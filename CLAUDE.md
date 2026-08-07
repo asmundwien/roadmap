@@ -21,15 +21,19 @@ Run everything from the repo root; pnpm comes from corepack.
 | `pnpm build`     | Typecheck (`tsc -b`) then production build |
 | `pnpm preview`   | Serve the production build                |
 | `pnpm typecheck` | Types only                                |
+| `pnpm test`      | Vitest, once                              |
+| `pnpm test:watch`| Vitest in watch mode                      |
 | `pnpm check`     | Biome lint + format check                 |
 | `pnpm fix`       | Biome autofix + format                    |
 
-`pnpm check` and `pnpm typecheck` both pass before anything is called done.
+`pnpm check`, `pnpm typecheck`, and `pnpm test` all pass before anything is called done.
 
 ## Stack
 
-Vite + React 19 + TypeScript, pnpm, Biome for lint/format. No test runner yet — add one with the
-first ticket that needs it rather than pre-emptively.
+Vite + React 19 + TypeScript, pnpm, Biome for lint/format, Vitest for tests.
+
+Vitest runs in the `node` environment and picks up `src/**/*.test.ts` — no DOM, because nothing has
+needed one yet. The first component test that does should add jsdom and Testing Library then.
 
 ## Conventions
 
@@ -50,6 +54,24 @@ Read it before writing fetch code; don't re-derive it.
 Auth is a personal access token injected via Vite env — copy `.env.example` to `.env.local`. Never
 persist the token to `localStorage`, and never deploy a production build anywhere: the token would
 ship inside the bundle.
+
+## The data layer
+
+Views never fetch. They read `useRoadmap()` and get a snapshot; everything below it is already built:
+
+- `src/github/` — transport. `client.ts` (auth, GraphQL errors, REST ETag replay), `discovery.ts`
+  (REST search for `wayfinder:map`), `map-query.ts` (the aliased GraphQL query and its batching).
+- `src/wayfinder/` — domain. `types.ts` is the vocabulary; `map-body.ts` parses the map template
+  tolerantly; `tickets.ts` derives `closed | blocked | claimed | frontier`; `from-github.ts` turns
+  raw payloads into `Project[]`.
+- `src/store/` — the poll loop and its React binding (`RoadmapProvider` / `useRoadmap`).
+
+Two loops: maps every 30s, discovery every 5min. GraphQL polls can't be conditional (no ETag on
+`POST /graphql`), so the only budget lever is the interval — the store stretches it when
+`rateLimit.remaining` drops, and skips polling entirely while the tab is hidden.
+
+Data that may be partial says so rather than looking whole: `ticketsTruncated`, `blockersTruncated`,
+`unreachable`, and `MapBody.missingSections`. Keep that habit.
 
 ## How the work is organized
 

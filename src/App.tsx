@@ -1,11 +1,55 @@
+import { useRoadmap } from './store/roadmap-provider.tsx'
+
+/**
+ * A plain readout of what the data layer is holding — enough to see the live poll working, and
+ * deliberately not a design. The project list and the map screen land in their own tickets.
+ */
 export function App() {
+  const { status, projects, error, lastUpdatedAt, rateLimit, refresh } = useRoadmap()
+
   return (
     <main className="shell">
       <h1>Roadmap</h1>
-      <p>A live, read-only visualization of wayfinder-organized projects on GitHub.</p>
       <p className="muted">
-        Empty shell — the project list and the live map screen land in later tickets.
+        {status === 'loading' && 'Discovering wayfinder maps…'}
+        {status === 'ready' &&
+          `${countMaps(projects)} map(s) across ${projects.length} project(s) · updated ${formatTime(lastUpdatedAt)}`}
+        {status === 'error' && error}
+      </p>
+
+      {projects.map((project) => (
+        <section key={project.nameWithOwner}>
+          <h2>{project.nameWithOwner}</h2>
+          {[...project.openMaps, ...project.closedMaps].map((map) => (
+            <p key={map.number}>
+              <a href={map.url}>
+                #{map.number} {map.title}
+              </a>
+              <br />
+              <span className="muted">
+                {map.progress.completed}/{map.progress.total} closed · {map.frontier.length} on the
+                frontier
+                {map.frontier.length > 0 && `: ${map.frontier.map((t) => t.title).join(', ')}`}
+              </span>
+            </p>
+          ))}
+        </section>
+      ))}
+
+      <p className="muted">
+        <button type="button" onClick={() => void refresh()}>
+          Refresh now
+        </button>{' '}
+        {rateLimit && `GraphQL budget: ${rateLimit.remaining}/${rateLimit.limit}`}
       </p>
     </main>
   )
+}
+
+function countMaps(projects: { openMaps: unknown[]; closedMaps: unknown[] }[]): number {
+  return projects.reduce((sum, p) => sum + p.openMaps.length + p.closedMaps.length, 0)
+}
+
+function formatTime(at: number | null): string {
+  return at === null ? 'never' : new Date(at).toLocaleTimeString()
 }

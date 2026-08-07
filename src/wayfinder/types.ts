@@ -1,0 +1,108 @@
+/** The `wayfinder:<type>` label a ticket carries. `untyped` covers a ticket carrying none. */
+export type TicketType = 'research' | 'prototype' | 'grilling' | 'task' | 'untyped'
+
+/**
+ * A ticket's position relative to the frontier.
+ *
+ * - `closed` — resolved; its answer is on the map.
+ * - `blocked` — open, but at least one blocker is still open.
+ * - `claimed` — open and unblocked, but a session has assigned it to itself.
+ * - `frontier` — open, unblocked, unclaimed: the edge of the known, and the only takeable state.
+ */
+export type TicketState = 'closed' | 'blocked' | 'claimed' | 'frontier'
+
+export interface Assignee {
+  login: string
+  avatarUrl: string
+  url: string
+}
+
+/** One end of a blocked-by edge. Carries its repo, so cross-repo edges stay legible. */
+export interface Blocker {
+  number: number
+  title: string
+  url: string
+  nameWithOwner: string
+  isOpen: boolean
+}
+
+export interface Ticket {
+  number: number
+  title: string
+  url: string
+  type: TicketType
+  state: TicketState
+  /** Independent of `state`, which collapses them: a ticket can be blocked *and* claimed. */
+  isClaimed: boolean
+  isBlocked: boolean
+  assignees: Assignee[]
+  blockedBy: Blocker[]
+  /** True when the ticket has more blockers than one page returned. */
+  blockersTruncated: boolean
+}
+
+/** One entry in the map's Decisions-so-far index: a gist plus a pointer to the ticket holding it. */
+export interface Decision {
+  title: string
+  url: string | null
+  gist: string
+  /** The bullet as written, so a line that defies parsing is still rendered faithfully. */
+  raw: string
+}
+
+/** A `##` block of the map body, kept verbatim alongside the parse so drift stays inspectable. */
+export interface MapSection {
+  heading: string
+  text: string
+  items: string[]
+}
+
+/**
+ * The map body parsed against the wayfinder template — tolerantly. Every field degrades to empty
+ * rather than throwing, unrecognised headings survive in `sections`, and the raw body is kept.
+ */
+export interface MapBody {
+  raw: string
+  destination: string
+  notes: string[]
+  decisions: Decision[]
+  notYetSpecified: string[]
+  outOfScope: string[]
+  /** Every `##` section in document order, recognised or not. */
+  sections: MapSection[]
+  /** Template sections that were absent — the drift signal a view may want to surface. */
+  missingSections: string[]
+}
+
+export interface MapProgress {
+  total: number
+  completed: number
+  percentCompleted: number
+}
+
+export interface WayfinderMap {
+  owner: string
+  repo: string
+  nameWithOwner: string
+  number: number
+  title: string
+  url: string
+  isOpen: boolean
+  body: MapBody
+  tickets: Ticket[]
+  /** Open, unblocked, unclaimed tickets in map order — what a session can take right now. */
+  frontier: Ticket[]
+  progress: MapProgress
+  /** True when the map has more children than one page returned; the graph is then partial. */
+  ticketsTruncated: boolean
+}
+
+/** A repo, with its maps. A project can hold several: open ones live, closed ones as history. */
+export interface Project {
+  nameWithOwner: string
+  owner: string
+  repo: string
+  isPrivate: boolean
+  openMaps: WayfinderMap[]
+  closedMaps: WayfinderMap[]
+}
