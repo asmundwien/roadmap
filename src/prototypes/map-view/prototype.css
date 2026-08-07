@@ -1,0 +1,398 @@
+/*
+ * PROTOTYPE — throwaway styles for the map-view variants.
+ *
+ * The four state colours are the one thing here worth keeping. They were picked against the dataviz
+ * skill's checks and validated with its script (all-pairs, both modes): green / blue / magenta clear
+ * the CVD and normal-vision floors where the obvious green / blue / orange and green / blue / violet
+ * sets both fail. `closed` is deliberately achromatic — it is chrome, not an identity, and it should
+ * recede. Magenta sits under 3:1 on the light surface, so the relief rule applies: every state also
+ * carries a glyph and a word, never colour alone.
+ */
+
+.proto {
+  --proto-surface: #fcfcfb;
+  --proto-plane: #f9f9f7;
+  --proto-ink: #0b0b0b;
+  --proto-ink-2: #52514e;
+  --proto-muted: #898781;
+  --proto-hairline: #e1e0d9;
+  --proto-ring: rgba(11, 11, 11, 0.1);
+
+  --state-closed: #898781;
+  --state-frontier: #0ca30c;
+  --state-claimed: #2a78d6;
+  --state-blocked: #e87ba4;
+
+  color-scheme: light;
+  min-height: 100dvh;
+  background: var(--proto-plane);
+  color: var(--proto-ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) .proto {
+    --proto-surface: #1a1a19;
+    --proto-plane: #0d0d0d;
+    --proto-ink: #ffffff;
+    --proto-ink-2: #c3c2b7;
+    --proto-muted: #898781;
+    --proto-hairline: #2c2c2a;
+    --proto-ring: rgba(255, 255, 255, 0.1);
+
+    --state-closed: #898781;
+    --state-frontier: #0ca30c;
+    --state-claimed: #3987e5;
+    --state-blocked: #d55181;
+
+    color-scheme: dark;
+  }
+}
+
+.proto a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.proto a:hover {
+  text-decoration: underline;
+}
+
+/* ---------------------------------------------------------------- shared chrome */
+
+.proto-head {
+  padding: 2rem 2rem 1rem;
+  border-bottom: 1px solid var(--proto-hairline);
+}
+
+.proto-head h1 {
+  margin: 0;
+  font-size: 1.375rem;
+  letter-spacing: -0.02em;
+}
+
+.proto-head .repo {
+  font-size: 0.8125rem;
+  color: var(--proto-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.proto-head .destination {
+  margin: 0.75rem 0 0;
+  max-width: 70ch;
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: var(--proto-ink-2);
+}
+
+.proto-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+  margin-top: 1rem;
+  font-size: 0.75rem;
+  color: var(--proto-ink-2);
+}
+
+.proto-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.proto-legend i {
+  font-style: normal;
+  font-size: 0.875rem;
+  line-height: 1;
+}
+
+/* ---------------------------------------------------------------- variant A: subway */
+
+.a-scroll {
+  overflow-x: auto;
+  padding: 1.5rem 2rem 4rem;
+}
+
+.a-rail {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  min-width: max-content;
+}
+
+.a-band {
+  padding: 0 1.5rem;
+  border-right: 1px dashed var(--proto-hairline);
+}
+
+.a-band:last-child {
+  border-right: 0;
+}
+
+.a-band-title {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--proto-muted);
+  margin-bottom: 0.875rem;
+  white-space: nowrap;
+}
+
+.a-station {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 15rem;
+  padding: 0.5rem 0.625rem;
+  margin-bottom: 0.375rem;
+  border-radius: 4px;
+  background: var(--proto-surface);
+  box-shadow: inset 0 0 0 1px var(--proto-ring);
+  font-size: 0.8125rem;
+  line-height: 1.3;
+}
+
+.a-station.is-closed {
+  opacity: 0.62;
+}
+
+.a-station.is-frontier {
+  box-shadow:
+    inset 0 0 0 2px var(--state-frontier),
+    0 0 0 4px color-mix(in oklab, var(--state-frontier) 18%, transparent);
+}
+
+.a-station.is-claimed {
+  box-shadow: inset 0 0 0 2px var(--state-claimed);
+}
+
+.a-station.is-blocked {
+  box-shadow: inset 0 0 0 1px var(--state-blocked);
+  opacity: 0.85;
+}
+
+.a-num {
+  font-size: 0.6875rem;
+  color: var(--proto-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.a-waits {
+  font-size: 0.6875rem;
+  color: var(--proto-muted);
+  padding: 0 0.625rem 0.5rem;
+  width: 15rem;
+  margin-top: -0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.a-fog {
+  width: 17rem;
+  padding: 0 1.5rem;
+  color: var(--proto-muted);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklab, var(--proto-ink) 6%, transparent)
+  );
+}
+
+.a-fog li {
+  font-size: 0.75rem;
+  line-height: 1.45;
+  margin-bottom: 0.625rem;
+}
+
+/* ---------------------------------------------------------------- variant B: terrain */
+
+.b-wrap {
+  display: grid;
+  grid-template-columns: 19rem minmax(0, 1fr);
+  gap: 1.5rem;
+  padding: 1.25rem 1.5rem 4rem 2rem;
+  align-items: start;
+}
+
+@media (max-width: 64rem) {
+  .b-wrap {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.b-side {
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--proto-ink-2);
+}
+
+.b-side h3 {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--proto-muted);
+  margin: 0 0 0.5rem;
+}
+
+.b-side li {
+  margin-bottom: 0.5rem;
+}
+
+.b-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.b-node-label {
+  font-size: 9px;
+  fill: var(--proto-ink-2);
+}
+
+/* ---------------------------------------------------------------- variant C: briefing */
+
+.c-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 2.5rem;
+  padding: 1.75rem 2rem 5rem;
+  align-items: start;
+}
+
+@media (max-width: 60rem) {
+  .c-wrap {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.c-wrap h2 {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--proto-muted);
+  margin: 0 0 0.75rem;
+}
+
+.c-take {
+  display: block;
+  padding: 0.875rem 1rem;
+  margin-bottom: 0.5rem;
+  border-radius: 6px;
+  background: var(--proto-surface);
+  box-shadow:
+    inset 0 0 0 2px var(--state-frontier),
+    0 0 0 4px color-mix(in oklab, var(--state-frontier) 14%, transparent);
+}
+
+.c-take .title {
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.c-take .meta {
+  font-size: 0.75rem;
+  color: var(--proto-muted);
+  margin-top: 0.25rem;
+}
+
+.c-meter {
+  display: flex;
+  height: 8px;
+  gap: 2px;
+  margin: 0.5rem 0 0.375rem;
+}
+
+.c-meter div {
+  border-radius: 2px;
+}
+
+.c-row {
+  display: flex;
+  gap: 0.625rem;
+  align-items: baseline;
+  padding: 0.4375rem 0;
+  border-bottom: 1px solid var(--proto-hairline);
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
+
+.c-row:last-child {
+  border-bottom: 0;
+}
+
+.c-row .waits {
+  color: var(--proto-muted);
+  font-size: 0.75rem;
+}
+
+.c-decision {
+  padding: 0.5rem 0 0.625rem;
+  border-bottom: 1px solid var(--proto-hairline);
+  font-size: 0.8125rem;
+}
+
+.c-decision .gist {
+  color: var(--proto-ink-2);
+  line-height: 1.45;
+}
+
+.c-fog li {
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--proto-muted);
+  margin-bottom: 0.5rem;
+}
+
+.c-section {
+  margin-bottom: 2rem;
+}
+
+.proto ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* ---------------------------------------------------------------- the switcher */
+
+.proto-switch {
+  position: fixed;
+  left: 50%;
+  bottom: 1.25rem;
+  transform: translateX(-50%);
+  z-index: 50;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  border-radius: 999px;
+  background: #0b0b0b;
+  color: #ffffff;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  font-size: 0.8125rem;
+  overflow: hidden;
+}
+
+.proto-switch button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0.5rem 0.875rem;
+  cursor: pointer;
+}
+
+.proto-switch button:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.proto-switch .label {
+  padding: 0.5rem 0.5rem;
+  min-width: 15rem;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.proto-switch .sep {
+  width: 1px;
+  background: rgba(255, 255, 255, 0.22);
+}

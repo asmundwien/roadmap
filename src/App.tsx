@@ -1,11 +1,17 @@
+import { isPrototypeRequested, MapViewPrototype } from './prototypes/map-view/prototype.tsx'
 import { useRoadmap } from './store/roadmap-provider.tsx'
 
 /**
  * A plain readout of what the data layer is holding — enough to see the live poll working, and
  * deliberately not a design. The project list and the map screen land in their own tickets.
+ *
+ * PROTOTYPE (throwaway): `?variant=A` hands the page to the map-view prototype instead. Goes away
+ * with the rest of `src/prototypes/` once issue #3 picks a direction.
  */
 export function App() {
   const { status, projects, error, lastUpdatedAt, rateLimit, refresh } = useRoadmap()
+
+  if (isPrototypeRequested()) return <MapViewPrototype />
 
   return (
     <main className="shell">
