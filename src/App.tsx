@@ -1,55 +1,11 @@
-import { useRoadmap } from './store/roadmap-provider.tsx'
+import { useRoute } from './router.ts'
+import { MapScreen } from './views/map-screen.tsx'
+import { ProjectList } from './views/project-list.tsx'
 
-/**
- * A plain readout of what the data layer is holding — enough to see the live poll working, and
- * deliberately not a design. The project list and the map screen land in their own tickets.
- */
+/** Routing shell: the project list is home, `#/map/...` opens a map. */
 export function App() {
-  const { status, projects, error, lastUpdatedAt, rateLimit, refresh } = useRoadmap()
+  const route = useRoute()
 
-  return (
-    <main className="shell">
-      <h1>Roadmap</h1>
-      <p className="muted">
-        {status === 'loading' && 'Discovering wayfinder maps…'}
-        {status === 'ready' &&
-          `${countMaps(projects)} map(s) across ${projects.length} project(s) · updated ${formatTime(lastUpdatedAt)}`}
-        {status === 'error' && error}
-      </p>
-
-      {projects.map((project) => (
-        <section key={project.nameWithOwner}>
-          <h2>{project.nameWithOwner}</h2>
-          {[...project.openMaps, ...project.closedMaps].map((map) => (
-            <p key={map.number}>
-              <a href={map.url}>
-                #{map.number} {map.title}
-              </a>
-              <br />
-              <span className="muted">
-                {map.progress.completed}/{map.progress.total} closed · {map.frontier.length} on the
-                frontier
-                {map.frontier.length > 0 && `: ${map.frontier.map((t) => t.title).join(', ')}`}
-              </span>
-            </p>
-          ))}
-        </section>
-      ))}
-
-      <p className="muted">
-        <button type="button" onClick={() => void refresh()}>
-          Refresh now
-        </button>{' '}
-        {rateLimit && `GraphQL budget: ${rateLimit.remaining}/${rateLimit.limit}`}
-      </p>
-    </main>
-  )
-}
-
-function countMaps(projects: { openMaps: unknown[]; closedMaps: unknown[] }[]): number {
-  return projects.reduce((sum, p) => sum + p.openMaps.length + p.closedMaps.length, 0)
-}
-
-function formatTime(at: number | null): string {
-  return at === null ? 'never' : new Date(at).toLocaleTimeString()
+  if (route.screen === 'map') return <MapScreen route={route} />
+  return <ProjectList />
 }

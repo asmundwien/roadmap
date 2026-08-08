@@ -2,6 +2,12 @@
   --bg: #fbfbfa;
   --fg: #1c1b1a;
   --muted: #6b6a67;
+  --edge: rgba(28, 27, 26, 0.12);
+
+  /* Progress-signal ramp, validated against --bg in both modes (dataviz skill, ordinal checks). */
+  --signal-decided: #2a78d6;
+  --signal-open: #86b6ef;
+  --signal-fog: #a9a7a0;
 
   color-scheme: light dark;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -13,6 +19,10 @@
     --bg: #121211;
     --fg: #eeedeb;
     --muted: #9a9894;
+    --edge: rgba(238, 237, 235, 0.14);
+    --signal-decided: #3987e5;
+    --signal-open: #184f95;
+    --signal-fog: #4c4b47;
   }
 }
 
