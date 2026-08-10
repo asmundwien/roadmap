@@ -3,24 +3,25 @@
  *
  * Answers issue #3: what should the map view look like? Round one (A subway / B terrain / C
  * briefing) was vetoed whole — each read as an adjacent genre — and lives in git history as the
- * evidence. Round two is one take per journey grammar the research shortlisted: D the ascent
- * (campaign-route composite), E the scroll (itinerary strip map), F the country (fog of war as the
- * frame). All three are judged against the success criteria in issue #10 before any reaction. Runs
- * off fixtures, not the live store, so it needs no token.
+ * evidence, as does E the scroll (vetoed in the round-two reaction: keep the maps, drop the strip).
+ * Live takes: D the ascent (campaign-route composite), F the country (fog of war as the frame),
+ * G the confluence (the map drawn as a git history — the round-two reaction's request). All are
+ * judged against the success criteria in issue #10 before any reaction. Runs off fixtures, not the
+ * live store, so it needs no token.
  */
 
 import { useEffect, useState } from 'react'
 import { FIXTURE_MAPS } from './fixture.ts'
 import { PrototypeSwitcher } from './switcher.tsx'
 import { NAME as NAME_D, VariantD } from './variant-d-ascent.tsx'
-import { NAME as NAME_E, VariantE } from './variant-e-scroll.tsx'
 import { NAME as NAME_F, VariantF } from './variant-f-country.tsx'
+import { NAME as NAME_G, VariantG } from './variant-g-confluence.tsx'
 import './prototype.css'
 
 const VARIANTS = {
   D: { name: NAME_D, render: VariantD },
-  E: { name: NAME_E, render: VariantE },
   F: { name: NAME_F, render: VariantF },
+  G: { name: NAME_G, render: VariantG },
 } as const
 
 type VariantKey = keyof typeof VARIANTS
