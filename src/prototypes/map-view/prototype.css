@@ -1,5 +1,5 @@
 /*
- * PROTOTYPE — throwaway styles for the map-view variants.
+ * PROTOTYPE — throwaway styles for the map-view variants (round two: D / E / F).
  *
  * The four state colours are the one thing here worth keeping. They were picked against the dataviz
  * skill's checks and validated with its script (all-pairs, both modes): green / blue / magenta clear
@@ -58,10 +58,16 @@
   text-decoration: underline;
 }
 
+.proto ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 /* ---------------------------------------------------------------- shared chrome */
 
 .proto-head {
-  padding: 2rem 2rem 1rem;
+  padding: 1.5rem 2rem 0.875rem;
   border-bottom: 1px solid var(--proto-hairline);
 }
 
@@ -77,19 +83,11 @@
   font-variant-numeric: tabular-nums;
 }
 
-.proto-head .destination {
-  margin: 0.75rem 0 0;
-  max-width: 70ch;
-  font-size: 0.9375rem;
-  line-height: 1.55;
-  color: var(--proto-ink-2);
-}
-
 .proto-legend {
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem 1.25rem;
-  margin-top: 1rem;
+  margin-top: 0.75rem;
   font-size: 0.75rem;
   color: var(--proto-ink-2);
 }
@@ -106,251 +104,330 @@
   line-height: 1;
 }
 
-/* ---------------------------------------------------------------- variant A: subway */
+/* ---------------------------------------------------------------- variant D: the ascent */
 
-.a-scroll {
-  overflow-x: auto;
-  padding: 1.5rem 2rem 4rem;
-}
-
-.a-rail {
+.d-wrap {
   display: flex;
-  align-items: stretch;
-  gap: 0;
-  min-width: max-content;
+  justify-content: center;
+  padding: 0.75rem 2rem 4rem;
 }
 
-.a-band {
-  padding: 0 1.5rem;
-  border-right: 1px dashed var(--proto-hairline);
+.d-svg {
+  display: block;
+  width: min(62rem, 100%);
+  height: auto;
 }
 
-.a-band:last-child {
-  border-right: 0;
+.d-flag {
+  font-size: 22px;
+  fill: var(--proto-ink);
 }
 
-.a-band-title {
-  font-size: 0.6875rem;
+.d-dest {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--proto-ink-2);
+  text-align: center;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* labels ride over lines and fog — a plane-coloured halo keeps them legible */
+.d-waypoint,
+.d-you-label,
+.d-node-title,
+.d-node-word,
+.f-waypoint,
+.f-you-label,
+.f-node-title,
+.f-node-word {
+  paint-order: stroke;
+  stroke: var(--proto-plane);
+  stroke-width: 3.5px;
+  stroke-linejoin: round;
+}
+
+.d-waypoint {
+  font-size: 10.5px;
+  fill: var(--proto-muted);
+}
+
+.d-you,
+.f-you {
+  font-size: 15px;
+  fill: var(--proto-ink);
+}
+
+.d-you-label,
+.f-you-label {
+  font-size: 9.5px;
+  fill: var(--proto-muted);
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--proto-muted);
-  margin-bottom: 0.875rem;
-  white-space: nowrap;
 }
 
-.a-station {
+.d-node-title {
+  font-size: 11px;
+  font-weight: 600;
+  fill: var(--proto-ink);
+}
+
+.d-node-title.is-dim {
+  font-weight: 500;
+  fill: var(--proto-ink-2);
+}
+
+.d-node-word {
+  font-size: 9.5px;
+}
+
+/* ---------------------------------------------------------------- variant E: the scroll */
+
+.e-col {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 1.5rem 1.5rem 5rem;
+}
+
+.e-dest {
   display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  width: 15rem;
-  padding: 0.5rem 0.625rem;
-  margin-bottom: 0.375rem;
-  border-radius: 4px;
+  gap: 0.75rem;
+  align-items: flex-start;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--proto-hairline);
+  border-radius: 8px;
   background: var(--proto-surface);
-  box-shadow: inset 0 0 0 1px var(--proto-ring);
-  font-size: 0.8125rem;
-  line-height: 1.3;
 }
 
-.a-station.is-closed {
-  opacity: 0.62;
+.e-flag {
+  font-size: 1.25rem;
+  line-height: 1.2;
 }
 
-.a-station.is-frontier {
-  box-shadow:
-    inset 0 0 0 2px var(--state-frontier),
-    0 0 0 4px color-mix(in oklab, var(--state-frontier) 18%, transparent);
-}
-
-.a-station.is-claimed {
-  box-shadow: inset 0 0 0 2px var(--state-claimed);
-}
-
-.a-station.is-blocked {
-  box-shadow: inset 0 0 0 1px var(--state-blocked);
-  opacity: 0.85;
-}
-
-.a-num {
-  font-size: 0.6875rem;
-  color: var(--proto-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.a-waits {
-  font-size: 0.6875rem;
-  color: var(--proto-muted);
-  padding: 0 0.625rem 0.5rem;
-  width: 15rem;
-  margin-top: -0.25rem;
-  margin-bottom: 0.5rem;
-}
-
-.a-fog {
-  width: 17rem;
-  padding: 0 1.5rem;
-  color: var(--proto-muted);
-  background: linear-gradient(
-    90deg,
-    transparent,
-    color-mix(in oklab, var(--proto-ink) 6%, transparent)
-  );
-}
-
-.a-fog li {
-  font-size: 0.75rem;
-  line-height: 1.45;
-  margin-bottom: 0.625rem;
-}
-
-/* ---------------------------------------------------------------- variant B: terrain */
-
-.b-wrap {
-  display: grid;
-  grid-template-columns: 19rem minmax(0, 1fr);
-  gap: 1.5rem;
-  padding: 1.25rem 1.5rem 4rem 2rem;
-  align-items: start;
-}
-
-@media (max-width: 64rem) {
-  .b-wrap {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-.b-side {
-  font-size: 0.75rem;
+.e-dest p {
+  margin: 0;
+  font-size: 0.875rem;
   line-height: 1.5;
   color: var(--proto-ink-2);
 }
 
-.b-side h3 {
-  font-size: 0.6875rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--proto-muted);
-  margin: 0 0 0.5rem;
+/* the stretch of country the scroll has not been drawn across yet */
+.e-fogzone {
+  position: relative;
+  height: 7.5rem;
 }
 
-.b-side li {
-  margin-bottom: 0.5rem;
+.e-fog-patch {
+  position: absolute;
+  height: 2.4rem;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--proto-ink) 13%, transparent);
+  filter: blur(10px);
 }
 
-.b-svg {
-  display: block;
-  width: 100%;
-  height: auto;
-}
-
-.b-node-label {
-  font-size: 9px;
-  fill: var(--proto-ink-2);
-}
-
-/* ---------------------------------------------------------------- variant C: briefing */
-
-.c-wrap {
-  display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
-  gap: 2.5rem;
-  padding: 1.75rem 2rem 5rem;
-  align-items: start;
-}
-
-@media (max-width: 60rem) {
-  .c-wrap {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-.c-wrap h2 {
-  font-size: 0.6875rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--proto-muted);
-  margin: 0 0 0.75rem;
-}
-
-.c-take {
-  display: block;
-  padding: 0.875rem 1rem;
-  margin-bottom: 0.5rem;
-  border-radius: 6px;
+.e-scroll {
+  position: relative;
   background: var(--proto-surface);
-  box-shadow:
-    inset 0 0 0 2px var(--state-frontier),
-    0 0 0 4px color-mix(in oklab, var(--state-frontier) 14%, transparent);
+  border: 1px solid var(--proto-hairline);
+  padding: 2.5rem 1.5rem 2rem;
+  clip-path: polygon(
+    0 22px,
+    5% 6px,
+    11% 18px,
+    18% 4px,
+    26% 16px,
+    33% 7px,
+    41% 20px,
+    49% 5px,
+    57% 15px,
+    64% 3px,
+    72% 17px,
+    80% 6px,
+    88% 19px,
+    95% 8px,
+    100% 16px,
+    100% 100%,
+    0 100%
+  );
 }
 
-.c-take .title {
-  font-size: 1rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-.c-take .meta {
-  font-size: 0.75rem;
-  color: var(--proto-muted);
-  margin-top: 0.25rem;
-}
-
-.c-meter {
+.e-ahead {
+  position: relative;
   display: flex;
-  height: 8px;
-  gap: 2px;
-  margin: 0.5rem 0 0.375rem;
+  flex-direction: column;
+  gap: 1.875rem;
+  padding-bottom: 1.5rem;
 }
 
-.c-meter div {
-  border-radius: 2px;
+.e-ahead::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -2.5rem;
+  bottom: 0;
+  border-left: 2px dashed color-mix(in oklab, var(--proto-ink) 32%, transparent);
 }
 
-.c-row {
+.e-rung {
+  position: relative;
   display: flex;
-  gap: 0.625rem;
-  align-items: baseline;
-  padding: 0.4375rem 0;
-  border-bottom: 1px solid var(--proto-hairline);
+  justify-content: center;
+  gap: 1.25rem;
+}
+
+.e-stop {
+  position: relative;
+  z-index: 1;
+  width: 11rem;
+  padding: 0.25rem 0.375rem;
+  text-align: center;
+  background: var(--proto-surface);
   font-size: 0.8125rem;
   line-height: 1.35;
 }
 
-.c-row:last-child {
-  border-bottom: 0;
+.e-stop i {
+  display: block;
+  font-style: normal;
+  font-size: 1rem;
+  line-height: 1.2;
 }
 
-.c-row .waits {
+.e-stop-title {
+  display: block;
+}
+
+.e-stop.is-frontier .e-stop-title {
+  font-weight: 600;
+}
+
+.e-stop-word,
+.e-stop-waits {
+  display: block;
+  margin-top: 0.125rem;
+  font-size: 0.6875rem;
+}
+
+.e-stop-waits {
   color: var(--proto-muted);
+}
+
+.e-you {
+  position: relative;
+  z-index: 1;
+  margin: 0.625rem auto;
+  width: fit-content;
+  padding: 0.25rem 0.875rem;
+  text-align: center;
+  background: var(--proto-surface);
   font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
-.c-decision {
-  padding: 0.5rem 0 0.625rem;
-  border-bottom: 1px solid var(--proto-hairline);
+.e-walked {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1.125rem;
+  padding-top: 1.25rem;
+}
+
+.e-walked::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 1.25rem;
+  border-left: 3px solid color-mix(in oklab, var(--proto-ink) 55%, transparent);
+}
+
+.e-stop-walked {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: fit-content;
+  max-width: 24rem;
+  margin: 0 auto;
+  padding: 0 0.5rem;
+  text-align: center;
+  background: var(--proto-surface);
   font-size: 0.8125rem;
-}
-
-.c-decision .gist {
   color: var(--proto-ink-2);
-  line-height: 1.45;
 }
 
-.c-fog li {
-  font-size: 0.8125rem;
-  line-height: 1.45;
+.e-stop-walked i {
+  display: block;
+  font-style: normal;
+  color: color-mix(in oklab, var(--proto-ink) 70%, transparent);
+  line-height: 1.1;
+}
+
+.e-setout {
+  position: relative;
+  z-index: 1;
+  margin: 0 auto;
+  width: fit-content;
+  padding: 0.125rem 0.75rem;
+  background: var(--proto-surface);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   color: var(--proto-muted);
-  margin-bottom: 0.5rem;
 }
 
-.c-section {
-  margin-bottom: 2rem;
+/* ---------------------------------------------------------------- variant F: the country */
+
+.f-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 0.75rem 2rem 4rem;
 }
 
-.proto ul {
+.f-svg {
+  display: block;
+  width: min(68rem, 100%);
+  height: auto;
+}
+
+.f-waypoint {
+  font-size: 10.5px;
+  fill: var(--proto-muted);
+}
+
+.f-node-title {
+  font-size: 10.5px;
+  font-weight: 600;
+  fill: var(--proto-ink);
+}
+
+.f-node-title.is-dim {
+  font-weight: 500;
+  fill: var(--proto-ink-2);
+}
+
+.f-node-word {
+  font-size: 9px;
+}
+
+.f-flag {
+  font-size: 24px;
+  fill: var(--proto-ink);
+}
+
+.f-dest {
   margin: 0;
-  padding: 0;
-  list-style: none;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--proto-ink-2);
+  text-align: right;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 /* ---------------------------------------------------------------- the switcher */

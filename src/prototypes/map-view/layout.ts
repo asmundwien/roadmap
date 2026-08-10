@@ -56,3 +56,26 @@ export function layerMap(map: WayfinderMap): Layered {
 export function openBlockersOf(ticket: Ticket): number[] {
   return ticket.blockedBy.filter((b) => b.isOpen).map((b) => b.number)
 }
+
+/**
+ * Order each layer so a ticket sits near the blockers it waits on in the layers below —
+ * barycentric ordering, the cheap trick that keeps edges flowing instead of crossing.
+ */
+export function orderLayers(ahead: Ticket[][]): Ticket[][] {
+  const slot = new Map<number, number>()
+  return ahead.map((layer, depth) => {
+    const sorted = [...layer].sort((a, b) => a.number - b.number)
+    if (depth > 0) {
+      const key = (t: Ticket): number => {
+        const upstream = t.blockedBy.filter((b) => b.isOpen && slot.has(b.number))
+        if (upstream.length === 0) return 0.5
+        return upstream.reduce((sum, b) => sum + (slot.get(b.number) ?? 0.5), 0) / upstream.length
+      }
+      sorted.sort((a, b) => key(a) - key(b) || a.number - b.number)
+    }
+    sorted.forEach((t, i) => {
+      slot.set(t.number, sorted.length === 1 ? 0.5 : i / (sorted.length - 1))
+    })
+    return sorted
+  })
+}

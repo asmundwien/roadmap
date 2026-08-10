@@ -1,23 +1,26 @@
 /**
- * PROTOTYPE — throwaway. Three variants of the map view on one route, switchable via `?variant=`.
+ * PROTOTYPE — throwaway. Round two of the map view on one route, switchable via `?variant=`.
  *
- * Answers issue #3: what should the map view look like? The three disagree about what space is for —
- * A spends it on dependency order, B on how much is known, C refuses to spend it at all. Runs off
- * fixtures, not the live store, so it needs no token.
+ * Answers issue #3: what should the map view look like? Round one (A subway / B terrain / C
+ * briefing) was vetoed whole — each read as an adjacent genre — and lives in git history as the
+ * evidence. Round two is one take per journey grammar the research shortlisted: D the ascent
+ * (campaign-route composite), E the scroll (itinerary strip map), F the country (fog of war as the
+ * frame). All three are judged against the success criteria in issue #10 before any reaction. Runs
+ * off fixtures, not the live store, so it needs no token.
  */
 
 import { useEffect, useState } from 'react'
 import { FIXTURE_MAPS } from './fixture.ts'
 import { PrototypeSwitcher } from './switcher.tsx'
-import { NAME as NAME_A, VariantA } from './variant-a-subway.tsx'
-import { NAME as NAME_B, VariantB } from './variant-b-terrain.tsx'
-import { NAME as NAME_C, VariantC } from './variant-c-briefing.tsx'
+import { NAME as NAME_D, VariantD } from './variant-d-ascent.tsx'
+import { NAME as NAME_E, VariantE } from './variant-e-scroll.tsx'
+import { NAME as NAME_F, VariantF } from './variant-f-country.tsx'
 import './prototype.css'
 
 const VARIANTS = {
-  A: { name: NAME_A, render: VariantA },
-  B: { name: NAME_B, render: VariantB },
-  C: { name: NAME_C, render: VariantC },
+  D: { name: NAME_D, render: VariantD },
+  E: { name: NAME_E, render: VariantE },
+  F: { name: NAME_F, render: VariantF },
 } as const
 
 type VariantKey = keyof typeof VARIANTS
@@ -28,7 +31,7 @@ function readParams() {
   const variant = params.get('variant')?.toUpperCase() ?? ''
   const mapIndex = Number(params.get('map') ?? 0)
   return {
-    variant: KEYS.find((k) => k === variant) ?? 'A',
+    variant: KEYS.find((k) => k === variant) ?? 'D',
     mapIndex: Number.isInteger(mapIndex) && FIXTURE_MAPS[mapIndex] ? mapIndex : 0,
   }
 }

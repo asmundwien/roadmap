@@ -27,6 +27,10 @@ export function StateGlyph({ state }: { state: TicketState }) {
   )
 }
 
+/**
+ * Round two: the destination is no longer in the header — the success criteria pin it at the far
+ * end of each variant's travel axis, so every canvas places it itself.
+ */
 export function MapHead({ map, children }: { map: WayfinderMap; children?: React.ReactNode }) {
   return (
     <header className="proto-head">
@@ -36,7 +40,6 @@ export function MapHead({ map, children }: { map: WayfinderMap; children?: React
       <h1>
         <a href={map.url}>{map.title}</a>
       </h1>
-      <p className="destination">{map.body.destination}</p>
       {children}
       <div className="proto-legend">
         {LEGEND_ORDER.map((state) => (
