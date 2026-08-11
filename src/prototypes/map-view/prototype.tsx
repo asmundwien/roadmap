@@ -14,14 +14,18 @@ import { useEffect, useState } from 'react'
 import { FIXTURE_MAPS } from './fixture.ts'
 import { PrototypeSwitcher } from './switcher.tsx'
 import { NAME as NAME_D, VariantD } from './variant-d-ascent.tsx'
-import { NAME as NAME_F, VariantF } from './variant-f-country.tsx'
 import { NAME as NAME_G, VariantG } from './variant-g-confluence.tsx'
+import { NAME as NAME_H, VariantH } from './variant-h-rails.tsx'
+import { NAME as NAME_J, VariantJ } from './variant-j-tributaries.tsx'
+import { NAME as NAME_K, VariantK } from './variant-k-ledger.tsx'
 import './prototype.css'
 
 const VARIANTS = {
   D: { name: NAME_D, render: VariantD },
-  F: { name: NAME_F, render: VariantF },
   G: { name: NAME_G, render: VariantG },
+  H: { name: NAME_H, render: VariantH },
+  J: { name: NAME_J, render: VariantJ },
+  K: { name: NAME_K, render: VariantK },
 } as const
 
 type VariantKey = keyof typeof VARIANTS

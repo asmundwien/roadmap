@@ -430,6 +430,23 @@
   overflow: hidden;
 }
 
+/* ---------------------------------------------------------------- variant K: ledger rows */
+
+.k-row-title {
+  font-size: 12px;
+  font-weight: 600;
+  fill: var(--proto-ink);
+  paint-order: stroke;
+  stroke: var(--proto-plane);
+  stroke-width: 3.5px;
+  stroke-linejoin: round;
+}
+
+.k-row-title.is-dim {
+  font-weight: 500;
+  fill: var(--proto-ink-2);
+}
+
 /* ---------------------------------------------------------------- the switcher */
 
 .proto-switch {
