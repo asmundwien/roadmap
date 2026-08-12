@@ -154,6 +154,14 @@ export function MapLedger({ map }: { map: WayfinderMap }) {
                 {ticket.title}
                 {gist !== undefined ? ` — ${gist}` : ''}
               </title>
+              <rect
+                className="row-hit"
+                x="0"
+                y={y - 26}
+                width={ledger.width}
+                height={52}
+                fill="transparent"
+              />
               {fresh.has(ticket.number) && (
                 <circle
                   className="fresh-ping"

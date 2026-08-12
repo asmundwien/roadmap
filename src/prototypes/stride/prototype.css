@@ -151,11 +151,10 @@
 
 .proto-tail {
   position: absolute;
-  left: 53.5px;
+  left: 53.44px;
   bottom: 0;
-  width: 3px;
-  background: var(--fg);
-  opacity: 0.55;
+  width: 3.125px;
+  background: color-mix(in srgb, var(--fg) 55%, var(--bg));
 }
 
 /* ------------------------------------------------------------------ the animated fold */
@@ -195,15 +194,19 @@
   cursor: pointer;
 }
 
-/* The rail through a trigger: solid in from the newer map above, solid on through history — */
+/*
+ * The rail through a trigger — drawn to be indistinguishable from the ledger's trunk: the same
+ * rendered width (2.5 viewBox units × 1.25 = 3.125px) on the same center (x = 55), and a
+ * PRE-MIXED opaque color instead of opacity, so overlapping segments never darken at the joints.
+ * fg 55% over bg equals the svg's fg stroke at 0.55 opacity.
+ */
 .fl-trigger::before,
 .fl-trigger::after {
   content: "";
   position: absolute;
-  left: 54px;
-  width: 2.5px;
-  background: var(--fg);
-  opacity: 0.55;
+  left: 53.44px;
+  width: 3.125px;
+  background: color-mix(in srgb, var(--fg) 55%, var(--bg));
 }
 
 .fl-trigger::before {
@@ -231,6 +234,12 @@
 .fl-trigger:focus-visible {
   background: color-mix(in srgb, var(--fg) 4.5%, transparent);
   border-radius: 10px;
+}
+
+/* The same full-row wash on the ledger's linked rows — the whole row is the touch target. */
+.proto .ledger a.row:hover .row-hit,
+.proto .ledger a.row:focus-visible .row-hit {
+  fill: color-mix(in srgb, var(--fg) 4.5%, transparent);
 }
 
 /*

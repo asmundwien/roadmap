@@ -18,7 +18,7 @@
 import { useMemo } from 'react'
 import { stripInlineMarkdown } from '../../views/gist.ts'
 import { buildLedger } from '../../views/map/geometry.ts'
-import { BareMap, CroppedLedger, Fold, ProjectHead } from './chrome.tsx'
+import { CroppedLedger, Fold, ProjectHead } from './chrome.tsx'
 import type { StrideMap, StrideProject } from './fixture.ts'
 
 export interface ScreenProps {
@@ -34,26 +34,15 @@ export interface CardProps {
 }
 
 export function FlaglineScreen({ project, openMap, onToggle }: ScreenProps) {
-  const single = project.maps.length === 1 ? project.maps[0] : undefined
   const newestFirst = [...project.maps].reverse()
   return (
     <div className="fl-screen">
       <ProjectHead project={project} />
-
-      {single ? (
-        <BareMap map={single} />
-      ) : (
-        <div className="fl-trace">
-          {newestFirst.map((map) => (
-            <FlagBlock
-              key={map.number}
-              map={map}
-              open={openMap === map.number}
-              onToggle={onToggle}
-            />
-          ))}
-        </div>
-      )}
+      <div className="fl-trace">
+        {newestFirst.map((map) => (
+          <FlagBlock key={map.number} map={map} open={openMap === map.number} onToggle={onToggle} />
+        ))}
+      </div>
     </div>
   )
 }
