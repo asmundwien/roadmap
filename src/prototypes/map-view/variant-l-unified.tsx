@@ -121,19 +121,10 @@ export function VariantL({ map }: VariantProps) {
           aria-label={`The ledger of ${map.title}: ground covered, charted ahead, and fog, on one rail`}
         >
           <title>{map.title}</title>
-          <defs>
-            <linearGradient id="l-haze" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stopColor="var(--proto-ink)" stopOpacity="0.05" />
-              <stop offset="0.55" stopColor="var(--proto-ink)" stopOpacity="0.035" />
-              <stop offset="1" stopColor="var(--proto-ink)" stopOpacity="0" />
-            </linearGradient>
-          </defs>
-
           {/* section boundaries */}
           <Section y={sepFog} label="fog · not yet specified" />
           <Section y={sepAhead} label="charted ahead" />
           <Section y={sepBehind} label="ground covered" />
-          <rect x="0" y={sepFog} width={W} height={sepAhead - sepFog} fill="url(#l-haze)" />
 
           {/* the trunk's lane, one line through every section: dashed ahead, solid behind */}
           <line
@@ -147,28 +138,15 @@ export function VariantL({ map }: VariantProps) {
             strokeDasharray="3 5"
             strokeLinecap="round"
           />
-          {behindNewestFirst.map((ticket, j) => (
-            <line
-              key={`trunk-${ticket.number}`}
-              x1={GX}
-              y1={j === 0 ? head.y : behindY(j - 1)}
-              x2={GX}
-              y2={behindY(j)}
-              stroke="var(--proto-ink)"
-              strokeOpacity="0.55"
-              strokeWidth={2 + (closed.length - j) * 0.3}
-              strokeLinecap="round"
-            />
-          ))}
           {closed.length > 0 && (
             <line
               x1={GX}
-              y1={behindY(closed.length - 1)}
+              y1={head.y}
               x2={GX}
               y2={behindY(closed.length - 1) + BEHIND_ROW_H * 0.7}
               stroke="var(--proto-ink)"
               strokeOpacity="0.55"
-              strokeWidth="2"
+              strokeWidth="2.5"
               strokeLinecap="round"
             />
           )}
@@ -276,26 +254,27 @@ export function VariantL({ map }: VariantProps) {
           })}
 
           {/* behind rows — the same grammar, just already walked */}
-          {behindNewestFirst.map((ticket, j) => (
-            <a key={ticket.number} href={ticket.url}>
-              <title>
-                {ticket.title}
-                {gistByTitle.has(ticket.title) ? ` — ${gistByTitle.get(ticket.title)}` : ''}
-              </title>
-              <circle cx={GX} cy={behindY(j)} r="5.5" fill="var(--proto-ink)" fillOpacity="0.7" />
-              <text x={textX} y={behindY(j) + 4} className="l-behind-title">
-                {truncate(ticket.title, 46)}
-              </text>
-              <text
-                x={textX}
-                y={behindY(j) + 19}
-                className="d-node-word"
-                fill="var(--state-closed)"
-              >
-                ● decided
-              </text>
-            </a>
-          ))}
+          {behindNewestFirst.map((ticket, j) => {
+            const gist = gistByTitle.get(ticket.title)
+            return (
+              <a key={ticket.number} href={ticket.url}>
+                <title>
+                  {ticket.title}
+                  {gist !== undefined ? ` — ${gist}` : ''}
+                </title>
+                <circle cx={GX} cy={behindY(j)} r="7" fill="var(--proto-ink)" fillOpacity="0.75" />
+                <text x={GX} y={behindY(j) + 3.5} textAnchor="middle" className="l-check">
+                  ✓
+                </text>
+                <text x={textX} y={behindY(j) + 4} className="l-behind-title">
+                  {truncate(ticket.title, 46)}
+                </text>
+                <text x={textX} y={behindY(j) + 19} className="l-behind-gist">
+                  {gist !== undefined ? truncate(gist, 76) : 'decided'}
+                </text>
+              </a>
+            )
+          })}
 
           {/* fog rows — ghost stops: suspected, dim, unconnected, readable */}
           {fogItems.map((item, i) => {
@@ -320,11 +299,15 @@ export function VariantL({ map }: VariantProps) {
             )
           })}
 
-          {/* the destination — the trunk's final stop */}
+          {/* the destination — the trunk's final stop, and the one warm thing on the map */}
+          <circle cx={GX} cy={destY} r="17" fill="var(--proto-goal)" fillOpacity="0.18" />
           <text x={GX} y={destY + 7} textAnchor="middle" className="l-flag">
             ⚑
           </text>
-          <foreignObject x={textX} y={destY - 18} width={W - textX - 28} height={64}>
+          <text x={textX} y={destY - 14} className="l-goal-caption">
+            the destination
+          </text>
+          <foreignObject x={textX} y={destY - 6} width={W - textX - 28} height={70}>
             <p className="l-dest" title={map.body.destination}>
               {map.body.destination}
             </p>

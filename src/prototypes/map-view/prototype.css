@@ -22,6 +22,7 @@
   --state-frontier: #0ca30c;
   --state-claimed: #2a78d6;
   --state-blocked: #e87ba4;
+  --proto-goal: #a87c10;
 
   color-scheme: light;
   min-height: 100dvh;
@@ -44,6 +45,7 @@
     --state-frontier: #0ca30c;
     --state-claimed: #3987e5;
     --state-blocked: #d55181;
+    --proto-goal: #dcaf3f;
 
     color-scheme: dark;
   }
@@ -474,18 +476,37 @@
 
 .l-flag {
   font-size: 20px;
-  fill: var(--proto-ink);
+  fill: var(--proto-goal);
+}
+
+.l-goal-caption {
+  font-size: 9px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  font-weight: 600;
+  fill: var(--proto-goal);
 }
 
 .l-dest {
   margin: 0;
-  font-size: 13px;
+  font-size: 14.5px;
   line-height: 1.45;
-  color: var(--proto-ink-2);
+  color: var(--proto-ink);
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.l-check {
+  font-size: 9px;
+  font-weight: 700;
+  fill: var(--proto-plane);
+}
+
+.l-behind-gist {
+  font-size: 11px;
+  fill: var(--proto-muted);
 }
 
 /* ---------------------------------------------------------------- the switcher */
