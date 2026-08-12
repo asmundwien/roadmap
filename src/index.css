@@ -9,6 +9,20 @@
   --signal-open: #86b6ef;
   --signal-fog: #a9a7a0;
 
+  /*
+   * Wayfinder state palette, validated against --bg in both modes (dataviz skill, all-pairs).
+   * `closed` is deliberately achromatic — it should recede. The light-mode blocked magenta sits at
+   * 2.6:1 against the surface, under the 3:1 floor, so a state is never colour alone: every mark
+   * ships a glyph and a word. The goal amber is a reserved accent — the destination flag only,
+   * never a fourth state mark; its deutan-side closeness to the frontier green is relieved by the
+   * flag glyph, its caption, and its own section.
+   */
+  --state-closed: #898781;
+  --state-frontier: #0ca30c;
+  --state-claimed: #2a78d6;
+  --state-blocked: #e87ba4;
+  --goal: #a87c10;
+
   color-scheme: light dark;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   line-height: 1.5;
@@ -23,6 +37,12 @@
     --signal-decided: #3987e5;
     --signal-open: #184f95;
     --signal-fog: #4c4b47;
+
+    --state-closed: #898781;
+    --state-frontier: #0ca30c;
+    --state-claimed: #3987e5;
+    --state-blocked: #d55181;
+    --goal: #dcaf3f;
   }
 }
 

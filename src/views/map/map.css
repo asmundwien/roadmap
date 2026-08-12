@@ -1,0 +1,259 @@
+/* The live map screen — the unified ledger. Palette tokens live in index.css. */
+
+.map-shell {
+  max-width: 66rem;
+}
+
+.map-head {
+  margin-bottom: 0.25rem;
+}
+
+.map-eyebrow {
+  margin: 0;
+}
+
+.map-head h1 {
+  margin: 0 0 0.5rem;
+  font-size: 1.5rem;
+}
+
+.map-head a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.map-head a:hover {
+  text-decoration: underline;
+}
+
+.map-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+}
+
+.legend-item i {
+  font-style: normal;
+}
+
+/* "updated just now" — the dot replays its pulse every time the poll lands (keyed remount). */
+.pulse-dot {
+  display: inline-block;
+  width: 0.5em;
+  height: 0.5em;
+  border-radius: 50%;
+  background: var(--signal-decided);
+  animation: pulse 1.2s ease-out 1;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--signal-decided) 55%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0.6em transparent;
+  }
+}
+
+/* ---------------------------------------------------------------- the ledger */
+
+.ledger-wrap {
+  padding: 0.5rem 0 2rem;
+}
+
+.ledger {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.ledger a {
+  text-decoration: none;
+}
+
+.caption {
+  font-size: 9px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  fill: var(--muted);
+}
+
+/* titles ride over rails — a surface-coloured halo keeps them legible */
+.row-title,
+.row-word,
+.behind-title {
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 3.5px;
+  stroke-linejoin: round;
+}
+
+.row-title {
+  font-size: 12px;
+  font-weight: 600;
+  fill: var(--fg);
+}
+
+.row-title.is-dim {
+  font-weight: 500;
+  fill: var(--muted);
+}
+
+.row-word {
+  font-size: 9.5px;
+}
+
+.behind-title {
+  font-size: 12px;
+  font-weight: 500;
+  fill: color-mix(in oklab, var(--fg) 80%, var(--bg));
+}
+
+.behind-gist {
+  font-size: 11px;
+  fill: var(--muted);
+}
+
+.check {
+  font-size: 10px;
+  font-weight: 700;
+  fill: var(--bg);
+}
+
+.fog-title {
+  font-size: 12px;
+  font-style: italic;
+  fill: color-mix(in oklab, var(--muted) 75%, transparent);
+}
+
+.flag {
+  font-size: 20px;
+  fill: var(--goal);
+}
+
+.goal-caption {
+  font-size: 9px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  font-weight: 600;
+  fill: var(--goal);
+}
+
+.dest {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 21px;
+  color: var(--fg);
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ---------------------------------------------------------------- edges & hover */
+
+.edge {
+  stroke: var(--muted);
+  stroke-width: 1.75px;
+  stroke-opacity: 0.5;
+  stroke-dasharray: 3 5;
+  pointer-events: none;
+  transition:
+    stroke-opacity 0.12s ease,
+    opacity 0.12s ease;
+}
+
+.edge-fork.is-claimed {
+  stroke: var(--state-claimed);
+  stroke-opacity: 0.7;
+  stroke-dasharray: 7 5;
+}
+
+.edge-tip {
+  stroke-width: 1.5px;
+  stroke-opacity: 0.25;
+  stroke-dasharray: 2 7;
+}
+
+/* Hovering a row answers "what exactly is this waiting on": its chain's rail and every edge it
+ * touches come forward, everything else in the gutter steps back. */
+.ledger.has-hover .edge:not(.is-hot) {
+  opacity: 0.25;
+}
+
+.edge.is-hot {
+  stroke: var(--fg);
+  stroke-opacity: 0.85;
+  stroke-width: 2.25px;
+}
+
+.edge.is-hot.is-claimed {
+  stroke: var(--state-claimed);
+}
+
+.row.is-hot .row-title {
+  fill: var(--fg);
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- poll updates */
+
+.row.is-fresh {
+  animation: row-in 0.6s ease-out;
+}
+
+@keyframes row-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.fresh-ping {
+  fill: none;
+  stroke-width: 2px;
+  animation: ping 1.2s ease-out 1 forwards;
+}
+
+@keyframes ping {
+  0% {
+    r: 10;
+    opacity: 0.6;
+  }
+  100% {
+    r: 26;
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse-dot,
+  .row.is-fresh,
+  .fresh-ping {
+    animation: none;
+  }
+
+  .fresh-ping {
+    opacity: 0;
+  }
+}
+
+/* ---------------------------------------------------------------- below the map */
+
+.map-aside {
+  margin: 0.75rem 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.map-aside summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.map-aside ul {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+}
