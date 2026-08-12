@@ -146,7 +146,7 @@ function MapAsides({
         </p>
       )}
       <p className="muted small fl-github">
-        <a href={map.url}>
+        <a href={map.url} target="_blank" rel="noreferrer">
           #{map.number} on GitHub{map.isOpen ? '' : ' · closed'}
         </a>
       </p>

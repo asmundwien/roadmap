@@ -115,6 +115,8 @@ export function MapLedger({
             <a
               key={ticket.number}
               href={ticket.url}
+              target="_blank"
+              rel="noreferrer"
               className={`row${isHot ? ' is-hot' : ''}${fresh.has(ticket.number) ? ' is-fresh' : ''}`}
               onPointerEnter={() => setHover(ticket.number)}
               onPointerLeave={() => setHover(null)}
@@ -157,6 +159,8 @@ export function MapLedger({
             <a
               key={ticket.number}
               href={ticket.url}
+              target="_blank"
+              rel="noreferrer"
               className={`row${fresh.has(ticket.number) ? ' is-fresh' : ''}`}
             >
               <title>
