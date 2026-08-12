@@ -210,11 +210,16 @@
   display: none;
 }
 
-/* The whole row is one thing — say so on hover, with the one shared radius. */
-.fl-trigger:hover,
-.fl-trigger:focus-visible {
+/* The whole row is one thing — say so on hover, with the one shared radius. A solo map's
+ * header is not a control, so it neither washes nor invites. */
+.fl-trigger:not(.is-static):hover,
+.fl-trigger:not(.is-static):focus-visible {
   background: var(--wash);
   border-radius: var(--radius);
+}
+
+.fl-trigger.is-static {
+  cursor: default;
 }
 
 /* The same full-row wash and radius on the ledger's linked rows. */

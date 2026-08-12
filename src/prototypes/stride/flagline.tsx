@@ -47,6 +47,8 @@ export function FlaglineScreen({ project, openMap, onToggle }: ScreenProps) {
             // The earliest map is the journey's start: its trunk ends at the last decision,
             // v1-style; every other open map runs its trunk to the edge, into the map below.
             last={i === newestFirst.length - 1}
+            // A single map has nothing to open or close against — no accordion, content only.
+            solo={newestFirst.length === 1}
             onToggle={onToggle}
           />
         ))}
@@ -59,34 +61,52 @@ function FlagBlock({
   map,
   open,
   last,
+  solo,
   onToggle,
 }: {
   map: StrideMap
   open: boolean
   last: boolean
+  solo: boolean
   onToggle: (n: number) => void
 }) {
   // Aligns the trigger's text with the embedded ledger's text column (exact at full render width).
   const textLeft = useMemo(() => buildLedger(map).textX * 1.25, [map])
+  const header = (
+    <>
+      <span className="fl-flag" aria-hidden="true">
+        ⚑
+      </span>
+      <span className="fl-body" style={{ marginLeft: textLeft }}>
+        <span className="fl-caption">the destination</span>
+        <span className="fl-dest">{stripInlineMarkdown(map.body.destination)}</span>
+        <span className="fl-meta muted small">
+          {map.title} · #{map.number}
+        </span>
+      </span>
+    </>
+  )
+  const child = (
+    <div className="fl-child">
+      <CroppedLedger map={map} trunkToEdge={!last} />
+    </div>
+  )
+
+  if (solo) {
+    return (
+      <div className="fl-block is-open">
+        <div className="fl-trigger is-static">{header}</div>
+        {child}
+      </div>
+    )
+  }
+
   return (
     <div className={`fl-block${open ? ' is-open' : ''}`}>
       <button type="button" className="fl-trigger" onClick={() => onToggle(map.number)}>
-        <span className="fl-flag" aria-hidden="true">
-          ⚑
-        </span>
-        <span className="fl-body" style={{ marginLeft: textLeft }}>
-          <span className="fl-caption">the destination</span>
-          <span className="fl-dest">{stripInlineMarkdown(map.body.destination)}</span>
-          <span className="fl-meta muted small">
-            {map.title} · #{map.number}
-          </span>
-        </span>
+        {header}
       </button>
-      <Fold open={open}>
-        <div className="fl-child">
-          <CroppedLedger map={map} trunkToEdge={!last} />
-        </div>
-      </Fold>
+      <Fold open={open}>{child}</Fold>
     </div>
   )
 }
