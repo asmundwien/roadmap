@@ -1,13 +1,17 @@
-import { mapHash } from '../router.ts'
+import { projectHash } from '../router.ts'
 import { useRoadmap } from '../store/roadmap-provider.tsx'
+import { activeMapOf } from '../wayfinder/from-github.ts'
 import type { Project, WayfinderMap } from '../wayfinder/types.ts'
 import { stripInlineMarkdown } from './gist.ts'
+import { formatMonth, formatRecency } from './recency.ts'
 import { SignalMeter } from './signal-meter.tsx'
 import './views.css'
 
 /**
- * The entry point: every discovered wayfinder project, open maps front and center, closed maps
- * as history. Selecting a map navigates to the map screen.
+ * The front page: every discovered project as a journey-at-a-glance card — the project screen at
+ * a second density, everything collapsed. The active map leads with its destination gist and
+ * meter, the maps behind it follow as flag-led lines with date tails, and a resting project
+ * shows its whole trace at rest. Selecting a card opens the project on its active map.
  */
 export function ProjectList() {
   const { status, projects, error, lastUpdatedAt, rateLimit, unreachable, refresh } = useRoadmap()
@@ -37,9 +41,11 @@ export function ProjectList() {
         </p>
       )}
 
-      {projects.map((project) => (
-        <ProjectSection key={project.nameWithOwner} project={project} />
-      ))}
+      <div className="fl-cards">
+        {projects.map((project) => (
+          <ProjectCard key={project.nameWithOwner} project={project} />
+        ))}
+      </div>
 
       {unreachable.length > 0 && (
         <p className="muted small">
@@ -61,52 +67,59 @@ export function ProjectList() {
   )
 }
 
-function ProjectSection({ project }: { project: Project }) {
+/**
+ * One project, collapsed to a card. The head is the active map — its line bold, its meter under
+ * it; a resting project says so where the head would be. Every other map is one collapsed stride:
+ * flag, destination gist, date tail — newest first, exactly the order the project screen unfolds.
+ */
+function ProjectCard({ project }: { project: Project }) {
+  const active = activeMapOf(project)
+  const rest = [...project.openMaps, ...project.closedMaps].filter((map) => map !== active)
+
   return (
-    <section className="project">
-      <h2 className="project-name">
+    <a className="fl-card" href={projectHash(project)}>
+      <span className="fl-card-name">
         {project.nameWithOwner}
         {project.isPrivate && <span className="badge">private</span>}
-      </h2>
+      </span>
 
-      {project.openMaps.map((map) => (
-        <MapCard key={map.number} map={map} />
-      ))}
-      {project.openMaps.length === 0 && <p className="muted small">No open maps — history only.</p>}
-
-      {project.closedMaps.length > 0 && (
-        <div className="history">
-          <h3 className="history-title muted">History</h3>
-          <ul className="history-list">
-            {project.closedMaps.map((map) => (
-              <li key={map.number}>
-                <a href={mapHash(map)}>{map.title}</a>{' '}
-                <span className="muted small">
-                  {map.progress.completed}/{map.progress.total} decided
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </section>
+      <span className="fl-card-trace">
+        {active ? (
+          <>
+            <CardLine map={active} active />
+            <span className="fl-card-meter">
+              <SignalMeter map={active} />
+            </span>
+          </>
+        ) : (
+          <span className="fl-card-rest muted small">
+            resting · all {rest.length === 1 ? '1 map' : `${rest.length} maps`} closed
+          </span>
+        )}
+        {rest.map((map) => (
+          <CardLine key={map.number} map={map} />
+        ))}
+      </span>
+    </a>
   )
 }
 
-function MapCard({ map }: { map: WayfinderMap }) {
+function CardLine({ map, active = false }: { map: WayfinderMap; active?: boolean }) {
+  const gist = stripInlineMarkdown(map.body.destination)
   return (
-    <a className="map-card" href={mapHash(map)}>
-      <span className="map-card-title">{map.title}</span>
-      {map.body.destination !== '' && (
-        <span className="map-card-destination">{stripInlineMarkdown(map.body.destination)}</span>
-      )}
-      <SignalMeter map={map} />
-      {map.frontier.length > 0 && (
-        <span className="map-card-frontier">
-          Frontier: {map.frontier.map((ticket) => ticket.title).join(' · ')}
-        </span>
-      )}
-    </a>
+    <span className="fl-card-line">
+      <span className="fl-card-flag" aria-hidden="true">
+        ⚑
+      </span>
+      <span className={`fl-card-dest${active ? ' is-active' : ''}`}>
+        {gist !== '' ? gist : map.title}
+      </span>
+      <span className="fl-card-tail muted">
+        {map.isOpen
+          ? formatRecency(map.updatedAt, Date.now())
+          : formatMonth(map.closedAt ?? map.updatedAt)}
+      </span>
+    </span>
   )
 }
 

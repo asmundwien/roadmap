@@ -18,10 +18,6 @@
   border-radius: 6px;
 }
 
-.project {
-  margin-bottom: 2.5rem;
-}
-
 /* The project screen's page-level header: the project's own details, nothing map-specific. */
 
 .project-head {
@@ -43,11 +39,6 @@
   gap: var(--sp-1) var(--sp-4);
 }
 
-.project-name {
-  font-size: 1.1rem;
-  margin: 0 0 0.75rem;
-}
-
 .badge {
   margin-left: 0.5rem;
   padding: 0.1rem 0.4rem;
@@ -59,39 +50,83 @@
   vertical-align: middle;
 }
 
-.map-card {
+/*
+ * The journey-at-a-glance cards: the project screen at a second density, everything collapsed.
+ * Flag-led destination lines, newest first, date tail, no rail — as the stride prototype settled.
+ */
+
+.fl-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
+  gap: var(--sp-3);
+  align-items: start;
+}
+
+.fl-card {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  padding: 1rem;
-  margin-bottom: 0.75rem;
+  align-items: stretch;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
   border: 1px solid var(--edge);
-  border-radius: 8px;
+  border-radius: var(--radius);
   color: inherit;
   text-decoration: none;
 }
 
-.map-card:hover,
-.map-card:focus-visible {
+.fl-card:hover,
+.fl-card:focus-visible {
   border-color: var(--signal-decided);
 }
 
-.map-card-title {
+.fl-card-name {
   font-weight: 600;
 }
 
-.map-card-destination {
-  color: var(--muted);
-  font-size: 0.9rem;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+.fl-card-trace {
+  display: flex;
+  flex-direction: column;
 }
 
-.map-card-frontier {
-  color: var(--muted);
+.fl-card-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) 0;
+  min-width: 0;
+}
+
+.fl-card-flag {
+  flex: none;
+  width: 13px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--goal);
+}
+
+.fl-card-dest {
   font-size: 0.85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fl-card-dest.is-active {
+  font-weight: 600;
+}
+
+.fl-card-tail {
+  margin-left: auto;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+/* The active map's meter and the at-rest note sit in the text column, under the head flag. */
+.fl-card-meter,
+.fl-card-rest {
+  display: block;
+  margin-left: calc(13px + var(--sp-2));
+  padding: var(--sp-1) 0;
 }
 
 /* The progress signal: a same-hue meter for tickets, a textured tail for fog. */
@@ -134,23 +169,6 @@
 .signal-caption {
   color: var(--muted);
   font-size: 0.8rem;
-}
-
-.history {
-  margin-top: 1rem;
-}
-
-.history-title {
-  font-size: 0.8rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin: 0 0 0.25rem;
-}
-
-.history-list {
-  margin: 0;
-  padding-left: 1.25rem;
 }
 
 .list-footer {
