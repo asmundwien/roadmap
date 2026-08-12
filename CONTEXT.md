@@ -32,3 +32,15 @@ _Avoid_: percent complete, completion, burn-down
 What reaching the end of a map looks like — pinned in view as the thing travelled toward, not a
 status to compute.
 _Avoid_: goal state, 100%
+
+**Active map**:
+The map a project is currently travelling — its most recently updated open map. A project aspires
+to one open map at a time; when several are open, one is active and the others are live but
+secondary. A project's future past its active map is not fog — it is unimagined, and nothing is
+drawn there.
+_Avoid_: current map, default map, main map
+
+**Resting**:
+The state of a project whose maps are all closed — between efforts, its trace intact. A legitimate,
+visible state, not an error or an empty case.
+_Avoid_: archived, inactive, finished, empty
