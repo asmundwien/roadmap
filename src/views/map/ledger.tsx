@@ -14,7 +14,16 @@ import { STATE_META } from './state-meta.ts'
  * edge it touches — the answer to the drill's one HARD question, "what exactly is this waiting
  * on" — and rows whose state just changed under the 30s poll animate in.
  */
-export function MapLedger({ map }: { map: WayfinderMap }) {
+export function MapLedger({
+  map,
+  trunkToEdge = false,
+}: {
+  map: WayfinderMap
+  /** Run the solid trunk to the svg's own bottom edge, so the rail continues into whatever the
+   * page renders below. The stride accordion passes it for every map except the earliest — one
+   * unbroken line from the active destination down to the journey's origin. */
+  trunkToEdge?: boolean
+}) {
   const ledger = useMemo(() => buildLedger(map), [map])
   const fresh = useFreshTickets(map)
   const [hover, setHover] = useState<number | null>(null)
@@ -65,16 +74,16 @@ export function MapLedger({ map }: { map: WayfinderMap }) {
           strokeDasharray="3 5"
           strokeLinecap="round"
         />
-        {ledger.trunkSolid && (
+        {(ledger.trunkSolid || trunkToEdge) && (
           <line
             x1={ledger.gutterX}
-            y1={ledger.trunkSolid.y1}
+            y1={ledger.trunkSolid ? ledger.trunkSolid.y1 : ledger.sepBehind}
             x2={ledger.gutterX}
-            y2={ledger.trunkSolid.y2}
+            y2={trunkToEdge ? ledger.height : (ledger.trunkSolid?.y2 ?? ledger.height)}
             stroke="var(--fg)"
             strokeOpacity="0.55"
             strokeWidth="2.5"
-            strokeLinecap="round"
+            strokeLinecap={trunkToEdge ? 'butt' : 'round'}
           />
         )}
 
@@ -128,12 +137,12 @@ export function MapLedger({ map }: { map: WayfinderMap }) {
               <StateMarker ticket={ticket} x={x} y={y} />
               <text
                 x={ledger.textX}
-                y={y + 4}
+                y={y - 4}
                 className={`row-title${ticket.state === 'blocked' ? ' is-dim' : ''}`}
               >
                 {truncate(ticket.title, 46)}
               </text>
-              <text x={ledger.textX} y={y + 19} className="row-word" fill={meta.color}>
+              <text x={ledger.textX} y={y + 11} className="row-word" fill={meta.color}>
                 {meta.glyph} {meta.word}
                 {login !== undefined ? ` · ${login}` : ''}
               </text>
@@ -154,6 +163,14 @@ export function MapLedger({ map }: { map: WayfinderMap }) {
                 {ticket.title}
                 {gist !== undefined ? ` — ${gist}` : ''}
               </title>
+              <rect
+                className="row-hit"
+                x="0"
+                y={y - 26}
+                width={ledger.width}
+                height={52}
+                fill="transparent"
+              />
               {fresh.has(ticket.number) && (
                 <circle
                   className="fresh-ping"
@@ -167,10 +184,10 @@ export function MapLedger({ map }: { map: WayfinderMap }) {
               <text x={ledger.gutterX} y={y + 3.5} textAnchor="middle" className="check">
                 ✓
               </text>
-              <text x={ledger.textX} y={y + 4} className="behind-title">
+              <text x={ledger.textX} y={y - 4} className="behind-title">
                 {truncate(ticket.title, 46)}
               </text>
-              <text x={ledger.textX} y={y + 19} className="behind-gist">
+              <text x={ledger.textX} y={y + 11} className="behind-gist">
                 {gist !== undefined ? truncate(gist, 76) : 'decided'}
               </text>
             </a>

@@ -23,6 +23,22 @@
   --state-blocked: #e87ba4;
   --goal: #a87c10;
 
+  /*
+   * The style vocabulary the stride prototype settled: every gap draws from --sp-*, every rounded
+   * hover from the one radius. --wash and --trunk are pre-mixed opaque against the surface so
+   * overlapping strokes never darken at the joints; the mixes re-resolve per colour scheme.
+   */
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-6: 1.5rem;
+  --sp-8: 2rem;
+  --sp-12: 3rem;
+  --radius: 10px;
+  --wash: color-mix(in srgb, var(--fg) 4.5%, transparent);
+  --trunk: color-mix(in srgb, var(--fg) 55%, var(--bg));
+
   color-scheme: light dark;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   line-height: 1.5;

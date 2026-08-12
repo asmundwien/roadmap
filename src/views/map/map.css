@@ -5,37 +5,6 @@
   max-width: 70rem;
 }
 
-.map-head {
-  margin-bottom: 0.25rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.map-eyebrow {
-  margin: 0;
-}
-
-.map-head h2 {
-  margin: 0;
-  font-size: 1.5rem;
-}
-
-.map-head a {
-  color: inherit;
-  text-decoration: none;
-}
-
-.map-head a:hover {
-  text-decoration: underline;
-}
-
-.map-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 1.25rem;
-}
-
 .legend-item i {
   font-style: normal;
 }
@@ -47,18 +16,31 @@
 }
 
 /*
- * The canvas renders at a fixed 1.25× its 840-unit viewBox — page-native sizing, like any other
- * content: internal 12px titles come out at 15px against the page's 16px body, and a wider window
- * doesn't inflate the map. Only a narrower one shrinks it.
+ * The canvas renders at a fixed 1.25× its 840-unit viewBox — page-native sizing: internal 12px
+ * titles come out at 15px against the page's 16px body. The width is pinned, not fluid: the
+ * accordion's trigger anatomy — flag, rail segments, crop offset — is CSS-positioned at that
+ * scale, and letting the svg shrink with the viewport would slide them apart. Below ~1100px the
+ * page scrolls sideways instead.
  */
 .ledger {
   display: block;
   width: min(1050px, 100%);
+  min-width: 1050px;
   height: auto;
 }
 
 .ledger a {
   text-decoration: none;
+}
+
+/* The whole row is one thing — say so on hover, with the one shared radius. */
+.ledger .row-hit {
+  rx: var(--radius);
+}
+
+.ledger a.row:hover .row-hit,
+.ledger a.row:focus-visible .row-hit {
+  fill: var(--wash);
 }
 
 .caption {
@@ -227,7 +209,195 @@
   }
 }
 
+/* ---------------------------------------------------------------- the flagline */
+
+/*
+ * The accordion of strides. Pixel values that are NOT on the --sp-* scale are ledger-derived:
+ * the svg renders at 1.25× its 840-unit viewBox, so 3.125px (trunk), 45px/25px (flag halo and
+ * glyph), and 11.25px / 18.125px / 26.25px (caption and destination type) are the ledger's own
+ * dimensions expressed in CSS, and stay exact rather than rounded to the scale.
+ */
+
+.fl-trace {
+  position: relative;
+}
+
+.fl-trigger {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: var(--sp-4) var(--sp-2) var(--sp-4) 0;
+  background: none;
+  border: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/*
+ * The rail through a trigger — drawn to be indistinguishable from the ledger's trunk: the same
+ * rendered width on the same center (x = 55), in the same pre-mixed opaque color, so overlapping
+ * segments never darken at the joints.
+ */
+.fl-trigger::before,
+.fl-trigger::after {
+  content: "";
+  position: absolute;
+  left: 53.44px;
+  width: 3.125px;
+  background: var(--trunk);
+}
+
+.fl-trigger::before {
+  top: 0;
+  height: 50%;
+}
+
+.fl-trigger::after {
+  top: 50%;
+  bottom: 0;
+}
+
+/* Nothing is drawn above the head flag — a project's future past its active map is unimagined. */
+.fl-trace > .fl-block:first-child .fl-trigger::before {
+  display: none;
+}
+
+/* The trace ends at the last flag; nothing dangles below it while it is folded. */
+.fl-trace > .fl-block:last-child:not(.is-open) .fl-trigger::after {
+  display: none;
+}
+
+/* The whole row is one thing — say so on hover, with the one shared radius. A solo map's
+ * header is not a control, so it neither washes nor invites. */
+.fl-trigger:not(.is-static):hover,
+.fl-trigger:not(.is-static):focus-visible {
+  background: var(--wash);
+  border-radius: var(--radius);
+}
+
+.fl-trigger.is-static {
+  cursor: default;
+}
+
+/*
+ * The flag: the ledger's destination mark, recreated exactly at its rendered size — the 18-unit
+ * halo (45px), goal fill at 0.18 flattened opaque onto the surface, the 20-unit ⚑ (25px) in
+ * goal. Identical for every map, open or closed, reached or ahead.
+ */
+.fl-flag {
+  position: absolute;
+  left: 55px;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 45px;
+  height: 45px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 25px;
+  color: var(--goal);
+  background: color-mix(in srgb, var(--goal) 18%, var(--bg));
+  z-index: 1;
+}
+
+.fl-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+/* The ledger's goal-caption, at its rendered size. */
+.fl-caption {
+  font-size: 11.25px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--goal);
+}
+
+/* The ledger's .dest, at its rendered size. */
+.fl-dest {
+  font-size: 18.125px;
+  line-height: 26.25px;
+  color: var(--fg);
+  max-width: 46rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.fl-meta {
+  margin: 0;
+}
+
+/* ---------------------------------------------------------------- the fold and the crop */
+
+/* The animated single-open fold: 0fr→1fr is the whole transition — no measured heights. */
+.fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 340ms ease;
+}
+
+.fold.is-open {
+  grid-template-rows: 1fr;
+}
+
+.fold-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fold {
+    transition: none;
+  }
+}
+
+/*
+ * Crop mode: the ledger minus its destination section — the trigger already is that section.
+ * trunkToEdge paints the trunk across the svg's blank bottom padding, so the solid line runs
+ * unbroken into the older map below.
+ */
+.fl-crop {
+  position: relative;
+  overflow: hidden;
+}
+
+/* The ledger-wrap's own padding would break the trunk at both ends of the fold — zero it. */
+.fl-crop .ledger-wrap {
+  padding: 0;
+}
+
 /* ---------------------------------------------------------------- below the map */
+
+/* The asides sit between the svg's edge and the next trigger, indented into the text column;
+ * has-rail threads the trunk through them so the line to the older map never breaks. */
+.fl-asides {
+  position: relative;
+  margin: 0;
+  padding-bottom: var(--sp-6);
+}
+
+.fl-asides.has-rail::before {
+  content: "";
+  position: absolute;
+  left: 53.44px;
+  top: 0;
+  bottom: 0;
+  width: 3.125px;
+  background: var(--trunk);
+}
+
+.fl-github a {
+  color: inherit;
+}
 
 .map-aside {
   margin: 0.75rem 0;

@@ -18,14 +18,21 @@ import { stripInlineMarkdown } from '../gist.ts'
  * followed, drawn, or offered as a hover neighbour.
  */
 
+/**
+ * The ledger renders at a fixed 1.25× its 840-unit viewBox (map.css pins the width), so the
+ * accordion chrome positioned in CSS around the svg — the flag trigger, the rail segments, the
+ * crop offset — converts geometry units to px through this one number.
+ */
+export const LEDGER_SCALE = 1.25
+
 const W = 840
 const GX = 44
 const PITCH = 34
 /** The gutter is never narrower than four lanes, so sparse maps keep room to breathe. */
 const MIN_GUTTER_LANES = 4
 const ROW_H = 52
-const SEC_PAD = 44
-const SEC_BOTTOM = 28
+const SEC_PAD = 56
+const SEC_BOTTOM = 34
 const PAD_TOP = 20
 const PAD_BOTTOM = 44
 const BEND = 40

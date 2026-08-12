@@ -36,6 +36,13 @@
   margin: 0.25rem 0 0;
 }
 
+/* The wayfinder states counted across the whole project — the head's one instrument. */
+.project-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-4);
+}
+
 .project-name {
   font-size: 1.1rem;
   margin: 0 0 0.75rem;

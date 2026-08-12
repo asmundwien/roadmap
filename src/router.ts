@@ -34,6 +34,16 @@ export function mapHash(map: { owner: string; repo: string; number: number }): s
   return `#/${map.owner}/${map.repo}/${map.number}`
 }
 
+/**
+ * Swap the current hash without growing history — the accordion re-pins its selection on every
+ * toggle, and stepping back through each fold would make the back button useless. replaceState
+ * fires no hashchange, so the event is dispatched by hand to keep `useRoute` subscribers live.
+ */
+export function replaceHash(hash: string): void {
+  window.history.replaceState(null, '', hash)
+  window.dispatchEvent(new HashChangeEvent('hashchange'))
+}
+
 function subscribe(onChange: () => void): () => void {
   window.addEventListener('hashchange', onChange)
   return () => window.removeEventListener('hashchange', onChange)
