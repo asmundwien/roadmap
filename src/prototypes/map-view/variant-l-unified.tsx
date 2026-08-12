@@ -1,14 +1,13 @@
 /**
  * PROTOTYPE — throwaway. Variant L: the unified ledger — K's grammar carried through the whole map.
  *
- * The round-three reaction: the ledger is the clearest by far, but its three designs (graph, fog,
- * goal) don't speak the same language. This take makes the graph's grammar carry everything: one
- * left-aligned gutter-and-text system in three sections — ground covered, charted ahead, fog —
- * with the trunk passing through all of them. History renders exactly like the future (rows on the
- * rail, titles in the column); HEAD is just where the rail turns from solid to dashed; fog items
- * are ghost rows — the drawn-elision idiom (jj's elided nodes) — dim but readable, under a light
- * haze instead of clouds; and the destination is the trunk's final stop, a flag node in the same
- * column as every other row.
+ * One left-aligned gutter-and-text system in three sections — fog, charted ahead, ground covered —
+ * with the trunk's rail passing through all of them, solid behind and dashed ahead. Everything
+ * obeys one scale: every node is the same 9px-radius family (closed a filled dot with a check, the
+ * goal an amber dot with a flag, claimed half-filled, blocked hollow, takeable a diamond in a
+ * glow), every section has the same padding rhythm and 52px row pitch, and every word — titles,
+ * gists, captions, the destination — lives in the same text column. The destination block sizes
+ * itself to its text, so the fog section starts below it rather than under it.
  */
 
 import type { Ticket } from '../../wayfinder/types.ts'
@@ -22,12 +21,13 @@ export const NAME = 'The unified ledger'
 const W = 1000
 const GX = 150
 const PITCH = 34
-const ROW_H = 54
-const BEHIND_ROW_H = 46
-const FOG_ROW_H = 46
+const ROW_H = 52
+const SEC_PAD = 44
+const SEC_BOTTOM = 28
 const PAD_TOP = 20
 const PAD_BOTTOM = 44
 const BEND = 40
+const DEST_LINE_H = 21
 
 function connector(a: { x: number; y: number }, b: { x: number; y: number }): string {
   if (Math.abs(a.x - b.x) < 1) return `M ${a.x} ${a.y} L ${b.x} ${b.y}`
@@ -47,8 +47,8 @@ interface Row {
 export function VariantL({ map }: VariantProps) {
   const { closed, layers, chains, chainOf, depthOf, descCount } = decomposeChains(map)
 
-  // Lane 0 is the trunk's own lane: the heaviest chain forked off HEAD continues it (J's spine
-  // rule) so merges pull toward the trunk. Tributaries take lanes rightward, heaviest first.
+  // Lane 0 is the trunk's own lane: the heaviest chain forked off HEAD continues it, so merges
+  // pull toward the trunk. Tributaries take lanes rightward, heaviest first.
   const headChains = chains.filter((c) => c.forkFrom === null)
   const spine = [...headChains].sort(
     (a, b) =>
@@ -80,19 +80,31 @@ export function VariantL({ map }: VariantProps) {
     return laneOf(a.number) - laneOf(b.number) || a.number - b.number
   })
 
-  // The vertical frame, top to bottom: destination row, fog section, ahead section, behind section.
-  const fogItems = map.body.notYetSpecified
-  const destY = PAD_TOP + 40
-  const sepFog = PAD_TOP + 84
-  const fogTopPad = 38
-  const sepAhead = sepFog + fogTopPad + fogItems.length * FOG_ROW_H + 16
-  const aheadHeight = 34 + ordered.length * ROW_H
-  const sepBehind = sepAhead + aheadHeight
-  const height = sepBehind + 38 + closed.length * BEHIND_ROW_H + PAD_BOTTOM
+  // The vertical frame, top to bottom: destination, fog, charted ahead, ground covered — every
+  // section with the same rhythm: SEC_PAD to its first row, ROW_H pitch, SEC_BOTTOM after its last.
+  const colWidth = W - textX - 28
+  const destLines = Math.min(
+    4,
+    Math.max(2, Math.ceil(map.body.destination.length / (colWidth / 7.4))),
+  )
+  const destTextY = PAD_TOP + 26
+  const destY = destTextY + 10
+  const sepFog = destTextY + destLines * DEST_LINE_H + 26
 
-  const ghostY = (i: number) => sepFog + fogTopPad + i * FOG_ROW_H + 14
-  const rowY = (i: number) => sepBehind - 30 - i * ROW_H
-  const behindY = (j: number) => sepBehind + 38 + j * BEHIND_ROW_H
+  const fogItems = map.body.notYetSpecified
+  const ghostY = (i: number) => sepFog + SEC_PAD + i * ROW_H
+  const sepAhead =
+    sepFog + (fogItems.length > 0 ? SEC_PAD + (fogItems.length - 1) * ROW_H + SEC_BOTTOM : 56)
+
+  const sepBehind =
+    sepAhead + (ordered.length > 0 ? SEC_PAD + (ordered.length - 1) * ROW_H + SEC_BOTTOM : 56)
+  const rowY = (i: number) => sepBehind - SEC_BOTTOM - i * ROW_H
+
+  const behindY = (j: number) => sepBehind + SEC_PAD + j * ROW_H
+  const height =
+    sepBehind +
+    (closed.length > 0 ? SEC_PAD + (closed.length - 1) * ROW_H + SEC_BOTTOM : 56) +
+    PAD_BOTTOM
 
   const rows: Row[] = ordered.map((ticket, i) => ({
     ticket,
@@ -118,13 +130,14 @@ export function VariantL({ map }: VariantProps) {
           className="d-svg"
           viewBox={`0 0 ${W} ${height}`}
           role="img"
-          aria-label={`The ledger of ${map.title}: ground covered, charted ahead, and fog, on one rail`}
+          aria-label={`The ledger of ${map.title}: fog, charted ahead, and ground covered, on one rail`}
         >
           <title>{map.title}</title>
-          {/* section boundaries */}
-          <Section y={sepFog} label="fog · not yet specified" />
-          <Section y={sepAhead} label="charted ahead" />
-          <Section y={sepBehind} label="ground covered" />
+
+          {/* section boundaries — captions live in the text column like every other word */}
+          <Section y={sepFog} label="fog · not yet specified" textX={textX} />
+          <Section y={sepAhead} label="charted ahead" textX={textX} />
+          <Section y={sepBehind} label="ground covered" textX={textX} />
 
           {/* the trunk's lane, one line through every section: dashed ahead, solid behind */}
           <line
@@ -143,7 +156,7 @@ export function VariantL({ map }: VariantProps) {
               x1={GX}
               y1={head.y}
               x2={GX}
-              y2={behindY(closed.length - 1) + BEHIND_ROW_H * 0.7}
+              y2={behindY(closed.length - 1) + ROW_H * 0.6}
               stroke="var(--proto-ink)"
               strokeOpacity="0.55"
               strokeWidth="2.5"
@@ -253,7 +266,7 @@ export function VariantL({ map }: VariantProps) {
             )
           })}
 
-          {/* behind rows — the same grammar, just already walked */}
+          {/* ground covered — the same grammar, already walked: a check, and what was won */}
           {behindNewestFirst.map((ticket, j) => {
             const gist = gistByTitle.get(ticket.title)
             return (
@@ -262,7 +275,7 @@ export function VariantL({ map }: VariantProps) {
                   {ticket.title}
                   {gist !== undefined ? ` — ${gist}` : ''}
                 </title>
-                <circle cx={GX} cy={behindY(j)} r="7" fill="var(--proto-ink)" fillOpacity="0.75" />
+                <circle cx={GX} cy={behindY(j)} r="9" fill="var(--proto-ink)" fillOpacity="0.75" />
                 <text x={GX} y={behindY(j) + 3.5} textAnchor="middle" className="l-check">
                   ✓
                 </text>
@@ -285,11 +298,11 @@ export function VariantL({ map }: VariantProps) {
                 <circle
                   cx={gx}
                   cy={ghostY(i)}
-                  r="6"
+                  r="9"
                   fill="none"
                   stroke="var(--proto-muted)"
-                  strokeWidth="1.5"
-                  strokeDasharray="2.5 3.5"
+                  strokeWidth="1.75"
+                  strokeDasharray="2.5 4"
                   strokeOpacity="0.7"
                 />
                 <text x={textX} y={ghostY(i) + 4} className="l-fog-title">
@@ -300,14 +313,20 @@ export function VariantL({ map }: VariantProps) {
           })}
 
           {/* the destination — the trunk's final stop, and the one warm thing on the map */}
-          <circle cx={GX} cy={destY} r="17" fill="var(--proto-goal)" fillOpacity="0.18" />
-          <text x={GX} y={destY + 7} textAnchor="middle" className="l-flag">
+          <circle cx={GX} cy={destY} r="18" fill="var(--proto-goal)" fillOpacity="0.18" />
+          <circle cx={GX} cy={destY} r="9" fill="var(--proto-goal)" />
+          <text x={GX} y={destY + 3.5} textAnchor="middle" className="l-flag">
             ⚑
           </text>
-          <text x={textX} y={destY - 14} className="l-goal-caption">
+          <text x={textX} y={PAD_TOP + 10} className="l-goal-caption">
             the destination
           </text>
-          <foreignObject x={textX} y={destY - 6} width={W - textX - 28} height={70}>
+          <foreignObject
+            x={textX}
+            y={PAD_TOP + 16}
+            width={colWidth}
+            height={destLines * DEST_LINE_H + 8}
+          >
             <p className="l-dest" title={map.body.destination}>
               {map.body.destination}
             </p>
@@ -318,11 +337,11 @@ export function VariantL({ map }: VariantProps) {
   )
 }
 
-function Section({ y, label }: { y: number; label: string }) {
+function Section({ y, label, textX }: { y: number; label: string; textX: number }) {
   return (
     <>
       <line x1="24" y1={y} x2={W - 24} y2={y} stroke="var(--proto-hairline)" />
-      <text x="26" y={y + 16} className="l-caption">
+      <text x={textX} y={y + 18} className="l-caption">
         {label}
       </text>
     </>

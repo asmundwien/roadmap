@@ -222,12 +222,12 @@ export function StateMarker({ ticket, x, y }: { ticket: Ticket; x: number; y: nu
     <>
       {ticket.state === 'frontier' && (
         <>
-          <circle cx={x} cy={y} r="17" fill={meta.color} fillOpacity="0.16" />
+          <circle cx={x} cy={y} r="18" fill={meta.color} fillOpacity="0.16" />
           <rect
-            x={x - 7.5}
-            y={y - 7.5}
-            width="15"
-            height="15"
+            x={x - 8}
+            y={y - 8}
+            width="16"
+            height="16"
             transform={`rotate(45 ${x} ${y})`}
             fill={meta.color}
           />
@@ -241,7 +241,7 @@ export function StateMarker({ ticket, x, y }: { ticket: Ticket; x: number; y: nu
             r="9"
             fill="var(--proto-surface)"
             stroke={meta.color}
-            strokeWidth="2.5"
+            strokeWidth="2.25"
           />
           <path d={`M ${x} ${y - 9} A 9 9 0 0 0 ${x} ${y + 9} Z`} fill={meta.color} />
         </>
@@ -250,10 +250,10 @@ export function StateMarker({ ticket, x, y }: { ticket: Ticket; x: number; y: nu
         <circle
           cx={x}
           cy={y}
-          r="7.5"
+          r="9"
           fill="var(--proto-plane)"
           stroke={meta.color}
-          strokeWidth="2"
+          strokeWidth="2.25"
         />
       )}
     </>

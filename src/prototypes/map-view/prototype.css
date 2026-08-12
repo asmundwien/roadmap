@@ -475,8 +475,8 @@
 }
 
 .l-flag {
-  font-size: 20px;
-  fill: var(--proto-goal);
+  font-size: 10px;
+  fill: var(--proto-plane);
 }
 
 .l-goal-caption {
@@ -490,16 +490,16 @@
 .l-dest {
   margin: 0;
   font-size: 14.5px;
-  line-height: 1.45;
+  line-height: 21px;
   color: var(--proto-ink);
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 
 .l-check {
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
   fill: var(--proto-plane);
 }
