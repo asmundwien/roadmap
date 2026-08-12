@@ -75,6 +75,40 @@
   font-size: 9.5px;
 }
 
+/* The kind-of-work chip riding the title line — GitHub's tinted-label anatomy (12% fill, hued
+ * border and word) in this map's own tones, one --chip hue per wayfinder type. */
+.type-chip {
+  --chip: var(--muted);
+}
+
+.type-chip.is-research {
+  --chip: var(--type-research);
+}
+
+.type-chip.is-prototype {
+  --chip: var(--type-prototype);
+}
+
+.type-chip.is-grilling {
+  --chip: var(--type-grilling);
+}
+
+.type-chip.is-task {
+  --chip: var(--type-task);
+}
+
+.type-chip rect {
+  fill: color-mix(in srgb, var(--chip) 12%, transparent);
+  stroke: color-mix(in srgb, var(--chip) 32%, transparent);
+}
+
+.type-chip text {
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  fill: var(--chip);
+}
+
 .behind-title {
   font-size: 12px;
   font-weight: 500;

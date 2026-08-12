@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Ticket, TicketState, WayfinderMap } from '../../wayfinder/types.ts'
+import type { Ticket, TicketState, TicketType, WayfinderMap } from '../../wayfinder/types.ts'
 import { stripInlineMarkdown } from '../gist.ts'
 import { buildLedger, type Ledger, type LedgerEdge } from './geometry.ts'
 import './map.css'
@@ -145,6 +145,13 @@ export function MapLedger({
               >
                 {truncate(ticket.title, 46)}
               </text>
+              <TypeChip
+                type={ticket.type}
+                title={truncate(ticket.title, 46)}
+                titleWeight={600}
+                x={ledger.textX}
+                y={y}
+              />
               <text x={ledger.textX} y={y + 11} className="row-word" fill={meta.color}>
                 {meta.glyph} {meta.word}
                 {login !== undefined ? ` · ${login}` : ''}
@@ -189,6 +196,13 @@ export function MapLedger({
               <text x={ledger.textX} y={y - 4} className="behind-title">
                 {truncate(ticket.title, 46)}
               </text>
+              <TypeChip
+                type={ticket.type}
+                title={truncate(ticket.title, 46)}
+                titleWeight={500}
+                x={ledger.textX}
+                y={y}
+              />
               <text x={ledger.textX} y={y + 11} className="behind-gist">
                 {gist !== undefined ? truncate(gist, 76) : 'decided'}
               </text>
@@ -261,6 +275,54 @@ function Section({ ledger, y, label }: { ledger: Ledger; y: number; label: strin
       </text>
     </>
   )
+}
+
+/**
+ * The kind-of-work layer: the ticket's `wayfinder:<type>` label as a chip after the title —
+ * GitHub's label shape in this map's tones (wash fill, edge stroke, muted word). Inline placement
+ * needs the title's real width, hence the canvas measurement. An untyped ticket shows nothing
+ * rather than a shrug.
+ */
+function TypeChip({
+  type,
+  title,
+  titleWeight,
+  x,
+  y,
+}: {
+  type: TicketType
+  title: string
+  titleWeight: number
+  /** The text column's left edge; the chip rides inline after the title. */
+  x: number
+  /** The row's center line, same `y` the marker and text lines position from. */
+  y: number
+}) {
+  if (type === 'untyped') return null
+  const left = x + textWidth(title, `${titleWeight} 12px ${FONT_STACK}`) + 8
+  const label = type.toUpperCase()
+  const width = textWidth(label, `600 8.5px ${FONT_STACK}`) + label.length * 0.45 + 12
+  return (
+    <g className={`type-chip is-${type}`}>
+      <rect x={left} y={y - 15.5} width={width} height={14} rx="7" />
+      <text x={left + width / 2} y={y - 5.3} textAnchor="middle">
+        {label}
+      </text>
+    </g>
+  )
+}
+
+/** Must mirror the root font-family in index.css, or the measured widths drift from the render. */
+const FONT_STACK = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif'
+
+let measureCtx: CanvasRenderingContext2D | null = null
+
+/** Rendered width of `text` in viewBox units — the svg's 12px is the canvas's 12px. */
+function textWidth(text: string, font: string): number {
+  measureCtx ??= document.createElement('canvas').getContext('2d')
+  if (!measureCtx) return text.length * 6.5
+  measureCtx.font = font
+  return measureCtx.measureText(text).width
 }
 
 /** The one 9px node family. `closed` is drawn by the ground-covered section, not here. */

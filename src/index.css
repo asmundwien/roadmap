@@ -24,6 +24,17 @@
   --goal: #a87c10;
 
   /*
+   * Ticket-type chip palette — the wayfinder labels' own GitHub hues (research green #0E8A16,
+   * prototype yellow #FBCA04, grilling red #D93F0B, task blue #0052CC), restated in this map's
+   * muted tones. Validated per mode (dataviz skill): every pair ≥15 normal-vision ΔE, every chip
+   * word ≥4.3:1 on its 12% tint; identity is never colour alone — the chip carries its word.
+   */
+  --type-research: #085a30;
+  --type-prototype: #856208;
+  --type-grilling: #c92e0e;
+  --type-task: #2563c0;
+
+  /*
    * The style vocabulary the stride prototype settled: every gap draws from --sp-*, every rounded
    * hover from the one radius. --wash and --trunk are pre-mixed opaque against the surface so
    * overlapping strokes never darken at the joints; the mixes re-resolve per colour scheme.
@@ -59,6 +70,11 @@
     --state-claimed: #3987e5;
     --state-blocked: #d55181;
     --goal: #dcaf3f;
+
+    --type-research: #4faf5c;
+    --type-prototype: #d1a730;
+    --type-grilling: #f0653a;
+    --type-task: #74a5ea;
   }
 }
 
