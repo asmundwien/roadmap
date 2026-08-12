@@ -475,8 +475,8 @@
 }
 
 .l-flag {
-  font-size: 10px;
-  fill: var(--proto-plane);
+  font-size: 20px;
+  fill: var(--proto-goal);
 }
 
 .l-goal-caption {

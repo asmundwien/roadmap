@@ -87,9 +87,9 @@ export function VariantL({ map }: VariantProps) {
     4,
     Math.max(2, Math.ceil(map.body.destination.length / (colWidth / 7.4))),
   )
-  const destTextY = PAD_TOP + 26
-  const destY = destTextY + 10
-  const sepFog = destTextY + destLines * DEST_LINE_H + 26
+  const destTextTop = PAD_TOP + 28
+  const destY = destTextTop + 10
+  const sepFog = destTextTop + destLines * DEST_LINE_H + 26
 
   const fogItems = map.body.notYetSpecified
   const ghostY = (i: number) => sepFog + SEC_PAD + i * ROW_H
@@ -275,7 +275,7 @@ export function VariantL({ map }: VariantProps) {
                   {ticket.title}
                   {gist !== undefined ? ` — ${gist}` : ''}
                 </title>
-                <circle cx={GX} cy={behindY(j)} r="9" fill="var(--proto-ink)" fillOpacity="0.75" />
+                <circle cx={GX} cy={behindY(j)} r="10" fill="var(--proto-ink)" />
                 <text x={GX} y={behindY(j) + 3.5} textAnchor="middle" className="l-check">
                   ✓
                 </text>
@@ -314,16 +314,15 @@ export function VariantL({ map }: VariantProps) {
 
           {/* the destination — the trunk's final stop, and the one warm thing on the map */}
           <circle cx={GX} cy={destY} r="18" fill="var(--proto-goal)" fillOpacity="0.18" />
-          <circle cx={GX} cy={destY} r="9" fill="var(--proto-goal)" />
-          <text x={GX} y={destY + 3.5} textAnchor="middle" className="l-flag">
+          <text x={GX} y={destY + 7} textAnchor="middle" className="l-flag">
             ⚑
           </text>
-          <text x={textX} y={PAD_TOP + 10} className="l-goal-caption">
+          <text x={textX} y={PAD_TOP + 14} className="l-goal-caption">
             the destination
           </text>
           <foreignObject
             x={textX}
-            y={PAD_TOP + 16}
+            y={destTextTop}
             width={colWidth}
             height={destLines * DEST_LINE_H + 8}
           >
