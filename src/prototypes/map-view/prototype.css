@@ -447,6 +447,47 @@
   fill: var(--proto-ink-2);
 }
 
+/* ---------------------------------------------------------------- variant L: unified ledger */
+
+.l-caption {
+  font-size: 9px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  fill: var(--proto-muted);
+}
+
+.l-behind-title {
+  font-size: 12px;
+  font-weight: 500;
+  fill: var(--proto-ink-2);
+  paint-order: stroke;
+  stroke: var(--proto-plane);
+  stroke-width: 3.5px;
+  stroke-linejoin: round;
+}
+
+.l-fog-title {
+  font-size: 12px;
+  font-style: italic;
+  fill: color-mix(in oklab, var(--proto-muted) 75%, transparent);
+}
+
+.l-flag {
+  font-size: 20px;
+  fill: var(--proto-ink);
+}
+
+.l-dest {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--proto-ink-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 /* ---------------------------------------------------------------- the switcher */
 
 .proto-switch {
