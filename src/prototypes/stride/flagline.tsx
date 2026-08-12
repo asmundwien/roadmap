@@ -1,0 +1,139 @@
+/**
+ * PROTOTYPE — throwaway. Round three: THE FLAGLINE — the destination is the header.
+ *
+ * The round-two reaction and the stride-joint research converged on the same finding: the
+ * accordion header and the ledger's destination block are the same element drawn twice. Now they
+ * are one. Maps are ordered the way the ledger reads — active map at the top, history descending
+ * into the past — and each map renders as its DESTINATION SECTION: the flag with its halo and the
+ * destination text at ledger scale. That whole block is the accordion trigger. Opening a map
+ * unfolds the node graph beneath it (the embedded ledger with its own destination section cropped
+ * away — the trigger already is that section), and the solid trunk exits the ground-covered end
+ * into the older map below: one line from the active destination down to the journey's origin.
+ *
+ * Amber stays reserved: only a live destination (an open map) carries the goal color; reached
+ * destinations are achromatic and recede, per the palette's rules in index.css.
+ */
+
+import { useMemo } from 'react'
+import { stripInlineMarkdown } from '../../views/gist.ts'
+import { buildLedger } from '../../views/map/geometry.ts'
+import { BareMap, Fold, MapChild, ProjectHead } from './chrome.tsx'
+import type { StrideMap, StrideProject } from './fixture.ts'
+
+export interface ScreenProps {
+  project: StrideProject
+  /** Number of the map whose graph is unfolded; null = fully collapsed (the resting default). */
+  openMap: number | null
+  onToggle: (mapNumber: number) => void
+}
+
+export interface CardProps {
+  project: StrideProject
+  onOpen: () => void
+}
+
+export function FlaglineScreen({ project, openMap, onToggle }: ScreenProps) {
+  const single = project.maps.length === 1 ? project.maps[0] : undefined
+  const newestFirst = [...project.maps].reverse()
+  return (
+    <div className="fl-screen">
+      <ProjectHead project={project} />
+
+      {single ? (
+        <BareMap map={single} />
+      ) : (
+        <div className="fl-trace">
+          {project.active === null && (
+            <p className="fl-rest">
+              <span className="fl-rest-cap" aria-hidden="true" />
+              at rest — trace intact
+            </p>
+          )}
+          {newestFirst.map((map) => (
+            <FlagBlock
+              key={map.number}
+              map={map}
+              active={map === project.active}
+              open={openMap === map.number}
+              onToggle={onToggle}
+            />
+          ))}
+          <p className="fl-origin">
+            <span className="fl-origin-cap" aria-hidden="true" />
+            <span className="muted small">where the journey began</span>
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FlagBlock({
+  map,
+  active,
+  open,
+  onToggle,
+}: {
+  map: StrideMap
+  active: boolean
+  open: boolean
+  onToggle: (n: number) => void
+}) {
+  // Aligns the trigger's text with the embedded ledger's text column (exact at full render width).
+  const textLeft = useMemo(() => buildLedger(map).textX * 1.25, [map])
+  const fog = map.body.notYetSpecified.length
+  return (
+    <div className={`fl-block${open ? ' is-open' : ''}`}>
+      <button type="button" className="fl-trigger" onClick={() => onToggle(map.number)}>
+        <span className={`fl-flag${map.isOpen ? ' is-live' : ''}`} aria-hidden="true">
+          ⚑
+        </span>
+        <span className="fl-body" style={{ marginLeft: textLeft }}>
+          <span className="fl-dest">{stripInlineMarkdown(map.body.destination)}</span>
+          <span className="fl-meta muted small">
+            {map.title} · #{map.number} ·{' '}
+            {map.isOpen
+              ? `${map.progress.completed} decided so far · ${active ? '' : 'live · '}${map.updatedAt}`
+              : `${map.progress.completed} decided · reached ${map.closedAt}`}
+            {!map.isOpen && fog > 0 && ` · ${fog} fog unentered`}
+          </span>
+        </span>
+      </button>
+      <Fold open={open}>
+        <div className="fl-child">
+          <MapChild map={map} crop />
+        </div>
+      </Fold>
+    </div>
+  )
+}
+
+/** The card is the screen at a second density: the same flag-led lines, newest first. */
+export function FlaglineCard({ project, onOpen }: CardProps) {
+  const newestFirst = [...project.maps].reverse()
+  return (
+    <button type="button" className="proto-card fl-card" onClick={onOpen}>
+      <span className="proto-card-name">{project.nameWithOwner}</span>
+      <span className="fl-card-trace">
+        <span className="fl-card-rail" aria-hidden="true" />
+        {project.active === null && (
+          <span className="fl-card-line">
+            <span className="fl-card-mark is-rest" aria-hidden="true" />
+            <span className="fl-card-dest muted">at rest — trace intact</span>
+          </span>
+        )}
+        {newestFirst.map((map) => (
+          <span key={map.number} className="fl-card-line">
+            <span className={`fl-card-flag${map.isOpen ? ' is-live' : ''}`} aria-hidden="true">
+              ⚑
+            </span>
+            <span className={`fl-card-dest${map === project.active ? ' is-active' : ''}`}>
+              {stripInlineMarkdown(map.body.destination)}
+            </span>
+            <span className="fl-card-tail muted">{map.isOpen ? map.updatedAt : map.closedAt}</span>
+          </span>
+        ))}
+      </span>
+    </button>
+  )
+}

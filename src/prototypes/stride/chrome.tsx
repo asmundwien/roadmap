@@ -1,20 +1,23 @@
 /**
- * PROTOTYPE — throwaway. Chrome shared by every variant, per the charting decisions the reaction
- * pointed back to: the map child is self-contained (all map-specific data lives inside it) and the
- * page-level header carries the project details. Both are designed once here; variants keep
- * differing on the collapsed stride's anatomy and the card's shape.
+ * PROTOTYPE — throwaway. Chrome shared across the flagline design, per the charting decisions:
+ * the map child is self-contained (all map-specific data lives inside it) and the page-level
+ * header carries the project details.
  *
- * The child deliberately does NOT render the map title — the accordion header owns it and morphs
- * into the open state's heading, so title identity never doubles. The child's front-matter (meta,
- * legend, notes, out-of-scope) sits ABOVE the ledger so the ledger's trunk ends the child and the
- * rail can run on into the next stride without a break.
+ * The child does NOT render the map title or destination — the flag trigger owns both, so
+ * identity never doubles. In `crop` mode (the accordion) the embedded ledger's own destination
+ * section is cropped away, because the trigger IS that section, and a computed trunk tail bridges
+ * the ledger's bottom padding so the solid rail runs unbroken into the older map below.
  */
 
-import type { ReactNode } from 'react'
+import { type ReactNode, useMemo } from 'react'
 import { stripInlineMarkdown } from '../../views/gist.ts'
+import { buildLedger } from '../../views/map/geometry.ts'
 import { MapLedger } from '../../views/map/ledger.tsx'
 import { LEGEND_ORDER, STATE_META } from '../../views/map/state-meta.ts'
 import type { StrideMap, StrideProject } from './fixture.ts'
+
+/** The ledger renders at 1.25× its 840-unit viewBox (map.css); geometry units → px. */
+const LEDGER_SCALE = 1.25
 
 export function ProjectHead({ project }: { project: StrideProject }) {
   const closed = project.maps.filter((m) => !m.isOpen).length
@@ -37,12 +40,21 @@ export function ProjectHead({ project }: { project: StrideProject }) {
   )
 }
 
-/** The self-contained map child: everything map-specific, title excepted — the header owns it. */
-export function MapChild({ map }: { map: StrideMap }) {
+/**
+ * The self-contained map child: everything map-specific, identity excepted — the trigger owns it.
+ * `crop` removes the ledger's destination section (the trigger already is that section) and adds
+ * the trunk tail across the svg's bottom padding.
+ */
+export function MapChild({ map, crop = false }: { map: StrideMap; crop?: boolean }) {
+  const geo = useMemo(() => buildLedger(map), [map])
+  const cropPx = geo.sepFog * LEDGER_SCALE
+  const tailPx = geo.trunkSolid ? (geo.height - geo.trunkSolid.y2) * LEDGER_SCALE : 0
+  const textLeft = geo.textX * LEDGER_SCALE
   const partial = map.ticketsTruncated || map.tickets.some((t) => t.blockersTruncated)
+
   return (
     <div className="proto-child">
-      <div className="proto-child-front">
+      <div className="proto-child-front" style={{ paddingLeft: textLeft }}>
         <div className="proto-child-meta muted small">
           <span>#{map.number}</span>
           <span>{map.isOpen ? `updated ${map.updatedAt}` : `closed ${map.closedAt}`}</span>
@@ -79,12 +91,23 @@ export function MapChild({ map }: { map: StrideMap }) {
           </details>
         )}
       </div>
-      <MapLedger map={map} />
+      {crop ? (
+        <div className="proto-crop">
+          <div style={{ marginTop: -cropPx }}>
+            <MapLedger map={map} />
+          </div>
+          {tailPx > 0 && (
+            <span className="proto-tail" style={{ height: tailPx }} aria-hidden="true" />
+          )}
+        </div>
+      ) : (
+        <MapLedger map={map} />
+      )}
     </div>
   )
 }
 
-/** The decided single-map grammar: no accordion chrome, the map child bare under its title. */
+/** The decided single-map grammar: no accordion chrome — the whole ledger bare, destination in. */
 export function BareMap({ map }: { map: StrideMap }) {
   return (
     <section>

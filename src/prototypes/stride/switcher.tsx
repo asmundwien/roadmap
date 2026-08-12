@@ -1,32 +1,20 @@
 /**
- * PROTOTYPE — throwaway. The floating bar: cycle variants with the arrows or ← / →, and jump the
- * screen pane between fixture projects. Both live in the URL, so a take is shareable and survives
- * reload. Never rendered in a production build.
+ * PROTOTYPE — throwaway. The floating bar: cycle the fixture projects with the arrows or ← / →.
+ * The selection lives in the URL, so a state is shareable and survives reload. Never rendered in
+ * a production build.
  */
 
 import { useEffect } from 'react'
 
 interface SwitcherProps {
-  variants: string[]
-  current: string
-  name: string
-  projectLabel: string
-  onVariant: (variant: string) => void
-  onNextProject: () => void
+  labels: string[]
+  current: number
+  onSelect: (index: number) => void
 }
 
-export function PrototypeSwitcher({
-  variants,
-  current,
-  name,
-  projectLabel,
-  onVariant,
-  onNextProject,
-}: SwitcherProps) {
+export function ProjectSwitcher({ labels, current, onSelect }: SwitcherProps) {
   const step = (delta: number) => {
-    const at = variants.indexOf(current)
-    const next = variants[(at + delta + variants.length) % variants.length]
-    if (next) onVariant(next)
+    onSelect((current + delta + labels.length) % labels.length)
   }
 
   useEffect(() => {
@@ -47,18 +35,12 @@ export function PrototypeSwitcher({
 
   return (
     <div className="proto-switch">
-      <button type="button" onClick={() => step(-1)} aria-label="Previous variant">
+      <button type="button" onClick={() => step(-1)} aria-label="Previous project">
         ←
       </button>
-      <span className="label">
-        {current} — {name}
-      </span>
-      <button type="button" onClick={() => step(1)} aria-label="Next variant">
+      <span className="label">the flagline — {labels[current]}</span>
+      <button type="button" onClick={() => step(1)} aria-label="Next project">
         →
-      </button>
-      <span className="sep" />
-      <button type="button" onClick={onNextProject}>
-        {projectLabel}
       </button>
     </div>
   )
