@@ -1,0 +1,571 @@
+/* PROTOTYPE — throwaway. Styles for the stride/card variants. Tokens come from index.css. */
+
+/* Doubled class beats .shell's 44rem cap regardless of stylesheet order — same trick as map.css. */
+.shell.proto-shell {
+  max-width: 70rem;
+  padding-top: 2rem;
+}
+
+.proto-note {
+  margin: 0 0 2rem;
+}
+
+.proto-h {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin: 0 0 1rem;
+}
+
+.proto-scenario {
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: normal;
+}
+
+.proto-front {
+  margin-bottom: 3.5rem;
+}
+
+.proto-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
+  gap: 0.75rem;
+  align-items: start;
+}
+
+/* Cards share the resting chrome of the live map-card; each variant fills the inside. */
+.proto-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+  padding: 1rem;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.proto-card:hover,
+.proto-card:focus-visible {
+  border-color: var(--signal-decided);
+}
+
+.proto-card-name {
+  font-weight: 600;
+}
+
+.proto-card-gist {
+  font-size: 0.9rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.proto-project-head {
+  margin-bottom: 1.25rem;
+}
+
+.proto-project-head h2 {
+  margin: 0;
+  font-size: 1.4rem;
+  letter-spacing: -0.01em;
+}
+
+.proto-project-head p {
+  margin: 0.15rem 0 0;
+}
+
+.proto-eyebrow {
+  margin: 0;
+}
+
+.proto-child-title {
+  margin: 0 0 0.5rem;
+  font-size: 1.15rem;
+}
+
+/* Stride rows are buttons; strip the button skin everywhere. */
+.va-stride,
+.vb-stride,
+.vb-open-head,
+.vc-stride,
+.vc-open-head {
+  background: none;
+  border: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+}
+
+/* ------------------------------------------------------------------ A · milestones */
+
+.va-trace {
+  position: relative;
+}
+
+/*
+ * The rail is drawn as one segment per row rather than a single absolute line, so it can stop at
+ * an open stride's header and hand over to the embedded ledger's trunk — a continuous line would
+ * paint solid rail behind the ledger's dashed-ahead region, drawing the future as ground covered.
+ * 54px centers the segment on 55px — the embedded ledger's gutter (44 in the viewBox × 1.25).
+ */
+.va-stride::before,
+.va-rest::before {
+  content: "";
+  position: absolute;
+  left: 54px;
+  top: 0;
+  bottom: 0;
+  width: 2.5px;
+  border-radius: 2px;
+  background: var(--fg);
+  opacity: 0.55;
+}
+
+/* The trace starts at the first marker, not above it; the rest cap ends it. */
+.va-trace > :first-child::before {
+  top: 50%;
+}
+
+.va-rest::before {
+  bottom: 50%;
+}
+
+.va-stride {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  width: 100%;
+  padding: 0.8rem 0.5rem 0.8rem 0;
+}
+
+.va-stride:hover .va-stride-title,
+.va-stride:focus-visible .va-stride-title {
+  text-decoration: underline;
+}
+
+.va-node {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin-left: 43px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  position: relative;
+  z-index: 1;
+}
+
+.va-node-done {
+  background: var(--fg);
+  color: var(--bg);
+}
+
+.va-node-live {
+  background: var(--bg);
+  border: 2.5px solid var(--state-claimed);
+}
+
+.va-node-live.is-active {
+  border-color: var(--fg);
+}
+
+.va-node-here {
+  background: var(--bg);
+  border: 2.5px solid var(--fg);
+}
+
+.va-node-here::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--fg);
+}
+
+.va-stride-title {
+  font-weight: 600;
+  font-size: 0.98rem;
+}
+
+.va-tail {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.85rem;
+  white-space: nowrap;
+}
+
+.va-tail-meter {
+  width: 7rem;
+}
+
+.va-tail-meter .signal-caption {
+  display: none;
+}
+
+.va-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.va-ghost-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px dashed var(--muted);
+}
+
+.va-open {
+  position: relative;
+}
+
+.va-open .ledger-wrap {
+  padding-bottom: 0.75rem;
+}
+
+.va-rest {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  margin: 0;
+  padding: 0.6rem 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.va-rest-cap {
+  flex: none;
+  width: 16px;
+  height: 4px;
+  margin-left: 47px;
+  border-radius: 2px;
+  background: var(--fg);
+  opacity: 0.55;
+  position: relative;
+  z-index: 1;
+}
+
+/* A's card: the same trace, second density. */
+.va-card-trace {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.va-card-rail {
+  position: absolute;
+  left: 4.5px;
+  top: 4px;
+  bottom: 4px;
+  width: 1.5px;
+  background: var(--fg);
+  opacity: 0.5;
+}
+
+.va-card-line {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.22rem 0;
+  min-width: 0;
+}
+
+.va-card-node {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  position: relative;
+  z-index: 1;
+}
+
+.va-card-node.is-done {
+  background: var(--fg);
+}
+
+.va-card-node.is-live {
+  background: var(--bg);
+  border: 1.75px solid var(--state-claimed);
+}
+
+.va-card-node.is-live.is-active {
+  border-color: var(--fg);
+}
+
+.va-card-node.is-rest {
+  border-radius: 1px;
+  height: 3px;
+  background: var(--fg);
+  opacity: 0.55;
+}
+
+.va-card-title {
+  font-size: 0.85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.va-card-title.is-active {
+  font-weight: 600;
+}
+
+.va-card-tail {
+  margin-left: auto;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ B · chronicle */
+
+.vb-trace {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.vb-stride {
+  display: flex;
+  gap: 1.1rem;
+  width: 100%;
+}
+
+.vb-seg {
+  flex: none;
+  width: 4px;
+  border-radius: 2px;
+  background: var(--fg);
+  opacity: 0.55;
+  margin-left: 53px;
+}
+
+.vb-seg.is-live {
+  background: var(--state-claimed);
+  opacity: 0.8;
+}
+
+.vb-seg.is-live.is-active {
+  background: var(--fg);
+}
+
+.vb-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  padding: 0.15rem 0;
+}
+
+.vb-won {
+  font-size: 0.98rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.vb-stride:hover .vb-won,
+.vb-stride:focus-visible .vb-won {
+  text-decoration: underline;
+}
+
+.vb-meta {
+  margin: 0;
+}
+
+.vb-meter {
+  max-width: 16rem;
+  margin-top: 0.2rem;
+}
+
+.vb-expired {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.vb-open-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  width: 100%;
+  margin-bottom: 0.25rem;
+  /* Keep the open map's header on the same text column as the collapsed strides. */
+  padding-left: calc(53px + 4px + 1.1rem);
+}
+
+.vb-open-head .vb-won {
+  font-weight: 600;
+  font-size: 1.05rem;
+}
+
+.vb-rest {
+  margin: 0;
+  padding-left: 53px;
+}
+
+/* B's card: its own fixed shape. */
+.vb-card-foot {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.vb-card-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.vb-card-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--fg);
+  opacity: 0.7;
+}
+
+.vb-card-dot.is-head {
+  background: var(--bg);
+  border: 1.5px solid var(--state-claimed);
+  opacity: 1;
+}
+
+/* ------------------------------------------------------------------ C · strata */
+
+.vc-trace {
+  display: flex;
+  flex-direction: column;
+}
+
+.vc-stride {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+}
+
+.vc-gutter {
+  flex: none;
+}
+
+.vc-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  justify-content: center;
+  min-width: 0;
+  padding: 0.35rem 0;
+}
+
+.vc-title {
+  font-weight: 600;
+  font-size: 0.98rem;
+}
+
+.vc-stride:hover .vc-title,
+.vc-stride:focus-visible .vc-title {
+  text-decoration: underline;
+}
+
+.vc-gist {
+  font-size: 0.88rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.vc-meter {
+  max-width: 16rem;
+  margin-top: 0.2rem;
+}
+
+.vc-open-head {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.vc-rest-row {
+  display: flex;
+  align-items: flex-start;
+}
+
+.vc-rest-row p {
+  margin: 0;
+  align-self: center;
+}
+
+/* C's card: the horizontal strip; a long history overflows, and that is data. */
+.vc-strip-wrap {
+  overflow-x: hidden;
+}
+
+.vc-strip {
+  display: block;
+}
+
+/* ------------------------------------------------------------------ the switcher */
+
+.proto-switch {
+  position: fixed;
+  bottom: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.7rem;
+  border-radius: 999px;
+  background: var(--fg);
+  color: var(--bg);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  font-size: 0.85rem;
+  z-index: 10;
+}
+
+.proto-switch button {
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+}
+
+.proto-switch button:hover {
+  background: rgba(128, 128, 128, 0.35);
+}
+
+.proto-switch .label {
+  white-space: nowrap;
+  max-width: 24rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.proto-switch .sep {
+  width: 1px;
+  height: 1rem;
+  background: currentColor;
+  opacity: 0.4;
+}
