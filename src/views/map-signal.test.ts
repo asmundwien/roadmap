@@ -21,6 +21,7 @@ function mapWith(overrides: {
       notes: [],
       decisions: [],
       notYetSpecified: overrides.notYetSpecified ?? [],
+      notYetSpecifiedNote: '',
       outOfScope: [],
       sections: [],
       missingSections: [],

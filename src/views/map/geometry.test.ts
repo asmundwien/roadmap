@@ -36,6 +36,7 @@ function body(overrides: Partial<MapBody> = {}): MapBody {
     notes: [],
     decisions: [],
     notYetSpecified: [],
+    notYetSpecifiedNote: '',
     outOfScope: [],
     sections: [],
     missingSections: [],
@@ -148,6 +149,41 @@ describe('buildLedger', () => {
     expect(ledger.destination).toBe('Reach the end.')
     expect(ledger.fogRows[0]?.item).toBe('A foggy thing')
     expect(ledger.trunkSolid).not.toBeNull()
+  })
+
+  it('scatters fog across the gutter, clear of the trunk and the text column', () => {
+    const map = makeMap([], {
+      notYetSpecified: ['one', 'two', 'three', 'four', 'five'],
+    })
+    const ledger = buildLedger(map)
+    for (const fog of ledger.fogRows) {
+      expect(fog.x).toBeGreaterThan(ledger.gutterX + 9)
+      expect(fog.x).toBeLessThan(ledger.textX - 9)
+    }
+  })
+
+  it('marks every empty section with a placeholder line, never a node', () => {
+    const ledger = buildLedger(makeMap([]))
+    expect(ledger.fogRows).toEqual([])
+    expect(ledger.placeholders.map((p) => p.text)).toEqual([
+      'no fog recorded',
+      'nothing charted ahead',
+      'nothing decided yet',
+    ])
+    expect(ledger.placeholders.map((p) => p.y)).toEqual(
+      [...ledger.placeholders.map((p) => p.y)].sort((a, b) => a - b),
+    )
+  })
+
+  it('shows the fog section’s prose as the empty note instead of a ghost node', () => {
+    const map = makeMap([ticket(2, 'frontier')], {
+      notYetSpecifiedNote: '*(No known fog remains — the route is fully ticketed.)*',
+    })
+    const ledger = buildLedger(map)
+    expect(ledger.fogRows).toEqual([])
+    expect(ledger.placeholders[0]?.text).toBe(
+      '(No known fog remains — the route is fully ticketed.)',
+    )
   })
 
   it('survives an empty map: sections and trunk render with nothing on them', () => {

@@ -95,6 +95,18 @@ describe('parseMapBody', () => {
     expect(body.notes).toEqual(['First thought.', 'Second thought.'])
   })
 
+  it('keeps fog prose as a note, never as patches', () => {
+    const body = parseMapBody('## Not yet specified\n\n*(No known fog remains.)*\n')
+    expect(body.notYetSpecified).toEqual([])
+    expect(body.notYetSpecifiedNote).toBe('*(No known fog remains.)*')
+  })
+
+  it('leaves the fog note empty when the section has bullets', () => {
+    const body = parseMapBody('## Not yet specified\n\n- unclear\n')
+    expect(body.notYetSpecified).toEqual(['unclear'])
+    expect(body.notYetSpecifiedNote).toBe('')
+  })
+
   it('joins a bullet with its wrapped continuation lines', () => {
     const body = parseMapBody('## Out of scope\n\n- Hosting and\n  multi-viewer sharing.\n')
     expect(body.outOfScope).toEqual(['Hosting and multi-viewer sharing.'])

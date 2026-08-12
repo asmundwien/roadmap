@@ -66,7 +66,7 @@ Views never fetch. They read `useRoadmap()` and get a snapshot; everything below
   raw payloads into `Project[]`.
 - `src/store/` — the poll loop and its React binding (`RoadmapProvider` / `useRoadmap`).
 
-Two loops: maps every 30s, discovery every 5min. GraphQL polls can't be conditional (no ETag on
+Two loops: maps every 90s, discovery every 5min. GraphQL polls can't be conditional (no ETag on
 `POST /graphql`), so the only budget lever is the interval — the store stretches it when
 `rateLimit.remaining` drops, and skips polling entirely while the tab is hidden.
 

@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react'
 import type { Route } from '../router.ts'
 import { useRoadmap } from '../store/roadmap-provider.tsx'
 import type { WayfinderMap } from '../wayfinder/types.ts'
@@ -10,11 +9,11 @@ import './views.css'
 /**
  * The map screen: the story of the road, not a work-picker. The ledger carries the journey —
  * destination, fog, the charted braid, ground covered — so this shell only adds what lives around
- * it: the header with the live "updated" pulse and legend, honesty about partial data, and the
- * map body's Notes and Out of scope a click away.
+ * it: the header with the legend, honesty about partial data, and the map body's Notes and Out of
+ * scope a click away.
  */
 export function MapScreen({ route }: { route: Extract<Route, { screen: 'map' }> }) {
-  const { status, projects, error, lastUpdatedAt } = useRoadmap()
+  const { status, projects, error } = useRoadmap()
 
   const map = projects
     .flatMap((project) => [...project.openMaps, ...project.closedMaps])
@@ -48,7 +47,7 @@ export function MapScreen({ route }: { route: Extract<Route, { screen: 'map' }> 
 
       {map && (
         <>
-          <MapHead map={map} lastUpdatedAt={lastUpdatedAt} />
+          <MapHead map={map} />
           <MapLedger map={map} />
           <MapAsides map={map} />
         </>
@@ -57,7 +56,7 @@ export function MapScreen({ route }: { route: Extract<Route, { screen: 'map' }> 
   )
 }
 
-function MapHead({ map, lastUpdatedAt }: { map: WayfinderMap; lastUpdatedAt: number | null }) {
+function MapHead({ map }: { map: WayfinderMap }) {
   const partial = map.ticketsTruncated || map.tickets.some((ticket) => ticket.blockersTruncated)
 
   return (
@@ -70,7 +69,6 @@ function MapHead({ map, lastUpdatedAt }: { map: WayfinderMap; lastUpdatedAt: num
         <a href={map.url}>{map.title}</a>
       </h1>
       <div className="map-meta muted small">
-        <UpdatedPulse at={lastUpdatedAt} />
         {LEGEND_ORDER.map((state) => (
           <span key={state} className="legend-item">
             <i aria-hidden="true" style={{ color: STATE_META[state].color }}>
@@ -89,32 +87,6 @@ function MapHead({ map, lastUpdatedAt }: { map: WayfinderMap; lastUpdatedAt: num
       )}
     </header>
   )
-}
-
-function UpdatedPulse({ at }: { at: number | null }) {
-  const now = useNow(10_000)
-  if (at === null) return null
-  return (
-    <span>
-      <i key={at} className="pulse-dot" aria-hidden="true" /> {freshness(at, now)}
-    </span>
-  )
-}
-
-function freshness(at: number, now: number): string {
-  const seconds = Math.max(0, Math.floor((now - at) / 1000))
-  if (seconds < 15) return 'updated just now'
-  if (seconds < 90) return `updated ${seconds}s ago`
-  return `updated ${Math.round(seconds / 60)}m ago`
-}
-
-function useNow(everyMs: number): number {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), everyMs)
-    return () => clearInterval(id)
-  }, [everyMs])
-  return now
 }
 
 /** The click-away tier: Notes and Out of scope, plus the drift signal if the body has one. */

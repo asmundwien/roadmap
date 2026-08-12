@@ -9,8 +9,8 @@ import { stripInlineMarkdown } from '../gist.ts'
  * `research/commit-graph-layouts`): chains own persistent rails, the heaviest chain forked off
  * HEAD keeps the trunk's lane 0 so merges pull toward the trunk, tributaries sit rightward
  * heaviest-first, and bends happen only at forks and merges. Everything is deterministic by
- * construction — same snapshot, same picture — which is what keeps the 30s poll from reshuffling
- * the map underfoot.
+ * construction — same snapshot, same picture — which is what keeps the poll from reshuffling the
+ * map underfoot.
  *
  * One thing the prototype's fixtures never exercised: blocked-by edges can cross repos, and issue
  * numbers only identify a ticket within one repo. Only same-repo blockers become geometry; a
@@ -18,9 +18,11 @@ import { stripInlineMarkdown } from '../gist.ts'
  * followed, drawn, or offered as a hover neighbour.
  */
 
-const W = 1000
-const GX = 150
+const W = 840
+const GX = 44
 const PITCH = 34
+/** The gutter is never narrower than four lanes, so sparse maps keep room to breathe. */
+const MIN_GUTTER_LANES = 4
 const ROW_H = 52
 const SEC_PAD = 44
 const SEC_BOTTOM = 28
@@ -84,6 +86,8 @@ export interface Ledger {
   /** Closed tickets on the trunk, newest first. */
   closedRows: ClosedRow[]
   fogRows: FogRow[]
+  /** One line per empty section — drawn as dim text in the text column, never as a node. */
+  placeholders: { y: number; text: string }[]
   edges: LedgerEdge[]
   /** Which chain's rail a ticket rides — hover highlights the whole rail. */
   chainIdOf: Map<number, number>
@@ -409,7 +413,7 @@ export function buildLedger(map: WayfinderMap): Ledger {
   const layers = orderLayers(ahead, home, openNumbers)
   const { chains, chainOf, descCount } = decomposeChains(layers, home)
   const { spine, laneOf, laneCount } = assignLanes(chains, chainOf, descCount)
-  const textX = GX + laneCount * PITCH + 44
+  const textX = GX + Math.max(laneCount, MIN_GUTTER_LANES) * PITCH + 44
 
   const ordered = layers.flat()
   ordered.sort((a, b) => {
@@ -428,20 +432,29 @@ export function buildLedger(map: WayfinderMap): Ledger {
   const destY = destTextTop + 10
   const sepFog = destTextTop + destLines * DEST_LINE_H + 26
 
+  // An empty section keeps the shared rhythm: its one placeholder line sits where a first row
+  // would, and the section closes SEC_BOTTOM below it.
+  const sectionHeight = (count: number) => SEC_PAD + Math.max(count - 1, 0) * ROW_H + SEC_BOTTOM
+
   const fogItems = map.body.notYetSpecified.map(stripInlineMarkdown)
   const ghostY = (i: number) => sepFog + SEC_PAD + i * ROW_H
-  const sepAhead =
-    sepFog + (fogItems.length > 0 ? SEC_PAD + (fogItems.length - 1) * ROW_H + SEC_BOTTOM : 56)
+  const sepAhead = sepFog + sectionHeight(fogItems.length)
 
-  const sepBehind =
-    sepAhead + (ordered.length > 0 ? SEC_PAD + (ordered.length - 1) * ROW_H + SEC_BOTTOM : 56)
+  const sepBehind = sepAhead + sectionHeight(ordered.length)
   const rowY = (i: number) => sepBehind - SEC_BOTTOM - i * ROW_H
 
   const behindY = (j: number) => sepBehind + SEC_PAD + j * ROW_H
-  const height =
-    sepBehind +
-    (closed.length > 0 ? SEC_PAD + (closed.length - 1) * ROW_H + SEC_BOTTOM : 56) +
-    PAD_BOTTOM
+  const height = sepBehind + sectionHeight(closed.length) + PAD_BOTTOM
+
+  const placeholders: { y: number; text: string }[] = []
+  if (fogItems.length === 0) {
+    const note = stripInlineMarkdown(map.body.notYetSpecifiedNote).trim()
+    placeholders.push({ y: sepFog + SEC_PAD, text: note !== '' ? note : 'no fog recorded' })
+  }
+  if (ordered.length === 0)
+    placeholders.push({ y: sepAhead + SEC_PAD, text: 'nothing charted ahead' })
+  if (closed.length === 0)
+    placeholders.push({ y: sepBehind + SEC_PAD, text: 'nothing decided yet' })
 
   const rows: LedgerRow[] = ordered.map((ticket, i) => ({
     ticket,
@@ -455,9 +468,12 @@ export function buildLedger(map: WayfinderMap): Ledger {
     .reverse()
     .map((ticket, j) => ({ ticket, y: behindY(j) }))
 
+  // Ghost stops scatter across the whole gutter — clear of the trunk, clear of the text column.
+  const fogMin = GX + 26
+  const fogMax = textX - 62
   const fogRows: FogRow[] = fogItems.map((item, i) => ({
     item,
-    x: GX + ((i * 0.618 + 0.35) % 1) * (laneCount - 1) * PITCH,
+    x: fogMin + ((i * 0.618 + 0.35) % 1) * (fogMax - fogMin),
     y: ghostY(i),
   }))
 
@@ -495,6 +511,7 @@ export function buildLedger(map: WayfinderMap): Ledger {
     rows,
     closedRows,
     fogRows,
+    placeholders,
     edges,
     chainIdOf,
     neighbors,

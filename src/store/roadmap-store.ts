@@ -5,7 +5,7 @@ import { toProjects } from '../wayfinder/from-github.ts'
 import type { Project } from '../wayfinder/types.ts'
 
 /** The fast loop: map contents, where the frontier actually moves. */
-const MAP_POLL_MS = 30_000
+const MAP_POLL_MS = 90_000
 /** The slow loop: which maps exist. New maps are rare, and search polls can't be conditional. */
 const DISCOVERY_POLL_MS = 5 * 60_000
 

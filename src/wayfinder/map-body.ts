@@ -40,12 +40,18 @@ export function parseMapBody(raw: string): MapBody {
     .filter((key) => !found.has(key))
     .map((key) => TEMPLATE_HEADINGS[key])
 
+  // Fog is stricter than the other list sections: a patch is a bullet, and prose is commentary
+  // about the fog ("no known fog remains"), which must never render as a patch.
+  const fog = found.get('notYetSpecified')
+  const fogPatches = fog ? bulletItems(fog.text) : []
+
   return {
     raw,
     destination: found.get('destination')?.text ?? '',
     notes: found.get('notes')?.items ?? [],
     decisions: (found.get('decisions')?.items ?? []).map(parseDecision),
-    notYetSpecified: found.get('notYetSpecified')?.items ?? [],
+    notYetSpecified: fogPatches,
+    notYetSpecifiedNote: fog && fogPatches.length === 0 ? fog.text : '',
     outOfScope: found.get('outOfScope')?.items ?? [],
     sections,
     missingSections,
@@ -113,6 +119,17 @@ function toSection(heading: string, body: string): MapSection {
  * so a section that drifted away from a list still reads as something rather than nothing.
  */
 function toItems(text: string): string[] {
+  const bullets = bulletItems(text)
+  if (bullets.length > 0) return bullets
+
+  return text
+    .split(/\n\s*\n/)
+    .map((paragraph) => paragraph.trim())
+    .filter((paragraph) => paragraph !== '')
+}
+
+/** The section's bullets alone, wrapped continuation lines joined — no prose fallback. */
+function bulletItems(text: string): string[] {
   if (text === '') return []
 
   const items: string[] = []
@@ -133,13 +150,7 @@ function toItems(text: string): string[] {
   }
   if (current !== null) items.push(current)
 
-  const bullets = items.map((item) => item.trim()).filter((item) => item !== '')
-  if (bullets.length > 0) return bullets
-
-  return text
-    .split(/\n\s*\n/)
-    .map((paragraph) => paragraph.trim())
-    .filter((paragraph) => paragraph !== '')
+  return items.map((item) => item.trim()).filter((item) => item !== '')
 }
 
 /** Drops the template's `<!-- ... -->` guidance so it never reads as content. */

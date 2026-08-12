@@ -66,7 +66,10 @@ export interface MapBody {
   destination: string
   notes: string[]
   decisions: Decision[]
+  /** Fog patches — bullets only. Prose in this section is commentary, not a patch. */
   notYetSpecified: string[]
+  /** Prose in Not-yet-specified when it carries no bullets — usually "no fog remains". */
+  notYetSpecifiedNote: string
   outOfScope: string[]
   /** Every `##` section in document order, recognised or not. */
   sections: MapSection[]

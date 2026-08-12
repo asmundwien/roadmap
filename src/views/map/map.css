@@ -36,25 +36,6 @@
   font-style: normal;
 }
 
-/* "updated just now" — the dot replays its pulse every time the poll lands (keyed remount). */
-.pulse-dot {
-  display: inline-block;
-  width: 0.5em;
-  height: 0.5em;
-  border-radius: 50%;
-  background: var(--signal-decided);
-  animation: pulse 1.2s ease-out 1;
-}
-
-@keyframes pulse {
-  0% {
-    box-shadow: 0 0 0 0 color-mix(in oklab, var(--signal-decided) 55%, transparent);
-  }
-  100% {
-    box-shadow: 0 0 0 0.6em transparent;
-  }
-}
-
 /* ---------------------------------------------------------------- the ledger */
 
 .ledger-wrap {
@@ -120,7 +101,8 @@
   fill: var(--bg);
 }
 
-.fog-title {
+.fog-title,
+.empty-note {
   font-size: 12px;
   font-style: italic;
   fill: color-mix(in oklab, var(--muted) 75%, transparent);
@@ -226,7 +208,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pulse-dot,
   .row.is-fresh,
   .fresh-ping {
     animation: none;

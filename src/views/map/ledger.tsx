@@ -177,6 +177,13 @@ export function MapLedger({ map }: { map: WayfinderMap }) {
           )
         })}
 
+        {/* empty sections say so in words — same mechanism everywhere, never a node */}
+        {ledger.placeholders.map(({ y, text }) => (
+          <text key={y} x={ledger.textX} y={y + 4} className="empty-note">
+            {truncate(text, 96)}
+          </text>
+        ))}
+
         {/* fog rows — ghost stops: suspected, dim, unconnected, readable */}
         {ledger.fogRows.map(({ item, x, y }) => (
           <g key={item}>
@@ -229,7 +236,7 @@ export function MapLedger({ map }: { map: WayfinderMap }) {
 function Section({ ledger, y, label }: { ledger: Ledger; y: number; label: string }) {
   return (
     <>
-      <line x1="24" y1={y} x2={ledger.width - 24} y2={y} stroke="var(--edge)" />
+      <line x1="0" y1={y} x2={ledger.width} y2={y} stroke="var(--edge)" />
       <text x={ledger.textX} y={y + 18} className="caption">
         {label}
       </text>
