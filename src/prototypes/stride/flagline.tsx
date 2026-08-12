@@ -44,12 +44,6 @@ export function FlaglineScreen({ project, openMap, onToggle }: ScreenProps) {
         <BareMap map={single} />
       ) : (
         <div className="fl-trace">
-          {project.active === null && (
-            <p className="fl-rest">
-              <span className="fl-rest-cap" aria-hidden="true" />
-              at rest — trace intact
-            </p>
-          )}
           {newestFirst.map((map) => (
             <FlagBlock
               key={map.number}
@@ -59,10 +53,6 @@ export function FlaglineScreen({ project, openMap, onToggle }: ScreenProps) {
               onToggle={onToggle}
             />
           ))}
-          <p className="fl-origin">
-            <span className="fl-origin-cap" aria-hidden="true" />
-            <span className="muted small">where the journey began</span>
-          </p>
         </div>
       )}
     </div>
@@ -118,12 +108,6 @@ export function FlaglineCard({ project, onOpen }: CardProps) {
       <span className="proto-card-name">{project.nameWithOwner}</span>
       <span className="fl-card-trace">
         <span className="fl-card-rail" aria-hidden="true" />
-        {project.active === null && (
-          <span className="fl-card-line">
-            <span className="fl-card-mark is-rest" aria-hidden="true" />
-            <span className="fl-card-dest muted">at rest — trace intact</span>
-          </span>
-        )}
         {newestFirst.map((map) => (
           <span key={map.number} className="fl-card-line">
             <span className="fl-card-flag" aria-hidden="true">

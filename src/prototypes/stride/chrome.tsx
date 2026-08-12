@@ -22,6 +22,7 @@ const LEDGER_SCALE = 1.25
 export function ProjectHead({ project }: { project: StrideProject }) {
   const closed = project.maps.filter((m) => !m.isOpen).length
   const open = project.maps.length - closed
+  const tickets = project.maps.flatMap((m) => m.tickets)
   return (
     <header className="proto-project-head">
       <h2>
@@ -35,6 +36,17 @@ export function ProjectHead({ project }: { project: StrideProject }) {
         {closed > 0 && open > 0 && ` — ${closed} closed, ${open === 1 ? 'one' : open} open`}
         {' · '}
         <a href={`https://github.com/${project.nameWithOwner}`}>on GitHub</a>
+      </p>
+      {/* The wayfinder states counted across the whole project — never a single map. */}
+      <p className="proto-project-legend muted small">
+        {LEGEND_ORDER.map((state) => (
+          <span key={state} className="legend-item">
+            <i aria-hidden="true" style={{ color: STATE_META[state].color }}>
+              {STATE_META[state].glyph}
+            </i>{' '}
+            {STATE_META[state].word} · {tickets.filter((t) => t.state === state).length}
+          </span>
+        ))}
       </p>
     </header>
   )

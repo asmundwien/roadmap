@@ -133,7 +133,9 @@
   padding-left: 1.25rem;
 }
 
-.proto-child .ledger-wrap {
+/* The ledger-wrap's own padding would break the trunk at both ends of the fold — zero it. */
+.proto-child .ledger-wrap,
+.proto-crop .ledger-wrap {
   padding: 0;
 }
 
@@ -219,6 +221,18 @@
   display: none;
 }
 
+/* The trace ends at the last flag; nothing dangles below it while it is folded. */
+.fl-trace > .fl-block:last-child:not(.is-open) .fl-trigger::after {
+  display: none;
+}
+
+/* The whole row is one thing — say so on hover. */
+.fl-trigger:hover,
+.fl-trigger:focus-visible {
+  background: color-mix(in srgb, var(--fg) 4.5%, transparent);
+  border-radius: 10px;
+}
+
 /*
  * The flag: the ledger's destination mark, recreated exactly at its rendered size — the 18-unit
  * halo (45px at 1.25×), goal fill at 0.18, the 20-unit ⚑ (25px) in goal. Identical for every
@@ -269,59 +283,19 @@
   overflow: hidden;
 }
 
-.fl-trigger:hover .fl-dest,
-.fl-trigger:focus-visible .fl-dest {
-  text-decoration: underline;
-}
-
 .fl-meta {
   margin: 0;
 }
 
-/* The at-rest head above a resting trace, and the origin cap where the journey began. */
-.fl-rest,
-.fl-origin {
-  position: relative;
+.proto-project-legend {
   display: flex;
-  align-items: center;
-  gap: 0.85rem;
-  margin: 0;
-  padding: 0.6rem 0;
-  color: var(--muted);
-  font-size: 0.9rem;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.1rem;
+  margin: 0.4rem 0 0;
 }
 
-.fl-rest::before,
-.fl-origin::before {
-  content: "";
-  position: absolute;
-  left: 54px;
-  width: 2.5px;
-  background: var(--fg);
-  opacity: 0.55;
-}
-
-.fl-rest::before {
-  top: 50%;
-  bottom: 0;
-}
-
-.fl-origin::before {
-  top: 0;
-  height: 50%;
-}
-
-.fl-rest-cap,
-.fl-origin-cap {
-  flex: none;
-  width: 16px;
-  height: 4px;
-  margin-left: 47px;
-  border-radius: 2px;
-  background: var(--fg);
-  opacity: 0.55;
-  position: relative;
-  z-index: 1;
+.proto-project-legend i {
+  font-style: normal;
 }
 
 /* ------------------------------------------------------------------ the card */
@@ -356,18 +330,6 @@
   text-align: center;
   font-size: 11px;
   color: var(--goal);
-  position: relative;
-  z-index: 1;
-}
-
-.fl-card-mark.is-rest {
-  flex: none;
-  width: 10px;
-  height: 3px;
-  margin: 0 1.5px;
-  border-radius: 1px;
-  background: var(--fg);
-  opacity: 0.55;
   position: relative;
   z-index: 1;
 }
