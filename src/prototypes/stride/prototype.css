@@ -129,12 +129,14 @@
   overflow: hidden;
 }
 
-.proto-tail {
-  position: absolute;
-  left: 53.44px;
-  bottom: 0;
-  width: 3.125px;
-  background: var(--trunk);
+/*
+ * Pin the ledger to its intended 1.25× scale inside the prototype. The CSS rail segments, flag
+ * position, and crop offsets are all expressed at that scale; letting the svg shrink with the
+ * viewport would slide them apart. Below ~1100px the page scrolls sideways instead — a prototype
+ * trade the build ticket resolves properly.
+ */
+.proto .ledger {
+  min-width: 1050px;
 }
 
 /* ------------------------------------------------------------------ the animated fold */

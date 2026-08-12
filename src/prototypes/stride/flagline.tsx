@@ -39,8 +39,16 @@ export function FlaglineScreen({ project, openMap, onToggle }: ScreenProps) {
     <div className="fl-screen">
       <ProjectHead project={project} />
       <div className="fl-trace">
-        {newestFirst.map((map) => (
-          <FlagBlock key={map.number} map={map} open={openMap === map.number} onToggle={onToggle} />
+        {newestFirst.map((map, i) => (
+          <FlagBlock
+            key={map.number}
+            map={map}
+            open={openMap === map.number}
+            // The earliest map is the journey's start: its trunk ends at the last decision,
+            // v1-style; every other open map runs its trunk to the edge, into the map below.
+            last={i === newestFirst.length - 1}
+            onToggle={onToggle}
+          />
         ))}
       </div>
     </div>
@@ -50,10 +58,12 @@ export function FlaglineScreen({ project, openMap, onToggle }: ScreenProps) {
 function FlagBlock({
   map,
   open,
+  last,
   onToggle,
 }: {
   map: StrideMap
   open: boolean
+  last: boolean
   onToggle: (n: number) => void
 }) {
   // Aligns the trigger's text with the embedded ledger's text column (exact at full render width).
@@ -74,7 +84,7 @@ function FlagBlock({
       </button>
       <Fold open={open}>
         <div className="fl-child">
-          <CroppedLedger map={map} />
+          <CroppedLedger map={map} trunkToEdge={!last} />
         </div>
       </Fold>
     </div>

@@ -14,7 +14,15 @@ import { STATE_META } from './state-meta.ts'
  * edge it touches — the answer to the drill's one HARD question, "what exactly is this waiting
  * on" — and rows whose state just changed under the 30s poll animate in.
  */
-export function MapLedger({ map }: { map: WayfinderMap }) {
+export function MapLedger({
+  map,
+  trunkToEdge = false,
+}: {
+  map: WayfinderMap
+  /** PROTOTYPE-only (stride accordion): run the solid trunk to the svg's bottom edge, so the
+   * rail continues into whatever the page renders below. The live map screen never passes it. */
+  trunkToEdge?: boolean
+}) {
   const ledger = useMemo(() => buildLedger(map), [map])
   const fresh = useFreshTickets(map)
   const [hover, setHover] = useState<number | null>(null)
@@ -65,16 +73,16 @@ export function MapLedger({ map }: { map: WayfinderMap }) {
           strokeDasharray="3 5"
           strokeLinecap="round"
         />
-        {ledger.trunkSolid && (
+        {(ledger.trunkSolid || trunkToEdge) && (
           <line
             x1={ledger.gutterX}
-            y1={ledger.trunkSolid.y1}
+            y1={ledger.trunkSolid ? ledger.trunkSolid.y1 : ledger.sepBehind}
             x2={ledger.gutterX}
-            y2={ledger.trunkSolid.y2}
+            y2={trunkToEdge ? ledger.height : (ledger.trunkSolid?.y2 ?? ledger.height)}
             stroke="var(--fg)"
             strokeOpacity="0.55"
             strokeWidth="2.5"
-            strokeLinecap="round"
+            strokeLinecap={trunkToEdge ? 'butt' : 'round'}
           />
         )}
 
