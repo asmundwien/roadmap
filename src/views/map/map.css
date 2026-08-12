@@ -1,7 +1,8 @@
 /* The live map screen — the unified ledger. Palette tokens live in index.css. */
 
-.map-shell {
-  max-width: 66rem;
+/* Doubled class beats .shell's 44rem regardless of stylesheet order. */
+.shell.map-shell {
+  max-width: 70rem;
 }
 
 .map-head {
@@ -42,9 +43,14 @@
   padding: 0.5rem 0 2rem;
 }
 
+/*
+ * The canvas renders at a fixed 1.25× its 840-unit viewBox — page-native sizing, like any other
+ * content: internal 12px titles come out at 15px against the page's 16px body, and a wider window
+ * doesn't inflate the map. Only a narrower one shrinks it.
+ */
 .ledger {
   display: block;
-  width: 100%;
+  width: min(1050px, 100%);
   height: auto;
 }
 
