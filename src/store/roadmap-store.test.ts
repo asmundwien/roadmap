@@ -18,6 +18,8 @@ function mapResponse(title: string, remaining = 5000) {
         title,
         url: 'https://github.com/a/r/issues/1',
         state: 'OPEN',
+        updatedAt: '2026-08-01T12:00:00Z',
+        closedAt: null,
         body: '## Destination\n\nSomewhere.\n',
         subIssuesSummary: { total: 0, completed: 0, percentCompleted: 0 },
         subIssues: { totalCount: 0, pageInfo: { hasNextPage: false }, nodes: [] },

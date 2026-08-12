@@ -53,6 +53,8 @@ function makeMap(tickets: Ticket[], bodyOverrides: Partial<MapBody> = {}): Wayfi
     title: 'Test map',
     url: `https://example.test/${HOME}/1`,
     isOpen: true,
+    updatedAt: 0,
+    closedAt: null,
     body: body(bodyOverrides),
     tickets,
     frontier: tickets.filter((t) => t.state === 'frontier'),

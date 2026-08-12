@@ -7,14 +7,17 @@
 
 .map-head {
   margin-bottom: 0.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
 .map-eyebrow {
   margin: 0;
 }
 
-.map-head h1 {
-  margin: 0 0 0.5rem;
+.map-head h2 {
+  margin: 0;
   font-size: 1.5rem;
 }
 

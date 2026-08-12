@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { FetchedMap, RawSubIssue } from '../github/map-query.ts'
-import { toProjects, toWayfinderMap } from './from-github.ts'
+import { activeMapOf, toProjects, toWayfinderMap } from './from-github.ts'
 
 function subIssue(overrides: Partial<RawSubIssue> & { number: number }): RawSubIssue {
   return {
@@ -25,6 +25,8 @@ function fetchedMap(children: RawSubIssue[], overrides: Partial<FetchedMap> = {}
       title: 'A map',
       url: 'https://github.com/a/r/issues/1',
       state: 'OPEN',
+      updatedAt: '2026-08-01T12:00:00Z',
+      closedAt: null,
       body: '## Destination\n\nSomewhere.\n',
       subIssuesSummary: { total: children.length, completed: 0, percentCompleted: 0 },
       subIssues: {
@@ -212,6 +214,47 @@ describe('toProjects', () => {
     expect(repo?.openMaps.map((map) => map.number)).toEqual([1])
     expect(repo?.closedMaps.map((map) => map.number)).toEqual([7])
     expect(repo?.isPrivate).toBe(true)
+  })
+
+  it('orders open maps most recently updated first, so the head is the active map', () => {
+    const stale = fetchedMap([])
+    const active: FetchedMap = {
+      ...stale,
+      ref: { ...stale.ref, number: 11 },
+      issue: { ...stale.issue, number: 11, updatedAt: '2026-08-10T12:00:00Z' },
+    }
+
+    const projects = toProjects([stale, active])
+
+    expect(projects[0]?.openMaps.map((map) => map.number)).toEqual([11, 1])
+    expect(projects[0] && activeMapOf(projects[0])?.number).toBe(11)
+  })
+
+  it('orders closed maps most recently closed first', () => {
+    const open = fetchedMap([])
+    const earlier: FetchedMap = {
+      ...open,
+      ref: { ...open.ref, number: 2 },
+      issue: { ...open.issue, number: 2, state: 'CLOSED', closedAt: '2026-06-01T12:00:00Z' },
+    }
+    const later: FetchedMap = {
+      ...open,
+      ref: { ...open.ref, number: 3 },
+      issue: { ...open.issue, number: 3, state: 'CLOSED', closedAt: '2026-07-01T12:00:00Z' },
+    }
+
+    const projects = toProjects([earlier, later, open])
+
+    expect(projects[0]?.closedMaps.map((map) => map.number)).toEqual([3, 2])
+  })
+
+  it('reports a resting project as having no active map', () => {
+    const closed = fetchedMap([])
+    const projects = toProjects([
+      { ...closed, issue: { ...closed.issue, state: 'CLOSED', closedAt: '2026-07-01T12:00:00Z' } },
+    ])
+
+    expect(projects[0] && activeMapOf(projects[0])).toBeNull()
   })
 
   it('sorts projects with live efforts ahead of pure history', () => {

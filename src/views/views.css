@@ -22,6 +22,20 @@
   margin-bottom: 2.5rem;
 }
 
+/* The project screen's page-level header: the project's own details, nothing map-specific. */
+
+.project-head {
+  margin-bottom: 2rem;
+}
+
+.project-head h1 {
+  margin: 0;
+}
+
+.project-head p {
+  margin: 0.25rem 0 0;
+}
+
 .project-name {
   font-size: 1.1rem;
   margin: 0 0 0.75rem;

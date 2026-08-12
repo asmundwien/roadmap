@@ -91,6 +91,10 @@ export interface WayfinderMap {
   title: string
   url: string
   isOpen: boolean
+  /** Last activity on the map issue, ms since epoch — recency picks a project's active map. */
+  updatedAt: number
+  /** When the map issue closed, ms since epoch; null while it is open. */
+  closedAt: number | null
   body: MapBody
   tickets: Ticket[]
   /** Open, unblocked, unclaimed tickets in map order — what a session can take right now. */
@@ -100,7 +104,11 @@ export interface WayfinderMap {
   ticketsTruncated: boolean
 }
 
-/** A repo, with its maps. A project can hold several: open ones live, closed ones as history. */
+/**
+ * A repo, with its maps. A project can hold several: open ones live, closed ones as history.
+ * `openMaps` is ordered most recently updated first — the head is the **active map**, any others
+ * are live but secondary. `closedMaps` is ordered most recently closed first.
+ */
 export interface Project {
   nameWithOwner: string
   owner: string

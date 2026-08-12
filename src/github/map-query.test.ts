@@ -17,6 +17,8 @@ function repository(nameWithOwner: string) {
       title: 'A map',
       url: `https://github.com/${nameWithOwner}/issues/1`,
       state: 'OPEN' as const,
+      updatedAt: '2026-08-01T12:00:00Z',
+      closedAt: null,
       body: '',
       subIssuesSummary: { total: 0, completed: 0, percentCompleted: 0 },
       subIssues: { totalCount: 0, pageInfo: { hasNextPage: false }, nodes: [] },
@@ -57,6 +59,12 @@ describe('buildMapsQuery', () => {
     const { query } = buildMapsQuery(REFS)
     expect(query).toContain('subIssues(first: 100)')
     expect(query).toContain('blockedBy(first: 50)')
+  })
+
+  it('fetches the timestamps recency and history ordering derive from', () => {
+    const { query } = buildMapsQuery(REFS)
+    expect(query).toContain('updatedAt')
+    expect(query).toContain('closedAt')
   })
 })
 

@@ -54,6 +54,8 @@ export interface RawMapIssue {
   title: string
   url: string
   state: IssueState
+  updatedAt: string
+  closedAt: string | null
   body: string
   subIssuesSummary: { total: number; completed: number; percentCompleted: number } | null
   subIssues: {
@@ -89,6 +91,8 @@ fragment MapFields on Issue {
   title
   url
   state
+  updatedAt
+  closedAt
   body
   subIssuesSummary { total completed percentCompleted }
   subIssues(first: ${MAX_SUB_ISSUES}) {

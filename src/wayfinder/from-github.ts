@@ -18,6 +18,8 @@ export function toWayfinderMap(fetched: FetchedMap): WayfinderMap {
     title: issue.title,
     url: issue.url,
     isOpen: issue.state === 'OPEN',
+    updatedAt: parseTime(issue.updatedAt),
+    closedAt: issue.closedAt === null ? null : parseTime(issue.closedAt),
     body: parseMapBody(issue.body ?? ''),
     tickets,
     frontier: frontierOf(tickets),
@@ -86,10 +88,30 @@ export function toProjects(fetched: readonly FetchedMap[]): Project[] {
     else project.closedMaps.push(map)
   }
 
+  // The head of openMaps is the active map; closed maps read newest stride first.
+  for (const project of projects.values()) {
+    project.openMaps.sort((a, b) => b.updatedAt - a.updatedAt)
+    project.closedMaps.sort((a, b) => (b.closedAt ?? b.updatedAt) - (a.closedAt ?? a.updatedAt))
+  }
+
   // Projects with live efforts sort first; the rest are browsable history.
   return [...projects.values()].sort(
     (a, b) =>
       Number(b.openMaps.length > 0) - Number(a.openMaps.length > 0) ||
       a.nameWithOwner.localeCompare(b.nameWithOwner),
   )
+}
+
+/**
+ * The map a project is currently travelling — its most recently updated open map. Null means the
+ * project is resting: every map closed, the trace intact. See CONTEXT.md for both terms.
+ */
+export function activeMapOf(project: Project): WayfinderMap | null {
+  return project.openMaps[0] ?? null
+}
+
+/** GitHub timestamps are ISO 8601; an unparsable one sorts to the beginning rather than throwing. */
+function parseTime(iso: string): number {
+  const ms = Date.parse(iso)
+  return Number.isNaN(ms) ? 0 : ms
 }

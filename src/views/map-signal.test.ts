@@ -15,6 +15,8 @@ function mapWith(overrides: {
     title: 'A map',
     url: 'https://github.com/someone/somewhere/issues/1',
     isOpen: true,
+    updatedAt: 0,
+    closedAt: null,
     body: {
       raw: '',
       destination: '',

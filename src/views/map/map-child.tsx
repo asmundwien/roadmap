@@ -1,58 +1,21 @@
-import type { Route } from '../router.ts'
-import { useRoadmap } from '../store/roadmap-provider.tsx'
-import type { WayfinderMap } from '../wayfinder/types.ts'
-import { stripInlineMarkdown } from './gist.ts'
-import { MapLedger } from './map/ledger.tsx'
-import { LEGEND_ORDER, STATE_META } from './map/state-meta.ts'
-import './views.css'
+import type { WayfinderMap } from '../../wayfinder/types.ts'
+import { stripInlineMarkdown } from '../gist.ts'
+import { SignalMeter } from '../signal-meter.tsx'
+import { MapLedger } from './ledger.tsx'
+import { LEGEND_ORDER, STATE_META } from './state-meta.ts'
 
 /**
- * The map screen: the story of the road, not a work-picker. The ledger carries the journey —
- * destination, fog, the charted braid, ground covered — so this shell only adds what lives around
- * it: the header with the legend, honesty about partial data, and the map body's Notes and Out of
- * scope a click away.
+ * One map, self-contained: title, counts, meter, ledger, and the click-away asides. It carries
+ * everything map-specific so the shell around it stays at project altitude — today it renders
+ * bare under the project header, and the accordion will mount it as a child unchanged.
  */
-export function MapScreen({ route }: { route: Extract<Route, { screen: 'map' }> }) {
-  const { status, projects, error } = useRoadmap()
-
-  const map = projects
-    .flatMap((project) => [...project.openMaps, ...project.closedMaps])
-    .find(
-      (candidate) =>
-        candidate.owner === route.owner &&
-        candidate.repo === route.repo &&
-        candidate.number === route.number,
-    )
-
+export function MapChild({ map }: { map: WayfinderMap }) {
   return (
-    <main className="shell map-shell">
-      <p>
-        <a href="#/">← All projects</a>
-      </p>
-
-      {error !== null && (
-        <p className="banner" role="alert">
-          {error}
-          {map && ' — showing the last good snapshot.'}
-        </p>
-      )}
-
-      {!map && (
-        <p className="muted">
-          {status === 'ready'
-            ? `No map at ${route.owner}/${route.repo}#${route.number}.`
-            : 'Loading…'}
-        </p>
-      )}
-
-      {map && (
-        <>
-          <MapHead map={map} />
-          <MapLedger map={map} />
-          <MapAsides map={map} />
-        </>
-      )}
-    </main>
+    <article>
+      <MapHead map={map} />
+      <MapLedger map={map} />
+      <MapAsides map={map} />
+    </article>
   )
 }
 
@@ -62,12 +25,12 @@ function MapHead({ map }: { map: WayfinderMap }) {
   return (
     <header className="map-head">
       <p className="muted small map-eyebrow">
-        {map.nameWithOwner} · #{map.number}
+        #{map.number}
         {!map.isOpen && ' · closed'}
       </p>
-      <h1>
+      <h2>
         <a href={map.url}>{map.title}</a>
-      </h1>
+      </h2>
       <div className="map-meta muted small">
         {LEGEND_ORDER.map((state) => (
           <span key={state} className="legend-item">
@@ -79,6 +42,7 @@ function MapHead({ map }: { map: WayfinderMap }) {
           </span>
         ))}
       </div>
+      <SignalMeter map={map} />
       {partial && (
         <p className="muted small">
           Partial view — GitHub returned only the first page of{' '}
