@@ -251,7 +251,8 @@
   justify-content: center;
   font-size: 25px;
   color: var(--goal);
-  background: color-mix(in srgb, var(--goal) 18%, transparent);
+  /* Opaque halo — goal at 0.18 flattened onto the surface, so the rail never shows through. */
+  background: color-mix(in srgb, var(--goal) 18%, var(--bg));
   z-index: 1;
 }
 
@@ -304,16 +305,6 @@
   position: relative;
   display: flex;
   flex-direction: column;
-}
-
-.fl-card-rail {
-  position: absolute;
-  left: 6px;
-  top: 6px;
-  bottom: 6px;
-  width: 1.5px;
-  background: var(--fg);
-  opacity: 0.4;
 }
 
 .fl-card-line {

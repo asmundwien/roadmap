@@ -20,8 +20,6 @@ import type { StrideMap, StrideProject } from './fixture.ts'
 const LEDGER_SCALE = 1.25
 
 export function ProjectHead({ project }: { project: StrideProject }) {
-  const closed = project.maps.filter((m) => !m.isOpen).length
-  const open = project.maps.length - closed
   const tickets = project.maps.flatMap((m) => m.tickets)
   return (
     <header className="proto-project-head">
@@ -29,14 +27,6 @@ export function ProjectHead({ project }: { project: StrideProject }) {
         {project.nameWithOwner}
         {project.isPrivate && <span className="proto-badge">private</span>}
       </h2>
-      <p className="muted small">
-        {project.active ? `travelling · ${project.active.updatedAt}` : 'resting — every map closed'}
-        {' · '}
-        {project.maps.length === 1 ? 'one map' : `${project.maps.length} maps`}
-        {closed > 0 && open > 0 && ` — ${closed} closed, ${open === 1 ? 'one' : open} open`}
-        {' · '}
-        <a href={`https://github.com/${project.nameWithOwner}`}>on GitHub</a>
-      </p>
       {/* The wayfinder states counted across the whole project — never a single map. */}
       <p className="proto-project-legend muted small">
         {LEGEND_ORDER.map((state) => (

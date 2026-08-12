@@ -48,7 +48,6 @@ export function FlaglineScreen({ project, openMap, onToggle }: ScreenProps) {
             <FlagBlock
               key={map.number}
               map={map}
-              active={map === project.active}
               open={openMap === map.number}
               onToggle={onToggle}
             />
@@ -61,18 +60,15 @@ export function FlaglineScreen({ project, openMap, onToggle }: ScreenProps) {
 
 function FlagBlock({
   map,
-  active,
   open,
   onToggle,
 }: {
   map: StrideMap
-  active: boolean
   open: boolean
   onToggle: (n: number) => void
 }) {
   // Aligns the trigger's text with the embedded ledger's text column (exact at full render width).
   const textLeft = useMemo(() => buildLedger(map).textX * 1.25, [map])
-  const fog = map.body.notYetSpecified.length
   return (
     <div className={`fl-block${open ? ' is-open' : ''}`}>
       <button type="button" className="fl-trigger" onClick={() => onToggle(map.number)}>
@@ -83,11 +79,7 @@ function FlagBlock({
           <span className="fl-caption">the destination</span>
           <span className="fl-dest">{stripInlineMarkdown(map.body.destination)}</span>
           <span className="fl-meta muted small">
-            {map.title} · #{map.number} ·{' '}
-            {map.isOpen
-              ? `${map.progress.completed} decided so far · ${active ? '' : 'live · '}${map.updatedAt}`
-              : `${map.progress.completed} decided · reached ${map.closedAt}`}
-            {!map.isOpen && fog > 0 && ` · ${fog} fog unentered`}
+            {map.title} · #{map.number}
           </span>
         </span>
       </button>
@@ -107,7 +99,6 @@ export function FlaglineCard({ project, onOpen }: CardProps) {
     <button type="button" className="proto-card fl-card" onClick={onOpen}>
       <span className="proto-card-name">{project.nameWithOwner}</span>
       <span className="fl-card-trace">
-        <span className="fl-card-rail" aria-hidden="true" />
         {newestFirst.map((map) => (
           <span key={map.number} className="fl-card-line">
             <span className="fl-card-flag" aria-hidden="true">
