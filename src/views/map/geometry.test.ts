@@ -14,7 +14,12 @@ function blocker(number: number, isOpen = true, nameWithOwner = HOME): Blocker {
   }
 }
 
-function ticket(number: number, state: TicketState, blockedBy: Blocker[] = []): Ticket {
+function ticket(
+  number: number,
+  state: TicketState,
+  blockedBy: Blocker[] = [],
+  closedAt: number | null = null,
+): Ticket {
   return {
     number,
     title: `Ticket ${number}`,
@@ -23,6 +28,7 @@ function ticket(number: number, state: TicketState, blockedBy: Blocker[] = []): 
     state,
     isClaimed: state === 'claimed',
     isBlocked: blockedBy.some((b) => b.isOpen),
+    closedAt,
     assignees: [],
     blockedBy,
     blockersTruncated: false,
@@ -97,6 +103,23 @@ describe('buildLedger', () => {
     expect(x(5)).toBeGreaterThan(ledger.gutterX)
   })
 
+  it('splits parallel takeable chains at HEAD, before the first node — never after it', () => {
+    const map = makeMap([
+      ticket(2, 'frontier'),
+      ticket(3, 'blocked', [blocker(2)]),
+      ticket(4, 'blocked', [blocker(3)]),
+      ticket(5, 'frontier'),
+    ])
+    const ledger = buildLedger(map)
+    const row5 = ledger.rows.find((r) => r.ticket.number === 5)
+    const fork = ledger.edges.find((e) => e.kind === 'fork' && e.to === 5)
+    // The tributary leaves the trunk right at HEAD and rides its own lane up to its node...
+    expect(fork?.path).toContain(`M ${ledger.gutterX} ${ledger.headY}`)
+    expect(fork?.path).toContain(`L ${row5?.x} ${row5?.y}`)
+    // ...so it never runs up the trunk lane past the takeable node sitting there.
+    expect(fork?.path).not.toContain(`L ${ledger.gutterX}`)
+  })
+
   it('lands a merge on the heavier rail and draws the lighter rail in as a merge edge', () => {
     const map = makeMap([
       ticket(2, 'frontier'),
@@ -141,13 +164,13 @@ describe('buildLedger', () => {
     expect(second.chainIdOf).toEqual(first.chainIdOf)
   })
 
-  it('lists ground covered newest first and strips markdown from fog and destination', () => {
-    const map = makeMap([ticket(2, 'closed'), ticket(3, 'closed')], {
+  it('orders ground covered by completion time — latest at the top, whatever the map order', () => {
+    const map = makeMap([ticket(2, 'closed', [], 200), ticket(3, 'closed', [], 100)], {
       destination: 'Reach **the** [end](https://example.test).',
       notYetSpecified: ['A [foggy](https://example.test) `thing`'],
     })
     const ledger = buildLedger(map)
-    expect(ledger.closedRows.map((r) => r.ticket.number)).toEqual([3, 2])
+    expect(ledger.closedRows.map((r) => r.ticket.number)).toEqual([2, 3])
     expect(ledger.destination).toBe('Reach the end.')
     expect(ledger.fogRows[0]?.item).toBe('A foggy thing')
     expect(ledger.trunkSolid).not.toBeNull()

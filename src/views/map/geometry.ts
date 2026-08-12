@@ -117,6 +117,25 @@ function connector(a: Point, b: Point): string {
   ].join(' ')
 }
 
+/**
+ * A fork's mirror image of `connector`: it leaves `a`'s lane immediately and rides `b`'s lane the
+ * rest of the way up. The split is drawn *before* anything else in the parent's lane — parallel
+ * chains off one point diverge at that point, never implying one comes first.
+ */
+function forkConnector(a: Point, b: Point): string {
+  if (Math.abs(a.x - b.x) < 1) return `M ${a.x} ${a.y} L ${b.x} ${b.y}`
+  const bendTo = a.y - BEND
+  if (bendTo <= b.y) {
+    const span = a.y - b.y
+    return `M ${a.x} ${a.y} C ${a.x} ${a.y - span * 0.35}, ${b.x} ${a.y - span * 0.65}, ${b.x} ${b.y}`
+  }
+  return [
+    `M ${a.x} ${a.y}`,
+    `C ${a.x} ${a.y - BEND * 0.35}, ${b.x} ${a.y - BEND * 0.65}, ${b.x} ${bendTo}`,
+    `L ${b.x} ${b.y}`,
+  ].join(' ')
+}
+
 /** Open blockers that live in this map — the only edges the ledger can draw. */
 function openInMapBlockers(ticket: Ticket, home: string, openNumbers: Set<number>): number[] {
   return ticket.blockedBy
@@ -155,7 +174,11 @@ interface Layered {
 
 function layerMap(map: WayfinderMap): Layered {
   const byNumber = new Map(map.tickets.map((t) => [t.number, t]))
-  const closed = map.tickets.filter((t) => t.state === 'closed')
+  // Ground covered reads as a log: most recently closed at the top, walking back in time. A
+  // ticket without a close time (shouldn't happen for a closed issue) sinks to the bottom.
+  const closed = map.tickets
+    .filter((t) => t.state === 'closed')
+    .sort((a, b) => (b.closedAt ?? 0) - (a.closedAt ?? 0))
   const open = map.tickets.filter((t) => t.state !== 'closed')
 
   const depthOf = new Map<number, number>()
@@ -335,7 +358,7 @@ function buildBraidEdges(
       to: first.number,
       chainId: chain.id,
       isClaimed: first.state === 'claimed',
-      path: connector(parent, firstRow),
+      path: forkConnector(parent, firstRow),
     })
     if (lastRow.y < firstRow.y) {
       edges.push({
@@ -471,9 +494,7 @@ export function buildLedger(map: WayfinderMap): Ledger {
   const rowByNumber = new Map(rows.map((r) => [r.ticket.number, r]))
   const head: Point = { x: GX, y: sepBehind }
 
-  const closedRows: ClosedRow[] = [...closed]
-    .reverse()
-    .map((ticket, j) => ({ ticket, y: behindY(j) }))
+  const closedRows: ClosedRow[] = closed.map((ticket, j) => ({ ticket, y: behindY(j) }))
 
   // Ghost stops scatter across the whole gutter — clear of the trunk, clear of the text column.
   const fogMin = GX + 26

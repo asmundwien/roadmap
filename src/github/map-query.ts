@@ -43,6 +43,7 @@ export interface RawSubIssue {
   url: string
   state: IssueState
   stateReason: string | null
+  closedAt: string | null
   body: string
   labels: { nodes: { name: string; color: string }[] | null } | null
   assignees: { nodes: RawAssignee[] | null } | null
@@ -104,6 +105,7 @@ fragment MapFields on Issue {
       url
       state
       stateReason
+      closedAt
       body
       labels(first: ${MAX_LABELS}) { nodes { name color } }
       assignees(first: ${MAX_ASSIGNEES}) { nodes { login avatarUrl url } }

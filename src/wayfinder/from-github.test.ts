@@ -8,6 +8,7 @@ function subIssue(overrides: Partial<RawSubIssue> & { number: number }): RawSubI
     url: `https://github.com/a/r/issues/${overrides.number}`,
     state: 'OPEN',
     stateReason: null,
+    closedAt: null,
     body: '',
     labels: { nodes: [{ name: 'wayfinder:task', color: '0052CC' }] },
     assignees: { nodes: [] },
@@ -43,7 +44,7 @@ describe('toWayfinderMap', () => {
   it('derives each ticket state from its assignees and blockers', () => {
     const map = toWayfinderMap(
       fetchedMap([
-        subIssue({ number: 2, state: 'CLOSED' }),
+        subIssue({ number: 2, state: 'CLOSED', closedAt: '2026-07-30T09:00:00Z' }),
         subIssue({
           number: 3,
           assignees: { nodes: [{ login: 'asmundwien', avatarUrl: 'a', url: 'u' }] },
@@ -74,6 +75,8 @@ describe('toWayfinderMap', () => {
       'blocked',
     ])
     expect(map.frontier.map((ticket) => ticket.number)).toEqual([4])
+    expect(map.tickets[0]?.closedAt).toBe(Date.parse('2026-07-30T09:00:00Z'))
+    expect(map.tickets[1]?.closedAt).toBeNull()
   })
 
   it('treats a ticket whose blockers are all closed as unblocked', () => {

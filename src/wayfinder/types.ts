@@ -35,6 +35,8 @@ export interface Ticket {
   /** Independent of `state`, which collapses them: a ticket can be blocked *and* claimed. */
   isClaimed: boolean
   isBlocked: boolean
+  /** When the ticket closed, ms since epoch; null while it is open. */
+  closedAt: number | null
   assignees: Assignee[]
   blockedBy: Blocker[]
   /** True when the ticket has more blockers than one page returned. */
