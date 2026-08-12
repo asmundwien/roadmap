@@ -10,14 +10,15 @@
  * away — the trigger already is that section), and the solid trunk exits the ground-covered end
  * into the older map below: one line from the active destination down to the journey's origin.
  *
- * Amber stays reserved: only a live destination (an open map) carries the goal color; reached
- * destinations are achromatic and recede, per the palette's rules in index.css.
+ * Stepped back per the round-three reaction: the trigger is a faithful recreation of the ledger's
+ * destination section — its icon, caption, colors, and rendered dimensions — identical for every
+ * map. No open-state morphs, no reached/live color split; the fold is the only motion.
  */
 
 import { useMemo } from 'react'
 import { stripInlineMarkdown } from '../../views/gist.ts'
 import { buildLedger } from '../../views/map/geometry.ts'
-import { BareMap, Fold, MapChild, ProjectHead } from './chrome.tsx'
+import { BareMap, CroppedLedger, Fold, ProjectHead } from './chrome.tsx'
 import type { StrideMap, StrideProject } from './fixture.ts'
 
 export interface ScreenProps {
@@ -85,10 +86,11 @@ function FlagBlock({
   return (
     <div className={`fl-block${open ? ' is-open' : ''}`}>
       <button type="button" className="fl-trigger" onClick={() => onToggle(map.number)}>
-        <span className={`fl-flag${map.isOpen ? ' is-live' : ''}`} aria-hidden="true">
+        <span className="fl-flag" aria-hidden="true">
           ⚑
         </span>
         <span className="fl-body" style={{ marginLeft: textLeft }}>
+          <span className="fl-caption">the destination</span>
           <span className="fl-dest">{stripInlineMarkdown(map.body.destination)}</span>
           <span className="fl-meta muted small">
             {map.title} · #{map.number} ·{' '}
@@ -101,7 +103,7 @@ function FlagBlock({
       </button>
       <Fold open={open}>
         <div className="fl-child">
-          <MapChild map={map} crop />
+          <CroppedLedger map={map} />
         </div>
       </Fold>
     </div>
@@ -124,7 +126,7 @@ export function FlaglineCard({ project, onOpen }: CardProps) {
         )}
         {newestFirst.map((map) => (
           <span key={map.number} className="fl-card-line">
-            <span className={`fl-card-flag${map.isOpen ? ' is-live' : ''}`} aria-hidden="true">
+            <span className="fl-card-flag" aria-hidden="true">
               ⚑
             </span>
             <span className={`fl-card-dest${map === project.active ? ' is-active' : ''}`}>

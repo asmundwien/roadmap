@@ -47,8 +47,6 @@ export function ProjectHead({ project }: { project: StrideProject }) {
  */
 export function MapChild({ map, crop = false }: { map: StrideMap; crop?: boolean }) {
   const geo = useMemo(() => buildLedger(map), [map])
-  const cropPx = geo.sepFog * LEDGER_SCALE
-  const tailPx = geo.trunkSolid ? (geo.height - geo.trunkSolid.y2) * LEDGER_SCALE : 0
   const textLeft = geo.textX * LEDGER_SCALE
   const partial = map.ticketsTruncated || map.tickets.some((t) => t.blockersTruncated)
 
@@ -91,18 +89,26 @@ export function MapChild({ map, crop = false }: { map: StrideMap; crop?: boolean
           </details>
         )}
       </div>
-      {crop ? (
-        <div className="proto-crop">
-          <div style={{ marginTop: -cropPx }}>
-            <MapLedger map={map} />
-          </div>
-          {tailPx > 0 && (
-            <span className="proto-tail" style={{ height: tailPx }} aria-hidden="true" />
-          )}
-        </div>
-      ) : (
+      {crop ? <CroppedLedger map={map} /> : <MapLedger map={map} />}
+    </div>
+  )
+}
+
+/**
+ * The node tree alone: the ledger minus its destination section — the flag trigger already is
+ * that section — with a computed trunk tail across the svg's blank bottom padding so the solid
+ * line runs unbroken into the older map below.
+ */
+export function CroppedLedger({ map }: { map: StrideMap }) {
+  const geo = useMemo(() => buildLedger(map), [map])
+  const cropPx = geo.sepFog * LEDGER_SCALE
+  const tailPx = geo.trunkSolid ? (geo.height - geo.trunkSolid.y2) * LEDGER_SCALE : 0
+  return (
+    <div className="proto-crop">
+      <div style={{ marginTop: -cropPx }}>
         <MapLedger map={map} />
-      )}
+      </div>
+      {tailPx > 0 && <span className="proto-tail" style={{ height: tailPx }} aria-hidden="true" />}
     </div>
   )
 }

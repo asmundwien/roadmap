@@ -109,17 +109,6 @@
   padding: 0.1rem 0 0.6rem;
 }
 
-.fl-child .proto-child-front::before {
-  content: "";
-  position: absolute;
-  left: 54px;
-  top: 0;
-  height: calc(100% + 8px);
-  width: 0;
-  border-left: 2.5px dashed var(--muted);
-  opacity: 0.6;
-}
-
 .proto-child-meta {
   display: flex;
   flex-wrap: wrap;
@@ -225,50 +214,31 @@
   bottom: 0;
 }
 
-/* — but below an OPEN flag the line dashes: what follows is the map's inside, fog first. */
-.fl-block.is-open .fl-trigger::after {
-  width: 0;
-  background: none;
-  border-left: 2.5px dashed var(--muted);
-  opacity: 0.6;
-}
-
 /* Nothing is drawn above the head flag — a project's future past its active map is unimagined. */
 .fl-trace > .fl-block:first-child .fl-trigger::before {
   display: none;
 }
 
-/* The flag: the ledger's destination mark, promoted to map identity. Amber only while live. */
+/*
+ * The flag: the ledger's destination mark, recreated exactly at its rendered size — the 18-unit
+ * halo (45px at 1.25×), goal fill at 0.18, the 20-unit ⚑ (25px) in goal. Identical for every
+ * map, open or closed, reached or ahead.
+ */
 .fl-flag {
   position: absolute;
   left: 55px;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 44px;
-  height: 44px;
+  width: 45px;
+  height: 45px;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 19px;
-  color: var(--muted);
-  background: var(--edge);
-  z-index: 1;
-  transition:
-    width 240ms ease,
-    height 240ms ease,
-    font-size 240ms ease;
-}
-
-.fl-flag.is-live {
+  font-size: 25px;
   color: var(--goal);
   background: color-mix(in srgb, var(--goal) 18%, transparent);
-}
-
-.fl-block.is-open .fl-flag {
-  width: 52px;
-  height: 52px;
-  font-size: 23px;
+  z-index: 1;
 }
 
 .fl-body {
@@ -278,20 +248,25 @@
   min-width: 0;
 }
 
-.fl-dest {
-  font-size: 1.02rem;
-  line-height: 1.5;
-  max-width: 46rem;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  transition: font-size 240ms ease;
+/* The ledger's goal-caption, at its rendered size (9 units → 11.25px). */
+.fl-caption {
+  font-size: 11.25px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--goal);
 }
 
-.fl-block.is-open .fl-dest {
-  font-size: 1.12rem;
+/* The ledger's .dest, at its rendered size (14.5/21 units → 18.1px/26.25px). */
+.fl-dest {
+  font-size: 18.125px;
+  line-height: 26.25px;
+  color: var(--fg);
+  max-width: 46rem;
+  display: -webkit-box;
   -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .fl-trigger:hover .fl-dest,
@@ -380,13 +355,9 @@
   width: 13px;
   text-align: center;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--goal);
   position: relative;
   z-index: 1;
-}
-
-.fl-card-flag.is-live {
-  color: var(--goal);
 }
 
 .fl-card-mark.is-rest {
