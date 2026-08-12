@@ -24,8 +24,8 @@ const PITCH = 34
 /** The gutter is never narrower than four lanes, so sparse maps keep room to breathe. */
 const MIN_GUTTER_LANES = 4
 const ROW_H = 52
-const SEC_PAD = 44
-const SEC_BOTTOM = 28
+const SEC_PAD = 56
+const SEC_BOTTOM = 34
 const PAD_TOP = 20
 const PAD_BOTTOM = 44
 const BEND = 40

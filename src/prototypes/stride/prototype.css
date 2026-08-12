@@ -1,13 +1,33 @@
-/* PROTOTYPE — throwaway. Styles for the flagline. Tokens come from index.css. */
+/*
+ * PROTOTYPE — throwaway. Styles for the flagline. Color tokens come from index.css; the spacing
+ * scale and radius below are the prototype's whole vocabulary — every gap, margin, and padding
+ * draws from --sp-*, every rounded hover and card from --radius. Pixel values that are NOT on the
+ * scale are ledger-derived: the svg renders at 1.25× its 840-unit viewBox, so 3.125px (trunk),
+ * 45px/25px (flag halo/glyph), 11.25px / 18.125px / 26.25px (caption / destination type) are the
+ * ledger's own dimensions expressed in CSS, and stay exact rather than rounded to the scale.
+ */
+
+.proto {
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-6: 1.5rem;
+  --sp-8: 2rem;
+  --sp-12: 3rem;
+  --radius: 10px;
+  --wash: color-mix(in srgb, var(--fg) 4.5%, transparent);
+  --trunk: color-mix(in srgb, var(--fg) 55%, var(--bg));
+}
 
 /* Doubled class beats .shell's 44rem cap regardless of stylesheet order — same trick as map.css. */
 .shell.proto-shell {
   max-width: 70rem;
-  padding-top: 2rem;
+  padding-top: var(--sp-8);
 }
 
 .proto-note {
-  margin: 0 0 2rem;
+  margin: 0 0 var(--sp-8);
 }
 
 .proto-h {
@@ -16,7 +36,7 @@
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--muted);
-  margin: 0 0 1rem;
+  margin: 0 0 var(--sp-4);
 }
 
 .proto-scenario {
@@ -26,13 +46,13 @@
 }
 
 .proto-front {
-  margin-bottom: 3.5rem;
+  margin-bottom: var(--sp-12);
 }
 
 .proto-cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
-  gap: 0.75rem;
+  gap: var(--sp-3);
   align-items: start;
 }
 
@@ -40,10 +60,10 @@
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 0.5rem;
-  padding: 1rem;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
   border: 1px solid var(--edge);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: none;
   color: inherit;
   font: inherit;
@@ -60,10 +80,10 @@
   font-weight: 600;
 }
 
-/* ---------------------------------------------------- shared chrome: project head, map child */
+/* ---------------------------------------------------- shared chrome: the project head */
 
 .proto-project-head {
-  margin-bottom: 1.5rem;
+  margin-bottom: var(--sp-6);
 }
 
 .proto-project-head h2 {
@@ -72,17 +92,9 @@
   letter-spacing: -0.01em;
 }
 
-.proto-project-head p {
-  margin: 0.15rem 0 0;
-}
-
-.proto-project-head a {
-  color: inherit;
-}
-
 .proto-badge {
-  margin-left: 0.5rem;
-  padding: 0.1rem 0.4rem;
+  margin-left: var(--sp-2);
+  padding: 0.125rem var(--sp-2);
   border: 1px solid var(--muted);
   border-radius: 999px;
   font-size: 0.7rem;
@@ -91,50 +103,18 @@
   vertical-align: middle;
 }
 
-.proto-child-title {
-  margin: 0 0 0.5rem;
-  font-size: 1.15rem;
-}
-
-/*
- * The child's front-matter sits between the flag trigger and the graph, indented to the ledger's
- * text column (inline style). Its ::before is the JOINT: a dashed segment at the rail's x that
- * carries the line from the flag into the cropped ledger's dashed trunk.
- */
-.proto-child-front {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  padding: 0.1rem 0 0.6rem;
-}
-
-.proto-child-meta {
+.proto-project-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.25rem 1.1rem;
+  gap: var(--sp-1) var(--sp-4);
+  margin: var(--sp-2) 0 0;
 }
 
-.proto-child-meta i {
+.proto-project-legend i {
   font-style: normal;
 }
 
-.proto-aside {
-  font-size: 0.85rem;
-  color: var(--muted);
-}
-
-.proto-aside summary {
-  cursor: pointer;
-}
-
-.proto-aside ul {
-  margin: 0.25rem 0 0;
-  padding-left: 1.25rem;
-}
-
 /* The ledger-wrap's own padding would break the trunk at both ends of the fold — zero it. */
-.proto-child .ledger-wrap,
 .proto-crop .ledger-wrap {
   padding: 0;
 }
@@ -154,7 +134,7 @@
   left: 53.44px;
   bottom: 0;
   width: 3.125px;
-  background: color-mix(in srgb, var(--fg) 55%, var(--bg));
+  background: var(--trunk);
 }
 
 /* ------------------------------------------------------------------ the animated fold */
@@ -185,7 +165,7 @@
   display: flex;
   align-items: center;
   width: 100%;
-  padding: 1.05rem 0.5rem 1.05rem 0;
+  padding: var(--sp-4) var(--sp-2) var(--sp-4) 0;
   background: none;
   border: none;
   font: inherit;
@@ -196,9 +176,8 @@
 
 /*
  * The rail through a trigger — drawn to be indistinguishable from the ledger's trunk: the same
- * rendered width (2.5 viewBox units × 1.25 = 3.125px) on the same center (x = 55), and a
- * PRE-MIXED opaque color instead of opacity, so overlapping segments never darken at the joints.
- * fg 55% over bg equals the svg's fg stroke at 0.55 opacity.
+ * rendered width on the same center (x = 55), in the same pre-mixed opaque color, so overlapping
+ * segments never darken at the joints.
  */
 .fl-trigger::before,
 .fl-trigger::after {
@@ -206,7 +185,7 @@
   position: absolute;
   left: 53.44px;
   width: 3.125px;
-  background: color-mix(in srgb, var(--fg) 55%, var(--bg));
+  background: var(--trunk);
 }
 
 .fl-trigger::before {
@@ -229,23 +208,27 @@
   display: none;
 }
 
-/* The whole row is one thing — say so on hover. */
+/* The whole row is one thing — say so on hover, with the one shared radius. */
 .fl-trigger:hover,
 .fl-trigger:focus-visible {
-  background: color-mix(in srgb, var(--fg) 4.5%, transparent);
-  border-radius: 10px;
+  background: var(--wash);
+  border-radius: var(--radius);
 }
 
-/* The same full-row wash on the ledger's linked rows — the whole row is the touch target. */
+/* The same full-row wash and radius on the ledger's linked rows. */
 .proto .ledger a.row:hover .row-hit,
 .proto .ledger a.row:focus-visible .row-hit {
-  fill: color-mix(in srgb, var(--fg) 4.5%, transparent);
+  fill: var(--wash);
+}
+
+.proto .ledger .row-hit {
+  rx: 10px;
 }
 
 /*
  * The flag: the ledger's destination mark, recreated exactly at its rendered size — the 18-unit
- * halo (45px at 1.25×), goal fill at 0.18, the 20-unit ⚑ (25px) in goal. Identical for every
- * map, open or closed, reached or ahead.
+ * halo (45px), goal fill at 0.18 flattened opaque onto the surface, the 20-unit ⚑ (25px) in
+ * goal. Identical for every map, open or closed, reached or ahead.
  */
 .fl-flag {
   position: absolute;
@@ -260,7 +243,6 @@
   justify-content: center;
   font-size: 25px;
   color: var(--goal);
-  /* Opaque halo — goal at 0.18 flattened onto the surface, so the rail never shows through. */
   background: color-mix(in srgb, var(--goal) 18%, var(--bg));
   z-index: 1;
 }
@@ -268,11 +250,11 @@
 .fl-body {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: var(--sp-1);
   min-width: 0;
 }
 
-/* The ledger's goal-caption, at its rendered size (9 units → 11.25px). */
+/* The ledger's goal-caption, at its rendered size. */
 .fl-caption {
   font-size: 11.25px;
   letter-spacing: 0.09em;
@@ -281,7 +263,7 @@
   color: var(--goal);
 }
 
-/* The ledger's .dest, at its rendered size (14.5/21 units → 18.1px/26.25px). */
+/* The ledger's .dest, at its rendered size. */
 .fl-dest {
   font-size: 18.125px;
   line-height: 26.25px;
@@ -297,21 +279,9 @@
   margin: 0;
 }
 
-.proto-project-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 1.1rem;
-  margin: 0.4rem 0 0;
-}
-
-.proto-project-legend i {
-  font-style: normal;
-}
-
 /* ------------------------------------------------------------------ the card */
 
 .fl-card-trace {
-  position: relative;
   display: flex;
   flex-direction: column;
 }
@@ -319,8 +289,8 @@
 .fl-card-line {
   display: flex;
   align-items: center;
-  gap: 0.55rem;
-  padding: 0.2rem 0;
+  gap: var(--sp-2);
+  padding: var(--sp-1) 0;
   min-width: 0;
 }
 
@@ -330,8 +300,6 @@
   text-align: center;
   font-size: 11px;
   color: var(--goal);
-  position: relative;
-  z-index: 1;
 }
 
 .fl-card-dest {
@@ -355,13 +323,13 @@
 
 .proto-switch {
   position: fixed;
-  bottom: 1rem;
+  bottom: var(--sp-4);
   left: 50%;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.4rem 0.7rem;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
   border-radius: 999px;
   background: var(--fg);
   color: var(--bg);
@@ -376,7 +344,7 @@
   color: inherit;
   font: inherit;
   cursor: pointer;
-  padding: 0.1rem 0.4rem;
+  padding: var(--sp-1) var(--sp-2);
   border-radius: 999px;
 }
 

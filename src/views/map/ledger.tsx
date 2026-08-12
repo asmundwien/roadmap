@@ -128,12 +128,12 @@ export function MapLedger({ map }: { map: WayfinderMap }) {
               <StateMarker ticket={ticket} x={x} y={y} />
               <text
                 x={ledger.textX}
-                y={y + 4}
+                y={y - 4}
                 className={`row-title${ticket.state === 'blocked' ? ' is-dim' : ''}`}
               >
                 {truncate(ticket.title, 46)}
               </text>
-              <text x={ledger.textX} y={y + 19} className="row-word" fill={meta.color}>
+              <text x={ledger.textX} y={y + 11} className="row-word" fill={meta.color}>
                 {meta.glyph} {meta.word}
                 {login !== undefined ? ` · ${login}` : ''}
               </text>
@@ -175,10 +175,10 @@ export function MapLedger({ map }: { map: WayfinderMap }) {
               <text x={ledger.gutterX} y={y + 3.5} textAnchor="middle" className="check">
                 ✓
               </text>
-              <text x={ledger.textX} y={y + 4} className="behind-title">
+              <text x={ledger.textX} y={y - 4} className="behind-title">
                 {truncate(ticket.title, 46)}
               </text>
-              <text x={ledger.textX} y={y + 19} className="behind-gist">
+              <text x={ledger.textX} y={y + 11} className="behind-gist">
                 {gist !== undefined ? truncate(gist, 76) : 'decided'}
               </text>
             </a>
