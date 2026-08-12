@@ -1,18 +1,19 @@
 /**
- * PROTOTYPE — throwaway. Variant B: CHRONICLE — the text-first thesis.
+ * PROTOTYPE — throwaway. Variant B: CHRONICLE — the text-first thesis, round two.
  *
- * The collapsed stride is a ground-covered ledger row writ large: the DESTINATION REACHED is the
- * primary text (what the journey won), the map title and count demoted to the second line. The
- * rail is segmented, not continuous — each stride carries its own short solid segment with a gap
- * at the accordion joints, so the trace reads as strides of a walk. Expired fog is a third line.
+ * The collapsed stride stays a ground-covered row writ large — destination reached as the primary
+ * text, title and count demoted — and the rail stays deliberately SEGMENTED: one solid chunk per
+ * stride, a gap at every joint. That is this variant's answer to the trunk question: the accordion
+ * is strides of a walk, not one drawn line, so the open map's ledger owns its own trunk and no
+ * continuity is promised. Judge it against A's unbroken rail. Opening animates; the self-contained
+ * child carries the map data.
  *
- * The card is its own shape — a deliberate NON-miniature: active destination + meter + a one-line
- * journey footnote with a ✓-dot per closed map. Constant height however long the history.
+ * The card is its own fixed shape — deliberately NOT a miniature.
  */
 
 import { stripInlineMarkdown } from '../../views/gist.ts'
-import { MapLedger } from '../../views/map/ledger.tsx'
 import { SignalMeter } from '../../views/signal-meter.tsx'
+import { BareMap, Fold, MapChild, ProjectHead } from './chrome.tsx'
 import type { StrideMap } from './fixture.ts'
 import type { CardProps, ScreenProps } from './variants.ts'
 
@@ -22,31 +23,21 @@ export function ScreenB({ project, openMap, onToggle }: ScreenProps) {
   const single = project.maps.length === 1 ? project.maps[0] : undefined
   return (
     <div className="vb-screen">
-      <header className="proto-project-head">
-        <h2>{project.nameWithOwner}</h2>
-        <p className="muted small">
-          {project.active
-            ? `travelling · ${project.active.updatedAt}`
-            : 'resting — every map closed'}
-        </p>
-      </header>
+      <ProjectHead project={project} />
 
       {single ? (
-        <BareChild map={single} />
+        <BareMap map={single} />
       ) : (
         <div className="vb-trace">
-          {project.maps.map((map) =>
-            openMap === map.number ? (
-              <OpenStrideB key={map.number} map={map} onToggle={onToggle} />
-            ) : (
-              <CollapsedStrideB
-                key={map.number}
-                map={map}
-                active={map === project.active}
-                onToggle={onToggle}
-              />
-            ),
-          )}
+          {project.maps.map((map) => (
+            <StrideB
+              key={map.number}
+              map={map}
+              active={map === project.active}
+              open={openMap === map.number}
+              onToggle={onToggle}
+            />
+          ))}
           {project.active === null && <p className="vb-rest muted small">at rest — trace intact</p>}
         </div>
       )}
@@ -54,72 +45,55 @@ export function ScreenB({ project, openMap, onToggle }: ScreenProps) {
   )
 }
 
-function CollapsedStrideB({
+function StrideB({
   map,
   active,
+  open,
   onToggle,
 }: {
   map: StrideMap
   active: boolean
+  open: boolean
   onToggle: (n: number) => void
 }) {
   const fog = map.body.notYetSpecified
   return (
-    <button
-      type="button"
-      className={`vb-stride${map.isOpen ? ' is-live' : ''}`}
-      onClick={() => onToggle(map.number)}
-    >
-      <span
-        className={`vb-seg${map.isOpen ? ' is-live' : ''}${active ? ' is-active' : ''}`}
-        aria-hidden="true"
-      />
-      <span className="vb-body">
-        <span className="vb-won">{stripInlineMarkdown(map.body.destination)}</span>
-        <span className="vb-meta muted small">
-          {map.title}
-          {map.isOpen
-            ? ` · travelling · ${map.updatedAt}`
-            : ` · ${map.progress.completed} decided · ${map.closedAt}`}
-        </span>
-        {map.isOpen && (
-          <span className="vb-meter">
-            <SignalMeter map={map} />
+    <div className={`vb-item${open ? ' is-open' : ''}`}>
+      <button
+        type="button"
+        className={`vb-stride${map.isOpen ? ' is-live' : ''}`}
+        onClick={() => onToggle(map.number)}
+      >
+        <span
+          className={`vb-seg${map.isOpen ? ' is-live' : ''}${active ? ' is-active' : ''}`}
+          aria-hidden="true"
+        />
+        <span className="vb-body">
+          <span className="vb-won">{stripInlineMarkdown(map.body.destination)}</span>
+          <span className="vb-meta muted small">
+            {map.title}
+            {map.isOpen
+              ? ` · travelling · ${map.updatedAt}`
+              : ` · ${map.progress.completed} decided · ${map.closedAt}`}
           </span>
-        )}
-        {!map.isOpen && fog.length > 0 && (
-          <span className="vb-expired" title={fog.join(' · ')}>
-            ◌ {fog.length} {fog.length === 1 ? 'patch' : 'patches'} seen, never entered
-          </span>
-        )}
-      </span>
-    </button>
-  )
-}
-
-function OpenStrideB({ map, onToggle }: { map: StrideMap; onToggle: (n: number) => void }) {
-  return (
-    <section className="vb-open">
-      <button type="button" className="vb-open-head" onClick={() => onToggle(map.number)}>
-        <span className="vb-won">{map.title}</span>
-        <span className="vb-meta muted small">
-          #{map.number} · {map.isOpen ? map.updatedAt : `closed ${map.closedAt}`} — click to fold
+          {map.isOpen && !open && (
+            <span className="vb-meter">
+              <SignalMeter map={map} />
+            </span>
+          )}
+          {!map.isOpen && fog.length > 0 && (
+            <span className="vb-expired" title={fog.join(' · ')}>
+              ◌ {fog.length} {fog.length === 1 ? 'patch' : 'patches'} seen, never entered
+            </span>
+          )}
         </span>
       </button>
-      <MapLedger map={map} />
-    </section>
-  )
-}
-
-function BareChild({ map }: { map: StrideMap }) {
-  return (
-    <section>
-      <p className="muted small proto-eyebrow">
-        #{map.number} · {map.isOpen ? map.updatedAt : `closed ${map.closedAt}`}
-      </p>
-      <h3 className="proto-child-title">{map.title}</h3>
-      <MapLedger map={map} />
-    </section>
+      <Fold open={open}>
+        <div className="vb-child">
+          <MapChild map={map} />
+        </div>
+      </Fold>
+    </div>
   )
 }
 

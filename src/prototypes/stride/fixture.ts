@@ -54,6 +54,7 @@ interface MapSpec {
   number: number
   title: string
   destination: string
+  notes?: string[]
   decisions: [string, string][]
   notYetSpecified: string[]
   outOfScope: string[]
@@ -114,7 +115,7 @@ function buildMap(owner: string, repo: string, spec: MapSpec): StrideMap {
   const body: MapBody = {
     raw: '',
     destination: spec.destination,
-    notes: [],
+    notes: spec.notes ?? [],
     decisions,
     notYetSpecified: spec.notYetSpecified,
     notYetSpecifiedNote: spec.notYetSpecified.length === 0 ? 'No fog remains.' : '',
@@ -324,6 +325,10 @@ const GS_SURFACE: MapSpec = {
   number: 40,
   title: 'The mixing surface — Wayfinder Map',
   updatedAt: 'today',
+  notes: [
+    'Execution override: this map carries the build — the surface ships behind a flag.',
+    'Skills for tickets: /grilling + /domain-modeling for decisions, dataviz for the meters.',
+  ],
   destination:
     'The first real surface: a channel strip per graph node — fader, meter, mute — rendered native, driven by the same events as the sentence door, resizable without a relayout decision per frame.',
   decisions: [
@@ -373,6 +378,9 @@ const SM_SPEAKABLE: MapSpec = {
   number: 1,
   title: 'Speakable mixes — Wayfinder Map',
   updatedAt: '3 days ago',
+  notes: [
+    'The grammar stays a tiny CFG — see the intent-grammar research doc before extending it.',
+  ],
   destination:
     'A mix you can speak: the sentence door understands level, pan, and mute intents over named channels, with a dry-run mode that narrates what would change before it does.',
   decisions: [

@@ -1,19 +1,19 @@
 /**
- * PROTOTYPE — throwaway. Variant C: STRATA — the density thesis.
+ * PROTOTYPE — throwaway. Variant C: STRATA — the density thesis, round two.
  *
- * The rail is the protagonist: one continuous solid line, and each collapsed map is a stratum
- * whose height is proportional to the ground it covered — one tick across the rail per decision.
- * A long history literally reads heavier. Expired fog is a ghost scatter at the stratum's foot,
- * beside the rail. A secondary open map shows its decided ticks plus hollow ticks still open.
+ * Collapsed maps stay strata: one continuous rail, a tick per decision, height as ground covered,
+ * expired fog as a ghost scatter at the foot. Round-two fixes: the open map's header mark is a
+ * PLAQUE (rounded square — the map-level family, distinct from every circular ticket node), the
+ * open child is the self-contained map child with a dashed joint carrying the rail into the
+ * ledger's flag, and opening animates.
  *
- * The card rotates the same rail horizontal: a journey strip whose segment lengths encode each
- * map's decisions, ending at the head — ring if travelling, cap if at rest. Width encodes history;
- * a long journey overflows and that's data too.
+ * The card rotates the rail horizontal: segment lengths encode each map's decisions, plaque head
+ * if travelling, cap if at rest.
  */
 
 import { stripInlineMarkdown } from '../../views/gist.ts'
-import { MapLedger } from '../../views/map/ledger.tsx'
 import { SignalMeter } from '../../views/signal-meter.tsx'
+import { BareMap, Fold, MapChild, ProjectHead } from './chrome.tsx'
 import type { StrideMap } from './fixture.ts'
 import type { CardProps, ScreenProps } from './variants.ts'
 
@@ -27,31 +27,21 @@ export function ScreenC({ project, openMap, onToggle }: ScreenProps) {
   const single = project.maps.length === 1 ? project.maps[0] : undefined
   return (
     <div className="vc-screen">
-      <header className="proto-project-head">
-        <h2>{project.nameWithOwner}</h2>
-        <p className="muted small">
-          {project.active
-            ? `travelling · ${project.active.updatedAt}`
-            : 'resting — every map closed'}
-        </p>
-      </header>
+      <ProjectHead project={project} />
 
       {single ? (
-        <BareChild map={single} />
+        <BareMap map={single} />
       ) : (
         <div className="vc-trace">
-          {project.maps.map((map) =>
-            openMap === map.number ? (
-              <OpenStrideC key={map.number} map={map} onToggle={onToggle} />
-            ) : (
-              <CollapsedStrideC
-                key={map.number}
-                map={map}
-                active={map === project.active}
-                onToggle={onToggle}
-              />
-            ),
-          )}
+          {project.maps.map((map) => (
+            <StrideC
+              key={map.number}
+              map={map}
+              active={map === project.active}
+              open={openMap === map.number}
+              onToggle={onToggle}
+            />
+          ))}
           {project.active === null && (
             <div className="vc-rest-row">
               <svg width="110" height="34" aria-hidden="true">
@@ -84,136 +74,144 @@ export function ScreenC({ project, openMap, onToggle }: ScreenProps) {
   )
 }
 
-function CollapsedStrideC({
+function StrideC({
   map,
   active,
+  open,
   onToggle,
 }: {
   map: StrideMap
   active: boolean
+  open: boolean
   onToggle: (n: number) => void
 }) {
+  return (
+    <div className={`vc-item${open ? ' is-open' : ''}`}>
+      <button type="button" className="vc-stride" onClick={() => onToggle(map.number)}>
+        {open ? <PlaqueGutter /> : <StratumGutter map={map} />}
+        <span className="vc-body">
+          <span className="vc-title">{map.title}</span>
+          {!open && (
+            <span className="vc-gist muted">{stripInlineMarkdown(map.body.destination)}</span>
+          )}
+          <span className="muted small">
+            {map.isOpen
+              ? `${map.progress.completed} decided so far · ${active ? '' : 'live · '}${map.updatedAt}`
+              : `${map.progress.completed} decided · closed ${map.closedAt}`}
+            {!map.isOpen &&
+              map.body.notYetSpecified.length > 0 &&
+              ` · ${map.body.notYetSpecified.length} fog unentered`}
+            {open && ' — click to fold'}
+          </span>
+          {map.isOpen && !open && (
+            <span className="vc-meter">
+              <SignalMeter map={map} />
+            </span>
+          )}
+        </span>
+      </button>
+      <Fold open={open}>
+        <div className="vc-child">
+          <MapChild map={map} />
+        </div>
+      </Fold>
+    </div>
+  )
+}
+
+/** The collapsed stratum: rail plus a tick per decision, ghost scatter for expired fog. */
+function StratumGutter({ map }: { map: StrideMap }) {
   const decided = map.progress.completed
-  const open = map.progress.total - decided
+  const openCount = map.progress.total - decided
   const fog = map.body.notYetSpecified
-  const ticks = map.isOpen ? decided + open : decided
+  const ticks = map.isOpen ? decided + openCount : decided
   const height = Math.max(44, ticks * TICK_PITCH + STRATUM_PAD * 2)
 
   return (
-    <button type="button" className="vc-stride" onClick={() => onToggle(map.number)}>
-      <svg width="110" height={height} className="vc-gutter" aria-hidden="true">
+    <svg width="110" height={height} className="vc-gutter" aria-hidden="true">
+      <line
+        x1={RAIL_X}
+        y1="0"
+        x2={RAIL_X}
+        y2={height}
+        stroke="var(--fg)"
+        strokeOpacity="0.55"
+        strokeWidth="2.5"
+      />
+      {Array.from({ length: decided }, (_, i) => (
         <line
-          x1={RAIL_X}
-          y1="0"
-          x2={RAIL_X}
-          y2={height}
+          // biome-ignore lint/suspicious/noArrayIndexKey: ticks are anonymous marks
+          key={i}
+          x1={RAIL_X - 8}
+          y1={STRATUM_PAD + i * TICK_PITCH + TICK_PITCH / 2}
+          x2={RAIL_X + 8}
+          y2={STRATUM_PAD + i * TICK_PITCH + TICK_PITCH / 2}
           stroke="var(--fg)"
           strokeOpacity="0.55"
-          strokeWidth="2.5"
+          strokeWidth="2"
+          strokeLinecap="round"
         />
-        {Array.from({ length: decided }, (_, i) => (
+      ))}
+      {map.isOpen &&
+        Array.from({ length: openCount }, (_, i) => (
           <line
             // biome-ignore lint/suspicious/noArrayIndexKey: ticks are anonymous marks
-            key={i}
-            x1={RAIL_X - 8}
-            y1={STRATUM_PAD + i * TICK_PITCH + TICK_PITCH / 2}
-            x2={RAIL_X + 8}
-            y2={STRATUM_PAD + i * TICK_PITCH + TICK_PITCH / 2}
-            stroke="var(--fg)"
-            strokeOpacity="0.55"
-            strokeWidth="2"
-            strokeLinecap="round"
+            key={`open-${i}`}
+            x1={RAIL_X - 5}
+            y1={STRATUM_PAD + (decided + i) * TICK_PITCH + TICK_PITCH / 2}
+            x2={RAIL_X + 5}
+            y2={STRATUM_PAD + (decided + i) * TICK_PITCH + TICK_PITCH / 2}
+            stroke="var(--muted)"
+            strokeOpacity="0.6"
+            strokeWidth="1.5"
+            strokeDasharray="2 3"
           />
         ))}
-        {map.isOpen &&
-          Array.from({ length: open }, (_, i) => (
-            <line
-              // biome-ignore lint/suspicious/noArrayIndexKey: ticks are anonymous marks
-              key={`open-${i}`}
-              x1={RAIL_X - 5}
-              y1={STRATUM_PAD + (decided + i) * TICK_PITCH + TICK_PITCH / 2}
-              x2={RAIL_X + 5}
-              y2={STRATUM_PAD + (decided + i) * TICK_PITCH + TICK_PITCH / 2}
+      {!map.isOpen &&
+        fog
+          .slice(0, 3)
+          .map((item, i) => (
+            <circle
+              key={item}
+              cx={RAIL_X + 16 + (i % 2) * 11}
+              cy={height - 10 - i * 9}
+              r="4"
+              fill="none"
               stroke="var(--muted)"
-              strokeOpacity="0.6"
               strokeWidth="1.5"
               strokeDasharray="2 3"
+              strokeOpacity="0.7"
             />
           ))}
-        {!map.isOpen &&
-          fog
-            .slice(0, 3)
-            .map((item, i) => (
-              <circle
-                key={item}
-                cx={RAIL_X + 16 + (i % 2) * 11}
-                cy={height - 10 - i * 9}
-                r="4"
-                fill="none"
-                stroke="var(--muted)"
-                strokeWidth="1.5"
-                strokeDasharray="2 3"
-                strokeOpacity="0.7"
-              />
-            ))}
-      </svg>
-      <span className="vc-body">
-        <span className="vc-title">{map.title}</span>
-        <span className="vc-gist muted">{stripInlineMarkdown(map.body.destination)}</span>
-        <span className="muted small">
-          {map.isOpen
-            ? `${decided} decided so far · ${active ? '' : 'live · '}${map.updatedAt}`
-            : `${decided} decided · closed ${map.closedAt}`}
-          {!map.isOpen && fog.length > 0 && ` · ${fog.length} fog unentered`}
-        </span>
-        {map.isOpen && (
-          <span className="vc-meter">
-            <SignalMeter map={map} />
-          </span>
-        )}
-      </span>
-    </button>
+    </svg>
   )
 }
 
-function OpenStrideC({ map, onToggle }: { map: StrideMap; onToggle: (n: number) => void }) {
+/** The open header's mark: the map-level plaque on the rail — square family, never a circle. */
+function PlaqueGutter() {
   return (
-    <section className="vc-open">
-      <button type="button" className="vc-open-head" onClick={() => onToggle(map.number)}>
-        <svg width="110" height="40" aria-hidden="true">
-          <line
-            x1={RAIL_X}
-            y1="0"
-            x2={RAIL_X}
-            y2="40"
-            stroke="var(--fg)"
-            strokeOpacity="0.55"
-            strokeWidth="2.5"
-          />
-          <circle cx={RAIL_X} cy="20" r="8" fill="var(--bg)" stroke="var(--fg)" strokeWidth="2.5" />
-          <circle cx={RAIL_X} cy="20" r="3" fill="var(--fg)" />
-        </svg>
-        <span className="vc-body">
-          <span className="vc-title">{map.title}</span>
-          <span className="muted small">
-            #{map.number} · {map.isOpen ? map.updatedAt : `closed ${map.closedAt}`} — click to fold
-          </span>
-        </span>
-      </button>
-      <MapLedger map={map} />
-    </section>
-  )
-}
-
-function BareChild({ map }: { map: StrideMap }) {
-  return (
-    <section>
-      <p className="muted small proto-eyebrow">
-        #{map.number} · {map.isOpen ? map.updatedAt : `closed ${map.closedAt}`}
-      </p>
-      <h3 className="proto-child-title">{map.title}</h3>
-      <MapLedger map={map} />
-    </section>
+    <svg width="110" height="44" aria-hidden="true">
+      <line
+        x1={RAIL_X}
+        y1="0"
+        x2={RAIL_X}
+        y2="44"
+        stroke="var(--fg)"
+        strokeOpacity="0.55"
+        strokeWidth="2.5"
+      />
+      <rect
+        x={RAIL_X - 9}
+        y={22 - 9}
+        width="18"
+        height="18"
+        rx="4"
+        fill="var(--bg)"
+        stroke="var(--fg)"
+        strokeWidth="2.5"
+      />
+      <rect x={RAIL_X - 3} y={22 - 3} width="6" height="6" rx="1.5" fill="var(--fg)" />
+    </svg>
   )
 }
 
@@ -277,15 +275,17 @@ export function CardC({ project, onOpen }: CardProps) {
           ))}
           {project.active ? (
             <>
-              <circle
-                cx={cursor + 2}
-                cy={STRIP_Y}
-                r="6"
+              <rect
+                x={cursor - 4}
+                y={STRIP_Y - 6}
+                width="12"
+                height="12"
+                rx="3"
                 fill="var(--bg)"
                 stroke="var(--fg)"
                 strokeWidth="2"
               />
-              <circle cx={cursor + 2} cy={STRIP_Y} r="2.25" fill="var(--fg)" />
+              <rect x={cursor} y={STRIP_Y - 2} width="4" height="4" rx="1" fill="var(--fg)" />
             </>
           ) : (
             <line
