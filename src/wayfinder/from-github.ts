@@ -55,6 +55,7 @@ function toTicket(raw: RawSubIssue): Ticket {
     state: deriveTicketState({ isOpen, isClaimed, hasOpenBlockers }),
     isClaimed,
     isBlocked: hasOpenBlockers,
+    createdAt: parseTime(raw.createdAt),
     closedAt: raw.closedAt === null ? null : parseTime(raw.closedAt),
     assignees,
     blockedBy,

@@ -35,6 +35,9 @@ export interface Ticket {
   /** Independent of `state`, which collapses them: a ticket can be blocked *and* claimed. */
   isClaimed: boolean
   isBlocked: boolean
+  /** When the ticket was created, ms since epoch — the provenance signal: a rootless ticket was
+   * spawned by whatever ticket's resolution immediately preceded its creation. */
+  createdAt: number
   /** When the ticket closed, ms since epoch; null while it is open. */
   closedAt: number | null
   assignees: Assignee[]

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import type { Blocker, MapBody, Ticket, TicketState, WayfinderMap } from '../../wayfinder/types.ts'
+import type {
+  Blocker,
+  MapBody,
+  Ticket,
+  TicketState,
+  TicketType,
+  WayfinderMap,
+} from '../../wayfinder/types.ts'
 import { buildLedger } from './geometry.ts'
 
 const HOME = 'me/repo'
@@ -19,15 +26,18 @@ function ticket(
   state: TicketState,
   blockedBy: Blocker[] = [],
   closedAt: number | null = null,
+  createdAt = 0,
+  type: TicketType = 'task',
 ): Ticket {
   return {
     number,
     title: `Ticket ${number}`,
     url: `https://example.test/${HOME}/${number}`,
-    type: 'task',
+    type,
     state,
     isClaimed: state === 'claimed',
     isBlocked: blockedBy.some((b) => b.isOpen),
+    createdAt,
     closedAt,
     assignees: [],
     blockedBy,
@@ -160,8 +170,89 @@ describe('buildLedger', () => {
     const first = buildLedger(map)
     const second = buildLedger(map)
     expect(second.rows).toEqual(first.rows)
+    expect(second.closedRows).toEqual(first.closedRows)
     expect(second.edges).toEqual(first.edges)
     expect(second.chainIdOf).toEqual(first.chainIdOf)
+  })
+
+  it('braids ground covered: closed chains keep their lanes, rails, and forks', () => {
+    const map = makeMap([
+      ticket(2, 'closed', [], 100),
+      ticket(3, 'closed', [blocker(2, false)], 200),
+      ticket(4, 'closed', [blocker(2, false)], 300),
+    ])
+    const ledger = buildLedger(map)
+    const row = (n: number) => ledger.closedRows.find((r) => r.ticket.number === n)
+    // The heaviest walked chain (2 → 3) continues the trunk; 4 forked off 2 onto its own lane.
+    expect(row(2)?.x).toBe(ledger.gutterX)
+    expect(row(3)?.x).toBe(ledger.gutterX)
+    expect(row(4)?.x).toBeGreaterThan(ledger.gutterX)
+    const fork = ledger.edges.find((e) => e.kind === 'fork' && e.to === 4)
+    expect(fork).toMatchObject({ from: 2, walked: true })
+    const run = ledger.edges.find((e) => e.kind === 'run' && e.walked)
+    expect(run).toMatchObject({ from: 2, to: 3 })
+    // Nothing closed waits on 4, so its lane visibly rejoins the trunk at HEAD.
+    const land = ledger.edges.find((e) => e.kind === 'land')
+    expect(land).toMatchObject({ to: 4, walked: true })
+  })
+
+  it('forks a spawned chain off the non-research ticket that closed just before its creation', () => {
+    const map = makeMap([
+      // The trunk: a task resolved at 100, its dependent at 400.
+      ticket(2, 'closed', [], 100),
+      ticket(3, 'closed', [blocker(2, false)], 400),
+      // Research created at 150 — right after the task closed — then resolved by its subagent.
+      ticket(6, 'closed', [], 300, 150, 'research'),
+      ticket(7, 'closed', [blocker(6, false)], 500),
+      // A research decoy that closed nearer the creation moment: research never spawns.
+      ticket(8, 'closed', [], 140, 0, 'research'),
+    ])
+    const ledger = buildLedger(map)
+    const row = (n: number) => ledger.closedRows.find((r) => r.ticket.number === n)
+    expect(row(6)?.x).toBeGreaterThan(ledger.gutterX)
+    const fork = ledger.edges.find((e) => e.kind === 'fork' && e.to === 6)
+    expect(fork).toMatchObject({ from: 2, walked: true })
+  })
+
+  it('sprouts a rootless walked tributary off the trunk, extending the trunk to its origin', () => {
+    const map = makeMap([
+      ticket(2, 'closed', [], 200),
+      ticket(3, 'closed', [blocker(2, false)], 300),
+      ticket(4, 'closed', [], 100),
+      ticket(5, 'closed', [blocker(4, false)], 400),
+    ])
+    const ledger = buildLedger(map)
+    const row = (n: number) => ledger.closedRows.find((r) => r.ticket.number === n)
+    // 4 → 5 lost the trunk lane to 2 → 3, and 4 has no blocker of its own...
+    expect(row(4)?.x).toBeGreaterThan(ledger.gutterX)
+    // ...so its chain forks off the trunk itself, just below its oldest row.
+    const origin = ledger.edges.find((e) => e.kind === 'fork' && e.to === 4)
+    expect(origin).toMatchObject({ from: null, walked: true })
+    expect(origin?.path.startsWith(`M ${ledger.gutterX} `)).toBe(true)
+    // The trunk reaches down past that origin, so the fork never leaves empty space.
+    expect(ledger.trunkSolid?.y2 ?? 0).toBeGreaterThan(row(4)?.y ?? Number.NaN)
+  })
+
+  it('keeps unconnected closed tickets on the trunk as plain log entries', () => {
+    const map = makeMap([ticket(2, 'closed', [], 100), ticket(3, 'closed', [], 200)])
+    const ledger = buildLedger(map)
+    expect(ledger.closedRows.every((r) => r.x === ledger.gutterX)).toBe(true)
+    expect(ledger.edges.some((e) => e.walked)).toBe(false)
+  })
+
+  it('draws lineage from a closed blocker up to the open ticket it unblocked', () => {
+    const map = makeMap([
+      ticket(2, 'closed', [], 100),
+      ticket(3, 'frontier'),
+      ticket(5, 'frontier', [blocker(2, false)]),
+    ])
+    const ledger = buildLedger(map)
+    // 5 rides a tributary lane, so the walked ground it builds on connects across HEAD...
+    const lineage = ledger.edges.find((e) => e.kind === 'merge' && e.to === 5)
+    expect(lineage).toMatchObject({ from: 2, walked: false })
+    // ...and hovering either end relates them.
+    expect(ledger.neighbors.get(5)).toContain(2)
+    expect(ledger.neighbors.get(2)).toContain(5)
   })
 
   it('orders ground covered by completion time — latest at the top, whatever the map order', () => {

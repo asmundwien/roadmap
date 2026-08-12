@@ -8,6 +8,7 @@ function subIssue(overrides: Partial<RawSubIssue> & { number: number }): RawSubI
     url: `https://github.com/a/r/issues/${overrides.number}`,
     state: 'OPEN',
     stateReason: null,
+    createdAt: '2026-07-01T00:00:00Z',
     closedAt: null,
     body: '',
     labels: { nodes: [{ name: 'wayfinder:task', color: '0052CC' }] },

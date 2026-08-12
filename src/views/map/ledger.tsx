@@ -40,7 +40,7 @@ export function MapLedger({
     if (!related) return false
     if (edge.from === hover || edge.to === hover) return true
     return (
-      (edge.kind === 'fork' || edge.kind === 'run') &&
+      (edge.kind === 'fork' || edge.kind === 'run' || edge.kind === 'land') &&
       related.chainId !== null &&
       edge.chainId === related.chainId
     )
@@ -94,6 +94,7 @@ export function MapLedger({
             className={[
               'edge',
               `edge-${edge.kind}`,
+              edge.walked ? 'is-walked' : '',
               edge.isClaimed ? 'is-claimed' : '',
               isHotEdge(edge) ? 'is-hot' : '',
             ]
@@ -152,16 +153,19 @@ export function MapLedger({
           )
         })}
 
-        {/* ground covered — the same grammar, already walked: a check, and what was won */}
-        {ledger.closedRows.map(({ ticket, y }) => {
+        {/* ground covered — the same grammar, already walked: a check on its own rail */}
+        {ledger.closedRows.map(({ ticket, x, y }) => {
           const gist = gistByTitle.get(ticket.title)
+          const isHot = related?.tickets.has(ticket.number) ?? false
           return (
             <a
               key={ticket.number}
               href={ticket.url}
               target="_blank"
               rel="noreferrer"
-              className={`row${fresh.has(ticket.number) ? ' is-fresh' : ''}`}
+              className={`row${isHot ? ' is-hot' : ''}${fresh.has(ticket.number) ? ' is-fresh' : ''}`}
+              onPointerEnter={() => setHover(ticket.number)}
+              onPointerLeave={() => setHover(null)}
             >
               <title>
                 {ticket.title}
@@ -176,16 +180,10 @@ export function MapLedger({
                 fill="transparent"
               />
               {fresh.has(ticket.number) && (
-                <circle
-                  className="fresh-ping"
-                  cx={ledger.gutterX}
-                  cy={y}
-                  r="10"
-                  stroke="var(--state-closed)"
-                />
+                <circle className="fresh-ping" cx={x} cy={y} r="10" stroke="var(--state-closed)" />
               )}
-              <circle cx={ledger.gutterX} cy={y} r="10" fill="var(--fg)" />
-              <text x={ledger.gutterX} y={y + 3.5} textAnchor="middle" className="check">
+              <circle cx={x} cy={y} r="10" fill="var(--fg)" />
+              <text x={x} y={y + 3.5} textAnchor="middle" className="check">
                 ✓
               </text>
               <text x={ledger.textX} y={y - 4} className="behind-title">

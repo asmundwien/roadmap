@@ -148,6 +148,14 @@
   stroke-dasharray: 2 7;
 }
 
+/* Ground covered's braid is already walked — solid, drawn like the trunk it feeds. */
+.edge.is-walked {
+  stroke: var(--fg);
+  stroke-opacity: 0.45;
+  stroke-width: 2.25px;
+  stroke-dasharray: none;
+}
+
 /* Hovering a row answers "what exactly is this waiting on": its chain's rail and every edge it
  * touches come forward, everything else in the gutter steps back. */
 .ledger.has-hover .edge:not(.is-hot) {
