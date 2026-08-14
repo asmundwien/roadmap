@@ -4,42 +4,49 @@ import { stripInlineMarkdown } from '../gist.ts'
 /**
  * The unified-ledger geometry — everything the map screen draws, computed as plain data.
  *
- * This is the winning prototype direction (variant L on `prototype/map-view`) made live. The lane
- * rules come from the commit-graph research (docs/research/commit-graph-layouts.md on
- * `research/commit-graph-layouts`): chains own persistent rails, the heaviest chain forked off
- * HEAD keeps the trunk's lane 0 so merges pull toward the trunk, tributaries sit rightward
- * heaviest-first, and bends happen only at forks and merges. Everything is deterministic by
- * construction — same snapshot, same picture — which is what keeps the poll from reshuffling the
- * map underfoot.
+ * The whole map is ONE graph. Rows run in road order — oldest decision at the bottom, newest at
+ * HEAD, then the open work by distance-from-takeable up to the fog — and a single commit-graph
+ * weave lays every ticket out, ground covered and charted ahead alike; the "ground covered"
+ * boundary is a separator line the threads simply cross. The weave (see `weave`) follows the
+ * commit-graph research (docs/research/commit-graph-layouts.md): a placed ticket holds its lane
+ * until its last drawn dependent arrives, that dependent inherits the lane so the rail continues,
+ * other blockers bend in as merges, and freed lanes return to a pool for later threads — the
+ * graph reuses its whitespace instead of growing a new column per branch. Reservation is also
+ * what keeps the picture honest: an edge only ever rides a lane its blocker holds, so no line can
+ * pass through a node it doesn't touch. Everything is deterministic by construction — same
+ * snapshot, same picture — which is what keeps the poll from reshuffling the map underfoot.
  *
- * One thing the prototype's fixtures never exercised: blocked-by edges can cross repos, and issue
- * numbers only identify a ticket within one repo. Only same-repo blockers become geometry; a
- * cross-repo blocker still counts one step of depth (the ticket really is blocked) but is never
- * followed, drawn, or offered as a hover neighbour.
+ * Merges obey the Hasse rule: a blocked-by that a longer chain of drawn edges already implies is
+ * not drawn again, so the picture carries the dependency *order* without restating every shortcut
+ * GitHub happens to know about — hover still walks the full graph; reduction trims ink, not
+ * truth.
  *
- * Ground covered is part of the same tree, not a detached log. Its rows keep strict close-time
- * order — the section still reads as a log — but closed tickets braid exactly like the charted
- * section, mirrored: chains own lanes, tributaries merge *toward* HEAD instead of forking off it,
- * and a closed blocker draws its lineage up to the open tickets it unblocked. Nothing starts in
- * the void: a chain with no blocker of its own forks off the ticket whose resolution spawned it —
- * wayfinder fires research subagents from the session that just closed something, and creation
- * time identifies that something — or, charted before anything closed, sprouts off the trunk
- * below its oldest row. Only tickets with no drawn relations at all stay on the trunk as plain
- * log entries.
+ * Cross-repo blocked-by edges never become geometry: issue numbers only identify a ticket within
+ * one repo, so a cross-repo blocker counts one step of depth (the ticket really is blocked) but
+ * is never followed, drawn, or offered as a hover neighbour.
+ *
+ * Origins: a rootless closed ticket that other work depends on forks off the ticket whose
+ * resolution spawned it — wayfinder fires research subagents from the session that just closed
+ * something, and creation time identifies that something. Anything else rootless simply starts
+ * where it stands, edge-free: a stroke to HEAD or the trunk would claim a dependency that does
+ * not exist, and a node without recorded relations honestly has none.
  */
 
 /**
- * The ledger renders at a fixed 1.25× its 840-unit viewBox (map.css pins the width), so the
+ * The ledger renders at a fixed 1.25× its 900-unit viewBox (map.css pins the width), so the
  * accordion chrome positioned in CSS around the svg — the flag trigger, the rail segments, the
  * crop offset — converts geometry units to px through this one number.
  */
 export const LEDGER_SCALE = 1.25
 
-const W = 840
+const W = 900
 const GX = 44
 const PITCH = 34
 /** The gutter is never narrower than four lanes, so sparse maps keep room to breathe. */
 const MIN_GUTTER_LANES = 4
+/** ...and never wider than ten at full pitch: a busier weave compresses its lanes evenly rather
+ * than swallowing the text column. */
+const MAX_GUTTER = 10 * PITCH
 const ROW_H = 52
 const SEC_PAD = 56
 const SEC_BOTTOM = 34
@@ -68,18 +75,18 @@ export interface FogRow {
 
 export interface LedgerEdge {
   key: string
-  /** fork: HEAD/blocker into a chain's first row · run: a chain's straight rail · merge: a
-   * cross-lane blocked-by · tip: a charted tip dissolving at the fog boundary · land: an
-   * off-trunk walked chain rejoining the trunk at HEAD. */
-  kind: 'fork' | 'run' | 'merge' | 'tip' | 'land'
-  /** Ticket number the edge leaves from; null means the trunk itself — HEAD for charted forks
-   * and landings, the road below for a walked chain's origin. */
+  /** run: a rail segment, blocker straight up to the dependent that inherited its lane · merge: a
+   * blocked-by bending from the blocker's lane into its dependent · fork: a spawner's origin
+   * stroke into the ticket it spawned · tip: an undepended open ticket dissolving at the fog
+   * boundary. */
+  kind: 'fork' | 'run' | 'merge' | 'tip'
+  /** Ticket number the edge leaves from; null only for tips, which rise from their own ticket. */
   from: number | null
   to: number
-  chainId: number
-  isClaimed: boolean
-  /** True when the edge lies behind HEAD — ground covered's braid, drawn solid like the trunk. */
-  walked: boolean
+  /** True when `from → to` is a real blocked-by edge. False for the narrative strokes — forks
+   * off HEAD, spawner forks, tips — so hover can light the dependency graph without dragging the
+   * scenery along. */
+  isDependency: boolean
   path: string
 }
 
@@ -101,20 +108,22 @@ export interface Ledger {
   headY: number
   /** The trunk ahead of HEAD, dashed — always present, it carries the eye to the destination. */
   trunkDashed: { y1: number; y2: number }
-  /** The trunk behind HEAD, solid — null until the first decision lands. */
+  /** The road behind HEAD, solid — from the topmost lane-0 decision down past the oldest row;
+   * null until the first decision lands. It stops where the real rails take over, so a dashed
+   * rail crossing into open work is never overpainted solid. */
   trunkSolid: { y1: number; y2: number } | null
   /** Open tickets, one row each: takeable at the bottom, deepest at the top. */
   rows: LedgerRow[]
-  /** Closed tickets, newest first — each on its walked chain's lane, unconnected ones on the trunk. */
+  /** Closed tickets, newest first — each on the lane the weave gave its thread. */
   closedRows: ClosedRow[]
   fogRows: FogRow[]
   /** One line per empty section — drawn as dim text in the text column, never as a node. */
   placeholders: { y: number; text: string }[]
   edges: LedgerEdge[]
-  /** Which chain's rail a ticket rides — hover highlights the whole rail. */
-  chainIdOf: Map<number, number>
-  /** Same-repo in-map blockers and dependents per ticket, open or closed — hover's related set. */
-  neighbors: Map<number, number[]>
+  /** Direct same-repo in-map blockers per ticket — hover walks these upstream, transitively. */
+  blockersOf: Map<number, number[]>
+  /** Direct same-repo in-map dependents per ticket — hover lights these one hop downstream. */
+  dependentsOf: Map<number, number[]>
 }
 
 interface Point {
@@ -122,7 +131,7 @@ interface Point {
   y: number
 }
 
-/** A vertical drop from `a` bending once into `b`'s lane — the only curve the ledger allows. */
+/** A vertical drop from `a` bending once into `b`'s lane — the merge stroke. */
 function connector(a: Point, b: Point): string {
   if (Math.abs(a.x - b.x) < 1) return `M ${a.x} ${a.y} L ${b.x} ${b.y}`
   return [
@@ -133,9 +142,9 @@ function connector(a: Point, b: Point): string {
 }
 
 /**
- * A fork's mirror image of `connector`: it leaves `a`'s lane immediately and rides `b`'s lane the
- * rest of the way up. The split is drawn *before* anything else in the parent's lane — parallel
- * chains off one point diverge at that point, never implying one comes first.
+ * A fork's mirror image of `connector`: it leaves `a` immediately and rides `b`'s lane the rest
+ * of the way up. The split is drawn *before* anything else near the parent, so parallel branches
+ * off one point diverge at that point, never implying one comes first.
  */
 function forkConnector(a: Point, b: Point): string {
   if (Math.abs(a.x - b.x) < 1) return `M ${a.x} ${a.y} L ${b.x} ${b.y}`
@@ -151,17 +160,10 @@ function forkConnector(a: Point, b: Point): string {
   ].join(' ')
 }
 
-/** Open blockers that live in this map — the edges the charted braid can draw. */
+/** Open blockers that live in this map — what the depth layering follows. */
 function openInMapBlockers(ticket: Ticket, home: string, openNumbers: Set<number>): number[] {
   return ticket.blockedBy
     .filter((b) => b.isOpen && b.nameWithOwner === home && openNumbers.has(b.number))
-    .map((b) => b.number)
-}
-
-/** Closed blockers that live in this map — the edges the walked braid can draw. */
-function closedInMapBlockers(ticket: Ticket, home: string, closedNumbers: Set<number>): number[] {
-  return ticket.blockedBy
-    .filter((b) => !b.isOpen && b.nameWithOwner === home && closedNumbers.has(b.number))
     .map((b) => b.number)
 }
 
@@ -188,30 +190,28 @@ export function openDepth(ticket: Ticket, byNumber: Map<number, Ticket>, home: s
 }
 
 interface Layered {
+  /** Closed tickets, newest first — ground covered reads as a log. */
   closed: Ticket[]
   /** Open tickets grouped by `openDepth`, index 0 being everything takeable now. */
   ahead: Ticket[][]
-  depthOf: Map<number, number>
 }
 
 function layerMap(map: WayfinderMap): Layered {
   const byNumber = new Map(map.tickets.map((t) => [t.number, t]))
-  // Ground covered reads as a log: most recently closed at the top, walking back in time. A
-  // ticket without a close time (shouldn't happen for a closed issue) sinks to the bottom.
+  // A ticket without a close time (shouldn't happen for a closed issue) sinks to the bottom.
   const closed = map.tickets
     .filter((t) => t.state === 'closed')
     .sort((a, b) => (b.closedAt ?? 0) - (a.closedAt ?? 0))
   const open = map.tickets.filter((t) => t.state !== 'closed')
 
-  const depthOf = new Map<number, number>()
-  for (const ticket of open)
-    depthOf.set(ticket.number, openDepth(ticket, byNumber, map.nameWithOwner))
-
-  const maxDepth = open.reduce((max, t) => Math.max(max, depthOf.get(t.number) ?? 0), 0)
+  const maxDepth = open.reduce(
+    (max, t) => Math.max(max, openDepth(t, byNumber, map.nameWithOwner)),
+    0,
+  )
   const ahead: Ticket[][] = Array.from({ length: maxDepth + 1 }, () => [])
-  for (const ticket of open) ahead[depthOf.get(ticket.number) ?? 0]?.push(ticket)
+  for (const ticket of open) ahead[openDepth(ticket, byNumber, map.nameWithOwner)]?.push(ticket)
 
-  return { closed, ahead, depthOf }
+  return { closed, ahead }
 }
 
 /**
@@ -237,504 +237,281 @@ function orderLayers(ahead: Ticket[][], home: string, openNumbers: Set<number>):
   })
 }
 
-interface Chain {
-  id: number
-  /** In depth order — the first ticket is where the rail begins. */
-  tickets: Ticket[]
-  /** Ticket number the chain forks from; null means it forks off HEAD. */
-  forkFrom: number | null
-}
-
-interface ChainWork {
-  layers: Ticket[][]
-  chains: Chain[]
-  chainOf: Map<number, Chain>
-  /** How many open tickets transitively wait on this one — the "weight" tiebreaker. */
-  descCount: Map<number, number>
+/** The raw same-repo in-map blocked-by graph, both directions — what hover walks. */
+function buildRelations(
+  tickets: Ticket[],
+  home: string,
+  inMap: Set<number>,
+): { blockersOf: Map<number, number[]>; dependentsOf: Map<number, number[]> } {
+  const blockersOf = new Map<number, number[]>()
+  const dependentsOf = new Map<number, number[]>()
+  for (const t of tickets) {
+    for (const b of t.blockedBy) {
+      if (b.nameWithOwner !== home || !inMap.has(b.number)) continue
+      blockersOf.set(t.number, [...(blockersOf.get(t.number) ?? []), b.number])
+      dependentsOf.set(b.number, [...(dependentsOf.get(b.number) ?? []), t.number])
+    }
+  }
+  return { blockersOf, dependentsOf }
 }
 
 /**
- * Decompose the ahead-of-HEAD DAG into chains that own rails. A merge sits ON the rail of its
- * heaviest incoming chain while the other rails visibly retire into it.
+ * The Hasse rule: true when `from → to` is already implied by a longer chain of edges, so drawing
+ * it directly would only restate what the rails between them say. Reduction of a DAG is unique,
+ * so this stays deterministic whatever order edges are considered in.
  */
-function decomposeChains(layers: Ticket[][], home: string): ChainWork {
-  const open = layers.flat()
-  const openNumbers = new Set(open.map((t) => t.number))
-
-  const dependents = new Map<number, number[]>()
-  for (const t of open) {
-    for (const n of openInMapBlockers(t, home, openNumbers)) {
-      dependents.set(n, [...(dependents.get(n) ?? []), t.number])
+function isTransitive(from: number, to: number, dependentsOf: Map<number, number[]>): boolean {
+  const seen = new Set<number>([from])
+  const stack = (dependentsOf.get(from) ?? []).filter((n) => n !== to)
+  for (let n = stack.pop(); n !== undefined; n = stack.pop()) {
+    if (seen.has(n)) continue
+    seen.add(n)
+    for (const d of dependentsOf.get(n) ?? []) {
+      if (d === to) return true
+      stack.push(d)
     }
   }
-  const descCount = new Map<number, number>()
-  for (const t of open) {
-    const seen = new Set<number>()
-    const walk = (n: number) => {
-      for (const k of dependents.get(n) ?? []) {
-        if (!seen.has(k)) {
-          seen.add(k)
-          walk(k)
-        }
-      }
-    }
-    walk(t.number)
-    descCount.set(t.number, seen.size)
-  }
-
-  const chains: Chain[] = []
-  const chainOf = new Map<number, Chain>()
-  const tipOf = new Map<Chain, number>()
-
-  const weightOf = (chain: Chain): number =>
-    chain.tickets.length + (descCount.get(tipOf.get(chain) ?? -1) ?? 0)
-
-  for (const layer of layers) {
-    for (const ticket of layer) {
-      const openBlockers = openInMapBlockers(ticket, home, openNumbers)
-      // A rail is free to continue only while the blocker is still its tip.
-      const candidates = openBlockers
-        .map((n) => chainOf.get(n))
-        .filter((c): c is Chain => c !== undefined && openBlockers.includes(tipOf.get(c) ?? -1))
-      const unique = [...new Set(candidates)]
-      unique.sort((a, b) => weightOf(b) - weightOf(a) || a.id - b.id)
-      const surviving = unique[0]
-      if (surviving) {
-        surviving.tickets.push(ticket)
-        chainOf.set(ticket.number, surviving)
-        tipOf.set(surviving, ticket.number)
-      } else {
-        const chain: Chain = {
-          id: chains.length,
-          tickets: [ticket],
-          forkFrom: openBlockers[0] ?? null,
-        }
-        chains.push(chain)
-        chainOf.set(ticket.number, chain)
-        tipOf.set(chain, ticket.number)
-      }
-    }
-  }
-
-  return { layers, chains, chainOf, descCount }
+  return false
 }
 
-/** The chain's weight once decomposition is done — tickets carried plus what waits on its head. */
-function chainWeight(chain: Chain, descCount: Map<number, number>): number {
-  const first = chain.tickets[0]
-  return chain.tickets.length + (first ? (descCount.get(first.number) ?? 0) : 0)
+/**
+ * Wayfinder spawns newly-surfaced tickets from the session that just resolved another, so a
+ * rootless closed ticket that other work depends on forks off the non-research ticket that
+ * closed most recently before it was created. Research never spawns — its subagent only
+ * resolves. A rootless ticket nothing depends on stays a plain log entry, edge-free.
+ */
+function findSpawners(
+  closed: Ticket[],
+  parentsOf: Map<number, number[]>,
+  hasDependents: Set<number>,
+): Map<number, number> {
+  const spawnerOf = new Map<number, number>()
+  for (const ticket of closed) {
+    if ((parentsOf.get(ticket.number) ?? []).length > 0) continue
+    if (!hasDependents.has(ticket.number)) continue
+    const spawner = closed
+      .filter(
+        (t) =>
+          t.number !== ticket.number &&
+          t.type !== 'research' &&
+          t.closedAt !== null &&
+          t.closedAt <= ticket.createdAt,
+      )
+      .sort((a, b) => (b.closedAt ?? 0) - (a.closedAt ?? 0) || b.number - a.number)[0]
+    if (spawner) spawnerOf.set(ticket.number, spawner.number)
+  }
+  return spawnerOf
 }
 
-interface Lanes {
-  spine: Chain | undefined
-  laneOf: (n: number) => number
+/** One drawn relation, lane-agnostic — `weave` decides these, paths come later. */
+interface Link {
+  kind: 'run' | 'merge' | 'fork'
+  from: number
+  to: number
+  isDependency: boolean
+}
+
+interface Loom {
+  laneOf: Map<number, number>
   laneCount: number
+  links: Link[]
+}
+
+/** The weave's working state, threaded through its helpers. */
+interface Shuttle {
+  posOf: Map<number, number>
+  /** Drawn dependents not yet placed, per ticket — a lane frees when its tip's count hits 0. */
+  pending: Map<number, number>
+  laneOf: Map<number, number>
+  /** Per lane: null while a thread holds it, else the position it has been clear since. */
+  freeSince: (number | null)[]
+  links: Link[]
+  spawnerOf: Map<number, number>
 }
 
 /**
- * Lane 0 is the trunk's own lane: the heaviest chain forked off HEAD continues it, so merges pull
- * toward the trunk. Tributaries take lanes rightward, heaviest first.
+ * Where a ticket sits: it inherits the leftmost lane whose thread ends with it, or takes the
+ * leftmost free lane. A thread whose spawner fork must reach back down only takes a lane that
+ * has been clear that far, so no stroke ever crosses a node it doesn't touch.
  */
-function assignLanes(
-  chains: Chain[],
-  chainOf: Map<number, Chain>,
-  descCount: Map<number, number>,
-): Lanes {
-  const byWeight = (a: Chain, b: Chain) =>
-    chainWeight(b, descCount) - chainWeight(a, descCount) ||
-    (a.tickets[0]?.number ?? 0) - (b.tickets[0]?.number ?? 0)
-  const spine = chains.filter((c) => c.forkFrom === null).sort(byWeight)[0]
-  const laneIndex = new Map<Chain, number>()
-  if (spine) laneIndex.set(spine, 0)
-  const tributaries = chains.filter((c) => c !== spine).sort(byWeight)
-  for (const [i, chain] of tributaries.entries()) laneIndex.set(chain, i + 1)
-  return {
-    spine,
-    laneOf: (n) => {
-      const chain = chainOf.get(n)
-      return chain ? (laneIndex.get(chain) ?? 0) : 0
-    },
-    laneCount: Math.max(chains.length, 2),
+function chooseLane(s: Shuttle, ticket: Ticket, pos: number, parents: number[]): number {
+  const ending = parents.filter((p) => s.pending.get(p) === 1)
+  if (ending.length > 0) return Math.min(...ending.map((p) => s.laneOf.get(p) ?? 0))
+  const spawner = s.spawnerOf.get(ticket.number)
+  const clearFrom = spawner !== undefined ? (s.posOf.get(spawner) ?? pos) : pos
+  const lane = s.freeSince.findIndex((p) => p !== null && p <= clearFrom)
+  if (lane !== -1) return lane
+  s.freeSince.push(null)
+  return s.freeSince.length - 1
+}
+
+/** Link a placed ticket to its drawn blockers: a rail up the inherited lane, merges otherwise —
+ * and free every blocker lane whose thread this ticket consumed. */
+function linkParents(s: Shuttle, to: number, lane: number, pos: number, parents: number[]): void {
+  for (const p of parents) {
+    s.links.push({
+      kind: s.laneOf.get(p) === lane ? 'run' : 'merge',
+      from: p,
+      to,
+      isDependency: true,
+    })
+    const left = (s.pending.get(p) ?? 1) - 1
+    s.pending.set(p, left)
+    const pLane = s.laneOf.get(p) ?? 0
+    if (left === 0 && pLane !== lane) s.freeSince[pLane] = pos
   }
 }
 
-/** Forks off HEAD or a blocker, straight rails through rows, merges into surviving rails. */
-function buildBraidEdges(
-  chains: Chain[],
-  rowByNumber: Map<number, LedgerRow>,
-  head: Point,
-): LedgerEdge[] {
-  const edges: LedgerEdge[] = []
-  for (const chain of chains) {
-    const first = chain.tickets[0]
-    const last = chain.tickets[chain.tickets.length - 1]
-    if (!first || !last) continue
-    const firstRow = rowByNumber.get(first.number)
-    const lastRow = rowByNumber.get(last.number)
-    if (!firstRow || !lastRow) continue
-    const parent = chain.forkFrom === null ? head : (rowByNumber.get(chain.forkFrom) ?? head)
-    edges.push({
-      key: `fork-${chain.id}`,
-      kind: 'fork',
-      from: chain.forkFrom,
-      to: first.number,
-      chainId: chain.id,
-      isClaimed: first.state === 'claimed',
-      walked: false,
-      path: forkConnector(parent, firstRow),
-    })
-    if (lastRow.y < firstRow.y) {
-      edges.push({
-        key: `run-${chain.id}`,
-        kind: 'run',
-        from: first.number,
-        to: last.number,
-        chainId: chain.id,
-        isClaimed: false,
-        walked: false,
-        path: `M ${firstRow.x} ${firstRow.y} L ${lastRow.x} ${lastRow.y}`,
-      })
+/** A spawned ticket's origin stroke. Anything else rootless simply starts where it stands —
+ * a line to HEAD or the trunk would claim a dependency that does not exist. */
+function linkOrigin(s: Shuttle, ticket: Ticket): void {
+  const spawner = s.spawnerOf.get(ticket.number)
+  if (spawner !== undefined) {
+    s.links.push({ kind: 'fork', from: spawner, to: ticket.number, isDependency: false })
+  }
+}
+
+/**
+ * The single pass that lays the whole graph out — a commit-graph weave over the rows in road
+ * order (position 0 at the bottom). Each placed ticket holds its lane as a live thread until its
+ * last drawn dependent arrives; that dependent inherits the lane so the rail continues, every
+ * other blocker bends in as a merge, and a freed lane returns to the pool for later threads to
+ * reuse — the graph never grows a column while an old one sits empty.
+ */
+function weave(
+  sequence: Ticket[],
+  parentsOf: Map<number, number[]>,
+  spawnerOf: Map<number, number>,
+): Loom {
+  const pending = new Map<number, number>()
+  for (const parents of parentsOf.values()) {
+    for (const p of parents) pending.set(p, (pending.get(p) ?? 0) + 1)
+  }
+  const s: Shuttle = {
+    posOf: new Map(sequence.map((t, i) => [t.number, i])),
+    pending,
+    laneOf: new Map(),
+    freeSince: [],
+    links: [],
+    spawnerOf,
+  }
+
+  for (const [pos, ticket] of sequence.entries()) {
+    const t = ticket.number
+    const parents = parentsOf.get(t) ?? []
+    const lane = chooseLane(s, ticket, pos, parents)
+    s.laneOf.set(t, lane)
+    s.freeSince[lane] = null
+    linkParents(s, t, lane, pos, parents)
+    if (parents.length === 0) linkOrigin(s, ticket)
+    // A closed dead end frees its lane; an undepended open ticket keeps holding it — its tip
+    // still rises toward the fog, and nothing may be stacked into that line.
+    if ((s.pending.get(t) ?? 0) === 0 && ticket.state === 'closed') s.freeSince[lane] = pos
+  }
+
+  return { laneOf: s.laneOf, laneCount: Math.max(s.freeSince.length, 2), links: s.links }
+}
+
+/**
+ * The drawn parents per ticket: same-repo in-map blockers that sit below it in road order, minus
+ * the ones a longer below-going chain already implies. Reduction runs on the below-going graph
+ * itself, so an edge is only dropped when the path that replaces it is actually drawable.
+ */
+function reduceParents(sequence: Ticket[], blockersOf: Map<number, number[]>) {
+  const posOf = new Map(sequence.map((t, i) => [t.number, i]))
+  const below = new Map<number, number[]>()
+  const downDependents = new Map<number, number[]>()
+  for (const t of sequence) {
+    const pos = posOf.get(t.number) ?? 0
+    const parents = [...new Set(blockersOf.get(t.number) ?? [])].filter(
+      (n) => (posOf.get(n) ?? Number.POSITIVE_INFINITY) < pos,
+    )
+    below.set(t.number, parents)
+    for (const n of parents) {
+      downDependents.set(n, [...(downDependents.get(n) ?? []), t.number])
     }
+  }
+  const parentsOf = new Map<number, number[]>()
+  for (const t of sequence) {
+    parentsOf.set(
+      t.number,
+      (below.get(t.number) ?? []).filter((n) => !isTransitive(n, t.number, downDependents)),
+    )
+  }
+  const hasDependents = new Set<number>()
+  for (const parents of parentsOf.values()) for (const n of parents) hasDependents.add(n)
+  return { parentsOf, hasDependents }
+}
+
+/** Materialize the weave's links as svg paths, now that every ticket has a point. */
+function buildEdges(links: Link[], pointOf: Map<number, Point>): LedgerEdge[] {
+  const edges: LedgerEdge[] = []
+  for (const link of links) {
+    const to = pointOf.get(link.to)
+    const from = pointOf.get(link.from)
+    if (!to || !from) continue
+    const path =
+      link.kind === 'run'
+        ? `M ${from.x} ${from.y} L ${to.x} ${to.y}`
+        : link.kind === 'merge'
+          ? connector(from, to)
+          : forkConnector(from, to)
+    edges.push({
+      key: `${link.kind}-${link.from}-${link.to}`,
+      kind: link.kind,
+      from: link.from,
+      to: link.to,
+      isDependency: link.isDependency,
+      path,
+    })
   }
   return edges
 }
 
-/** Cross-lane merges into surviving rails, and charted tips dissolving at the fog boundary. */
-function buildCrossEdges(
+/** Undepended open tickets — except the trunk's own top — dissolve toward the fog. */
+function buildTipEdges(
   rows: LedgerRow[],
-  rowByNumber: Map<number, LedgerRow>,
-  chainOf: Map<number, Chain>,
-  spine: Chain | undefined,
-  home: string,
-  openNumbers: Set<number>,
+  hasDependents: Set<number>,
+  trunkTopNumber: number | null,
   sepAhead: number,
 ): LedgerEdge[] {
   const edges: LedgerEdge[] = []
   for (const { ticket, x, y } of rows) {
-    for (const n of openInMapBlockers(ticket, home, openNumbers)) {
-      const from = rowByNumber.get(n)
-      if (!from || Math.abs(from.x - x) < 1) continue
-      edges.push({
-        key: `merge-${ticket.number}-${n}`,
-        kind: 'merge',
-        from: n,
-        to: ticket.number,
-        chainId: chainOf.get(ticket.number)?.id ?? -1,
-        isClaimed: false,
-        walked: false,
-        path: connector(from, { x, y }),
-      })
-    }
-  }
-  const dependedOn = new Set(rows.flatMap((r) => openInMapBlockers(r.ticket, home, openNumbers)))
-  for (const { ticket, x, y } of rows) {
-    if (dependedOn.has(ticket.number) || chainOf.get(ticket.number) === spine) continue
+    if (hasDependents.has(ticket.number) || ticket.number === trunkTopNumber) continue
     edges.push({
       key: `tip-${ticket.number}`,
       kind: 'tip',
       from: null,
       to: ticket.number,
-      chainId: chainOf.get(ticket.number)?.id ?? -1,
-      isClaimed: false,
-      walked: false,
+      isDependency: false,
       path: `M ${x} ${y} L ${x} ${sepAhead + 26}`,
     })
   }
   return edges
 }
 
-interface WalkedWork {
-  chains: Chain[]
-  chainOf: Map<number, Chain>
-  laneIndex: Map<Chain, number>
-  laneOf: (n: number) => number
-  laneCount: number
-  /** Closed tickets some later closed ticket waited on — a walked tip with none rejoins at HEAD. */
-  hasClosedDependent: Set<number>
-  /** For a rootless off-trunk chain: the ticket whose resolution spawned it (see decomposeWalked). */
-  spawnerOf: Map<Chain, number>
-}
-
-/**
- * The walked braid — the charted decomposition mirrored below HEAD. Rows keep close-time order,
- * so chains grow oldest-to-newest, converging up toward HEAD the way charted chains fork down off
- * it. A chain earns a lane only when it braids: it carries more than one ticket, grew off a
- * blocker, or feeds a later closed ticket. The heaviest of those continues the trunk's lane 0; a
- * lone unconnected ticket stays a plain log entry on the trunk, exactly as before.
- */
-function decomposeWalked(closed: Ticket[], home: string): WalkedWork {
-  const closedNumbers = new Set(closed.map((t) => t.number))
-  const chains: Chain[] = []
-  const chainOf = new Map<number, Chain>()
-  const tipOf = new Map<Chain, number>()
-
-  // `closed` arrives newest-first; walk it oldest-first so a blocker's chain exists before its
-  // dependent — close-time order is the walked graph's topological order.
-  for (let i = closed.length - 1; i >= 0; i--) {
-    const ticket = closed[i]
-    if (!ticket) continue
-    const blockers = closedInMapBlockers(ticket, home, closedNumbers)
-    const candidates = blockers
-      .map((n) => chainOf.get(n))
-      .filter((c): c is Chain => c !== undefined && blockers.includes(tipOf.get(c) ?? -1))
-    const unique = [...new Set(candidates)]
-    unique.sort((a, b) => b.tickets.length - a.tickets.length || a.id - b.id)
-    const surviving = unique[0]
-    if (surviving) {
-      surviving.tickets.push(ticket)
-      chainOf.set(ticket.number, surviving)
-      tipOf.set(surviving, ticket.number)
-    } else {
-      const chain: Chain = { id: chains.length, tickets: [ticket], forkFrom: blockers[0] ?? null }
-      chains.push(chain)
-      chainOf.set(ticket.number, chain)
-      tipOf.set(chain, ticket.number)
-    }
-  }
-
-  const hasClosedDependent = new Set<number>()
-  for (const t of closed) {
-    for (const n of closedInMapBlockers(t, home, closedNumbers)) hasClosedDependent.add(n)
-  }
-
-  const structural = chains.filter(
-    (c) =>
-      c.tickets.length > 1 || c.forkFrom !== null || hasClosedDependent.has(tipOf.get(c) ?? -1),
-  )
-  structural.sort(
-    (a, b) =>
-      b.tickets.length - a.tickets.length ||
-      (a.tickets[0]?.number ?? 0) - (b.tickets[0]?.number ?? 0),
-  )
-  const laneIndex = new Map<Chain, number>()
-  for (const [i, chain] of structural.entries()) laneIndex.set(chain, i)
-
-  return {
-    chains,
-    chainOf,
-    laneIndex,
-    laneOf: (n) => {
-      const chain = chainOf.get(n)
-      return chain ? (laneIndex.get(chain) ?? 0) : 0
-    },
-    laneCount: Math.max(structural.length, 1),
-    hasClosedDependent,
-    spawnerOf: findSpawners(chains, chainOf, laneIndex, closed),
-  }
-}
-
-/**
- * Wayfinder spawns newly-surfaced tickets — research above all — from the session that just
- * resolved another ticket, so a rootless chain's true origin is the ticket that closed most
- * recently before its first ticket was *created*. Research never spawns (its subagent only
- * resolves), so research tickets are skipped as candidates. No candidate means the chain was
- * charted before anything closed — then it genuinely springs from the journey's start.
- */
-function findSpawners(
-  chains: Chain[],
-  chainOf: Map<number, Chain>,
-  laneIndex: Map<Chain, number>,
-  closed: Ticket[],
-): Map<Chain, number> {
-  const spawnerOf = new Map<Chain, number>()
-  for (const chain of chains) {
-    // Log-entry singletons stay edge-free; a structural chain gets its origin whatever its lane —
-    // even the trunk's own chain may have been spawned mid-journey by a tributary's resolution.
-    if (chain.forkFrom !== null || !laneIndex.has(chain)) continue
-    const first = chain.tickets[0]
-    if (!first) continue
-    const spawner = closed
-      .filter(
-        (t) =>
-          chainOf.get(t.number) !== chain &&
-          t.type !== 'research' &&
-          t.closedAt !== null &&
-          t.closedAt <= first.createdAt,
-      )
-      .sort((a, b) => (b.closedAt ?? 0) - (a.closedAt ?? 0) || b.number - a.number)[0]
-    if (spawner) spawnerOf.set(chain, spawner.number)
-  }
-  return spawnerOf
-}
-
-/** Where a rootless walked chain sprouts from the trunk: one bend below its oldest row. */
-function walkedOrigin(firstRow: Point): Point {
-  return { x: GX, y: firstRow.y + BEND }
-}
-
-/** One walked chain's edges: its fork off a blocker — or off the trunk when it has none — its
- * rail, and, off-trunk with nothing closed depending on its tip, its landing back at HEAD. */
-function buildWalkedChainEdges(
-  chain: Chain,
-  walked: WalkedWork,
-  rowByNumber: Map<number, ClosedRow>,
-  head: Point,
-  idBase: number,
-): LedgerEdge[] {
-  const first = chain.tickets[0]
-  const last = chain.tickets[chain.tickets.length - 1]
-  if (!first || !last) return []
-  const firstRow = rowByNumber.get(first.number)
-  const lastRow = rowByNumber.get(last.number)
-  if (!firstRow || !lastRow) return []
-  const id = idBase + chain.id
-  const isOffTrunk = (walked.laneIndex.get(chain) ?? 0) > 0
-  const base = { chainId: id, isClaimed: false, walked: true }
-
-  const edges: LedgerEdge[] = []
-  const origin = chain.forkFrom ?? walked.spawnerOf.get(chain) ?? null
-  const parent = origin !== null ? rowByNumber.get(origin) : undefined
-  if (parent) {
-    edges.push({
-      ...base,
-      key: `wfork-${id}`,
-      kind: 'fork',
-      from: origin,
-      to: first.number,
-      path: forkConnector(parent, firstRow),
-    })
-  } else if (isOffTrunk) {
-    // Neither a blocker nor a spawner — charted before anything closed, so the chain sprouts off
-    // the road itself, not out of the void.
-    edges.push({
-      ...base,
-      key: `worigin-${id}`,
-      kind: 'fork',
-      from: null,
-      to: first.number,
-      path: forkConnector(walkedOrigin(firstRow), firstRow),
-    })
-  }
-  if (lastRow.y < firstRow.y) {
-    edges.push({
-      ...base,
-      key: `wrun-${id}`,
-      kind: 'run',
-      from: first.number,
-      to: last.number,
-      path: `M ${firstRow.x} ${firstRow.y} L ${lastRow.x} ${lastRow.y}`,
-    })
-  }
-  if (isOffTrunk && !walked.hasClosedDependent.has(last.number)) {
-    edges.push({
-      ...base,
-      key: `land-${id}`,
-      kind: 'land',
-      from: null,
-      to: last.number,
-      path: connector(lastRow, head),
-    })
-  }
-  return edges
-}
-
-/**
- * The walked braid's edges: each chain's fork, rail, and landing, then cross-lane merges among
- * closed tickets — the blocker a chain forked from is already drawn, so that pair is skipped.
- */
-function buildWalkedEdges(
-  walked: WalkedWork,
-  rowByNumber: Map<number, ClosedRow>,
-  head: Point,
-  home: string,
-  closedNumbers: Set<number>,
-  idBase: number,
-): LedgerEdge[] {
-  const edges = walked.chains.flatMap((chain) =>
-    buildWalkedChainEdges(chain, walked, rowByNumber, head, idBase),
-  )
-  for (const row of rowByNumber.values()) {
-    const chain = walked.chainOf.get(row.ticket.number)
-    for (const n of closedInMapBlockers(row.ticket, home, closedNumbers)) {
-      if (chain && chain.tickets[0]?.number === row.ticket.number && chain.forkFrom === n) continue
-      const from = rowByNumber.get(n)
-      if (!from || Math.abs(from.x - row.x) < 1) continue
-      edges.push({
-        key: `wmerge-${row.ticket.number}-${n}`,
-        kind: 'merge',
-        from: n,
-        to: row.ticket.number,
-        chainId: idBase + (chain?.id ?? 0),
-        isClaimed: false,
-        walked: true,
-        path: connector(from, row),
-      })
-    }
-  }
-  return edges
-}
-
-/**
- * Lineage across HEAD: a closed blocker connects up to the open tickets it unblocked, so finishing
- * a ticket moves it below the line without cutting it out of the tree. Same-lane pairs are skipped
- * — there the trunk itself already carries the story.
- */
-function buildLineageEdges(
-  rows: LedgerRow[],
-  closedRowByNumber: Map<number, ClosedRow>,
-  chainOf: Map<number, Chain>,
-  home: string,
-  closedNumbers: Set<number>,
-): LedgerEdge[] {
-  const edges: LedgerEdge[] = []
-  for (const { ticket, x, y } of rows) {
-    for (const n of closedInMapBlockers(ticket, home, closedNumbers)) {
-      const from = closedRowByNumber.get(n)
-      if (!from || Math.abs(from.x - x) < 1) continue
-      edges.push({
-        key: `lineage-${ticket.number}-${n}`,
-        kind: 'merge',
-        from: n,
-        to: ticket.number,
-        chainId: chainOf.get(ticket.number)?.id ?? -1,
-        isClaimed: false,
-        walked: false,
-        path: connector(from, { x, y }),
-      })
-    }
-  }
-  return edges
-}
-
-/** Same-repo in-map blockers and dependents per ticket, open or closed — hover's related set. */
-function buildNeighbors(
-  tickets: Ticket[],
-  home: string,
-  inMap: Set<number>,
-): Map<number, number[]> {
-  const neighbors = new Map<number, number[]>()
-  const link = (a: number, b: number) => {
-    neighbors.set(a, [...(neighbors.get(a) ?? []), b])
-  }
-  for (const t of tickets) {
-    for (const b of t.blockedBy) {
-      if (b.nameWithOwner !== home || !inMap.has(b.number)) continue
-      link(t.number, b.number)
-      link(b.number, t.number)
-    }
-  }
-  return neighbors
-}
-
 export function buildLedger(map: WayfinderMap): Ledger {
   const home = map.nameWithOwner
-  const { closed, ahead, depthOf } = layerMap(map)
+  const { closed, ahead } = layerMap(map)
   const openNumbers = new Set(ahead.flat().map((t) => t.number))
-  const closedNumbers = new Set(closed.map((t) => t.number))
-  const layers = orderLayers(ahead, home, openNumbers)
-  const { chains, chainOf, descCount } = decomposeChains(layers, home)
-  const { spine, laneOf, laneCount: aheadLaneCount } = assignLanes(chains, chainOf, descCount)
-  const walked = decomposeWalked(closed, home)
-  const laneCount = Math.max(aheadLaneCount, walked.laneCount)
-  const textX = GX + Math.max(laneCount, MIN_GUTTER_LANES) * PITCH + 44
+  const orderedOpen = orderLayers(ahead, home, openNumbers).flat()
 
-  const ordered = layers.flat()
-  ordered.sort((a, b) => {
-    const da = depthOf.get(a.number) ?? 0
-    const db = depthOf.get(b.number) ?? 0
-    if (da !== db) return da - db
-    return laneOf(a.number) - laneOf(b.number) || a.number - b.number
-  })
+  const { blockersOf, dependentsOf } = buildRelations(
+    map.tickets,
+    home,
+    new Set(map.tickets.map((t) => t.number)),
+  )
+
+  // Road order, bottom-up: oldest decision first, then the open layers takeable-first.
+  const sequence = [...[...closed].reverse(), ...orderedOpen]
+  const { parentsOf, hasDependents } = reduceParents(sequence, blockersOf)
+  const spawnerOf = findSpawners(closed, parentsOf, hasDependents)
+  const { laneOf, laneCount, links } = weave(sequence, parentsOf, spawnerOf)
+
+  // Even spacing always: a weave past ten lanes narrows every lane by the same amount.
+  const pitch = Math.min(PITCH, MAX_GUTTER / laneCount)
+  const textX = GX + Math.max(laneCount * pitch, MIN_GUTTER_LANES * PITCH) + 44
+  const laneX = (n: number) => GX + (laneOf.get(n) ?? 0) * pitch
 
   // The vertical frame, top to bottom: destination, fog, charted ahead, ground covered — every
   // section with the same rhythm: SEC_PAD to its first row, ROW_H pitch, SEC_BOTTOM after its last.
@@ -753,7 +530,9 @@ export function buildLedger(map: WayfinderMap): Ledger {
   const ghostY = (i: number) => sepFog + SEC_PAD + i * ROW_H
   const sepAhead = sepFog + sectionHeight(fogItems.length)
 
-  const sepBehind = sepAhead + sectionHeight(ordered.length)
+  // With nothing charted the section disappears outright — no separator, no empty band — and
+  // fog flows straight into ground covered.
+  const sepBehind = sepAhead + (orderedOpen.length > 0 ? sectionHeight(orderedOpen.length) : 0)
   const rowY = (i: number) => sepBehind - SEC_BOTTOM - i * ROW_H
 
   const behindY = (j: number) => sepBehind + SEC_PAD + j * ROW_H
@@ -764,25 +543,23 @@ export function buildLedger(map: WayfinderMap): Ledger {
     const note = stripInlineMarkdown(map.body.notYetSpecifiedNote).trim()
     placeholders.push({ y: sepFog + SEC_PAD, text: note !== '' ? note : 'no fog recorded' })
   }
-  if (ordered.length === 0)
-    placeholders.push({ y: sepAhead + SEC_PAD, text: 'nothing charted ahead' })
   if (closed.length === 0)
     placeholders.push({ y: sepBehind + SEC_PAD, text: 'nothing decided yet' })
 
-  const rows: LedgerRow[] = ordered.map((ticket, i) => ({
+  const rows: LedgerRow[] = orderedOpen.map((ticket, i) => ({
     ticket,
-    x: GX + laneOf(ticket.number) * PITCH,
+    x: laneX(ticket.number),
     y: rowY(i),
   }))
-  const rowByNumber = new Map(rows.map((r) => [r.ticket.number, r]))
-  const head: Point = { x: GX, y: sepBehind }
-
   const closedRows: ClosedRow[] = closed.map((ticket, j) => ({
     ticket,
-    x: GX + walked.laneOf(ticket.number) * PITCH,
+    x: laneX(ticket.number),
     y: behindY(j),
   }))
-  const closedRowByNumber = new Map(closedRows.map((r) => [r.ticket.number, r]))
+  const head: Point = { x: GX, y: sepBehind }
+  const pointOf = new Map<number, Point>(
+    [...rows, ...closedRows].map((r) => [r.ticket.number, { x: r.x, y: r.y }]),
+  )
 
   // Ghost stops scatter across the whole gutter — clear of the trunk, clear of the text column.
   const fogMin = GX + 26
@@ -793,36 +570,15 @@ export function buildLedger(map: WayfinderMap): Ledger {
     y: ghostY(i),
   }))
 
+  // The trunk's dashed reach starts at the road's topmost open node when lane 0 carries one.
+  const trunkTop = [...rows].reverse().find((r) => r.x === GX)
   const edges: LedgerEdge[] = [
-    ...buildBraidEdges(chains, rowByNumber, head),
-    ...buildCrossEdges(rows, rowByNumber, chainOf, spine, home, openNumbers, sepAhead),
-    ...buildWalkedEdges(walked, closedRowByNumber, head, home, closedNumbers, chains.length),
-    ...buildLineageEdges(rows, closedRowByNumber, chainOf, home, closedNumbers),
+    ...buildEdges(links, pointOf),
+    ...buildTipEdges(rows, hasDependents, trunkTop?.ticket.number ?? null, sepAhead),
   ]
 
-  const chainIdOf = new Map<number, number>()
-  for (const [n, chain] of chainOf) chainIdOf.set(n, chain.id)
-  for (const [n, chain] of walked.chainOf) chainIdOf.set(n, chains.length + chain.id)
-
-  const neighbors = buildNeighbors(map.tickets, home, new Set(map.tickets.map((t) => t.number)))
-
-  const lastSpineRow = [...rows].reverse().find((r) => chainOf.get(r.ticket.number) === spine)
-  // The solid trunk runs through its own lane's rows — a walked tributary hangs off it instead —
-  // and reaches down past the oldest rootless sprout, so no origin forks off empty space.
-  const lastTrunkClosed = [...closedRows].reverse().find((r) => r.x === GX)
-  const originYs = walked.chains
-    .filter(
-      (c) => c.forkFrom === null && !walked.spawnerOf.has(c) && (walked.laneIndex.get(c) ?? 0) > 0,
-    )
-    .flatMap((c) => {
-      const first = c.tickets[0]
-      const row = first ? closedRowByNumber.get(first.number) : undefined
-      return row ? [walkedOrigin(row).y] : []
-    })
-  const trunkEnd = Math.max(
-    lastTrunkClosed ? lastTrunkClosed.y + ROW_H * 0.6 : Number.NEGATIVE_INFINITY,
-    ...originYs,
-  )
+  const lastClosed = closedRows[closedRows.length - 1]
+  const topTrunkClosed = closedRows.find((r) => r.x === GX)
 
   return {
     width: W,
@@ -840,14 +596,16 @@ export function buildLedger(map: WayfinderMap): Ledger {
     sepAhead,
     sepBehind,
     headY: head.y,
-    trunkDashed: { y1: lastSpineRow ? lastSpineRow.y : head.y, y2: destY + 14 },
-    trunkSolid: Number.isFinite(trunkEnd) ? { y1: head.y, y2: trunkEnd } : null,
+    trunkDashed: { y1: trunkTop ? trunkTop.y : head.y, y2: destY + 14 },
+    trunkSolid: lastClosed
+      ? { y1: topTrunkClosed?.y ?? head.y, y2: lastClosed.y + ROW_H * 0.6 }
+      : null,
     rows,
     closedRows,
     fogRows,
     placeholders,
     edges,
-    chainIdOf,
-    neighbors,
+    blockersOf,
+    dependentsOf,
   }
 }

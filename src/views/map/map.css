@@ -2,7 +2,7 @@
 
 /* Doubled class beats .shell's 44rem regardless of stylesheet order. */
 .shell.map-shell {
-  max-width: 70rem;
+  max-width: 74rem;
 }
 
 .legend-item i {
@@ -16,16 +16,16 @@
 }
 
 /*
- * The canvas renders at a fixed 1.25× its 840-unit viewBox — page-native sizing: internal 12px
+ * The canvas renders at a fixed 1.25× its 900-unit viewBox — page-native sizing: internal 12px
  * titles come out at 15px against the page's 16px body. The width is pinned, not fluid: the
  * accordion's trigger anatomy — flag, rail segments, crop offset — is CSS-positioned at that
- * scale, and letting the svg shrink with the viewport would slide them apart. Below ~1100px the
+ * scale, and letting the svg shrink with the viewport would slide them apart. Below ~1175px the
  * page scrolls sideways instead.
  */
 .ledger {
   display: block;
-  width: min(1050px, 100%);
-  min-width: 1050px;
+  width: min(1125px, 100%);
+  min-width: 1125px;
   height: auto;
 }
 
@@ -170,24 +170,26 @@
     opacity 0.12s ease;
 }
 
-.edge-fork.is-claimed {
-  stroke: var(--state-claimed);
-  stroke-opacity: 0.7;
-  stroke-dasharray: 7 5;
-}
-
 .edge-tip {
   stroke-width: 1.5px;
   stroke-opacity: 0.25;
   stroke-dasharray: 2 7;
 }
 
-/* Ground covered's braid is already walked — solid, drawn like the trunk it feeds. */
-.edge.is-walked {
+/* A line ending in completed work is solid, drawn like the trunk. Lines into blocked or takeable
+ * tickets keep the dashed default: that stretch is still ahead. */
+.edge.is-settled {
   stroke: var(--fg);
   stroke-opacity: 0.45;
   stroke-width: 2.25px;
   stroke-dasharray: none;
+}
+
+/* A line into claimed work is underway — the claim's color, a wider dash. */
+.edge.is-claimed {
+  stroke: var(--state-claimed);
+  stroke-opacity: 0.7;
+  stroke-dasharray: 7 5;
 }
 
 /* Hovering a row answers "what exactly is this waiting on": its chain's rail and every edge it
@@ -255,7 +257,7 @@
 
 /*
  * The accordion of strides. Pixel values that are NOT on the --sp-* scale are ledger-derived:
- * the svg renders at 1.25× its 840-unit viewBox, so 3.125px (trunk), 45px/25px (flag halo and
+ * the svg renders at 1.25× its 900-unit viewBox, so 3.125px (trunk), 45px/25px (flag halo and
  * glyph), and 11.25px / 18.125px / 26.25px (caption and destination type) are the ledger's own
  * dimensions expressed in CSS, and stay exact rather than rounded to the scale.
  */
@@ -300,6 +302,22 @@
 .fl-trigger::after {
   top: 50%;
   bottom: 0;
+}
+
+/*
+ * An open map's destination is still ahead: its trigger rail is the ledger's dashed trunk — same
+ * rendered width (1.75 units → 2.1875px) on the same center, the dash rhythm of the svg's
+ * "3 5" at scale — not the walked road. It grows solid the day the map closes.
+ */
+.fl-block.is-charted .fl-trigger::before,
+.fl-block.is-charted .fl-trigger::after {
+  left: 53.9px;
+  width: 2.1875px;
+  background: repeating-linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--muted) 45%, var(--bg)) 0 3.75px,
+    transparent 3.75px 10px
+  );
 }
 
 /* Nothing is drawn above the head flag — a project's future past its active map is unimagined. */

@@ -10,9 +10,11 @@ import { STATE_META } from './state-meta.ts'
  * text column through three sections (fog, charted ahead, ground covered) with the trunk's rail
  * running through all of them: dashed ahead, solid behind, the transition is HEAD.
  *
- * Two live behaviours the prototype deferred: hovering a row highlights its chain's rail and every
- * edge it touches — the answer to the drill's one HARD question, "what exactly is this waiting
- * on" — and rows whose state just changed under the 30s poll animate in.
+ * Two live behaviours the prototype deferred: hovering a row lights its dependency lineage — the
+ * ticket, everything it waits on transitively, its direct dependents, and exactly the edges
+ * between those tickets, nodes and edges always agreeing — the answer to the drill's one HARD
+ * question, "what exactly is this waiting on". And rows whose state just changed under the 30s
+ * poll animate in.
  */
 export function MapLedger({
   map,
@@ -27,22 +29,35 @@ export function MapLedger({
   const ledger = useMemo(() => buildLedger(map), [map])
   const fresh = useFreshTickets(map)
   const [hover, setHover] = useState<number | null>(null)
+  const stateOf = useMemo(() => new Map(map.tickets.map((t) => [t.number, t.state])), [map])
 
+  // The hovered ticket, its blockers walked transitively upstream, and its direct dependents.
   const related = useMemo(() => {
     if (hover === null) return null
-    return {
-      chainId: ledger.chainIdOf.get(hover) ?? null,
-      tickets: new Set([hover, ...(ledger.neighbors.get(hover) ?? [])]),
+    const tickets = new Set<number>([hover])
+    const stack = [hover]
+    for (let n = stack.pop(); n !== undefined; n = stack.pop()) {
+      for (const b of ledger.blockersOf.get(n) ?? []) {
+        if (!tickets.has(b)) {
+          tickets.add(b)
+          stack.push(b)
+        }
+      }
     }
+    for (const d of ledger.dependentsOf.get(hover) ?? []) tickets.add(d)
+    return { tickets }
   }, [hover, ledger])
 
+  // An edge lights when it touches the hovered ticket itself — scenery included — or when it is
+  // a real blocked-by whose both ends are lit, so the highlight follows the graph, not the lanes.
   const isHotEdge = (edge: LedgerEdge): boolean => {
     if (!related) return false
     if (edge.from === hover || edge.to === hover) return true
     return (
-      (edge.kind === 'fork' || edge.kind === 'run' || edge.kind === 'land') &&
-      related.chainId !== null &&
-      edge.chainId === related.chainId
+      edge.isDependency &&
+      edge.from !== null &&
+      related.tickets.has(edge.from) &&
+      related.tickets.has(edge.to)
     )
   }
 
@@ -57,21 +72,30 @@ export function MapLedger({
       >
         <title>{map.title}</title>
 
-        {/* section boundaries — captions live in the text column like every other word */}
-        <Section ledger={ledger} y={ledger.sepFog} label="fog · not yet specified" />
-        <Section ledger={ledger} y={ledger.sepAhead} label="charted ahead" />
+        {/* section boundaries — captions live in the text column like every other word. A map
+            that reached its destination has no fog left to lift: what remains was left out on
+            purpose. An empty charted-ahead section is not drawn at all. */}
+        <Section
+          ledger={ledger}
+          y={ledger.sepFog}
+          label={map.isOpen ? 'fog · not yet specified' : 'fog · left out of scope'}
+        />
+        {ledger.rows.length > 0 && (
+          <Section ledger={ledger} y={ledger.sepAhead} label="charted ahead" />
+        )}
         <Section ledger={ledger} y={ledger.sepBehind} label="ground covered" />
 
-        {/* the trunk's lane, one line through every section: dashed ahead, solid behind */}
+        {/* the trunk's lane: dashed while the destination is ahead — solid once the map closes,
+            the whole road reached */}
         <line
           x1={ledger.gutterX}
           y1={ledger.trunkDashed.y1}
           x2={ledger.gutterX}
           y2={ledger.trunkDashed.y2}
-          stroke="var(--muted)"
-          strokeWidth="1.75"
-          strokeOpacity="0.45"
-          strokeDasharray="3 5"
+          stroke={map.isOpen ? 'var(--muted)' : 'var(--fg)'}
+          strokeWidth={map.isOpen ? 1.75 : 2.5}
+          strokeOpacity={map.isOpen ? 0.45 : 0.55}
+          strokeDasharray={map.isOpen ? '3 5' : undefined}
           strokeLinecap="round"
         />
         {(ledger.trunkSolid || trunkToEdge) && (
@@ -87,24 +111,27 @@ export function MapLedger({
           />
         )}
 
-        {/* the braid: forks off HEAD, straight rails through rows, merges into surviving rails */}
-        {ledger.edges.map((edge) => (
-          <path
-            key={edge.key}
-            className={[
-              'edge',
-              `edge-${edge.kind}`,
-              edge.walked ? 'is-walked' : '',
-              edge.isClaimed ? 'is-claimed' : '',
-              isHotEdge(edge) ? 'is-hot' : '',
-            ]
-              .filter(Boolean)
-              .join(' ')}
-            d={edge.path}
-            fill="none"
-            strokeLinecap="round"
-          />
-        ))}
+        {/* the weave: rails, merges, and origin forks — solid into settled work, dashed ahead */}
+        {ledger.edges.map((edge) => {
+          const target = stateOf.get(edge.to)
+          return (
+            <path
+              key={edge.key}
+              className={[
+                'edge',
+                `edge-${edge.kind}`,
+                target === 'closed' ? 'is-settled' : '',
+                target === 'claimed' ? 'is-claimed' : '',
+                isHotEdge(edge) ? 'is-hot' : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              d={edge.path}
+              fill="none"
+              strokeLinecap="round"
+            />
+          )
+        })}
 
         {/* ahead rows */}
         {ledger.rows.map(({ ticket, x, y }) => {

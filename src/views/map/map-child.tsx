@@ -53,9 +53,13 @@ export function MapChild({
     </div>
   )
 
+  // An open map's destination is still ahead: its trigger rail stays dashed until the map
+  // closes and the whole road grows solid.
+  const charted = map.isOpen ? ' is-charted' : ''
+
   if (solo) {
     return (
-      <article className="fl-block is-open">
+      <article className={`fl-block is-open${charted}`}>
         <div className="fl-trigger is-static">{header}</div>
         {child}
       </article>
@@ -63,7 +67,7 @@ export function MapChild({
   }
 
   return (
-    <article className={`fl-block${open ? ' is-open' : ''}`}>
+    <article className={`fl-block${open ? ' is-open' : ''}${charted}`}>
       <button type="button" className="fl-trigger" onClick={() => onToggle(map.number)}>
         {header}
       </button>
