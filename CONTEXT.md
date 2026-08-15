@@ -40,6 +40,13 @@ secondary. A project's future past its active map is not fog — it is unimagine
 drawn there.
 _Avoid_: current map, default map, main map
 
+**Change feed**:
+The stream of domain events — a ticket closed, a frontier changed, a map appeared — derived by
+diffing consecutive snapshots of roadmap state. Source-blind by construction: whether a change was
+caught by a webhook or a reconciling sweep is invisible to consumers. Triggers subscribe to the
+feed, never to transports.
+_Avoid_: webhook stream, event log, activity feed
+
 **Resting**:
 The state of a project whose maps are all closed — between efforts, its trace intact. A legitimate,
 visible state, not an error or an empty case.
