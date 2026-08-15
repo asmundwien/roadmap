@@ -1,5 +1,5 @@
+import type { Ticket, TicketState, TicketType, WayfinderMap } from '@roadmap/contracts'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Ticket, TicketState, TicketType, WayfinderMap } from '../../wayfinder/types.ts'
 import { stripInlineMarkdown } from '../gist.ts'
 import { buildLedger, type Ledger, type LedgerEdge } from './geometry.ts'
 import './map.css'

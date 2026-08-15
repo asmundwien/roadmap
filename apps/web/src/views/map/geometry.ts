@@ -1,4 +1,4 @@
-import type { Ticket, WayfinderMap } from '../../wayfinder/types.ts'
+import type { Ticket, WayfinderMap } from '@roadmap/contracts'
 import { stripInlineMarkdown } from '../gist.ts'
 
 /**

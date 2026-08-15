@@ -8,12 +8,15 @@ Guidance for Claude Code working in this repo.
 projects on GitHub. It discovers every repo carrying a `wayfinder:map` issue and renders each effort
 as a living map: the dependency graph of tickets alongside the decisions made and the fog ahead.
 
-Read-only, solo user, local-first. v1 is a browser-only SPA you run with `pnpm dev` — **there is no
-backend**, and adding one needs a decision on the map, not a commit.
+Read-only, solo user, local-first. The repo is a pnpm workspace: `apps/web` is the SPA, `apps/server`
+is the v3 server (an empty shell until [its ticket](https://github.com/asmundwien/roadmap/issues/20)
+lands), and `packages/contracts` (`@roadmap/contracts`) holds the shared domain vocabulary — exactly
+what will cross the WebSocket.
 
 ## Commands
 
-Run everything from the repo root; pnpm comes from corepack.
+Run everything from the repo root; pnpm comes from corepack. The root scripts delegate into the
+workspaces, so the names below are unchanged from the single-package days.
 
 | Command          | What it does                              |
 | ---------------- | ----------------------------------------- |
@@ -30,10 +33,15 @@ Run everything from the repo root; pnpm comes from corepack.
 
 ## Stack
 
-Vite + React 19 + TypeScript, pnpm, Biome for lint/format, Vitest for tests.
+Vite + React 19 + TypeScript, pnpm workspaces, Biome for lint/format (one root `biome.json`),
+Vitest for tests.
 
-Vitest runs in the `node` environment and picks up `src/**/*.test.ts` — no DOM, because nothing has
-needed one yet. The first component test that does should add jsdom and Testing Library then.
+Vitest runs in the `node` environment and picks up `apps/web/src/**/*.test.ts` — no DOM, because
+nothing has needed one yet. The first component test that does should add jsdom and Testing Library
+then.
+
+`.env.local` stays at the repo root — the web app reaches it via `envDir` in its Vite config, and
+the server will read the same file.
 
 ## Conventions
 
@@ -59,12 +67,15 @@ ship inside the bundle.
 
 Views never fetch. They read `useRoadmap()` and get a snapshot; everything below it is already built:
 
-- `src/github/` — transport. `client.ts` (auth, GraphQL errors, REST ETag replay), `discovery.ts`
-  (REST search for `wayfinder:map`), `map-query.ts` (the aliased GraphQL query and its batching).
-- `src/wayfinder/` — domain. `types.ts` is the vocabulary; `map-body.ts` parses the map template
-  tolerantly; `tickets.ts` derives `closed | blocked | claimed | frontier`; `from-github.ts` turns
-  raw payloads into `Project[]`.
-- `src/store/` — the poll loop and its React binding (`RoadmapProvider` / `useRoadmap`).
+- `packages/contracts/` — the domain vocabulary (`Project`, `WayfinderMap`, `Ticket`, states…),
+  imported everywhere as `@roadmap/contracts`.
+- `apps/web/src/github/` — transport. `client.ts` (auth, GraphQL errors, REST ETag replay),
+  `discovery.ts` (REST search for `wayfinder:map`), `map-query.ts` (the aliased GraphQL query and
+  its batching).
+- `apps/web/src/wayfinder/` — domain logic. `map-body.ts` parses the map template tolerantly;
+  `tickets.ts` derives `closed | blocked | claimed | frontier`; `from-github.ts` turns raw payloads
+  into `Project[]`.
+- `apps/web/src/store/` — the poll loop and its React binding (`RoadmapProvider` / `useRoadmap`).
 
 Two loops: maps every 90s, discovery every 5min. GraphQL polls can't be conditional (no ETag on
 `POST /graphql`), so the only budget lever is the interval — the store stretches it when
@@ -75,9 +86,10 @@ Data that may be partial says so rather than looking whole: `ticketsTruncated`, 
 
 ## How the work is organized
 
-This repo is driven by a **wayfinder map** — [issue #1](https://github.com/asmundwien/roadmap/issues/1).
-The map holds the destination, the decisions made so far, and the fog still ahead; its child issues
-are the tickets. Before starting work, read the map and take a ticket from the frontier (open,
+This repo is driven by **wayfinder maps** — [v1 (issue #1)](https://github.com/asmundwien/roadmap/issues/1)
+is the closed history; [v3: live events (issue #16)](https://github.com/asmundwien/roadmap/issues/16)
+is the active effort. A map holds the destination, the decisions made so far, and the fog still
+ahead; its child issues are the tickets. Before starting work, read the map and take a ticket from the frontier (open,
 unblocked, unassigned). Use the `/wayfinder` skill rather than freelancing new work.
 
 Note that this map carries **execution**, not just planning: its task tickets deliver working code.

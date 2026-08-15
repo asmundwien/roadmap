@@ -1,7 +1,7 @@
+import type { Blocker, Project, Ticket, WayfinderMap } from '@roadmap/contracts'
 import type { FetchedMap, RawSubIssue } from '../github/map-query.ts'
 import { parseMapBody } from './map-body.ts'
 import { deriveTicketState, frontierOf, ticketTypeFromLabels } from './tickets.ts'
-import type { Blocker, Project, Ticket, WayfinderMap } from './types.ts'
 
 /** Turns one map's raw GraphQL payload into the domain object the views read. */
 export function toWayfinderMap(fetched: FetchedMap): WayfinderMap {

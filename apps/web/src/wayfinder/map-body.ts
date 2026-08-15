@@ -1,4 +1,4 @@
-import type { Decision, MapBody, MapSection } from './types.ts'
+import type { Decision, MapBody, MapSection } from '@roadmap/contracts'
 
 /**
  * Template headings, keyed by their normalised form. The extra keys are drift tolerance: a map

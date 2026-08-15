@@ -1,5 +1,5 @@
+import type { WayfinderMap } from '@roadmap/contracts'
 import { type ReactNode, useMemo } from 'react'
-import type { WayfinderMap } from '../../wayfinder/types.ts'
 import { stripInlineMarkdown } from '../gist.ts'
 import { buildLedger, LEDGER_SCALE } from './geometry.ts'
 import { MapLedger } from './ledger.tsx'

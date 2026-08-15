@@ -1,7 +1,7 @@
+import type { Project, WayfinderMap } from '@roadmap/contracts'
 import { projectHash } from '../router.ts'
 import { useRoadmap } from '../store/roadmap-provider.tsx'
 import { activeMapOf } from '../wayfinder/from-github.ts'
-import type { Project, WayfinderMap } from '../wayfinder/types.ts'
 import { stripInlineMarkdown } from './gist.ts'
 import { formatMonth, formatRecency } from './recency.ts'
 import { SignalMeter } from './signal-meter.tsx'

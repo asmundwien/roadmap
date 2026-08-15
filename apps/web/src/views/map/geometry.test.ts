@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest'
 import type {
   Blocker,
   MapBody,
@@ -6,7 +5,8 @@ import type {
   TicketState,
   TicketType,
   WayfinderMap,
-} from '../../wayfinder/types.ts'
+} from '@roadmap/contracts'
+import { describe, expect, it } from 'vitest'
 import { buildLedger } from './geometry.ts'
 
 const HOME = 'me/repo'

@@ -1,4 +1,4 @@
-import type { TicketState } from '../../wayfinder/types.ts'
+import type { TicketState } from '@roadmap/contracts'
 
 /**
  * A glyph and a word per state, so colour is never the only channel — the dataviz rule for status

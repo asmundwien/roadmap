@@ -1,4 +1,4 @@
-import type { WayfinderMap } from '../wayfinder/types.ts'
+import type { WayfinderMap } from '@roadmap/contracts'
 import { deriveMapSignal, describeMapSignal } from './map-signal.ts'
 
 /**

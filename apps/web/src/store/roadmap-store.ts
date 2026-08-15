@@ -1,8 +1,8 @@
+import type { Project } from '@roadmap/contracts'
 import type { GitHubClient, RateLimit } from '../github/client.ts'
 import { discoverMaps, type MapRef } from '../github/discovery.ts'
 import { fetchMaps } from '../github/map-query.ts'
 import { toProjects } from '../wayfinder/from-github.ts'
-import type { Project } from '../wayfinder/types.ts'
 
 /** The fast loop: map contents, where the frontier actually moves. */
 const MAP_POLL_MS = 90_000

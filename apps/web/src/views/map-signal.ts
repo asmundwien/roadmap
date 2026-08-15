@@ -1,4 +1,4 @@
-import type { WayfinderMap } from '../wayfinder/types.ts'
+import type { WayfinderMap } from '@roadmap/contracts'
 
 /**
  * The numbers behind a map's progress signal: what's decided, what's still open, and how much

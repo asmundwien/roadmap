@@ -1,4 +1,4 @@
-import type { Ticket, TicketState, TicketType } from './types.ts'
+import type { Ticket, TicketState, TicketType } from '@roadmap/contracts'
 
 const TICKET_TYPES: TicketType[] = ['research', 'prototype', 'grilling', 'task']
 const TYPE_LABEL_PREFIX = 'wayfinder:'

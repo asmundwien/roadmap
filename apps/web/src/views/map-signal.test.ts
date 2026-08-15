@@ -1,5 +1,5 @@
+import type { WayfinderMap } from '@roadmap/contracts'
 import { describe, expect, it } from 'vitest'
-import type { WayfinderMap } from '../wayfinder/types.ts'
 import { deriveMapSignal, describeMapSignal } from './map-signal.ts'
 
 function mapWith(overrides: {
