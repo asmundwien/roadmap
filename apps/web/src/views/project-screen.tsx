@@ -1,6 +1,14 @@
 import type { Project, WayfinderMap } from '@roadmap/contracts'
 import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from 'react'
-import { mapHash, type Route, replaceHash } from '../router.ts'
+import {
+  encodeSelection,
+  mapHash,
+  type PanelSelection,
+  type Route,
+  replaceHash,
+  resolveSelection,
+  selectionHash,
+} from '../router.ts'
 import { useRoadmap } from '../store/roadmap-provider.tsx'
 import { activeMapOf } from './active-map.ts'
 import { MapChild } from './map/map-child.tsx'
@@ -8,19 +16,12 @@ import { ledgerSequence } from './map/prototype-ledger.tsx'
 // PROTOTYPE (throwaway): `?variant=` swaps the single-map representation — see prototype-map-child.tsx.
 import {
   type DrawerSelection,
-  decodeSel,
-  encodeSel,
   PrototypeMapChild,
   PrototypePanel,
   prototypeMapKey,
   sameSelection,
 } from './map/prototype-map-child.tsx'
-import {
-  PrototypeSwitcher,
-  usePrototypeParam,
-  usePrototypeVariant,
-  writePrototypeUrl,
-} from './map/prototype-switcher.tsx'
+import { PrototypeSwitcher, usePrototypeVariant } from './map/prototype-switcher.tsx'
 import { LEGEND_ORDER, STATE_META } from './map/state-meta.ts'
 import './views.css'
 
@@ -45,6 +46,7 @@ export function ProjectScreen({ route }: { route: Extract<Route, { screen: 'proj
         key={project.nameWithOwner}
         project={project}
         selected={route.selected}
+        selection={route.selection}
         disconnected={connection === 'disconnected'}
       />
     )
@@ -89,23 +91,29 @@ export function ProjectScreen({ route }: { route: Extract<Route, { screen: 'proj
  * beside the page and eats its width, so the map stays clickable and picks swap the panel's
  * content without a close in between.
  *
- * ALL state lives in the URL: the hash pins the open map, `?sel=` names the panel's item, and
- * both resolve against the live snapshot on every render — no useState mirrors anywhere. The
- * prev/next sequence spans the WHOLE trace in on-screen order, so stepping past a map's edge
- * walks into the neighbouring map: the pin follows the pick, and the accordion unfolds with it.
+ * ALL state lives in the hash: `#/owner/repo/<map>` pins the open map and its selection segment
+ * names the panel's item — one router owns it all, resolved against the live snapshot on every
+ * render, no useState mirrors anywhere. The prev/next sequence spans the WHOLE trace in
+ * on-screen order, so stepping past a map's edge walks into the neighbouring map: the pin
+ * follows the pick, and the accordion unfolds with it.
  */
 function PrototypeProjectScreen({
   project,
   selected,
+  selection,
   disconnected,
 }: {
   project: Project
   selected: number | null
+  selection: PanelSelection | null
   disconnected: boolean
 }) {
-  const rawSel = usePrototypeParam('sel')
   const trace = [...project.openMaps, ...project.closedMaps]
-  const pick = decodeSel(rawSel, trace)
+  // The selection rides the pinned map: a stale pin or a vanished item is no selection.
+  const pinnedMap = selected !== null ? trace.find((m) => m.number === selected) : undefined
+  const item = pinnedMap && selection ? resolveSelection(pinnedMap, selection) : null
+  const pick: { map: WayfinderMap; item: DrawerSelection } | null =
+    pinnedMap && item ? { map: pinnedMap, item } : null
 
   // Not state — the URL is the only truth. Like the fold keeping its children mounted, the rail
   // needs content to move while collapsing, so the last pick lingers for the closing animation.
@@ -127,34 +135,37 @@ function PrototypeProjectScreen({
       )
     : -1
 
-  // Selecting writes sel AND re-pins the hash to the item's map in one URL update, so the
-  // accordion always unfolds the map the panel is describing. Activating the item that is
-  // already selected deselects it — the panel folds shut.
-  const close = () => writePrototypeUrl((url) => url.searchParams.delete('sel'))
-  const select = (map: WayfinderMap, item: DrawerSelection) => {
-    if (pick && pick.map.number === map.number && sameSelection(pick.item, item)) {
+  // Selecting names the item's map AND its selection in one hash write, so the accordion always
+  // unfolds the map the panel is describing. Activating the item that is already selected
+  // deselects it — the panel folds shut, the pin stays.
+  const close = () => {
+    if (selected !== null)
+      replaceHash(mapHash({ owner: project.owner, repo: project.repo, number: selected }))
+  }
+  const select = (map: WayfinderMap, selectedItem: DrawerSelection) => {
+    if (pick && pick.map.number === map.number && sameSelection(pick.item, selectedItem)) {
       close()
       return
     }
-    writePrototypeUrl((url) => {
-      url.searchParams.set('sel', encodeSel(map, item))
-      url.hash = mapHash({ owner: map.owner, repo: map.repo, number: map.number })
-    })
+    const encoded = encodeSelection(map, selectedItem)
+    if (encoded) replaceHash(selectionHash(map, encoded))
   }
   const step = (delta: number) => {
     const target = flat[at + delta]
     if (target) select(target.map, target.item)
   }
 
-  // Escape closes the panel, like its » button.
+  // Escape closes the panel, like its » button — keyed off the hash's selection segment, so it
+  // also cleans a segment that resolved to nothing.
   useEffect(() => {
-    if (rawSel === null) return
+    if (selection === null || selected === null) return
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') writePrototypeUrl((url) => url.searchParams.delete('sel'))
+      if (event.key === 'Escape')
+        replaceHash(mapHash({ owner: project.owner, repo: project.repo, number: selected }))
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [rawSel])
+  }, [selection, selected, project.owner, project.repo])
 
   // The whole navigation is ONE tab stop: roving tabindex puts Tab on the selected item (or the
   // first destination). ArrowUp/Down move a keyboard HOVER — DOM focus roving over the visible

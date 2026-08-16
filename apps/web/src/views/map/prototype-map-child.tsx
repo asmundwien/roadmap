@@ -22,65 +22,15 @@ import { STATE_META } from './state-meta.ts'
  * `current` (no param) renders the production MapChild untouched, as the baseline.
  */
 
-/** Everything the panel can show: the map's own prose, or one clicked item. */
+/**
+ * Everything the panel can show: the map's own prose, or one clicked item. Structurally the
+ * router's `ResolvedSelection` — the hash carries the pick (fog/scope as list indices) and
+ * router.ts owns the codec; this is the view's resolved, text-carrying side of it.
+ */
 export type DrawerSelection = LedgerSelection | { kind: 'map' }
 
 export function prototypeMapKey(map: WayfinderMap): string {
   return `${map.nameWithOwner}#${map.number}`
-}
-
-/** A selection resolved from the URL against the live snapshot. */
-export interface UrlPick {
-  map: WayfinderMap
-  item: DrawerSelection
-}
-
-/**
- * The `?sel=` codec — the URL is the ONLY store of what the panel shows:
- * `<map>.map` · `<map>.ticket.<n>` · `<map>.fog.<i>` · `<map>.scope.<i>` · `<map>.scope-all`.
- * Fog and scope entries are title-less body bullets, so they travel as list indices and resolve
- * back to text against the live snapshot on every render — never a stored object.
- */
-export function encodeSel(map: WayfinderMap, item: DrawerSelection): string {
-  switch (item.kind) {
-    case 'map':
-      return `${map.number}.map`
-    case 'scope-all':
-      return `${map.number}.scope-all`
-    case 'ticket':
-      return `${map.number}.ticket.${item.number}`
-    case 'fog':
-      return `${map.number}.fog.${map.body.notYetSpecified.map(stripInlineMarkdown).indexOf(item.text)}`
-    case 'scope':
-      return `${map.number}.scope.${map.body.outOfScope.map(stripInlineMarkdown).indexOf(item.text)}`
-  }
-}
-
-/** Anything that doesn't resolve — stale map, vanished index — is no selection, not an error. */
-export function decodeSel(raw: string | null, trace: WayfinderMap[]): UrlPick | null {
-  if (raw === null) return null
-  const [mapPart, kind, arg] = raw.split('.')
-  const map = trace.find((m) => String(m.number) === mapPart)
-  if (!map || kind === undefined) return null
-  const item = decodeItem(map, kind, arg)
-  return item !== null ? { map, item } : null
-}
-
-function decodeItem(map: WayfinderMap, kind: string, arg: string | undefined) {
-  if (kind === 'map' || kind === 'scope-all') return { kind } as DrawerSelection
-  if (kind === 'ticket') {
-    const number = Number(arg)
-    return Number.isInteger(number) ? ({ kind: 'ticket', number } as DrawerSelection) : null
-  }
-  if (kind === 'fog' || kind === 'scope') {
-    const index = Number(arg)
-    const list = (kind === 'fog' ? map.body.notYetSpecified : map.body.outOfScope).map(
-      stripInlineMarkdown,
-    )
-    const text = Number.isInteger(index) ? list[index] : undefined
-    return text !== undefined ? ({ kind, text } as DrawerSelection) : null
-  }
-  return null
 }
 
 export function PrototypeMapChild({
