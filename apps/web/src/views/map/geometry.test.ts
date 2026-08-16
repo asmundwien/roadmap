@@ -33,6 +33,7 @@ function ticket(
     number,
     title: `Ticket ${number}`,
     url: `https://example.test/${HOME}/${number}`,
+    body: '',
     type,
     state,
     isClaimed: state === 'claimed',

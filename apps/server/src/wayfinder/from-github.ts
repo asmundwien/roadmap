@@ -51,6 +51,7 @@ function toTicket(raw: RawSubIssue): Ticket {
     number: raw.number,
     title: raw.title,
     url: raw.url,
+    body: raw.body ?? '',
     type: ticketTypeFromLabels(labels),
     state: deriveTicketState({ isOpen, isClaimed, hasOpenBlockers }),
     isClaimed,

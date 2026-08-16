@@ -30,6 +30,8 @@ export interface Ticket {
   number: number
   title: string
   url: string
+  /** The issue body as written — markdown, unrendered; empty when the issue has none. */
+  body: string
   type: TicketType
   state: TicketState
   /** Independent of `state`, which collapses them: a ticket can be blocked *and* claimed. */

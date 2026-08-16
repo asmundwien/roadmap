@@ -7,6 +7,7 @@ function ticket(number: number, state: TicketState, overrides: Partial<Ticket> =
     number,
     title: `Ticket ${number}`,
     url: `https://github.com/a/roadmap/issues/${number}`,
+    body: '',
     type: 'task',
     state,
     isClaimed: state === 'claimed',

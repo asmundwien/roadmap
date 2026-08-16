@@ -1,0 +1,451 @@
+/*
+ * PROTOTYPE — throwaway styles for the single-map representation rework. The whole pfl-* family
+ * dies with prototype-map-child.tsx / prototype-ledger.tsx / prototype-switcher.tsx.
+ */
+
+/* ------------------------------------------------------------- the inverted trigger */
+
+.pfl-title {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+}
+
+.pfl-gist {
+  max-width: 46rem;
+  font-size: 13.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pfl-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.pfl-flaw {
+  padding: 0 0.45rem;
+  border: 1px solid var(--goal);
+  border-radius: 999px;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--goal);
+}
+
+/*
+ * The destination trigger is an item like any other: same squared band, same --edge rule, same
+ * wash — the selectors mirror map.css's own hover selector with the .pfl-screen prefix so they
+ * outrank its rounded wash. The focus ring is the selection band's job, as on the rows.
+ */
+.pfl-screen .fl-trigger {
+  cursor: pointer;
+}
+
+.pfl-screen .fl-hit:focus {
+  outline: none;
+}
+
+.pfl-screen:where(:not(.is-kbnav)) .fl-trigger:hover,
+.pfl-screen:where(:not(.is-kbnav)) .fl-trigger:not(.is-static):hover:not(:has(.fl-meta a:hover)),
+.pfl-screen:where(.is-kbnav) .fl-trigger:has(.fl-hit:focus) {
+  background: var(--wash);
+  border-radius: 0;
+  box-shadow: inset 0 0 0 1px var(--edge);
+}
+
+/* In keyboard mode the cursor's resting trigger shows nothing — including map.css's own wash —
+ * unless the keyboard hover itself sits there (the focused trigger keeps its band). */
+.pfl-screen:where(.is-kbnav)
+.fl-trigger:not(.is-static):hover:not(:has(.fl-meta a:hover)):not(:has(.fl-hit:focus)) {
+  background: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.pfl-screen .fl-trigger.is-selected,
+.pfl-screen .fl-trigger.is-selected:not(.is-static):hover:not(:has(.fl-meta a:hover)) {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  border-radius: 0;
+  box-shadow: inset 0 0 0 1px var(--edge);
+}
+
+/* Keyboard focus rides on top of whichever band is underneath — a ring, never a fill. Gated
+ * like the band: the ring is part of the same hover entity, so the pointer taking over clears
+ * it; the next Tab or arrow brings it back. */
+.pfl-screen:where(.is-kbnav) .fl-trigger:has(.fl-hit:focus-visible),
+.pfl-screen:where(.is-kbnav) .fl-trigger.is-selected:has(.fl-hit:focus-visible) {
+  border-radius: 0;
+  box-shadow: inset 0 0 0 2px var(--pfl-ring);
+}
+
+/* ------------------------------------------------------------- the cartouche card */
+
+/* The printed-map legend box: a double rule, squarer than the app's hover radius. */
+.pfl-cartouche {
+  padding: var(--sp-4);
+  border: 1px solid var(--edge);
+  outline: 1px solid var(--edge);
+  outline-offset: 2px;
+  border-radius: 4px;
+  background: var(--bg);
+  font-size: 0.85rem;
+}
+
+.pfl-cart-caption {
+  margin: 0 0 var(--sp-2);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--goal);
+}
+
+.pfl-cart-dest {
+  margin: 0;
+  white-space: pre-line;
+  color: var(--fg);
+}
+
+.pfl-cart-head {
+  margin: var(--sp-3) 0 var(--sp-1);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.pfl-cartouche ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--muted);
+}
+
+.pfl-cartouche li {
+  margin: 0.15rem 0;
+}
+
+.pfl-struck {
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent);
+}
+
+.pfl-cart-warn {
+  margin: var(--sp-3) 0 0;
+  font-size: 0.8rem;
+  color: var(--goal);
+}
+
+/* ------------------------------------------------------------- drawer item content */
+
+.pfl-item-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.pfl-item-state {
+  margin: var(--sp-1) 0 var(--sp-3);
+  font-size: 0.8rem;
+}
+
+/* THE one presentation of a referenced item: the title over its state word, row-shaped like the
+ * ledger's own rows. On-map references are buttons that select; off-map ones link to GitHub. */
+.pfl-item-links {
+  display: flex;
+  flex-direction: column;
+}
+
+.pfl-item-link {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  margin: 0 calc(-1 * var(--sp-2));
+  padding: var(--sp-2);
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  color: var(--fg);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.pfl-item-link:hover {
+  background: var(--wash);
+  box-shadow: inset 0 0 0 1px var(--edge);
+}
+
+.pfl-item-link-title {
+  font-weight: 500;
+}
+
+.pfl-item-link-state {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+/* A full-column rule between the issue body and the blocked-by list: it breaks out of the
+ * panel body's side padding, so it spans the whole column like the navbar's own borders. */
+.pfl-rule {
+  margin: var(--sp-4) calc(-1 * var(--sp-6));
+  border: none;
+  border-top: 1px solid var(--edge);
+}
+
+/* Rides just under the caption, above the title — the way out to the source, always in reach. */
+.pfl-gh-row {
+  margin: 0 0 var(--sp-3);
+}
+
+.pfl-gh {
+  display: inline-block;
+  padding: 0.25rem 0.7rem;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  font-size: 0.8rem;
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.pfl-gh:hover {
+  border-color: var(--muted);
+}
+
+/* ------------------------------------------------------------- the docked panel */
+
+/*
+ * Not an overlay: the panel flexes in beside the page and eats its width, so the map stays
+ * clickable underneath and picks swap the panel's content with no close in between. When the
+ * panel leaves the map column too narrow for the pinned-width ledger, the column scrolls
+ * sideways within itself.
+ */
+.pfl-screen {
+  display: flex;
+  /* The keyboard-focus ring, shared by rows, triggers, and the panel's buttons: hover is the
+   * wash, selected is the deep band, and THIS says where Tab and the arrows are. */
+  --pfl-ring: color-mix(in srgb, var(--fg) 55%, transparent);
+}
+
+/* No right padding: the map column ends where the panel begins — rules, bands, and border are
+ * one connected surface, no white gap between the containers and the panel. */
+.pfl-screen > .shell {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  padding-right: 0;
+}
+
+/*
+ * The rail is a horizontal accordion — the fold's 0fr→1fr grammar, sideways. Always mounted, so
+ * open and close both animate; it stretches the flex row's full height, so the border runs the
+ * whole page even when the panel's content is short.
+ */
+.pfl-panel-rail {
+  flex: none;
+  display: grid;
+  grid-template-columns: 0fr;
+  transition: grid-template-columns 340ms ease;
+}
+
+.pfl-panel-rail.is-open {
+  grid-template-columns: 1fr;
+}
+
+/* clip, not hidden: hidden would make this a scroll container and unstick the panel inside. */
+.pfl-rail-inner {
+  min-width: 0;
+  overflow: clip;
+  border-left: 1px solid var(--edge);
+  background: var(--bg);
+  transition: border-color 340ms ease;
+}
+
+.pfl-panel-rail:not(.is-open) .pfl-rail-inner {
+  border-left-color: transparent;
+}
+
+/* 42px is the site header's rendered height — the panel docks just beneath its sticky bar. */
+.pfl-panel {
+  position: sticky;
+  top: 42px;
+  width: min(26rem, 40vw);
+  max-height: calc(100dvh - 42px);
+  overflow-y: auto;
+}
+
+.pfl-panel .pfl-cartouche {
+  padding: 0;
+  border: none;
+  outline: none;
+  background: none;
+}
+
+/* The panel's own navbar: the square » dismiss on the left, then two equal prev/next buttons
+ * filling the rest — all ruled with the sidebar's border. Sticky, so long content scrolls under. */
+.pfl-panel-nav {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  border-bottom: 1px solid var(--edge);
+  background: var(--bg);
+}
+
+.pfl-panel-nav button {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.pfl-panel-nav button + button {
+  border-left: 1px solid var(--edge);
+}
+
+.pfl-panel-nav .pfl-panel-dismiss {
+  flex: 0 0 36px;
+}
+
+.pfl-panel-nav button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.pfl-panel-nav button:hover:not(:disabled) {
+  background: var(--wash);
+  color: var(--fg);
+}
+
+/* Same keyboard-focus ring as the rows and the trigger — one grammar across the whole unit. */
+.pfl-panel-nav button:focus {
+  outline: none;
+}
+
+.pfl-screen:where(.is-kbnav) .pfl-panel-nav button:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--pfl-ring);
+  color: var(--fg);
+}
+
+.pfl-panel-body {
+  padding: var(--sp-4) var(--sp-6) var(--sp-6);
+}
+
+/* ------------------------------------------------------------- clickable rows */
+
+/*
+ * The panel buttons' grammar, adopted by the list: squared bands (no radius), the same --edge
+ * rule, the same wash. Rows and rules overshoot the svg's viewBox (EXT in prototype-ledger) and
+ * the map column's own overflow clips them at exactly the panel border — no gap; hence the
+ * visible overflow here and the crop reaching across the shell's right padding.
+ */
+.pfl-screen .ledger {
+  overflow: visible;
+}
+
+.ledger .row,
+.ledger .pfl-ghost-row {
+  cursor: pointer;
+}
+
+/* The browser's own ring never draws — the row-hit rect carries our focus ring instead. */
+.pfl-screen .ledger .row:focus,
+.pfl-screen .ledger .pfl-ghost-row:focus {
+  outline: none;
+}
+
+.pfl-screen .ledger .row-hit {
+  rx: 0;
+}
+
+/*
+ * The hover is ONE entity: in pointer mode (`:not(.is-kbnav)`) it is the row under the cursor;
+ * once the keyboard moves it (`.is-kbnav`) it is the focused row, and the cursor's resting row
+ * shows nothing until the mouse moves again and snaps the entity back. `:where()` keeps the
+ * gates specificity-neutral so the selected band below still wins ties.
+ */
+.pfl-screen:where(:not(.is-kbnav)) .ledger .row:hover .row-hit,
+.pfl-screen:where(:not(.is-kbnav)) .ledger .pfl-ghost-row:hover .row-hit,
+.pfl-screen:where(.is-kbnav) .ledger .row:focus .row-hit,
+.pfl-screen:where(.is-kbnav) .ledger .pfl-ghost-row:focus .row-hit {
+  fill: var(--wash);
+  stroke: var(--edge);
+}
+
+.pfl-screen .ledger .row.is-selected .row-hit,
+.pfl-screen .ledger .pfl-ghost-row.is-selected .row-hit {
+  fill: color-mix(in srgb, var(--fg) 8%, transparent);
+  stroke: var(--edge);
+}
+
+/* Keyboard focus rides on top of whichever band is underneath — a ring, never a fill — and it
+ * clears with the rest of the keyboard hover when the pointer takes over. */
+.pfl-screen:where(.is-kbnav) .ledger .row:focus-visible .row-hit,
+.pfl-screen:where(.is-kbnav) .ledger .pfl-ghost-row:focus-visible .row-hit {
+  stroke: var(--pfl-ring);
+  stroke-width: 2;
+}
+
+/* ------------------------------------------------------------- ⊘ scope stops in the fog */
+
+.pfl-scope-title {
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent);
+}
+
+/* ------------------------------------------------------------- the variant switcher bar */
+
+/* Deliberately alien to the page — an inverted pill, obviously not part of the design. */
+.pfl-switcher {
+  position: fixed;
+  bottom: var(--sp-4);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: 999px;
+  background: var(--fg);
+  color: var(--bg);
+  font-size: 0.78rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.pfl-switcher button {
+  padding: 0 var(--sp-1);
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 0.95rem;
+  color: inherit;
+  cursor: pointer;
+}
+
+.pfl-switcher-label {
+  min-width: 17rem;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pfl-panel-rail,
+  .pfl-rail-inner {
+    transition: none;
+  }
+}
