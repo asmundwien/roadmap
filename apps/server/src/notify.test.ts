@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ChangeEvent, EventTicket } from './change-feed.ts'
-import { createNotifier } from './notify.ts'
+import { createNotifier, NOTIFY_ICON } from './notify.ts'
 
 function eventTicket(number: number): EventTicket {
   return {
@@ -39,6 +39,8 @@ describe('createNotifier', () => {
         'https://github.com/a/roadmap/issues/2',
         '-group',
         'https://github.com/a/roadmap/issues/2',
+        '-contentImage',
+        NOTIFY_ICON,
       ],
       [
         '-title',
@@ -51,6 +53,8 @@ describe('createNotifier', () => {
         'https://github.com/a/roadmap/issues/3',
         '-group',
         'https://github.com/a/roadmap/issues/3',
+        '-contentImage',
+        NOTIFY_ICON,
       ],
     ])
   })

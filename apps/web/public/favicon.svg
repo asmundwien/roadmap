@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- The waypoint-flag tile — same mark as the notification icon, legible on any tab strip. -->
+  <title>Roadmap</title>
+  <rect width="512" height="512" rx="115" fill="#1c1b1a" />
+  <g transform="translate(41.5,48) scale(13)">
+    <path d="M9 3.5v25" fill="none" stroke="#b5b3ae" stroke-width="3" stroke-linecap="round" />
+    <path fill="#dcaf3f" d="M9 4.5h16.5l-4.5 6.25 4.5 6.25H9z" />
+  </g>
+</svg>

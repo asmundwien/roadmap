@@ -1,5 +1,61 @@
 /* Screen styles. Palette tokens live in index.css; everything here consumes them. */
 
+/* The persistent top bar — brand on the left, the socket's health on the right. */
+
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-2) var(--sp-6);
+  border-bottom: 1px solid var(--edge);
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: inherit;
+  text-decoration: none;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.brand svg {
+  display: block;
+}
+
+.conn {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: 0.8rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.conn-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--state-frontier);
+}
+
+.conn-connecting .conn-dot {
+  background: var(--goal);
+}
+
+.conn-disconnected .conn-dot {
+  background: var(--state-blocked);
+}
+
 .list-header {
   margin-bottom: 1.5rem;
 }

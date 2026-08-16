@@ -92,7 +92,7 @@ body {
 .shell {
   max-width: 44rem;
   margin: 0 auto;
-  padding: 4rem 1.5rem;
+  padding: 2.5rem 1.5rem 4rem;
 }
 
 .shell h1 {

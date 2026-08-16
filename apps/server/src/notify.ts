@@ -1,8 +1,16 @@
 import { execFile } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import type { ChangeEvent, EventTicket } from './change-feed.ts'
 
 /** Runs terminal-notifier with the given arguments; rejects if it cannot. */
 export type NotifyRunner = (args: string[]) => Promise<void>
+
+/**
+ * The waypoint-flag tile shown inside each banner. `-contentImage` because modern macOS ignores
+ * `-appIcon` — the banner keeps terminal-notifier's own app icon, but carries the brand beside
+ * the text.
+ */
+export const NOTIFY_ICON = fileURLToPath(new URL('../assets/roadmap.png', import.meta.url))
 
 /**
  * The change feed's first subscriber: a macOS banner (terminal-notifier) for the actions agent
@@ -40,6 +48,8 @@ function bannerArgs(verb: string, ticket: EventTicket): string[] {
     ticket.url,
     '-group',
     ticket.url,
+    '-contentImage',
+    NOTIFY_ICON,
   ]
 }
 

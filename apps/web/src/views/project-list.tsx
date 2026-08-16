@@ -19,12 +19,8 @@ export function ProjectList() {
   return (
     <main className="shell">
       <header className="list-header">
-        <h1>Roadmap</h1>
-        <p className="muted">
-          {connection === 'connecting' && 'Connecting to the server…'}
-          {connection === 'live' && `Live · updated ${formatTime(capturedAt)}`}
-          {connection === 'disconnected' && 'Server unreachable'}
-        </p>
+        <h1>Projects</h1>
+        <p className="muted">Every wayfinder journey, at a glance.</p>
       </header>
 
       {connection === 'disconnected' && (
