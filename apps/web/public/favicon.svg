@@ -1,9 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <!-- The waypoint-flag tile — same mark as the notification icon, legible on any tab strip. -->
+  <!-- The fork knockout tile — the map's atom in ink on the goal-gold field; same mark everywhere. -->
   <title>Roadmap</title>
-  <rect width="512" height="512" rx="115" fill="#1c1b1a" />
-  <g transform="translate(41.5,48) scale(13)">
-    <path d="M9 3.5v25" fill="none" stroke="#b5b3ae" stroke-width="3" stroke-linecap="round" />
-    <path fill="#dcaf3f" d="M9 4.5h16.5l-4.5 6.25 4.5 6.25H9z" />
-  </g>
+  <rect width="512" height="512" rx="115" fill="#dcaf3f" />
+  <path d="M 182 404 V 180" fill="none" stroke="#1c1b1a" stroke-width="36" stroke-linecap="round" />
+  <path d="M 182 300 C 182 226, 328 254, 328 164" fill="none" stroke="#1c1b1a" stroke-width="36" stroke-linecap="round" />
+  <circle cx="328" cy="140" r="36" fill="#1c1b1a" stroke="#dcaf3f" stroke-width="12" />
 </svg>
