@@ -330,10 +330,22 @@
   display: none;
 }
 
-/* The whole row is one thing — say so on hover, with the one shared radius. A solo map's
+/* The toggle itself: an invisible full-row overlay, so the meta line's GitHub link can be a
+ * real anchor beside it instead of illegally inside a button. */
+.fl-hit {
+  position: absolute;
+  inset: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+/* The whole row is one thing — say so on hover, with the one shared radius. Except on the
+ * meta link, where a click goes to GitHub instead of the fold: there the wash drops and the
+ * link speaks for itself, so the hover always shows what a click will do. A solo map's
  * header is not a control, so it neither washes nor invites. */
-.fl-trigger:not(.is-static):hover,
-.fl-trigger:not(.is-static):focus-visible {
+.fl-trigger:not(.is-static):hover:not(:has(.fl-meta a:hover)),
+.fl-trigger:has(.fl-hit:focus-visible) {
   background: var(--wash);
   border-radius: var(--radius);
 }
@@ -396,6 +408,19 @@
   margin: 0;
 }
 
+/* The issue link rides the meta line, lifted above the toggle overlay so it clicks through
+ * to GitHub instead of folding the map. Its own hover brightens it — the affordance that
+ * replaces the row wash while the cursor is here. */
+.fl-meta a {
+  position: relative;
+  z-index: 1;
+  color: inherit;
+}
+
+.fl-meta a:hover {
+  color: var(--fg);
+}
+
 /* ---------------------------------------------------------------- the fold and the crop */
 
 /* The animated single-open fold: 0fr→1fr is the whole transition — no measured heights. */
@@ -453,10 +478,6 @@
   bottom: 0;
   width: 3.125px;
   background: var(--trunk);
-}
-
-.fl-github a {
-  color: inherit;
 }
 
 .map-aside {

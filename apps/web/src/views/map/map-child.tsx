@@ -40,7 +40,9 @@ export function MapChild({
         <span className="fl-caption">the destination</span>
         <span className="fl-dest">{stripInlineMarkdown(map.body.destination)}</span>
         <span className="fl-meta muted small">
-          {map.title} · #{map.number}
+          <a href={map.url} target="_blank" rel="noreferrer">
+            {map.title} · #{map.number}
+          </a>
         </span>
       </span>
     </>
@@ -66,11 +68,21 @@ export function MapChild({
     )
   }
 
+  // The trigger is a div with a full-row overlay button rather than a button wrapping the
+  // header: the meta line's GitHub link couldn't legally live inside one. The link rises
+  // above the overlay on z-index, so the whole row still toggles except the link itself.
   return (
     <article className={`fl-block${open ? ' is-open' : ''}${charted}`}>
-      <button type="button" className="fl-trigger" onClick={() => onToggle(map.number)}>
+      <div className="fl-trigger">
+        <button
+          type="button"
+          className="fl-hit"
+          aria-expanded={open}
+          aria-label={`${map.title} — ${open ? 'fold' : 'unfold'} the map`}
+          onClick={() => onToggle(map.number)}
+        />
         {header}
-      </button>
+      </div>
       <Fold open={open}>{child}</Fold>
     </article>
   )
@@ -104,7 +116,7 @@ function Fold({ open, children }: { open: boolean; children: ReactNode }) {
   )
 }
 
-/** The click-away tier: Notes, Out of scope, data-honesty warnings, and the map's GitHub link. */
+/** The click-away tier: Notes, Out of scope, and data-honesty warnings. */
 function MapAsides({
   map,
   textLeft,
@@ -149,11 +161,6 @@ function MapAsides({
           Map body is missing sections: {map.body.missingSections.join(', ')}.
         </p>
       )}
-      <p className="muted small fl-github">
-        <a href={map.url} target="_blank" rel="noreferrer">
-          #{map.number} on GitHub{map.isOpen ? '' : ' · closed'}
-        </a>
-      </p>
     </footer>
   )
 }
