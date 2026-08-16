@@ -83,8 +83,11 @@ auth, GraphQL errors, REST ETag replay, discovery search, the aliased map query)
 On top of them: `store.ts` (the one snapshot both funnels feed, with coalescing invalidation),
 `invalidation.ts` (delivery payload → refetch decision, per `docs/research/webhook-path.md` §2),
 `webhook.ts` (best-effort HMAC, dedup, ACK-fast receiver), `relay.ts` (smee subscription,
-reconcile on reconnect), `socket.ts` (full-snapshot WebSocket broadcast), `main.ts` (composition:
-baseline sweep, then relay, then a 5-minute reconciler stretched by the rate-limit valve).
+reconcile on reconnect), `socket.ts` (full-snapshot WebSocket broadcast), `change-feed.ts` (the
+trigger seam: consecutive snapshots diffed into source-blind domain events; the baseline is
+observed, never diffed), `notify.ts` (the feed's first subscriber — terminal-notifier banners for
+agent actions: claimed and completed), `main.ts` (composition: baseline sweep, then relay, then a
+5-minute reconciler stretched by the rate-limit valve).
 
 Data that may be partial says so rather than looking whole: `ticketsTruncated`, `blockersTruncated`,
 `unreachable`, and `MapBody.missingSections`. Keep that habit.

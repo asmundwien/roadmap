@@ -1,7 +1,9 @@
 import { createServer } from 'node:http'
 import { fileURLToPath } from 'node:url'
+import { createChangeFeed } from './change-feed.ts'
 import { readServerConfig } from './config.ts'
 import { createGitHubClient } from './github/client.ts'
+import { createNotifier } from './notify.ts'
 import { startRelay } from './relay.ts'
 import { createSnapshotSocket } from './socket.ts'
 import { createSnapshotStore } from './store.ts'
@@ -73,11 +75,15 @@ async function main(): Promise<void> {
     )
   })
 
+  // The change feed sees the baseline as its first snapshot — observed, never diffed — so no
+  // triggers fire from the baseline sweep. Its first subscriber banners what agents do.
+  const feed = createChangeFeed(store)
+  feed.onEvent(createNotifier())
+
   await new Promise<void>((resolve) => server.listen(config.port, resolve))
   console.info(`listening on http://localhost:${config.port} (webhook: /webhook, socket: /ws)`)
 
-  // Baseline before the relay starts: state exists before the first delivery can touch it, and
-  // no triggers fire from this sweep — subscribers attach to the change feed later (#22).
+  // Baseline before the relay starts: state exists before the first delivery can touch it.
   await store.reconcile('baseline')
   console.info(`baseline: ${store.knownMaps().length} maps`)
 
@@ -111,6 +117,7 @@ async function main(): Promise<void> {
   const shutdown = (): void => {
     console.info('shutting down')
     if (reconcileTimer !== null) clearTimeout(reconcileTimer)
+    feed.stop()
     store.stop()
     socket.close()
     server.close()
