@@ -4,10 +4,19 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node --experimental-strip-types src/main.ts"
+    "dev": "node --experimental-strip-types src/main.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",
-    "typescript": "~6.0.2"
+    "@types/ws": "^8.18.1",
+    "typescript": "~6.0.2",
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "@roadmap/contracts": "workspace:*",
+    "smee-client": "^5.0.0",
+    "ws": "^8.21.3"
   }
 }

@@ -9,7 +9,9 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "pnpm --filter @roadmap/web dev",
+    "dev": "pnpm --parallel --filter @roadmap/web --filter @roadmap/server dev",
+    "dev:web": "pnpm --filter @roadmap/web dev",
+    "dev:server": "pnpm --filter @roadmap/server dev",
     "build": "pnpm --filter @roadmap/web build",
     "preview": "pnpm --filter @roadmap/web preview",
     "typecheck": "tsc -b --noEmit",

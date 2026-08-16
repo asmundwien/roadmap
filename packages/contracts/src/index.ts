@@ -122,3 +122,36 @@ export interface Project {
   openMaps: WayfinderMap[]
   closedMaps: WayfinderMap[]
 }
+
+/** A `wayfinder:map` issue found by discovery — enough to address it, not yet its content. */
+export interface MapRef {
+  owner: string
+  repo: string
+  nameWithOwner: string
+  number: number
+}
+
+/** GitHub's self-reported GraphQL budget, echoed by every query that asks for it. */
+export interface RateLimit {
+  cost: number
+  remaining: number
+  limit: number
+  resetAt: string
+}
+
+/**
+ * The whole roadmap state at an instant — what the server owns and broadcasts. Full-snapshot
+ * replace: the wire never carries patches; diffing is the server's internal concern.
+ */
+export interface Snapshot {
+  /** When the server assembled this snapshot, ms since epoch. */
+  capturedAt: number
+  projects: Project[]
+  /** Discovered maps the map query returned nothing for — deleted, renamed, or now invisible. */
+  unreachable: MapRef[]
+  /** The budget as of the last GraphQL fetch; null before the first one reports. */
+  rateLimit: RateLimit | null
+}
+
+/** Everything the server sends over the WebSocket. Today that is one message: the snapshot. */
+export type ServerMessage = { type: 'snapshot'; snapshot: Snapshot }

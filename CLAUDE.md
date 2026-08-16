@@ -9,9 +9,9 @@ projects on GitHub. It discovers every repo carrying a `wayfinder:map` issue and
 as a living map: the dependency graph of tickets alongside the decisions made and the fog ahead.
 
 Read-only, solo user, local-first. The repo is a pnpm workspace: `apps/web` is the SPA, `apps/server`
-is the v3 server (an empty shell until [its ticket](https://github.com/asmundwien/roadmap/issues/20)
-lands), and `packages/contracts` (`@roadmap/contracts`) holds the shared domain vocabulary — exactly
-what will cross the WebSocket.
+is the v3 server (owns the snapshot: webhook invalidations + a reconciling poll feed one in-memory
+state, broadcast whole over WebSocket at `/ws`), and `packages/contracts` (`@roadmap/contracts`)
+holds the shared domain vocabulary — exactly what crosses the WebSocket.
 
 ## Commands
 
@@ -80,6 +80,14 @@ Views never fetch. They read `useRoadmap()` and get a snapshot; everything below
 Two loops: maps every 90s, discovery every 5min. GraphQL polls can't be conditional (no ETag on
 `POST /graphql`), so the only budget lever is the interval — the store stretches it when
 `rateLimit.remaining` drops, and skips polling entirely while the tab is hidden.
+
+The server (`apps/server/src/`) carries its own copy of `github/` and `wayfinder/` — the copy in
+`apps/web` dies when the SPA hands over to the socket ([#21](https://github.com/asmundwien/roadmap/issues/21)).
+On top of them: `store.ts` (the one snapshot both funnels feed, with coalescing invalidation),
+`invalidation.ts` (delivery payload → refetch decision, per `docs/research/webhook-path.md` §2),
+`webhook.ts` (best-effort HMAC, dedup, ACK-fast receiver), `relay.ts` (smee subscription,
+reconcile on reconnect), `socket.ts` (full-snapshot WebSocket broadcast), `main.ts` (composition:
+baseline sweep, then relay, then a 5-minute reconciler stretched by the rate-limit valve).
 
 Data that may be partial says so rather than looking whole: `ticketsTruncated`, `blockersTruncated`,
 `unreachable`, and `MapBody.missingSections`. Keep that habit.
