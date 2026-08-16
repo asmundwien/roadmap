@@ -2,7 +2,7 @@ import type { Project } from '@roadmap/contracts'
 import { useState } from 'react'
 import { mapHash, type Route, replaceHash } from '../router.ts'
 import { useRoadmap } from '../store/roadmap-provider.tsx'
-import { activeMapOf } from '../wayfinder/from-github.ts'
+import { activeMapOf } from './active-map.ts'
 import { MapChild } from './map/map-child.tsx'
 import { LEGEND_ORDER, STATE_META } from './map/state-meta.ts'
 import './views.css'
@@ -14,7 +14,7 @@ import './views.css'
  * project; everything map-specific lives inside each self-contained map child.
  */
 export function ProjectScreen({ route }: { route: Extract<Route, { screen: 'project' }> }) {
-  const { status, projects, error } = useRoadmap()
+  const { connection, projects, capturedAt } = useRoadmap()
 
   const project = projects.find(
     (candidate) => candidate.owner === route.owner && candidate.repo === route.repo,
@@ -26,16 +26,18 @@ export function ProjectScreen({ route }: { route: Extract<Route, { screen: 'proj
         <a href="#/">← All projects</a>
       </p>
 
-      {error !== null && (
+      {connection === 'disconnected' && (
         <p className="banner" role="alert">
-          {error}
-          {project && ' — showing the last good snapshot.'}
+          Server unreachable — reconnecting.
+          {project && ' Showing the last snapshot.'}
         </p>
       )}
 
       {!project && (
         <p className="muted">
-          {status === 'ready' ? `No project at ${route.owner}/${route.repo}.` : 'Loading…'}
+          {capturedAt !== null
+            ? `No project at ${route.owner}/${route.repo}.`
+            : 'Waiting for the server…'}
         </p>
       )}
 

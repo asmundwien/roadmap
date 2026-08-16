@@ -20,7 +20,7 @@ workspaces, so the names below are unchanged from the single-package days.
 
 | Command          | What it does                              |
 | ---------------- | ----------------------------------------- |
-| `pnpm dev`       | Vite dev server (http://localhost:5173)   |
+| `pnpm dev`       | Server (:8790) + Vite (:5173), together   |
 | `pnpm build`     | Typecheck (`tsc -b`) then production build |
 | `pnpm preview`   | Serve the production build                |
 | `pnpm typecheck` | Types only                                |
@@ -40,8 +40,10 @@ Vitest runs in the `node` environment and picks up `apps/web/src/**/*.test.ts` �
 nothing has needed one yet. The first component test that does should add jsdom and Testing Library
 then.
 
-`.env.local` stays at the repo root — the web app reaches it via `envDir` in its Vite config, and
-the server will read the same file.
+`.env.local` stays at the repo root — the server loads it directly, and the web app reaches it via
+`envDir` in its Vite config. Every secret in it is `ROADMAP_`-prefixed, never `VITE_`: the browser
+sees no credentials, only (optionally) `VITE_ROADMAP_SERVER_URL` when the socket moves off the
+default `ws://localhost:8790/ws`.
 
 ## Conventions
 
@@ -59,30 +61,25 @@ budget, ETag behaviour, and the single GraphQL query that fetches a whole map wi
 blocked-by edges: **[docs/research/github-api-primitives.md](docs/research/github-api-primitives.md)**.
 Read it before writing fetch code; don't re-derive it.
 
-Auth is a personal access token injected via Vite env — copy `.env.example` to `.env.local`. Never
-persist the token to `localStorage`, and never deploy a production build anywhere: the token would
-ship inside the bundle.
+Auth is a personal access token read by the server as `ROADMAP_GITHUB_TOKEN` — copy `.env.example`
+to `.env.local`. The token never enters the browser: only the server talks to GitHub, and nothing
+`VITE_`-prefixed carries a secret. Local-only remains the deal — nothing here is deployed.
 
 ## The data layer
 
-Views never fetch. They read `useRoadmap()` and get a snapshot; everything below it is already built:
+Views never fetch. They read `useRoadmap()` and get a snapshot; the SPA is a pure renderer:
 
-- `packages/contracts/` — the domain vocabulary (`Project`, `WayfinderMap`, `Ticket`, states…),
-  imported everywhere as `@roadmap/contracts`.
-- `apps/web/src/github/` — transport. `client.ts` (auth, GraphQL errors, REST ETag replay),
-  `discovery.ts` (REST search for `wayfinder:map`), `map-query.ts` (the aliased GraphQL query and
-  its batching).
-- `apps/web/src/wayfinder/` — domain logic. `map-body.ts` parses the map template tolerantly;
-  `tickets.ts` derives `closed | blocked | claimed | frontier`; `from-github.ts` turns raw payloads
-  into `Project[]`.
-- `apps/web/src/store/` — the poll loop and its React binding (`RoadmapProvider` / `useRoadmap`).
+- `packages/contracts/` — the domain vocabulary (`Project`, `WayfinderMap`, `Ticket`, states…,
+  plus `Snapshot`/`ServerMessage`, the wire), imported everywhere as `@roadmap/contracts`.
+- `apps/web/src/store/` — the SPA's whole data layer: a WebSocket subscription
+  (`roadmap-store.ts`) with wholesale snapshot replace, a `connection` state
+  (`connecting | live | disconnected`), and auto-reconnect with backoff; server down keeps the
+  last snapshot on screen, honestly marked stale. `RoadmapProvider` / `useRoadmap` bind it to
+  React.
 
-Two loops: maps every 90s, discovery every 5min. GraphQL polls can't be conditional (no ETag on
-`POST /graphql`), so the only budget lever is the interval — the store stretches it when
-`rateLimit.remaining` drops, and skips polling entirely while the tab is hidden.
-
-The server (`apps/server/src/`) carries its own copy of `github/` and `wayfinder/` — the copy in
-`apps/web` dies when the SPA hands over to the socket ([#21](https://github.com/asmundwien/roadmap/issues/21)).
+Everything that talks to GitHub lives in the server (`apps/server/src/`): `github/` (transport —
+auth, GraphQL errors, REST ETag replay, discovery search, the aliased map query), `wayfinder/`
+(domain logic — tolerant map-body parsing, ticket-state derivation, payload → `Project[]`).
 On top of them: `store.ts` (the one snapshot both funnels feed, with coalescing invalidation),
 `invalidation.ts` (delivery payload → refetch decision, per `docs/research/webhook-path.md` §2),
 `webhook.ts` (best-effort HMAC, dedup, ACK-fast receiver), `relay.ts` (smee subscription,

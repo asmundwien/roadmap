@@ -1,8 +1,8 @@
 /**
  * Where the server's configuration comes from: the root `.env.local`, loaded into `process.env`
- * by `main.ts` before this runs. The GitHub names keep their `VITE_` prefix — same file, same
- * variables the web app reads — while the server-only secrets are unprefixed so Vite can never
- * expose them to the browser.
+ * by `main.ts` before this runs. Every name is `ROADMAP_`-prefixed, never `VITE_` — the PAT and
+ * the webhook secrets are the server's alone, and an unprefixed name is what keeps Vite from
+ * ever exposing them to the browser.
  */
 
 /** The default port for the HTTP + WebSocket server; `ROADMAP_SERVER_PORT` overrides. */
@@ -31,15 +31,15 @@ export type ConfigResult =
  * each is a warning, not a refusal, so the server always starts once reads work.
  */
 export function readServerConfig(env: Record<string, string | undefined>): ConfigResult {
-  const token = env.VITE_GITHUB_TOKEN?.trim() ?? ''
-  const user = env.VITE_GITHUB_USER?.trim() ?? ''
+  const token = env.ROADMAP_GITHUB_TOKEN?.trim() ?? ''
+  const user = env.ROADMAP_GITHUB_USER?.trim() ?? ''
   const smeeUrl = env.ROADMAP_SMEE_URL?.trim() || null
   const webhookSecret = env.ROADMAP_WEBHOOK_SECRET?.trim() || null
   const port = readPort(env.ROADMAP_SERVER_PORT)
 
   const missing: string[] = []
-  if (token === '') missing.push('VITE_GITHUB_TOKEN')
-  if (user === '') missing.push('VITE_GITHUB_USER')
+  if (token === '') missing.push('ROADMAP_GITHUB_TOKEN')
+  if (user === '') missing.push('ROADMAP_GITHUB_USER')
   if (missing.length > 0) {
     return {
       ok: false,

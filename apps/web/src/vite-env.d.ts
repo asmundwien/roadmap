@@ -1,8 +1,8 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  readonly VITE_GITHUB_TOKEN?: string
-  readonly VITE_GITHUB_USER?: string
+  /** The local server's WebSocket endpoint; defaults to `ws://localhost:8790/ws`. */
+  readonly VITE_ROADMAP_SERVER_URL?: string
 }
 
 interface ImportMeta {

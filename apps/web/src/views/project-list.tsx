@@ -1,7 +1,7 @@
 import type { Project, WayfinderMap } from '@roadmap/contracts'
 import { projectHash } from '../router.ts'
 import { useRoadmap } from '../store/roadmap-provider.tsx'
-import { activeMapOf } from '../wayfinder/from-github.ts'
+import { activeMapOf } from './active-map.ts'
 import { stripInlineMarkdown } from './gist.ts'
 import { formatMonth, formatRecency } from './recency.ts'
 import { SignalMeter } from './signal-meter.tsx'
@@ -14,27 +14,27 @@ import './views.css'
  * shows its whole trace at rest. Selecting a card opens the project on its active map.
  */
 export function ProjectList() {
-  const { status, projects, error, lastUpdatedAt, rateLimit, unreachable, refresh } = useRoadmap()
+  const { connection, projects, capturedAt, rateLimit, unreachable } = useRoadmap()
 
   return (
     <main className="shell">
       <header className="list-header">
         <h1>Roadmap</h1>
         <p className="muted">
-          {status === 'loading' && 'Discovering wayfinder maps…'}
-          {status === 'ready' && `Updated ${formatTime(lastUpdatedAt)}`}
-          {status === 'error' && 'Live view interrupted'}
+          {connection === 'connecting' && 'Connecting to the server…'}
+          {connection === 'live' && `Live · updated ${formatTime(capturedAt)}`}
+          {connection === 'disconnected' && 'Server unreachable'}
         </p>
       </header>
 
-      {error !== null && (
+      {connection === 'disconnected' && (
         <p className="banner" role="alert">
-          {error}
-          {projects.length > 0 && ' — showing the last good snapshot.'}
+          Server unreachable — reconnecting.
+          {capturedAt !== null && ` Showing the snapshot from ${formatTime(capturedAt)}.`}
         </p>
       )}
 
-      {status === 'ready' && projects.length === 0 && (
+      {connection === 'live' && projects.length === 0 && (
         <p className="muted">
           No wayfinder maps found. A project joins this list when one of its issues carries the
           <code> wayfinder:map</code> label.
@@ -53,16 +53,13 @@ export function ProjectList() {
         </p>
       )}
 
-      <footer className="list-footer muted small">
-        <button type="button" onClick={() => void refresh()}>
-          Refresh now
-        </button>
-        {rateLimit && (
+      {rateLimit && (
+        <footer className="list-footer muted small">
           <span>
             GraphQL budget {rateLimit.remaining}/{rateLimit.limit}
           </span>
-        )}
-      </footer>
+        </footer>
+      )}
     </main>
   )
 }

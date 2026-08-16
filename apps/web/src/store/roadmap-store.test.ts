@@ -1,209 +1,179 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { GitHubClient } from '../github/client.ts'
-import { createRoadmapStore } from './roadmap-store.ts'
+import type { Project, Snapshot } from '@roadmap/contracts'
+import { describe, expect, it } from 'vitest'
+import { createRoadmapStore, type SocketLike } from './roadmap-store.ts'
 
-const SEARCH_RESULT = {
-  total_count: 1,
-  incomplete_results: false,
-  items: [{ number: 1, repository_url: 'https://api.github.com/repos/a/r' }],
-}
+type SocketEvent = 'open' | 'message' | 'close'
 
-function mapResponse(title: string, remaining = 5000) {
-  return {
-    m0: {
-      nameWithOwner: 'a/r',
-      isPrivate: true,
-      issue: {
-        number: 1,
-        title,
-        url: 'https://github.com/a/r/issues/1',
-        state: 'OPEN',
-        updatedAt: '2026-08-01T12:00:00Z',
-        closedAt: null,
-        body: '## Destination\n\nSomewhere.\n',
-        subIssuesSummary: { total: 0, completed: 0, percentCompleted: 0 },
-        subIssues: { totalCount: 0, pageInfo: { hasNextPage: false }, nodes: [] },
-      },
-    },
-    rateLimit: { cost: 2, remaining, limit: 5000, resetAt: '2026-08-07T12:00:00Z' },
+class FakeSocket implements SocketLike {
+  closed = false
+  private listeners: Record<SocketEvent, ((event: { data?: unknown }) => void)[]> = {
+    open: [],
+    message: [],
+    close: [],
+  }
+
+  addEventListener(type: SocketEvent, listener: (event: { data?: unknown }) => void): void {
+    this.listeners[type].push(listener)
+  }
+
+  close(): void {
+    this.closed = true
+  }
+
+  emit(type: SocketEvent, data?: unknown): void {
+    for (const listener of this.listeners[type]) listener({ data })
   }
 }
 
-function fakeClient(graphql: GitHubClient['graphql']): GitHubClient {
-  return { graphql, restGet: vi.fn(async () => SEARCH_RESULT) as GitHubClient['restGet'] }
+function project(nameWithOwner: string): Project {
+  const [owner = '', repo = ''] = nameWithOwner.split('/')
+  return { nameWithOwner, owner, repo, isPrivate: false, openMaps: [], closedMaps: [] }
 }
 
-beforeEach(() => {
-  vi.useFakeTimers()
-})
+function snapshot(overrides: Partial<Snapshot> = {}): Snapshot {
+  return { capturedAt: 1000, projects: [], unreachable: [], rateLimit: null, ...overrides }
+}
 
-afterEach(() => {
-  vi.useRealTimers()
-})
+function wire(message: Snapshot): string {
+  return JSON.stringify({ type: 'snapshot', snapshot: message })
+}
+
+/** A store wired to fakes: sockets are captured for driving, reconnect fires via `delays`. */
+function harness() {
+  const sockets: FakeSocket[] = []
+  const delays: number[] = []
+  const store = createRoadmapStore('ws://test/ws', {
+    createSocket: () => {
+      const socket = new FakeSocket()
+      sockets.push(socket)
+      return socket
+    },
+    reconnectDelayMs: (attempt) => {
+      delays.push(attempt)
+      return 0
+    },
+  })
+  return { store, sockets, delays }
+}
+
+function flushTimers(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0))
+}
 
 describe('createRoadmapStore', () => {
-  it('starts idle and holds nothing until it is started', () => {
-    const store = createRoadmapStore(fakeClient(vi.fn()), 'a')
-    expect(store.getSnapshot()).toMatchObject({ status: 'idle', projects: [], error: null })
-  })
-
-  it('discovers, fetches, and publishes a ready snapshot', async () => {
-    const store = createRoadmapStore(
-      fakeClient(vi.fn(async () => mapResponse('A map')) as GitHubClient['graphql']),
-      'a',
-    )
-    store.start()
-    await store.refresh()
-
-    const snapshot = store.getSnapshot()
-    expect(snapshot.status).toBe('ready')
-    expect(snapshot.projects[0]?.openMaps[0]?.title).toBe('A map')
-    expect(snapshot.rateLimit?.remaining).toBe(5000)
-    expect(snapshot.lastUpdatedAt).not.toBeNull()
-  })
-
-  it('notifies subscribers when the snapshot changes', async () => {
-    const listener = vi.fn()
-    const store = createRoadmapStore(
-      fakeClient(vi.fn(async () => mapResponse('A map')) as GitHubClient['graphql']),
-      'a',
-    )
-    store.subscribe(listener)
-    store.start()
-    await store.refresh()
-
-    expect(listener).toHaveBeenCalled()
-  })
-
-  it('returns the same snapshot object between changes, so useSyncExternalStore settles', async () => {
-    const store = createRoadmapStore(
-      fakeClient(vi.fn(async () => mapResponse('A map')) as GitHubClient['graphql']),
-      'a',
-    )
-    store.start()
-    await store.refresh()
-
-    expect(store.getSnapshot()).toBe(store.getSnapshot())
-  })
-
-  it('keeps the last good projects when a poll fails', async () => {
-    let call = 0
-    const graphql = vi.fn(async () => {
-      call += 1
-      if (call === 1) return mapResponse('A map')
-      throw new Error('network down')
+  it('starts connecting with an empty snapshot', () => {
+    const { store, sockets } = harness()
+    expect(store.getSnapshot()).toEqual({
+      connection: 'connecting',
+      projects: [],
+      unreachable: [],
+      rateLimit: null,
+      capturedAt: null,
     })
-    const store = createRoadmapStore(fakeClient(graphql as GitHubClient['graphql']), 'a')
+    expect(sockets).toHaveLength(0)
+  })
+
+  it('opens one socket no matter how many watchers start', () => {
+    const { store, sockets } = harness()
     store.start()
-    await store.refresh()
-    await store.refresh()
-
-    const snapshot = store.getSnapshot()
-    expect(snapshot.status).toBe('error')
-    expect(snapshot.error).toContain('network down')
-    expect(snapshot.projects).toHaveLength(1)
-  })
-
-  it('shares one in-flight refresh between concurrent callers', async () => {
-    const graphql = vi.fn(async () => mapResponse('A map'))
-    const store = createRoadmapStore(fakeClient(graphql as GitHubClient['graphql']), 'a')
-
-    await Promise.all([store.refresh(), store.refresh(), store.refresh()])
-
-    expect(graphql).toHaveBeenCalledTimes(1)
-  })
-
-  it('re-discovers only on the slow loop, not on every map poll', async () => {
-    const client = fakeClient(vi.fn(async () => mapResponse('A map')) as GitHubClient['graphql'])
-    const store = createRoadmapStore(client, 'a', { discoveryPollMs: 60_000 })
-
-    await store.refresh()
-    await store.refresh()
-    expect(client.restGet).toHaveBeenCalledTimes(1)
-
-    vi.setSystemTime(Date.now() + 61_000)
-    await store.refresh()
-    expect(client.restGet).toHaveBeenCalledTimes(2)
-  })
-
-  it('polls on the map interval once started', async () => {
-    const graphql = vi.fn(async () => mapResponse('A map'))
-    const store = createRoadmapStore(fakeClient(graphql as GitHubClient['graphql']), 'a', {
-      mapPollMs: 1000,
-      isVisible: () => true,
-    })
-
     store.start()
-    await vi.advanceTimersByTimeAsync(3500)
-
-    expect(graphql.mock.calls.length).toBeGreaterThanOrEqual(3)
+    expect(sockets).toHaveLength(1)
   })
 
-  it('skips the poll while the tab is hidden, but keeps the loop alive', async () => {
-    const graphql = vi.fn(async () => mapResponse('A map'))
-    let visible = false
-    const store = createRoadmapStore(fakeClient(graphql as GitHubClient['graphql']), 'a', {
-      mapPollMs: 1000,
-      isVisible: () => visible,
-    })
-
+  it('goes live on open and replaces the snapshot wholesale on every message', () => {
+    const { store, sockets } = harness()
     store.start()
-    await vi.advanceTimersByTimeAsync(3500)
-    const whileHidden = graphql.mock.calls.length
+    const socket = sockets[0]
+    if (!socket) throw new Error('no socket opened')
 
-    visible = true
-    await vi.advanceTimersByTimeAsync(2500)
+    socket.emit('open')
+    expect(store.getSnapshot().connection).toBe('live')
 
-    expect(whileHidden).toBe(1) // only the immediate refresh `start` runs
-    expect(graphql.mock.calls.length).toBeGreaterThan(whileHidden)
+    socket.emit('message', wire(snapshot({ capturedAt: 1000, projects: [project('a/one')] })))
+    expect(store.getSnapshot().projects.map((p) => p.nameWithOwner)).toEqual(['a/one'])
+
+    socket.emit('message', wire(snapshot({ capturedAt: 2000, projects: [project('b/two')] })))
+    const replaced = store.getSnapshot()
+    expect(replaced.projects.map((p) => p.nameWithOwner)).toEqual(['b/two'])
+    expect(replaced.capturedAt).toBe(2000)
   })
 
-  it('stretches the interval when the GraphQL budget runs low', async () => {
-    const graphql = vi.fn(async () => mapResponse('A map', 200))
-    const store = createRoadmapStore(fakeClient(graphql as GitHubClient['graphql']), 'a', {
-      mapPollMs: 1000,
-      isVisible: () => true,
-    })
-
+  it('drops unparsable and unknown messages, keeping the last snapshot', () => {
+    const { store, sockets } = harness()
     store.start()
-    await vi.advanceTimersByTimeAsync(3500)
+    const socket = sockets[0]
+    if (!socket) throw new Error('no socket opened')
 
-    // remaining < 300 multiplies the interval by 8, so only the initial refresh has run.
-    expect(graphql).toHaveBeenCalledTimes(1)
+    socket.emit('open')
+    socket.emit('message', wire(snapshot({ capturedAt: 1000 })))
+    socket.emit('message', 'not json')
+    socket.emit('message', JSON.stringify({ type: 'mystery' }))
+    socket.emit('message', 12345)
+
+    expect(store.getSnapshot().capturedAt).toBe(1000)
+    expect(store.getSnapshot().connection).toBe('live')
   })
 
-  it('stops polling once the last subscriber leaves', async () => {
-    const graphql = vi.fn(async () => mapResponse('A map'))
-    const store = createRoadmapStore(fakeClient(graphql as GitHubClient['graphql']), 'a', {
-      mapPollMs: 1000,
-      isVisible: () => true,
-    })
+  it('marks the kept snapshot disconnected when the socket drops, then reconnects', async () => {
+    const { store, sockets } = harness()
+    store.start()
+    sockets[0]?.emit('open')
+    sockets[0]?.emit('message', wire(snapshot({ capturedAt: 1000, projects: [project('a/one')] })))
 
-    const stop = store.start()
-    await vi.advanceTimersByTimeAsync(1500)
-    stop()
-    const afterStop = graphql.mock.calls.length
-    await vi.advanceTimersByTimeAsync(5000)
+    sockets[0]?.emit('close')
+    const stale = store.getSnapshot()
+    expect(stale.connection).toBe('disconnected')
+    expect(stale.projects.map((p) => p.nameWithOwner)).toEqual(['a/one'])
+    expect(stale.capturedAt).toBe(1000)
 
-    expect(graphql.mock.calls.length).toBe(afterStop)
+    await flushTimers()
+    expect(sockets).toHaveLength(2)
+    sockets[1]?.emit('open')
+    expect(store.getSnapshot().connection).toBe('live')
   })
 
-  it('survives StrictMode double-subscribing', async () => {
-    const graphql = vi.fn(async () => mapResponse('A map'))
-    const store = createRoadmapStore(fakeClient(graphql as GitHubClient['graphql']), 'a', {
-      mapPollMs: 1000,
-      isVisible: () => true,
-    })
+  it('backs off with the attempt count and resets it on a successful open', async () => {
+    const { store, sockets, delays } = harness()
+    store.start()
 
-    const first = store.start()
-    const second = store.start()
-    await vi.advanceTimersByTimeAsync(1500)
-    first()
+    sockets[0]?.emit('close')
+    await flushTimers()
+    sockets[1]?.emit('close')
+    await flushTimers()
+    expect(delays).toEqual([0, 1])
 
-    // The second subscriber still holds the loop open.
-    const before = graphql.mock.calls.length
-    await vi.advanceTimersByTimeAsync(1500)
-    expect(graphql.mock.calls.length).toBeGreaterThan(before)
-    second()
+    sockets[2]?.emit('open')
+    sockets[2]?.emit('close')
+    await flushTimers()
+    expect(delays).toEqual([0, 1, 0])
+  })
+
+  it('closes the socket and stops reconnecting once the last watcher stops', async () => {
+    const { store, sockets } = harness()
+    const stopFirst = store.start()
+    const stopLast = store.start()
+
+    stopFirst()
+    expect(sockets[0]?.closed).toBe(false)
+
+    stopLast()
+    expect(sockets[0]?.closed).toBe(true)
+
+    // A close event from the socket we abandoned must not schedule a comeback.
+    sockets[0]?.emit('close')
+    await flushTimers()
+    expect(sockets).toHaveLength(1)
+    expect(store.getSnapshot().connection).toBe('connecting')
+  })
+
+  it('reconnects rather than double-connecting when a watcher restarts mid-backoff', async () => {
+    const { store, sockets } = harness()
+    store.start()
+    sockets[0]?.emit('close')
+
+    // A second watcher arrives while the reconnect timer is pending.
+    store.start()
+    await flushTimers()
+    expect(sockets).toHaveLength(2)
   })
 })
