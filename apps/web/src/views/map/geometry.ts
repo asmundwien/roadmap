@@ -48,6 +48,9 @@ const MIN_GUTTER_LANES = 4
  * than swallowing the text column. */
 const MAX_GUTTER = 10 * PITCH
 const ROW_H = 52
+/** Single-line rows — fog ghosts and title-only covered ground — sit on their own tighter pitch;
+ * open rows keep the taller one for their two text lines. */
+const THIN_ROW_H = 40
 const SEC_PAD = 56
 const SEC_BOTTOM = 34
 const PAD_TOP = 20
@@ -524,19 +527,21 @@ export function buildLedger(map: WayfinderMap): Ledger {
 
   // An empty section keeps the shared rhythm: its one placeholder line sits where a first row
   // would, and the section closes SEC_BOTTOM below it.
-  const sectionHeight = (count: number) => SEC_PAD + Math.max(count - 1, 0) * ROW_H + SEC_BOTTOM
+  const sectionHeight = (count: number, rowH: number) =>
+    SEC_PAD + Math.max(count - 1, 0) * rowH + SEC_BOTTOM
 
   const fogItems = map.body.notYetSpecified.map(stripInlineMarkdown)
-  const ghostY = (i: number) => sepFog + SEC_PAD + i * ROW_H
-  const sepAhead = sepFog + sectionHeight(fogItems.length)
+  const ghostY = (i: number) => sepFog + SEC_PAD + i * THIN_ROW_H
+  const sepAhead = sepFog + sectionHeight(fogItems.length, THIN_ROW_H)
 
   // With nothing charted the section disappears outright — no separator, no empty band — and
   // fog flows straight into ground covered.
-  const sepBehind = sepAhead + (orderedOpen.length > 0 ? sectionHeight(orderedOpen.length) : 0)
+  const sepBehind =
+    sepAhead + (orderedOpen.length > 0 ? sectionHeight(orderedOpen.length, ROW_H) : 0)
   const rowY = (i: number) => sepBehind - SEC_BOTTOM - i * ROW_H
 
-  const behindY = (j: number) => sepBehind + SEC_PAD + j * ROW_H
-  const height = sepBehind + sectionHeight(closed.length) + PAD_BOTTOM
+  const behindY = (j: number) => sepBehind + SEC_PAD + j * THIN_ROW_H
+  const height = sepBehind + sectionHeight(closed.length, THIN_ROW_H) + PAD_BOTTOM
 
   const placeholders: { y: number; text: string }[] = []
   if (fogItems.length === 0) {
@@ -598,7 +603,7 @@ export function buildLedger(map: WayfinderMap): Ledger {
     headY: head.y,
     trunkDashed: { y1: trunkTop ? trunkTop.y : head.y, y2: destY + 14 },
     trunkSolid: lastClosed
-      ? { y1: topTrunkClosed?.y ?? head.y, y2: lastClosed.y + ROW_H * 0.6 }
+      ? { y1: topTrunkClosed?.y ?? head.y, y2: lastClosed.y + THIN_ROW_H * 0.6 }
       : null,
     rows,
     closedRows,

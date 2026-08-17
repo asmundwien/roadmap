@@ -1,88 +1,6 @@
-import type {
-  Blocker,
-  MapBody,
-  Ticket,
-  TicketState,
-  TicketType,
-  WayfinderMap,
-} from '@roadmap/contracts'
 import { describe, expect, it } from 'vitest'
 import { buildLedger } from './geometry.ts'
-
-const HOME = 'me/repo'
-
-function blocker(number: number, isOpen = true, nameWithOwner = HOME): Blocker {
-  return {
-    number,
-    title: `Ticket ${number}`,
-    url: `https://example.test/${nameWithOwner}/${number}`,
-    nameWithOwner,
-    isOpen,
-  }
-}
-
-function ticket(
-  number: number,
-  state: TicketState,
-  blockedBy: Blocker[] = [],
-  closedAt: number | null = null,
-  createdAt = 0,
-  type: TicketType = 'task',
-): Ticket {
-  return {
-    number,
-    title: `Ticket ${number}`,
-    url: `https://example.test/${HOME}/${number}`,
-    body: '',
-    type,
-    state,
-    isClaimed: state === 'claimed',
-    isBlocked: blockedBy.some((b) => b.isOpen),
-    createdAt,
-    closedAt,
-    assignees: [],
-    blockedBy,
-    blockersTruncated: false,
-  }
-}
-
-function body(overrides: Partial<MapBody> = {}): MapBody {
-  return {
-    raw: '',
-    destination: 'The destination.',
-    notes: [],
-    decisions: [],
-    notYetSpecified: [],
-    notYetSpecifiedNote: '',
-    outOfScope: [],
-    sections: [],
-    missingSections: [],
-    ...overrides,
-  }
-}
-
-function makeMap(tickets: Ticket[], bodyOverrides: Partial<MapBody> = {}): WayfinderMap {
-  return {
-    owner: 'me',
-    repo: 'repo',
-    nameWithOwner: HOME,
-    number: 1,
-    title: 'Test map',
-    url: `https://example.test/${HOME}/1`,
-    isOpen: true,
-    updatedAt: 0,
-    closedAt: null,
-    body: body(bodyOverrides),
-    tickets,
-    frontier: tickets.filter((t) => t.state === 'frontier'),
-    progress: {
-      total: tickets.length,
-      completed: tickets.filter((t) => t.state === 'closed').length,
-      percentCompleted: 0,
-    },
-    ticketsTruncated: false,
-  }
-}
+import { blocker, makeMap, ticket } from './test-fixtures.ts'
 
 /** Every straight vertical (a rail or a merge's drop) riding through an unrelated node's center. */
 function passThroughs(ledger: ReturnType<typeof buildLedger>): string[] {
@@ -499,5 +417,28 @@ describe('buildLedger', () => {
     expect(ledger.height).toBeGreaterThan(0)
     expect(ledger.sepFog).toBeLessThan(ledger.sepAhead)
     expect(ledger.sepAhead).toBe(ledger.sepBehind)
+  })
+
+  it('sits two-line ahead rows on the 52-unit pitch, single-line fog and covered rows on 40', () => {
+    const map = makeMap(
+      [
+        // A three-deep open chain and three closed decisions — consecutive rows in each section.
+        ticket(2, 'frontier'),
+        ticket(3, 'blocked', [blocker(2)]),
+        ticket(4, 'blocked', [blocker(3)]),
+        ticket(5, 'closed', [], 100),
+        ticket(6, 'closed', [], 200),
+        ticket(7, 'closed', [], 300),
+      ],
+      { notYetSpecified: ['one', 'two', 'three'] },
+    )
+    const ledger = buildLedger(map)
+    const pitches = (ys: number[]) => {
+      const sorted = [...ys].sort((a, b) => a - b)
+      return sorted.slice(1).map((y, i) => y - (sorted[i] ?? Number.NaN))
+    }
+    expect(pitches(ledger.rows.map((r) => r.y))).toEqual([52, 52])
+    expect(pitches(ledger.fogRows.map((r) => r.y))).toEqual([40, 40])
+    expect(pitches(ledger.closedRows.map((r) => r.y))).toEqual([40, 40])
   })
 })

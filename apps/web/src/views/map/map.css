@@ -1,4 +1,5 @@
-/* The live map screen — the unified ledger. Palette tokens live in index.css. */
+/* The live map screen — the unified ledger and the docked Panel. Palette tokens live in
+ * index.css. */
 
 /* Doubled class beats .shell's 44rem regardless of stylesheet order. */
 .shell.map-shell {
@@ -21,26 +22,17 @@
  * accordion's trigger anatomy — flag, rail segments, crop offset — is CSS-positioned at that
  * scale, and letting the svg shrink with the viewport would slide them apart. Below ~1175px the
  * page scrolls sideways instead.
+ *
+ * Overflow is visible: section rules and row bands overshoot the viewBox (EXT in ledger.tsx) and
+ * the map column's own overflow clips them at exactly the Panel border — no gap between the
+ * map's rules and the Panel.
  */
 .ledger {
   display: block;
   width: min(1125px, 100%);
   min-width: 1125px;
   height: auto;
-}
-
-.ledger a {
-  text-decoration: none;
-}
-
-/* The whole row is one thing — say so on hover, with the one shared radius. */
-.ledger .row-hit {
-  rx: var(--radius);
-}
-
-.ledger a.row:hover .row-hit,
-.ledger a.row:focus-visible .row-hit {
-  fill: var(--wash);
+  overflow: visible;
 }
 
 .caption {
@@ -115,11 +107,6 @@
   fill: color-mix(in oklab, var(--fg) 80%, var(--bg));
 }
 
-.behind-gist {
-  font-size: 11px;
-  fill: var(--muted);
-}
-
 .check {
   font-size: 10px;
   font-weight: 700;
@@ -131,6 +118,12 @@
   font-size: 12px;
   font-style: italic;
   fill: color-mix(in oklab, var(--muted) 75%, transparent);
+}
+
+/* ⊘ scope stops riding the fog band: struck through, left out on purpose. */
+.scope-title {
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent);
 }
 
 .flag {
@@ -155,6 +148,51 @@
   -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+/* ---------------------------------------------------------------- clickable rows */
+
+/*
+ * The Panel buttons' grammar, adopted by the list: squared bands (no radius), the same --edge
+ * rule, the same wash. The browser's own ring never draws — the row-hit rect carries our focus
+ * ring instead.
+ */
+.ledger .row,
+.ledger .ghost-row {
+  cursor: pointer;
+}
+
+.panel-screen .ledger .row:focus,
+.panel-screen .ledger .ghost-row:focus {
+  outline: none;
+}
+
+/*
+ * The hover is ONE entity: in pointer mode (`:not(.is-kbnav)`) it is the row under the cursor;
+ * once the keyboard moves it (`.is-kbnav`) it is the focused row, and the cursor's resting row
+ * shows nothing until the mouse moves again and snaps the entity back. `:where()` keeps the
+ * gates specificity-neutral so the selected band below still wins ties.
+ */
+.panel-screen:where(:not(.is-kbnav)) .ledger .row:hover .row-hit,
+.panel-screen:where(:not(.is-kbnav)) .ledger .ghost-row:hover .row-hit,
+.panel-screen:where(.is-kbnav) .ledger .row:focus .row-hit,
+.panel-screen:where(.is-kbnav) .ledger .ghost-row:focus .row-hit {
+  fill: var(--wash);
+  stroke: var(--edge);
+}
+
+.panel-screen .ledger .row.is-selected .row-hit,
+.panel-screen .ledger .ghost-row.is-selected .row-hit {
+  fill: color-mix(in srgb, var(--fg) 8%, transparent);
+  stroke: var(--edge);
+}
+
+/* Keyboard focus rides on top of whichever band is underneath — a ring, never a fill — and it
+ * clears with the rest of the keyboard hover when the pointer takes over. */
+.panel-screen:where(.is-kbnav) .ledger .row:focus-visible .row-hit,
+.panel-screen:where(.is-kbnav) .ledger .ghost-row:focus-visible .row-hit {
+  stroke: var(--ring);
+  stroke-width: 2;
 }
 
 /* ---------------------------------------------------------------- edges & hover */
@@ -213,7 +251,7 @@
   font-weight: 600;
 }
 
-/* ---------------------------------------------------------------- poll updates */
+/* ---------------------------------------------------------------- live updates */
 
 .row.is-fresh {
   animation: row-in 0.6s ease-out;
@@ -258,8 +296,8 @@
 /*
  * The accordion of strides. Pixel values that are NOT on the --sp-* scale are ledger-derived:
  * the svg renders at 1.25× its 900-unit viewBox, so 3.125px (trunk), 45px/25px (flag halo and
- * glyph), and 11.25px / 18.125px / 26.25px (caption and destination type) are the ledger's own
- * dimensions expressed in CSS, and stay exact rather than rounded to the scale.
+ * glyph), and 11.25px (caption type) are the ledger's own dimensions expressed in CSS, and stay
+ * exact rather than rounded to the scale.
  */
 
 .fl-trace {
@@ -330,8 +368,8 @@
   display: none;
 }
 
-/* The toggle itself: an invisible full-row overlay, so the meta line's GitHub link can be a
- * real anchor beside it instead of illegally inside a button. */
+/* The trigger itself is an item like any other: an invisible full-row overlay button that the
+ * roving-focus unit steps through — clicking selects the map into the Panel. */
 .fl-hit {
   position: absolute;
   inset: 0;
@@ -340,18 +378,30 @@
   cursor: pointer;
 }
 
-/* The whole row is one thing — say so on hover, with the one shared radius. Except on the
- * meta link, where a click goes to GitHub instead of the fold: there the wash drops and the
- * link speaks for itself, so the hover always shows what a click will do. A solo map's
- * header is not a control, so it neither washes nor invites. */
-.fl-trigger:not(.is-static):hover:not(:has(.fl-meta a:hover)),
-.fl-trigger:has(.fl-hit:focus-visible) {
-  background: var(--wash);
-  border-radius: var(--radius);
+.fl-hit:focus {
+  outline: none;
 }
 
-.fl-trigger.is-static {
-  cursor: default;
+/*
+ * The destination trigger wears the item grammar: the same squared band, the same --edge rule,
+ * the same wash as the ledger's rows. The focus ring is the selection band's job, as on the rows.
+ */
+.panel-screen:where(:not(.is-kbnav)) .fl-trigger:hover,
+.panel-screen:where(.is-kbnav) .fl-trigger:has(.fl-hit:focus) {
+  background: var(--wash);
+  box-shadow: inset 0 0 0 1px var(--edge);
+}
+
+.panel-screen .fl-trigger.is-selected {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  box-shadow: inset 0 0 0 1px var(--edge);
+}
+
+/* Keyboard focus rides on top of whichever band is underneath — a ring, never a fill. Gated
+ * like the band: the ring is part of the same hover entity, so the pointer taking over clears
+ * it; the next Tab or arrow brings it back. */
+.panel-screen:where(.is-kbnav) .fl-trigger:has(.fl-hit:focus-visible) {
+  box-shadow: inset 0 0 0 2px var(--ring);
 }
 
 /*
@@ -392,33 +442,37 @@
   color: var(--goal);
 }
 
-/* The ledger's .dest, at its rendered size. */
-.fl-dest {
-  font-size: 18.125px;
-  line-height: 26.25px;
+/* The inverted trigger: the map title big, the destination prose a one-line gist. */
+.fl-title {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--fg);
+}
+
+.fl-gist {
   max-width: 46rem;
-  display: -webkit-box;
-  -webkit-line-clamp: 4;
-  -webkit-box-orient: vertical;
+  font-size: 13.5px;
+  color: var(--muted);
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .fl-meta {
-  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
 }
 
-/* The issue link rides the meta line, lifted above the toggle overlay so it clicks through
- * to GitHub instead of folding the map. Its own hover brightens it — the affordance that
- * replaces the row wash while the cursor is here. */
-.fl-meta a {
-  position: relative;
-  z-index: 1;
-  color: inherit;
-}
-
-.fl-meta a:hover {
-  color: var(--fg);
+.fl-flaw {
+  padding: 0 0.45rem;
+  border: 1px solid var(--goal);
+  border-radius: 999px;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--goal);
 }
 
 /* ---------------------------------------------------------------- the fold and the crop */
@@ -439,12 +493,6 @@
   min-height: 0;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .fold {
-    transition: none;
-  }
-}
-
 /*
  * Crop mode: the ledger minus its destination section — the trigger already is that section.
  * trunkToEdge paints the trunk across the svg's blank bottom padding, so the solid line runs
@@ -460,41 +508,267 @@
   padding: 0;
 }
 
-/* ---------------------------------------------------------------- below the map */
+/* ---------------------------------------------------------------- the docked Panel */
 
-/* The asides sit between the svg's edge and the next trigger, indented into the text column;
- * has-rail threads the trunk through them so the line to the older map never breaks. */
-.fl-asides {
-  position: relative;
-  margin: 0;
-  padding-bottom: var(--sp-6);
+/*
+ * Not an overlay: the Panel flexes in beside the page and eats its width, so the map stays
+ * clickable underneath and picks swap the Panel's content with no close in between. When the
+ * Panel leaves the map column too narrow for the pinned-width ledger, the column scrolls
+ * sideways within itself.
+ */
+.panel-screen {
+  display: flex;
+  /* The keyboard-focus ring, shared by rows, triggers, and the Panel's buttons: hover is the
+   * wash, selected is the deep band, and THIS says where Tab and the arrows are. */
+  --ring: color-mix(in srgb, var(--fg) 55%, transparent);
 }
 
-.fl-asides.has-rail::before {
-  content: "";
-  position: absolute;
-  left: 53.44px;
+/* No right padding: the map column ends where the Panel begins — rules, bands, and border are
+ * one connected surface, no white gap between the containers and the Panel. */
+.panel-screen > .shell {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  padding-right: 0;
+}
+
+/*
+ * The rail is a horizontal accordion — the fold's 0fr→1fr grammar, sideways. Always mounted, so
+ * open and close both animate; it stretches the flex row's full height, so the border runs the
+ * whole page even when the Panel's content is short.
+ */
+.panel-rail {
+  flex: none;
+  display: grid;
+  grid-template-columns: 0fr;
+  transition: grid-template-columns 340ms ease;
+}
+
+.panel-rail.is-open {
+  grid-template-columns: 1fr;
+}
+
+/* clip, not hidden: hidden would make this a scroll container and unstick the Panel inside. */
+.panel-rail-inner {
+  min-width: 0;
+  overflow: clip;
+  border-left: 1px solid var(--edge);
+  background: var(--bg);
+  transition: border-color 340ms ease;
+}
+
+.panel-rail:not(.is-open) .panel-rail-inner {
+  border-left-color: transparent;
+}
+
+/* 42px is the site header's rendered height — the Panel docks just beneath its sticky bar. */
+.panel {
+  position: sticky;
+  top: 42px;
+  width: min(26rem, 40vw);
+  max-height: calc(100dvh - 42px);
+  overflow-y: auto;
+}
+
+/* The Panel's own navbar: two equal prev/next buttons, then the square » dismiss at the far
+ * right — all ruled with the sidebar's border. Sticky, so long content scrolls under. */
+.panel-nav {
+  position: sticky;
   top: 0;
-  bottom: 0;
-  width: 3.125px;
-  background: var(--trunk);
+  z-index: 1;
+  display: flex;
+  border-bottom: 1px solid var(--edge);
+  background: var(--bg);
 }
 
-.map-aside {
-  margin: 0.75rem 0;
+.panel-nav button {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
   color: var(--muted);
-  font-size: 0.9rem;
+  cursor: pointer;
 }
 
-.map-aside summary {
-  cursor: pointer;
+.panel-nav button + button {
+  border-left: 1px solid var(--edge);
+}
+
+.panel-nav .panel-dismiss {
+  flex: 0 0 36px;
+}
+
+.panel-nav button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.panel-nav button:hover:not(:disabled) {
+  background: var(--wash);
+  color: var(--fg);
+}
+
+/* Same keyboard-focus ring as the rows and the trigger — one grammar across the whole unit. */
+.panel-nav button:focus {
+  outline: none;
+}
+
+.panel-screen:where(.is-kbnav) .panel-nav button:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--ring);
+  color: var(--fg);
+}
+
+.panel-body {
+  padding: var(--sp-4) var(--sp-6) var(--sp-6);
+}
+
+/* ---------------------------------------------------------------- the Panel's content */
+
+/* The printed-map legend box: a double rule, squarer than the app's hover radius. Inside the
+ * Panel it sheds its chrome — the Panel's own borders carry the framing. */
+.cartouche {
+  padding: var(--sp-4);
+  border: 1px solid var(--edge);
+  outline: 1px solid var(--edge);
+  outline-offset: 2px;
+  border-radius: 4px;
+  background: var(--bg);
+  font-size: 0.85rem;
+}
+
+.panel .cartouche {
+  padding: 0;
+  border: none;
+  outline: none;
+  background: none;
+}
+
+.cart-caption {
+  margin: 0 0 var(--sp-2);
+  font-size: 0.7rem;
   font-weight: 600;
-  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--goal);
+}
+
+.cart-dest {
+  margin: 0;
+  white-space: pre-line;
+  color: var(--fg);
+}
+
+.cart-head {
+  margin: var(--sp-3) 0 var(--sp-1);
+  font-size: 0.7rem;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  color: var(--muted);
 }
 
-.map-aside ul {
-  margin: 0.5rem 0 0;
-  padding-left: 1.25rem;
+.cartouche ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--muted);
+}
+
+.cartouche li {
+  margin: 0.15rem 0;
+}
+
+.cart-warn {
+  margin: var(--sp-3) 0 0;
+  font-size: 0.8rem;
+  color: var(--goal);
+}
+
+.panel-item-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.panel-item-state {
+  margin: var(--sp-1) 0 var(--sp-3);
+  font-size: 0.8rem;
+}
+
+/* THE one presentation of a referenced item: the title over its state word, row-shaped like the
+ * ledger's own rows. On-map references are buttons that select; off-map ones link to GitHub. */
+.item-links {
+  display: flex;
+  flex-direction: column;
+}
+
+.item-link {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  margin: 0 calc(-1 * var(--sp-2));
+  padding: var(--sp-2);
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  color: var(--fg);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.item-link:hover {
+  background: var(--wash);
+  box-shadow: inset 0 0 0 1px var(--edge);
+}
+
+.item-link-title {
+  font-weight: 500;
+}
+
+.item-link-state {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+/* A full-column rule between the issue body and the blocked-by list: it breaks out of the
+ * Panel body's side padding, so it spans the whole column like the navbar's own borders. */
+.panel-rule {
+  margin: var(--sp-4) calc(-1 * var(--sp-6));
+  border: none;
+  border-top: 1px solid var(--edge);
+}
+
+/* Rides just under the caption, above the title — the way out to the source, always in reach. */
+.gh-row {
+  margin: 0 0 var(--sp-3);
+}
+
+.gh-link {
+  display: inline-block;
+  padding: 0.25rem 0.7rem;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  font-size: 0.8rem;
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.gh-link:hover {
+  border-color: var(--muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fold,
+  .panel-rail,
+  .panel-rail-inner {
+    transition: none;
+  }
 }

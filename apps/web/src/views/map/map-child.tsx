@@ -1,23 +1,30 @@
 import type { WayfinderMap } from '@roadmap/contracts'
 import { type ReactNode, useMemo } from 'react'
+import type { ResolvedSelection } from '../../router.ts'
 import { stripInlineMarkdown } from '../gist.ts'
 import { buildLedger, LEDGER_SCALE } from './geometry.ts'
 import { MapLedger } from './ledger.tsx'
+import './map.css'
+import type { LedgerSelection } from './sequence.ts'
 
 /**
- * One map, self-contained, as the flagline settled it: the map IS its destination section — the
- * flag on its opaque halo, the caption, the destination at ledger scale, one `title · #n` meta
- * line — and that whole block is the accordion trigger. Opening it unfolds the node tree: the
- * ledger with its own destination section cropped away, since the trigger already is that
- * section. The asides ride inside the fold, indented into the text column so the rail's gutter
- * stays clear.
+ * One map, self-contained: the trigger is inverted — the map title big, the destination prose a
+ * one-line gist — and that whole block is the accordion trigger AND an item like any other. The
+ * map renders titles only; every descriptive text lives in the docked Panel, which the project
+ * screen owns. Opening the accordion unfolds the node tree: the ledger with its own destination
+ * section cropped away, since the trigger already is that section.
  */
 export function MapChild({
   map,
   open,
   solo,
   last,
-  onToggle,
+  onSelect,
+  onUnfold,
+  panelOpen,
+  selected,
+  entry,
+  kbNav,
 }: {
   map: WayfinderMap
   open: boolean
@@ -26,10 +33,25 @@ export function MapChild({
   /** The earliest map is the journey's start: its trunk ends at the last decision, v1-style;
    * every other map runs its trunk to the svg's edge, into the map below. */
   last: boolean
-  onToggle: (mapNumber: number) => void
+  onSelect: (item: ResolvedSelection) => void
+  /** Re-pin the hash to this map so its accordion unfolds — without touching the selection. */
+  onUnfold: () => void
+  /** Whether the Panel is open at all (whatever it shows) — it decides what a trigger click
+   * means on a folded map: unfold only while closed, unfold AND select while open. */
+  panelOpen: boolean
+  /** The Panel's current pick when it belongs to this map — drawn as the active item. */
+  selected: ResolvedSelection | null
+  /** True while the keyboard was the last mover — the ledger treats its focused row as hovered. */
+  kbNav: boolean
+  /** True when nothing is selected anywhere and this is the first map — the navbar's Tab entry
+   * point. Every other element in the unit is reached with arrows, never Tab. */
+  entry: boolean
 }) {
   // Aligns the trigger's text with the embedded ledger's text column (exact at full render width).
   const textLeft = useMemo(() => buildLedger(map).textX * LEDGER_SCALE, [map])
+  const partial = map.ticketsTruncated || map.tickets.some((ticket) => ticket.blockersTruncated)
+  const ledgerSelected = selected !== null && selected.kind !== 'map' ? selected : null
+  const isMapSelected = selected?.kind === 'map'
 
   const header = (
     <>
@@ -38,67 +60,101 @@ export function MapChild({
       </span>
       <span className="fl-body" style={{ marginLeft: textLeft }}>
         <span className="fl-caption">the destination</span>
-        <span className="fl-dest">{stripInlineMarkdown(map.body.destination)}</span>
-        <span className="fl-meta muted small">
-          <a href={map.url} target="_blank" rel="noreferrer">
-            {map.title} · #{map.number}
-          </a>
-        </span>
+        <span className="fl-title">{map.title}</span>
+        <span className="fl-gist">{stripInlineMarkdown(map.body.destination)}</span>
+        {partial && (
+          <span className="fl-meta muted small">
+            <span className="fl-flaw">partial view</span>
+          </span>
+        )}
       </span>
     </>
   )
 
   const child = (
     <div className="fl-child">
-      <CroppedLedger map={map} trunkToEdge={!last} />
-      <MapAsides map={map} textLeft={textLeft} hasRail={!last} />
+      <CroppedLedger
+        map={map}
+        trunkToEdge={!last}
+        onSelect={onSelect}
+        selected={ledgerSelected}
+        kbNav={kbNav}
+      />
     </div>
   )
 
-  // An open map's destination is still ahead: its trigger rail stays dashed until the map
-  // closes and the whole road grows solid.
   const charted = map.isOpen ? ' is-charted' : ''
 
-  if (solo) {
-    return (
-      <article className={`fl-block is-open${charted}`}>
-        <div className="fl-trigger is-static">{header}</div>
-        {child}
-      </article>
-    )
+  // The destination is an item like any other, but its click reads the accordion and the Panel:
+  // a folded map with the Panel closed unfolds first — click again to open the Panel on it; with
+  // the Panel already open, one click unfolds AND selects; and activating the already-selected
+  // destination deselects it (the screen's toggle), closing the Panel. The GitHub link lives in
+  // the Panel.
+  const expanded = solo || open
+  const activate = () => {
+    if (!expanded && !panelOpen) {
+      onUnfold()
+      return
+    }
+    onSelect({ kind: 'map' })
   }
 
-  // The trigger is a div with a full-row overlay button rather than a button wrapping the
-  // header: the meta line's GitHub link couldn't legally live inside one. The link rises
-  // above the overlay on z-index, so the whole row still toggles except the link itself.
   return (
-    <article className={`fl-block${open ? ' is-open' : ''}${charted}`}>
-      <div className="fl-trigger">
+    <article className={`fl-block${expanded ? ' is-open' : ''}${charted}`}>
+      <div className={`fl-trigger${isMapSelected ? ' is-selected' : ''}`}>
         <button
           type="button"
           className="fl-hit"
-          aria-expanded={open}
-          aria-label={`${map.title} — ${open ? 'fold' : 'unfold'} the map`}
-          onClick={() => onToggle(map.number)}
+          data-nav-item="true"
+          data-selected={isMapSelected ? 'true' : 'false'}
+          tabIndex={isMapSelected || entry ? 0 : -1}
+          aria-label={`${map.title} — the destination`}
+          onClick={activate}
         />
         {header}
       </div>
-      <Fold open={open}>{child}</Fold>
+      {solo ? child : <Fold open={open}>{child}</Fold>}
     </article>
   )
 }
 
+/** True when two picks point at the same thing — how the Panel finds itself in the sequence. */
+export function sameSelection(a: ResolvedSelection, b: ResolvedSelection): boolean {
+  if (a.kind === 'ticket') return b.kind === 'ticket' && b.number === a.number
+  if (a.kind === 'fog') return b.kind === 'fog' && b.text === a.text
+  if (a.kind === 'scope') return b.kind === 'scope' && b.text === a.text
+  return a.kind === b.kind
+}
+
 /**
- * The node tree alone: the ledger minus its destination section. `trunkToEdge` asks the ledger
- * to draw its solid trunk to its own bottom edge, so the rail continues into the older map below
- * inside the svg itself — same stroke, same scale, no overlay.
+ * The node tree alone: the ledger minus its destination section — the trigger already is that
+ * section. `trunkToEdge` asks the ledger to draw its solid trunk to its own bottom edge, so the
+ * rail continues into the older map below inside the svg itself.
  */
-function CroppedLedger({ map, trunkToEdge }: { map: WayfinderMap; trunkToEdge: boolean }) {
+function CroppedLedger({
+  map,
+  trunkToEdge,
+  onSelect,
+  selected,
+  kbNav,
+}: {
+  map: WayfinderMap
+  trunkToEdge: boolean
+  onSelect: (selection: LedgerSelection) => void
+  selected: LedgerSelection | null
+  kbNav: boolean
+}) {
   const cropPx = useMemo(() => buildLedger(map).sepFog * LEDGER_SCALE, [map])
   return (
     <div className="fl-crop">
       <div style={{ marginTop: -cropPx }}>
-        <MapLedger map={map} trunkToEdge={trunkToEdge} />
+        <MapLedger
+          map={map}
+          trunkToEdge={trunkToEdge}
+          onSelect={onSelect}
+          selected={selected}
+          kbNav={kbNav}
+        />
       </div>
     </div>
   )
@@ -113,54 +169,5 @@ function Fold({ open, children }: { open: boolean; children: ReactNode }) {
     <div className={`fold${open ? ' is-open' : ''}`} aria-hidden={!open}>
       <div className="fold-inner">{children}</div>
     </div>
-  )
-}
-
-/** The click-away tier: Notes, Out of scope, and data-honesty warnings. */
-function MapAsides({
-  map,
-  textLeft,
-  hasRail,
-}: {
-  map: WayfinderMap
-  textLeft: number
-  hasRail: boolean
-}) {
-  const partial = map.ticketsTruncated || map.tickets.some((ticket) => ticket.blockersTruncated)
-
-  return (
-    <footer className={`fl-asides${hasRail ? ' has-rail' : ''}`} style={{ paddingLeft: textLeft }}>
-      {partial && (
-        <p className="muted small">
-          Partial view — GitHub returned only the first page of{' '}
-          {map.ticketsTruncated ? 'tickets' : 'some tickets’ blockers'}.
-        </p>
-      )}
-      {map.body.notes.length > 0 && (
-        <details className="map-aside">
-          <summary>Notes</summary>
-          <ul>
-            {map.body.notes.map((note) => (
-              <li key={note}>{stripInlineMarkdown(note)}</li>
-            ))}
-          </ul>
-        </details>
-      )}
-      {map.body.outOfScope.length > 0 && (
-        <details className="map-aside">
-          <summary>Out of scope</summary>
-          <ul>
-            {map.body.outOfScope.map((item) => (
-              <li key={item}>{stripInlineMarkdown(item)}</li>
-            ))}
-          </ul>
-        </details>
-      )}
-      {map.body.missingSections.length > 0 && (
-        <p className="muted small">
-          Map body is missing sections: {map.body.missingSections.join(', ')}.
-        </p>
-      )}
-    </footer>
   )
 }
