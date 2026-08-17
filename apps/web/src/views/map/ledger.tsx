@@ -40,6 +40,7 @@ function pressProps(
   return {
     role: 'button' as const,
     tabIndex: selected ? 0 : -1,
+    'aria-current': selected ? ('true' as const) : undefined,
     'data-nav-item': 'true',
     'data-selected': selected ? 'true' : 'false',
     onClick: select,

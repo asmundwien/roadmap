@@ -76,6 +76,18 @@ Views never fetch. They read `useRoadmap()` and get a snapshot; the SPA is a pur
   (`connecting | live | disconnected`), and auto-reconnect with backoff; server down keeps the
   last snapshot on screen, honestly marked stale. `RoadmapProvider` / `useRoadmap` bind it to
   React.
+- `apps/web/src/router.ts` — the hash owns ALL URL state: `#/owner/repo/<map>` pins the open map
+  and one more segment (`/map`, `/ticket/<n>`, `/fog/<i>`, `/scope/<i>`, `/scope-all`) names the
+  Panel's selection. `PanelSelection` (as the hash carries it) resolves against the live snapshot
+  on every render into `ResolvedSelection` — no `useState` mirrors of the URL anywhere.
+- `apps/web/src/views/` — the panel-era map view (anatomy terms in `CONTEXT.md`: Panel, Selection,
+  Hover, Item link, aggregate scope stop): the ledger (`map/ledger.tsx` + `map/geometry.ts`) draws
+  titles only; every descriptive text lives in the **Panel** (`map/panel.tsx`), the docked column
+  fed by the router's resolved selection — never an overlay. `map/sequence.ts` holds the pure
+  logic (on-screen prev/next order, the out-of-scope display plan), `map/prose.tsx` renders all
+  Panel prose as markdown (`react-markdown` + `remark-gfm`, no rehype plugins). The whole
+  navigation is one roving-tabindex composite owned by `project-screen.tsx`: Tab lands on one
+  item, arrows move the shared hover, Space/Enter select.
 
 Everything that talks to GitHub lives in the server (`apps/server/src/`): `github/` (transport —
 auth, GraphQL errors, REST ETag replay, discovery search, the aliased map query), `wayfinder/`
@@ -94,9 +106,9 @@ Data that may be partial says so rather than looking whole: `ticketsTruncated`, 
 
 ## How the work is organized
 
-This repo is driven by **wayfinder maps** — [v1 (issue #1)](https://github.com/asmundwien/roadmap/issues/1)
-is the closed history; [v3: live events (issue #16)](https://github.com/asmundwien/roadmap/issues/16)
-is the active effort. A map holds the destination, the decisions made so far, and the fog still
+This repo is driven by **wayfinder maps** — the closed maps ([v1 #1](https://github.com/asmundwien/roadmap/issues/1)
+through the rest) are the history; the active effort is whatever `wayfinder:map` issue is open.
+A map holds the destination, the decisions made so far, and the fog still
 ahead; its child issues are the tickets. Before starting work, read the map and take a ticket from the frontier (open,
 unblocked, unassigned). Use the `/wayfinder` skill rather than freelancing new work.
 

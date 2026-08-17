@@ -109,6 +109,8 @@ export function MapChild({
           data-selected={isMapSelected ? 'true' : 'false'}
           tabIndex={isMapSelected || entry ? 0 : -1}
           aria-label={`${map.title} — the destination`}
+          aria-current={isMapSelected ? 'true' : undefined}
+          aria-expanded={solo ? undefined : open}
           onClick={activate}
         />
         {header}

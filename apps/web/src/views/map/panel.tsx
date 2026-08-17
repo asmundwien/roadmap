@@ -38,7 +38,7 @@ export function Panel({
       {/* Part of the screen's single-tab-stop navbar: reached with ArrowRight from the item
           list, never with Tab. Native buttons — Space and Enter both activate, per standard.
           The square » dismiss sits at the far right, past the two equal prev/next buttons. */}
-      <div className="panel-nav">
+      <div className="panel-nav" role="toolbar" aria-label="panel navigation">
         <button
           type="button"
           data-panel-nav="0"

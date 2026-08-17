@@ -268,7 +268,12 @@ function PanelScreen({
       </main>
 
       {/* The rail is always mounted: opening and closing is the fold's 0fr→1fr, sideways. */}
-      <aside className={`panel-rail${pick ? ' is-open' : ''}`} aria-hidden={!pick} inert={!pick}>
+      <aside
+        className={`panel-rail${pick ? ' is-open' : ''}`}
+        aria-label="the panel"
+        aria-hidden={!pick}
+        inert={!pick}
+      >
         <div className="panel-rail-inner">
           {shown && (
             <div className="panel">
