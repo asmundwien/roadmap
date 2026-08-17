@@ -2,6 +2,7 @@ import type { Blocker, Ticket, WayfinderMap } from '@roadmap/contracts'
 import type { ResolvedSelection } from '../../router.ts'
 import { stripInlineMarkdown } from '../gist.ts'
 import './map.css'
+import { Prose } from './prose.tsx'
 import { STATE_META } from './state-meta.ts'
 
 /**
@@ -122,9 +123,21 @@ function PanelBody({
     case 'ticket':
       return <TicketContent map={map} number={selection.number} onSelect={onSelect} />
     case 'fog':
-      return <ListItemContent map={map} caption="fog · not yet specified" text={selection.text} />
+      return (
+        <ListItemContent
+          map={map}
+          caption="fog · not yet specified"
+          markdown={rawListItem(map.body.notYetSpecified, selection.text)}
+        />
+      )
     case 'scope':
-      return <ListItemContent map={map} caption="left out of scope" text={selection.text} />
+      return (
+        <ListItemContent
+          map={map}
+          caption="left out of scope"
+          markdown={rawListItem(map.body.outOfScope, selection.text)}
+        />
+      )
     case 'scope-all':
       return <ScopeAllContent map={map} />
   }
@@ -140,13 +153,15 @@ function MapContent({ map }: { map: WayfinderMap }) {
         {map.title} · #{map.number}
       </p>
       <GithubButton url={map.url} label="View map in GitHub" />
-      <p className="cart-dest">{stripInlineMarkdown(map.body.destination)}</p>
+      <Prose markdown={map.body.destination} />
       {map.body.notes.length > 0 && (
         <>
           <p className="cart-head">notes</p>
           <ul>
             {map.body.notes.map((note) => (
-              <li key={note}>{stripInlineMarkdown(note)}</li>
+              <li key={note}>
+                <Prose markdown={note} />
+              </li>
             ))}
           </ul>
         </>
@@ -156,7 +171,9 @@ function MapContent({ map }: { map: WayfinderMap }) {
           <p className="cart-head">out of scope</p>
           <ul>
             {map.body.outOfScope.map((item) => (
-              <li key={item}>{stripInlineMarkdown(item)}</li>
+              <li key={item}>
+                <Prose markdown={item} />
+              </li>
             ))}
           </ul>
         </>
@@ -207,11 +224,11 @@ function TicketContent({
         {login !== undefined ? ` · ${login}` : ''}
         {ticket.closedAt !== null ? ` · ${shortDate(ticket.closedAt)}` : ''}
       </p>
-      {body !== '' && <p className="cart-dest">{body}</p>}
+      {body !== '' && <Prose markdown={body} />}
       {gist !== undefined && (
         <>
           <p className="cart-head">the decision</p>
-          <p className="cart-dest">{stripInlineMarkdown(gist.gist)}</p>
+          <Prose markdown={gist.gist} />
         </>
       )}
       <BlockerList map={map} ticket={ticket} onSelect={onSelect} />
@@ -294,21 +311,30 @@ export function ItemLink({
   )
 }
 
+/**
+ * Selections carry the ledger's stripped text — it doubles as the pick's identity — so the raw
+ * markdown it names is looked back up for rendering. A miss (a snapshot replace racing the pick)
+ * falls back to the stripped text itself: plain, but never wrong.
+ */
+function rawListItem(items: string[], stripped: string): string {
+  return items.find((item) => stripInlineMarkdown(item) === stripped) ?? stripped
+}
+
 /** A fog patch or scope entry in full — these live on the map issue itself, title-less. */
 function ListItemContent({
   map,
   caption,
-  text,
+  markdown,
 }: {
   map: WayfinderMap
   caption: string
-  text: string
+  markdown: string
 }) {
   return (
     <div className="cartouche">
       <p className="cart-caption">{caption}</p>
       <GithubButton url={map.url} label="View map in GitHub" />
-      <p className="cart-dest">{text}</p>
+      <Prose markdown={markdown} />
     </div>
   )
 }
@@ -321,7 +347,9 @@ function ScopeAllContent({ map }: { map: WayfinderMap }) {
       <GithubButton url={map.url} label="View map in GitHub" />
       <ul>
         {map.body.outOfScope.map((item) => (
-          <li key={item}>{stripInlineMarkdown(item)}</li>
+          <li key={item}>
+            <Prose markdown={item} />
+          </li>
         ))}
       </ul>
     </div>

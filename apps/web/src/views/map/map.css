@@ -657,12 +657,6 @@
   color: var(--goal);
 }
 
-.cart-dest {
-  margin: 0;
-  white-space: pre-line;
-  color: var(--fg);
-}
-
 .cart-head {
   margin: var(--sp-3) 0 var(--sp-1);
   font-size: 0.7rem;
@@ -742,6 +736,139 @@
  * Panel body's side padding, so it spans the whole column like the navbar's own borders. */
 .panel-rule {
   margin: var(--sp-4) calc(-1 * var(--sp-6));
+  border: none;
+  border-top: 1px solid var(--edge);
+}
+
+/* ------------------------------------------------------- rendered markdown, the Panel's prose */
+
+/*
+ * react-markdown's plain semantic output, themed with the app's own tokens so both themes fall
+ * out for free. Declared after the .cartouche rules on purpose: .prose ul must win their tie so
+ * lists inside a body keep the body's color, while a Prose sitting inside a cartouche list (a
+ * note, a scope entry) inherits that list's muted tone.
+ */
+
+/* Fragments are one-liners as often as whole bodies: a lone paragraph keeps no outer margins,
+ * so a rendered gist sits exactly where the old plain text sat. */
+.prose > :first-child {
+  margin-top: 0;
+}
+
+.prose > :last-child {
+  margin-bottom: 0;
+}
+
+.prose p,
+.prose ul,
+.prose ol,
+.prose blockquote,
+.prose pre,
+.prose table {
+  margin: 0.5rem 0;
+}
+
+/* Only h3–h6 ever render — the component downshifts h1/h2 so bodies can't outrank the chrome. */
+.prose h3,
+.prose h4,
+.prose h5,
+.prose h6 {
+  margin: var(--sp-3) 0 var(--sp-1);
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.prose h4 {
+  font-size: 0.9rem;
+}
+
+.prose h5,
+.prose h6 {
+  font-size: 0.85rem;
+}
+
+.prose ul,
+.prose ol {
+  padding-left: 1.25rem;
+  color: inherit;
+}
+
+.prose li {
+  margin: 0.15rem 0;
+}
+
+/* GFM task lists: the checkbox is the marker, as GitHub draws them. */
+.prose .contains-task-list {
+  padding-left: 0.25rem;
+  list-style: none;
+}
+
+.prose input[type="checkbox"] {
+  margin-right: 0.4em;
+}
+
+.prose a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--muted);
+  text-underline-offset: 2px;
+}
+
+.prose a:hover {
+  text-decoration-color: currentcolor;
+}
+
+.prose code {
+  padding: 0.1em 0.35em;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  background: var(--wash);
+  font-size: 0.92em;
+}
+
+.prose pre {
+  padding: var(--sp-3);
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  background: var(--wash);
+  overflow-x: auto;
+}
+
+.prose pre code {
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 0.78rem;
+}
+
+.prose blockquote {
+  padding-left: var(--sp-3);
+  border-left: 3px solid var(--edge);
+  color: var(--muted);
+}
+
+/* Wide content scrolls within the Panel's column; the layout never stretches. */
+.prose table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.prose th,
+.prose td {
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--edge);
+  text-align: left;
+}
+
+.prose img {
+  max-width: 100%;
+}
+
+.prose hr {
+  margin: var(--sp-3) 0;
   border: none;
   border-top: 1px solid var(--edge);
 }
