@@ -12,6 +12,7 @@
     "dev": "pnpm --parallel --filter @roadmap/web --filter @roadmap/server dev",
     "dev:web": "pnpm --filter @roadmap/web dev",
     "dev:server": "pnpm --filter @roadmap/server dev",
+    "prototype:management": "pnpm --filter @roadmap/web prototype:management",
     "build": "pnpm --filter @roadmap/web build",
     "preview": "pnpm --filter @roadmap/web preview",
     "typecheck": "tsc -b --noEmit",
