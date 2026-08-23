@@ -11,6 +11,7 @@
   "scripts": {
     "dev": "pnpm --parallel --filter @roadmap/web --filter @roadmap/server dev",
     "dev:web": "pnpm --filter @roadmap/web dev",
+    "prototype:automation": "pnpm --filter @roadmap/web exec vite automation-prototype --port 4173 --strictPort",
     "dev:server": "pnpm --filter @roadmap/server dev",
     "build": "pnpm --filter @roadmap/web build",
     "preview": "pnpm --filter @roadmap/web preview",
