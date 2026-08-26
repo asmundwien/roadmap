@@ -11,6 +11,7 @@ import type {
   RuntimeCodec,
 } from '@roadmap/contracts'
 import { isRecord } from '../type-guards.ts'
+import { CLASSIFICATION_RESULT_SCHEMA_MARKER } from './classification-contract.ts'
 import {
   type ConfigurationMigration,
   type LegacyRoadmapConfiguration,
@@ -80,6 +81,12 @@ export interface RoadmapConfiguration {
   projects: ProjectRegistration[]
   automation: AutomationConfiguration
 }
+
+const POINTER_PROMPT_MARKERS = ['{{roadmap.map}}', '{{roadmap.ticket}}']
+const CLASSIFICATION_PROMPT_MARKERS = [
+  ...POINTER_PROMPT_MARKERS,
+  CLASSIFICATION_RESULT_SCHEMA_MARKER,
+]
 
 export type ConfigurationRead =
   | { ok: true; document: RoadmapConfiguration; notices?: string[] }
@@ -679,11 +686,21 @@ function decodeAutomation(
   const classificationCommand =
     value.classificationCommand === undefined
       ? undefined
-      : decodeHarnessCommand(value.classificationCommand, `${path}.classificationCommand`, issues)
+      : decodeHarnessCommand(
+          value.classificationCommand,
+          `${path}.classificationCommand`,
+          issues,
+          CLASSIFICATION_PROMPT_MARKERS,
+        )
   const wayfinderCommand =
     value.wayfinderCommand === undefined
       ? undefined
-      : decodeHarnessCommand(value.wayfinderCommand, `${path}.wayfinderCommand`, issues)
+      : decodeHarnessCommand(
+          value.wayfinderCommand,
+          `${path}.wayfinderCommand`,
+          issues,
+          POINTER_PROMPT_MARKERS,
+        )
   const enabledProjects = decodeEnabledProjects(value.enabledProjects, path, issues)
   if (enabled === null) return null
   return {
@@ -745,6 +762,7 @@ function decodeHarnessCommand(
   input: unknown,
   path: string,
   issues: ConfigurationIssue[],
+  promptMarkers: readonly string[],
 ): HarnessCommand | null {
   const value = asRecord(input, path, issues)
   if (!value) return null
@@ -756,7 +774,9 @@ function decodeHarnessCommand(
     issues,
     false,
   )
-  if (promptTemplate !== null) validatePromptTemplate(promptTemplate, path, issues)
+  if (promptTemplate !== null) {
+    validatePromptTemplate(promptTemplate, path, issues, promptMarkers)
+  }
   return base && promptTemplate ? { ...base, promptTemplate } : null
 }
 
@@ -807,9 +827,9 @@ function validatePromptTemplate(
   promptTemplate: string,
   path: string,
   issues: ConfigurationIssue[],
+  allowed: readonly string[],
 ): void {
   const markers = promptTemplate.match(/{{[^{}]+}}/g) ?? []
-  const allowed = ['{{roadmap.map}}', '{{roadmap.ticket}}']
   for (const marker of new Set(markers)) {
     if (!allowed.includes(marker)) {
       issue(issues, `${path}.promptTemplate`, `Unknown template marker ${JSON.stringify(marker)}.`)

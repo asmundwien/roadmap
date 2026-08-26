@@ -29,6 +29,11 @@ const HARNESS_COMMAND = {
   promptDelivery: 'stdin' as const,
   promptTemplate: 'Map {{roadmap.map}} ticket {{roadmap.ticket}}',
 }
+const CLASSIFICATION_HARNESS_COMMAND = {
+  ...HARNESS_COMMAND,
+  promptTemplate:
+    'Map {{roadmap.map}} ticket {{roadmap.ticket}} schema {{roadmap.classificationResultSchema}}',
+}
 
 function memoryConfiguration(
   initial: ConfigurationRead,
@@ -320,7 +325,7 @@ describe('RoadmapApplication', () => {
       projects: [project],
       automation: {
         enabled: false,
-        classificationCommand: HARNESS_COMMAND,
+        classificationCommand: CLASSIFICATION_HARNESS_COMMAND,
         wayfinderCommand: HARNESS_COMMAND,
         enabledProjects: [],
       },
@@ -400,7 +405,7 @@ describe('RoadmapApplication', () => {
       ...BASE_CONFIGURATION,
       automation: {
         enabled: false,
-        classificationCommand: HARNESS_COMMAND,
+        classificationCommand: CLASSIFICATION_HARNESS_COMMAND,
         wayfinderCommand: HARNESS_COMMAND,
         enabledProjects: [],
       },

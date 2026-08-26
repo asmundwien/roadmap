@@ -4,14 +4,17 @@ import { open, readFile, rename, unlink } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import type { ProjectKey, RegisteredProject, Ticket } from '@roadmap/contracts'
 import { isRecord } from '../type-guards.ts'
+import {
+  CLASSIFICATION_RESULT_SCHEMA_MARKER,
+  type ClassificationResult,
+  classificationResultSchemaJson,
+  decodeClassificationResult,
+} from './classification-contract.ts'
 import type { HarnessCommand, RoadmapConfiguration } from './configuration.ts'
 
 const PROMPT_MARKER = '{{roadmap.prompt}}'
 const STDOUT_LIMIT = 16 * 1024
 const STDERR_LIMIT = 64 * 1024
-const PROMPT_VERSION = 1
-
-type ClassificationVerdict = 'afk' | 'hitl' | 'unable'
 
 interface AutomationTarget {
   project: ProjectKey
@@ -21,7 +24,7 @@ interface AutomationTarget {
 
 type ClassificationAttempt =
   | { status: 'attempted' }
-  | { status: ClassificationVerdict | 'failed'; reason: string }
+  | { status: ClassificationResult['verdict'] | 'failed'; reason: string }
 
 type WayfinderAttempt = { status: 'attempted' | 'started' | 'launch-failed' }
 
@@ -326,6 +329,7 @@ function renderPrompt(promptTemplate: string, candidate: Candidate): string {
   return promptTemplate
     .replaceAll('{{roadmap.map}}', () => candidate.mapPointer)
     .replaceAll('{{roadmap.ticket}}', () => candidate.ticketPointer)
+    .replaceAll(CLASSIFICATION_RESULT_SCHEMA_MARKER, () => classificationResultSchemaJson)
 }
 
 function classificationResult(result: ClassificationProcessResult): ClassificationAttempt {
@@ -339,29 +343,13 @@ function classificationResult(result: ClassificationProcessResult): Classificati
   if (result.stdoutOversized) {
     return { status: 'failed', reason: `Classification stdout exceeded ${STDOUT_LIMIT} bytes.` }
   }
-  const decoded = decodeHarnessVerdict(result.stdout)
-  return (
-    decoded ?? {
-      status: 'failed',
-      reason: 'Classification stdout was not one valid version 1 verdict object.',
-    }
-  )
-}
-
-function decodeHarnessVerdict(stdout: string): ClassificationAttempt | null {
-  let input: unknown
-  try {
-    input = JSON.parse(stdout)
-  } catch {
-    return null
-  }
-  if (!isRecord(input) || !exactKeys(input, ['schemaVersion', 'verdict', 'reason'])) return null
-  if (input.schemaVersion !== PROMPT_VERSION) return null
-  if (input.verdict !== 'afk' && input.verdict !== 'hitl' && input.verdict !== 'unable') return null
-  if (typeof input.reason !== 'string' || input.reason.length === 0 || input.reason.length > 1000) {
-    return null
-  }
-  return { status: input.verdict, reason: input.reason }
+  const decoded = decodeClassificationResult(result.stdout)
+  return decoded
+    ? { status: decoded.verdict, reason: decoded.reason }
+    : {
+        status: 'failed',
+        reason: 'Classification stdout did not match the current result contract.',
+      }
 }
 
 export function createAutomationDocument(path: string): AutomationDocument {

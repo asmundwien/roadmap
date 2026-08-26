@@ -1,6 +1,7 @@
 import type { ProjectRegistration } from '@roadmap/contracts'
 import { inspectLocalWorkspace } from '../local/workspace.ts'
 import { LOCAL_PROJECTS_PATH, readLocalProjectRegistry } from '../local-projects.ts'
+import { CLASSIFICATION_RESULT_SCHEMA_MARKER } from './classification-contract.ts'
 import type {
   HarnessCommand,
   LegacyHarnessCommand,
@@ -33,12 +34,8 @@ Map pointer: {{roadmap.map}}
 Ticket pointer: {{roadmap.ticket}}
 
 Load both from the tracker. Do not claim, edit, or resolve anything.
-Classify the ticket as:
-- afk: an agent can complete it without live human input or action;
-- hitl: completion requires live human judgment, input, or action;
-- unable: the available tracker facts do not support a confident verdict.
-
-Write only one JSON object to stdout with exactly schemaVersion 1, a verdict of afk, hitl, or unable, and a non-empty reason of at most 1000 characters.
+Write only one JSON object to stdout matching this schema:
+${CLASSIFICATION_RESULT_SCHEMA_MARKER}
 `
 
 const LEGACY_WAYFINDER_PROMPT_TEMPLATE = `Invoke the Wayfinder skill for exactly this map and ticket.

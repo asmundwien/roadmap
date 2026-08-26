@@ -21,6 +21,7 @@ import {
   type ClassificationProcessResult,
   createAutomationLauncher,
 } from './automation.ts'
+import { classificationResultSchemaJson } from './classification-contract.ts'
 import type {
   ConfigurationDocument,
   ConfigurationRead,
@@ -298,7 +299,8 @@ describe('RoadmapApplication Automation', () => {
       configuration: configuration([sourceProject], {
         classificationCommand: {
           ...COMMAND,
-          promptTemplate: 'Classify {{roadmap.ticket}} under {{roadmap.map}}.',
+          promptTemplate:
+            'Classify {{roadmap.ticket}} under {{roadmap.map}}. Contract: {{roadmap.classificationResultSchema}}',
         },
         wayfinderCommand: {
           ...COMMAND,
@@ -306,9 +308,8 @@ describe('RoadmapApplication Automation', () => {
         },
       }),
     })
-
     expect(launches.classifications[0]?.request.prompt).toBe(
-      `Classify ${ticketUrl} under ${mapUrl}.`,
+      `Classify ${ticketUrl} under ${mapUrl}. Contract: ${classificationResultSchemaJson}`,
     )
     launches.classifications[0]?.resolve(processResult())
     await vi.waitFor(() => expect(launches.dispatches).toHaveLength(1))
@@ -516,7 +517,8 @@ describe('RoadmapApplication Automation', () => {
         `process.stdin.resume(); process.stdout.write(JSON.stringify({schemaVersion:1, verdict:'afk', reason:'Ready.'}))`,
       ],
       promptDelivery: 'stdin',
-      promptTemplate: 'Classify {{roadmap.ticket}} for {{roadmap.map}}.',
+      promptTemplate:
+        'Classify {{roadmap.ticket}} for {{roadmap.map}} with {{roadmap.classificationResultSchema}}.',
     }
     const wayfinder: HarnessCommand = {
       command: process.execPath,

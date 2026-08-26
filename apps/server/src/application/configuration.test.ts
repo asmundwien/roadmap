@@ -221,7 +221,8 @@ describe('roadmap configuration', () => {
             command: '/usr/bin/agent',
             args: ['run', '{{roadmap.prompt}}'],
             promptDelivery: 'argument',
-            promptTemplate: 'Map {{roadmap.map}} ticket {{roadmap.ticket}}',
+            promptTemplate:
+              'Map {{roadmap.map}} ticket {{roadmap.ticket}} schema {{roadmap.classificationResultSchema}}',
           },
           wayfinderCommand: {
             command: '/usr/bin/agent',
@@ -248,6 +249,13 @@ describe('roadmap configuration', () => {
           shell: true,
           promptTemplate: '{{roadmap.ticket}} {{roadmap.ticket}} {{roadmap.unknown}}',
         },
+        wayfinderCommand: {
+          command: '/usr/bin/agent',
+          args: [],
+          promptDelivery: 'stdin',
+          promptTemplate:
+            'Map {{roadmap.map}} ticket {{roadmap.ticket}} schema {{roadmap.classificationResultSchema}}',
+        },
         enabledProjects: [{ integration: 'local', id: 'missing' }],
       },
     })
@@ -260,6 +268,10 @@ describe('roadmap configuration', () => {
         expect.objectContaining({ path: '$.automation.classificationCommand.args' }),
         expect.objectContaining({
           path: '$.automation.classificationCommand.promptTemplate',
+        }),
+        expect.objectContaining({
+          path: '$.automation.wayfinderCommand.promptTemplate',
+          message: expect.stringContaining('Unknown template marker'),
         }),
         expect.objectContaining({ path: '$.automation.enabledProjects[0]' }),
       ]),
@@ -333,7 +345,7 @@ describe('roadmap configuration', () => {
           enabled: false,
           classificationCommand: {
             ...command,
-            promptTemplate: expect.stringContaining('{{roadmap.ticket}}'),
+            promptTemplate: expect.stringContaining('{{roadmap.classificationResultSchema}}'),
           },
           enabledProjects: [],
         },
@@ -389,7 +401,7 @@ describe('roadmap configuration', () => {
           enabled: true,
           classificationCommand: {
             ...classificationCommand,
-            promptTemplate: expect.stringContaining('{{roadmap.ticket}}'),
+            promptTemplate: expect.stringContaining('{{roadmap.classificationResultSchema}}'),
           },
           wayfinderCommand: {
             ...wayfinderCommand,
