@@ -126,7 +126,7 @@ export interface RoadmapApplicationOptions {
 
 const EMPTY_SNAPSHOT: Snapshot = { capturedAt: 0, projects: [], unreachable: [] }
 const EMPTY_CONFIGURATION: RoadmapConfiguration = {
-  schemaVersion: 4,
+  schemaVersion: 5,
   configurationVersion: 0,
   connections: [{ id: 'local', integration: 'local', name: 'Local', builtIn: true }],
   projects: [],

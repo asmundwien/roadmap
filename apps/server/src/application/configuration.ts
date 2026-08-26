@@ -17,6 +17,7 @@ import {
   migrateConfigurationV1,
   migrateConfigurationV2,
   migrateConfigurationV3,
+  migrateConfigurationV4,
 } from './migration.ts'
 
 export interface ConfiguredConnection {
@@ -27,14 +28,18 @@ export interface ConfiguredConnection {
   githubIdentity?: GitHubConnectionIdentity
 }
 
-export interface HarnessCommand {
+export interface LegacyHarnessCommand {
   command: string
   args: string[]
   promptDelivery: 'argument' | 'stdin'
 }
 
+export interface HarnessCommand extends LegacyHarnessCommand {
+  promptTemplate: string
+}
+
 export interface LegacyClassificationConfiguration {
-  command?: HarnessCommand
+  command?: LegacyHarnessCommand
   enabledProjects: ProjectKey[]
 }
 
@@ -46,6 +51,21 @@ export interface LegacyRoadmapConfigurationV3 {
   classification: LegacyClassificationConfiguration
 }
 
+export interface LegacyAutomationConfiguration {
+  enabled: boolean
+  classificationCommand?: LegacyHarnessCommand
+  wayfinderCommand?: LegacyHarnessCommand
+  enabledProjects: ProjectKey[]
+}
+
+export interface LegacyRoadmapConfigurationV4 {
+  schemaVersion: 4
+  configurationVersion: number
+  connections: ConfiguredConnection[]
+  projects: ProjectRegistration[]
+  automation: LegacyAutomationConfiguration
+}
+
 export interface AutomationConfiguration {
   enabled: boolean
   classificationCommand?: HarnessCommand
@@ -54,7 +74,7 @@ export interface AutomationConfiguration {
 }
 
 export interface RoadmapConfiguration {
-  schemaVersion: 4
+  schemaVersion: 5
   configurationVersion: number
   connections: ConfiguredConnection[]
   projects: ProjectRegistration[]
@@ -89,11 +109,20 @@ function configurationCodec(
 function configurationCodec(
   schemaVersion: 4,
   requireReservedLocal: boolean,
+): RuntimeCodec<LegacyRoadmapConfigurationV4>
+function configurationCodec(
+  schemaVersion: 5,
+  requireReservedLocal: boolean,
 ): RuntimeCodec<RoadmapConfiguration>
 function configurationCodec(
-  schemaVersion: 1 | 2 | 3 | 4,
+  schemaVersion: 1 | 2 | 3 | 4 | 5,
   requireReservedLocal: boolean,
-): RuntimeCodec<LegacyRoadmapConfiguration | LegacyRoadmapConfigurationV3 | RoadmapConfiguration> {
+): RuntimeCodec<
+  | LegacyRoadmapConfiguration
+  | LegacyRoadmapConfigurationV3
+  | LegacyRoadmapConfigurationV4
+  | RoadmapConfiguration
+> {
   return {
     decode(input) {
       return decodeConfiguration(input, schemaVersion, requireReservedLocal)
@@ -104,6 +133,7 @@ function configurationCodec(
 type ConfigurationValue =
   | LegacyRoadmapConfiguration
   | LegacyRoadmapConfigurationV3
+  | LegacyRoadmapConfigurationV4
   | RoadmapConfiguration
 
 type ConfigurationDecode =
@@ -119,7 +149,7 @@ interface DecodedConfigurationBase {
 
 function decodeConfiguration(
   input: unknown,
-  schemaVersion: 1 | 2 | 3 | 4,
+  schemaVersion: 1 | 2 | 3 | 4 | 5,
   requireReservedLocal: boolean,
 ): ConfigurationDecode {
   const issues: ConfigurationIssue[] = []
@@ -137,7 +167,8 @@ function decodeConfiguration(
     connections: decodeConnections(root.connections, issues),
     projects: decodeProjects(root.projects, issues),
   }
-  if (schemaVersion === 4) return decodeCurrentConfiguration(base, issues, requireReservedLocal)
+  if (schemaVersion === 5) return decodeCurrentConfiguration(base, issues, requireReservedLocal)
+  if (schemaVersion === 4) return decodeVersionFour(base, issues, requireReservedLocal)
   if (schemaVersion === 3) return decodeVersionThree(base, issues, requireReservedLocal)
   return decodeLegacyConfiguration(base, issues, requireReservedLocal, schemaVersion)
 }
@@ -162,6 +193,35 @@ function decodeCurrentConfiguration(
   requireReservedLocal: boolean,
 ): ConfigurationDecode {
   const automation = decodeAutomation(base.root.automation, '$.automation', issues)
+  validateSemantics(
+    base.connections,
+    base.projects,
+    automation?.enabledProjects ?? null,
+    issues,
+    requireReservedLocal,
+    '$.automation.enabledProjects',
+  )
+  if (issues.length > 0 || base.configurationVersion === null || !automation) {
+    return { ok: false, issues }
+  }
+  return {
+    ok: true,
+    value: {
+      schemaVersion: 5,
+      configurationVersion: base.configurationVersion,
+      connections: base.connections,
+      projects: base.projects,
+      automation,
+    },
+  }
+}
+
+function decodeVersionFour(
+  base: DecodedConfigurationBase,
+  issues: ConfigurationIssue[],
+  requireReservedLocal: boolean,
+): ConfigurationDecode {
+  const automation = decodeLegacyAutomation(base.root.automation, '$.automation', issues)
   validateSemantics(
     base.connections,
     base.projects,
@@ -240,16 +300,17 @@ function decodeLegacyConfiguration(
   }
 }
 
-function configurationKeys(schemaVersion: 1 | 2 | 3 | 4): string[] {
+function configurationKeys(schemaVersion: 1 | 2 | 3 | 4 | 5): string[] {
   const keys = ['schemaVersion', 'configurationVersion', 'connections', 'projects']
   if (schemaVersion === 3) return [...keys, 'classification']
-  return schemaVersion === 4 ? [...keys, 'automation'] : keys
+  return schemaVersion === 4 || schemaVersion === 5 ? [...keys, 'automation'] : keys
 }
 
-export const roadmapConfigurationCodec = configurationCodec(4, true)
+export const roadmapConfigurationCodec = configurationCodec(5, true)
 const legacyConfigurationV1Codec = configurationCodec(1, false)
 const legacyConfigurationV2Codec = configurationCodec(2, true)
 const legacyConfigurationV3Codec = configurationCodec(3, true)
+const legacyConfigurationV4Codec = configurationCodec(4, true)
 
 async function readConfigurationSource(
   path: string,
@@ -287,9 +348,13 @@ type MigrationDecode =
 
 async function decodeMigration(
   parsed: unknown,
-  version: 1 | 2 | 3,
+  version: 1 | 2 | 3 | 4,
   legacyLocalProjectsPath: string,
 ): Promise<MigrationDecode> {
+  if (version === 4) {
+    const legacy = legacyConfigurationV4Codec.decode(parsed)
+    return legacy.ok ? { ok: true, value: migrateConfigurationV4(legacy.value) } : legacy
+  }
   if (version === 3) {
     const legacy = legacyConfigurationV3Codec.decode(parsed)
     return legacy.ok ? { ok: true, value: migrateConfigurationV3(legacy.value) } : legacy
@@ -320,7 +385,7 @@ export function createConfigurationDocument(
   async function migrateCurrent(
     raw: string,
     parsed: unknown,
-    version: 1 | 2 | 3,
+    version: 1 | 2 | 3 | 4,
   ): Promise<ConfigurationRead> {
     const migrated = await decodeMigration(
       parsed,
@@ -362,7 +427,8 @@ export function createConfigurationDocument(
       isRecord(parsed.value) &&
       (parsed.value.schemaVersion === 1 ||
         parsed.value.schemaVersion === 2 ||
-        parsed.value.schemaVersion === 3)
+        parsed.value.schemaVersion === 3 ||
+        parsed.value.schemaVersion === 4)
     ) {
       return migrateCurrent(source.raw, parsed.value, parsed.value.schemaVersion)
     }
@@ -591,7 +657,7 @@ function decodeClassification(
   const command =
     value.command === undefined
       ? undefined
-      : decodeHarnessCommand(value.command, `${path}.command`, issues)
+      : decodeLegacyHarnessCommand(value.command, `${path}.command`, issues)
   const enabledProjects = decodeEnabledProjects(value.enabledProjects, path, issues)
   return { ...(command ? { command } : {}), enabledProjects }
 }
@@ -628,6 +694,42 @@ function decodeAutomation(
   }
 }
 
+function decodeLegacyAutomation(
+  input: unknown,
+  path: string,
+  issues: ConfigurationIssue[],
+): LegacyAutomationConfiguration | null {
+  const value = asRecord(input, path, issues)
+  if (!value) return null
+  exactKeys(
+    value,
+    ['enabled', 'classificationCommand', 'wayfinderCommand', 'enabledProjects'],
+    path,
+    issues,
+  )
+  const enabled = boolean(value.enabled, `${path}.enabled`, issues)
+  const classificationCommand =
+    value.classificationCommand === undefined
+      ? undefined
+      : decodeLegacyHarnessCommand(
+          value.classificationCommand,
+          `${path}.classificationCommand`,
+          issues,
+        )
+  const wayfinderCommand =
+    value.wayfinderCommand === undefined
+      ? undefined
+      : decodeLegacyHarnessCommand(value.wayfinderCommand, `${path}.wayfinderCommand`, issues)
+  const enabledProjects = decodeEnabledProjects(value.enabledProjects, path, issues)
+  if (enabled === null) return null
+  return {
+    enabled,
+    ...(classificationCommand ? { classificationCommand } : {}),
+    ...(wayfinderCommand ? { wayfinderCommand } : {}),
+    enabledProjects,
+  }
+}
+
 function decodeEnabledProjects(
   input: unknown,
   path: string,
@@ -646,7 +748,34 @@ function decodeHarnessCommand(
 ): HarnessCommand | null {
   const value = asRecord(input, path, issues)
   if (!value) return null
+  exactKeys(value, ['command', 'args', 'promptDelivery', 'promptTemplate'], path, issues)
+  const base = decodeHarnessCommandFields(value, path, issues)
+  const promptTemplate = literalCommandString(
+    value.promptTemplate,
+    `${path}.promptTemplate`,
+    issues,
+    false,
+  )
+  if (promptTemplate !== null) validatePromptTemplate(promptTemplate, path, issues)
+  return base && promptTemplate ? { ...base, promptTemplate } : null
+}
+
+function decodeLegacyHarnessCommand(
+  input: unknown,
+  path: string,
+  issues: ConfigurationIssue[],
+): LegacyHarnessCommand | null {
+  const value = asRecord(input, path, issues)
+  if (!value) return null
   exactKeys(value, ['command', 'args', 'promptDelivery'], path, issues)
+  return decodeHarnessCommandFields(value, path, issues)
+}
+
+function decodeHarnessCommandFields(
+  value: Record<string, unknown>,
+  path: string,
+  issues: ConfigurationIssue[],
+): LegacyHarnessCommand | null {
   const command = literalCommandString(value.command, `${path}.command`, issues, false)
   const args = array(value.args, `${path}.args`, issues).flatMap((arg, index) => {
     const decoded = literalCommandString(arg, `${path}.args[${index}]`, issues, true)
@@ -672,6 +801,29 @@ function decodeHarnessCommand(
     }
   }
   return command && promptDelivery ? { command, args, promptDelivery } : null
+}
+
+function validatePromptTemplate(
+  promptTemplate: string,
+  path: string,
+  issues: ConfigurationIssue[],
+): void {
+  const markers = promptTemplate.match(/{{[^{}]+}}/g) ?? []
+  const allowed = ['{{roadmap.map}}', '{{roadmap.ticket}}']
+  for (const marker of new Set(markers)) {
+    if (!allowed.includes(marker)) {
+      issue(issues, `${path}.promptTemplate`, `Unknown template marker ${JSON.stringify(marker)}.`)
+    }
+  }
+  for (const marker of allowed) {
+    if (markers.filter((candidate) => candidate === marker).length !== 1) {
+      issue(
+        issues,
+        `${path}.promptTemplate`,
+        `Must contain exactly one ${JSON.stringify(marker)} marker.`,
+      )
+    }
+  }
 }
 
 function literalCommandString(

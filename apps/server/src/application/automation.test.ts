@@ -34,6 +34,7 @@ const COMMAND: HarnessCommand = {
   command: process.execPath,
   args: ['-e', 'process.stdin.resume()'],
   promptDelivery: 'stdin',
+  promptTemplate: 'Map {{roadmap.map}} ticket {{roadmap.ticket}}',
 }
 const roots: string[] = []
 
@@ -180,7 +181,7 @@ function configuration(
   overrides: Partial<RoadmapConfiguration['automation']> = {},
 ): RoadmapConfiguration {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     configurationVersion: 1,
     connections: [{ id: 'local', integration: 'local', name: 'Local', builtIn: true }],
     projects: projects.map((entry) => ({
@@ -284,6 +285,37 @@ async function harness(options: {
 }
 
 describe('RoadmapApplication Automation', () => {
+  it('renders configured map and ticket pointers for both Harness Commands', async () => {
+    const mapUrl = 'https://github.com/example/project/issues/1'
+    const ticketUrl = 'https://github.com/example/project/issues/2'
+    const sourceTicket = ticket('2', TASK, { url: ticketUrl })
+    const sourceProject = project('github-pointers', [sourceTicket])
+    sourceProject.openMaps[0] = map(sourceProject.key, [sourceTicket], { url: mapUrl })
+    const launches = deferredLauncher()
+    const current = await harness({
+      projects: [sourceProject],
+      launcher: launches.launcher,
+      configuration: configuration([sourceProject], {
+        classificationCommand: {
+          ...COMMAND,
+          promptTemplate: 'Classify {{roadmap.ticket}} under {{roadmap.map}}.',
+        },
+        wayfinderCommand: {
+          ...COMMAND,
+          promptTemplate: 'Run {{roadmap.map}} ticket {{roadmap.ticket}}.',
+        },
+      }),
+    })
+
+    expect(launches.classifications[0]?.request.prompt).toBe(
+      `Classify ${ticketUrl} under ${mapUrl}.`,
+    )
+    launches.classifications[0]?.resolve(processResult())
+    await vi.waitFor(() => expect(launches.dispatches).toHaveLength(1))
+    expect(launches.dispatches[0]?.prompt).toBe(`Run ${mapUrl} ticket ${ticketUrl}.`)
+    await current.application.stop()
+  })
+
   it('persists each attempt before launch and never repeats the same ticket identity', async () => {
     const sourceProject = project('one', [ticket('1')])
     const ledger = memoryAutomationDocument()
@@ -484,6 +516,7 @@ describe('RoadmapApplication Automation', () => {
         `process.stdin.resume(); process.stdout.write(JSON.stringify({schemaVersion:1, verdict:'afk', reason:'Ready.'}))`,
       ],
       promptDelivery: 'stdin',
+      promptTemplate: 'Classify {{roadmap.ticket}} for {{roadmap.map}}.',
     }
     const wayfinder: HarnessCommand = {
       command: process.execPath,
@@ -493,6 +526,7 @@ describe('RoadmapApplication Automation', () => {
         outputPath,
       ],
       promptDelivery: 'stdin',
+      promptTemplate: 'Configured map={{roadmap.map}} ticket={{roadmap.ticket}}',
     }
     const sourceProject = project('real', [ticket('9')])
     sourceProject.openMaps[0] = map(sourceProject.key, sourceProject.openMaps[0]?.tickets ?? [], {
@@ -521,11 +555,8 @@ describe('RoadmapApplication Automation', () => {
     })
     const session: unknown = JSON.parse(observed)
     expect(session).toMatchObject({ cwd: root, kind: 'wayfinder', map: 'map', ticket: '9' })
-    expect(isRecord(session) && session.input).toContain(
-      `Map pointer: ${join(root, '.wayfinder/map.md')}`,
-    )
-    expect(isRecord(session) && session.input).toContain(
-      'If it is no longer on the frontier, stop without assigning it',
+    expect(isRecord(session) && session.input).toBe(
+      `Configured map=${join(root, '.wayfinder/map.md')} ticket=/tmp/project-9/.wayfinder/tickets/9.md`,
     )
     await current.application.stop()
   })

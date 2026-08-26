@@ -162,9 +162,7 @@ export function createAutomationLoop(options: {
 
     let process: ClassificationProcess
     try {
-      process = options.launcher.classify(
-        launchRequest(candidate, command, 'classification', classificationPrompt(candidate)),
-      )
+      process = options.launcher.classify(launchRequest(candidate, command, 'classification'))
     } catch {
       await replace({
         ...marker,
@@ -232,9 +230,7 @@ export function createAutomationLoop(options: {
     if (!(await replace(marker)) || !accepting) return
 
     try {
-      await options.launcher.dispatch(
-        launchRequest(candidate, command, 'wayfinder', wayfinderPrompt(candidate)),
-      )
+      await options.launcher.dispatch(launchRequest(candidate, command, 'wayfinder'))
       await replace({ ...marker, wayfinder: { status: 'started' } })
     } catch {
       await replace({ ...marker, wayfinder: { status: 'launch-failed' } })
@@ -310,7 +306,6 @@ function launchRequest(
   candidate: Candidate,
   command: HarnessCommand,
   kind: 'classification' | 'wayfinder',
-  prompt: string,
 ): AutomationLaunch {
   const environment: Record<string, string> = {
     ROADMAP_RUN_ID: randomUUID(),
@@ -322,33 +317,15 @@ function launchRequest(
   return {
     command,
     workspace: candidate.project.workspace.path,
-    prompt,
+    prompt: renderPrompt(command.promptTemplate, candidate),
     environment,
   }
 }
 
-function classificationPrompt(candidate: Candidate): string {
-  return `Perform a Roadmap Classification Run for the task ticket below.
-Map pointer: ${candidate.mapPointer}
-Ticket pointer: ${candidate.ticketPointer}
-
-Load both from the tracker. Do not claim, edit, or resolve anything.
-Classify the ticket as:
-- afk: an agent can complete it without live human input or action;
-- hitl: completion requires live human judgment, input, or action;
-- unable: the available tracker facts do not support a confident verdict.
-
-Write only one JSON object to stdout with exactly schemaVersion ${PROMPT_VERSION}, a verdict of afk, hitl, or unable, and a non-empty reason of at most 1000 characters.
-`
-}
-
-function wayfinderPrompt(candidate: Candidate): string {
-  return `Invoke the Wayfinder skill for exactly this map and ticket.
-Map pointer: ${candidate.mapPointer}
-Ticket pointer: ${candidate.ticketPointer}
-
-Reload both from the tracker. Confirm that the ticket is an open, unblocked, unassigned child of the map. If it is no longer on the frontier, stop without assigning it or making any other mutation. If it is still on the frontier, claim it before any work, then resolve exactly this ticket through the normal Wayfinder workflow. Do not choose or resolve another ticket.
-`
+function renderPrompt(promptTemplate: string, candidate: Candidate): string {
+  return promptTemplate
+    .replaceAll('{{roadmap.map}}', () => candidate.mapPointer)
+    .replaceAll('{{roadmap.ticket}}', () => candidate.ticketPointer)
 }
 
 function classificationResult(result: ClassificationProcessResult): ClassificationAttempt {

@@ -17,7 +17,7 @@ const LOCAL_CONNECTION: RoadmapConfiguration['connections'][number] = {
   builtIn: true,
 }
 const BASE_CONFIGURATION: RoadmapConfiguration = {
-  schemaVersion: 4,
+  schemaVersion: 5,
   configurationVersion: 1,
   connections: [LOCAL_CONNECTION],
   projects: [],
@@ -27,6 +27,7 @@ const HARNESS_COMMAND = {
   command: '/usr/bin/true',
   args: [],
   promptDelivery: 'stdin' as const,
+  promptTemplate: 'Map {{roadmap.map}} ticket {{roadmap.ticket}}',
 }
 
 function memoryConfiguration(

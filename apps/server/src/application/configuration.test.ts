@@ -36,7 +36,7 @@ describe('roadmap configuration', () => {
     expect(result).toEqual({
       ok: true,
       document: {
-        schemaVersion: 4,
+        schemaVersion: 5,
         configurationVersion: 1,
         connections: [LOCAL_CONNECTION],
         projects: [],
@@ -61,7 +61,7 @@ describe('roadmap configuration', () => {
     expect(changes.mock.calls.at(-1)?.[0]).toMatchObject({ ok: false })
 
     const repaired: RoadmapConfiguration = {
-      schemaVersion: 4,
+      schemaVersion: 5,
       configurationVersion: 2,
       connections: [LOCAL_CONNECTION],
       projects: [],
@@ -82,7 +82,7 @@ describe('roadmap configuration', () => {
 
     await writeFile(path, '{"external":true}\n', 'utf8')
     const result = await document.write({
-      schemaVersion: 4,
+      schemaVersion: 5,
       configurationVersion: 2,
       connections: [LOCAL_CONNECTION],
       projects: [],
@@ -96,7 +96,7 @@ describe('roadmap configuration', () => {
 
   it('rejects secret-looking fields and inconsistent registration references', () => {
     const decoded = roadmapConfigurationCodec.decode({
-      schemaVersion: 4,
+      schemaVersion: 5,
       configurationVersion: 1,
       accessToken: 'never',
       connections: [LOCAL_CONNECTION],
@@ -127,7 +127,7 @@ describe('roadmap configuration', () => {
 
   it('requires durable GitHub identity metadata and rejects duplicate users', () => {
     const decoded = roadmapConfigurationCodec.decode({
-      schemaVersion: 4,
+      schemaVersion: 5,
       configurationVersion: 1,
       connections: [
         LOCAL_CONNECTION,
@@ -162,7 +162,7 @@ describe('roadmap configuration', () => {
   })
   it('rejects duplicate stable GitHub repository identities', () => {
     const decoded = roadmapConfigurationCodec.decode({
-      schemaVersion: 4,
+      schemaVersion: 5,
       configurationVersion: 1,
       connections: [
         LOCAL_CONNECTION,
@@ -211,7 +211,7 @@ describe('roadmap configuration', () => {
     }
     expect(
       roadmapConfigurationCodec.decode({
-        schemaVersion: 4,
+        schemaVersion: 5,
         configurationVersion: 1,
         connections: [LOCAL_CONNECTION],
         projects: [project],
@@ -221,11 +221,13 @@ describe('roadmap configuration', () => {
             command: '/usr/bin/agent',
             args: ['run', '{{roadmap.prompt}}'],
             promptDelivery: 'argument',
+            promptTemplate: 'Map {{roadmap.map}} ticket {{roadmap.ticket}}',
           },
           wayfinderCommand: {
             command: '/usr/bin/agent',
             args: [],
             promptDelivery: 'stdin',
+            promptTemplate: 'Map {{roadmap.map}} ticket {{roadmap.ticket}}',
           },
           enabledProjects: [project.key],
         },
@@ -233,7 +235,7 @@ describe('roadmap configuration', () => {
     ).toMatchObject({ ok: true })
 
     const invalid = roadmapConfigurationCodec.decode({
-      schemaVersion: 4,
+      schemaVersion: 5,
       configurationVersion: 1,
       connections: [LOCAL_CONNECTION],
       projects: [project],
@@ -244,6 +246,7 @@ describe('roadmap configuration', () => {
           args: ['{{roadmap.prompt}}', '{{roadmap.prompt}}'],
           promptDelivery: 'argument',
           shell: true,
+          promptTemplate: '{{roadmap.ticket}} {{roadmap.ticket}} {{roadmap.unknown}}',
         },
         enabledProjects: [{ integration: 'local', id: 'missing' }],
       },
@@ -255,6 +258,9 @@ describe('roadmap configuration', () => {
         expect.objectContaining({ path: '$.automation.classificationCommand.shell' }),
         expect.objectContaining({ path: '$.automation.classificationCommand.command' }),
         expect.objectContaining({ path: '$.automation.classificationCommand.args' }),
+        expect.objectContaining({
+          path: '$.automation.classificationCommand.promptTemplate',
+        }),
         expect.objectContaining({ path: '$.automation.enabledProjects[0]' }),
       ]),
     )
@@ -278,7 +284,7 @@ describe('roadmap configuration', () => {
     expect(result).toEqual({
       ok: true,
       document: {
-        schemaVersion: 4,
+        schemaVersion: 5,
         configurationVersion: 8,
         connections: [LOCAL_CONNECTION],
         projects: [],
@@ -319,14 +325,77 @@ describe('roadmap configuration', () => {
     expect(result).toEqual({
       ok: true,
       document: {
-        schemaVersion: 4,
+        schemaVersion: 5,
         configurationVersion: 10,
         connections: [LOCAL_CONNECTION],
         projects: [project],
         automation: {
           enabled: false,
-          classificationCommand: command,
+          classificationCommand: {
+            ...command,
+            promptTemplate: expect.stringContaining('{{roadmap.ticket}}'),
+          },
           enabledProjects: [],
+        },
+      },
+    })
+    await document.stop()
+  })
+
+  it('materializes built-in prompts when migrating version four Automation', async () => {
+    const path = await temporaryPath()
+    const project = {
+      key: { integration: 'local' as const, id: 'demo' },
+      connectionId: 'local',
+      locator: { integration: 'local' as const, path: '/tmp/demo' },
+      workspace: { path: '/tmp/demo' },
+    }
+    const classificationCommand = {
+      command: '/usr/bin/agent',
+      args: ['run', '{{roadmap.prompt}}'],
+      promptDelivery: 'argument' as const,
+    }
+    const wayfinderCommand = {
+      command: '/usr/bin/agent',
+      args: [],
+      promptDelivery: 'stdin' as const,
+    }
+    await writeFile(
+      path,
+      `${JSON.stringify({
+        schemaVersion: 4,
+        configurationVersion: 11,
+        connections: [LOCAL_CONNECTION],
+        projects: [project],
+        automation: {
+          enabled: true,
+          classificationCommand,
+          wayfinderCommand,
+          enabledProjects: [project.key],
+        },
+      })}\n`,
+      'utf8',
+    )
+
+    const document = createConfigurationDocument(path)
+    const result = await document.load()
+
+    expect(result).toMatchObject({
+      ok: true,
+      document: {
+        schemaVersion: 5,
+        configurationVersion: 12,
+        automation: {
+          enabled: true,
+          classificationCommand: {
+            ...classificationCommand,
+            promptTemplate: expect.stringContaining('{{roadmap.ticket}}'),
+          },
+          wayfinderCommand: {
+            ...wayfinderCommand,
+            promptTemplate: expect.stringContaining('{{roadmap.ticket}}'),
+          },
+          enabledProjects: [project.key],
         },
       },
     })
@@ -367,7 +436,7 @@ describe('roadmap configuration', () => {
     expect(migrated).toMatchObject({
       ok: true,
       document: {
-        schemaVersion: 4,
+        schemaVersion: 5,
         configurationVersion: 1,
         connections: [LOCAL_CONNECTION],
         projects: [

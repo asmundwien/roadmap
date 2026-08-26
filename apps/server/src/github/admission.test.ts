@@ -25,7 +25,7 @@ const UPSTREAM: RepositoryIdentity = {
 }
 
 const CONFIGURATION: RoadmapConfiguration = {
-  schemaVersion: 4,
+  schemaVersion: 5,
   configurationVersion: 1,
   connections: [
     {

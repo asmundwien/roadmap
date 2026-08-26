@@ -1,7 +1,13 @@
 import type { ProjectRegistration } from '@roadmap/contracts'
 import { inspectLocalWorkspace } from '../local/workspace.ts'
 import { LOCAL_PROJECTS_PATH, readLocalProjectRegistry } from '../local-projects.ts'
-import type { LegacyRoadmapConfigurationV3, RoadmapConfiguration } from './configuration.ts'
+import type {
+  HarnessCommand,
+  LegacyHarnessCommand,
+  LegacyRoadmapConfigurationV3,
+  LegacyRoadmapConfigurationV4,
+  RoadmapConfiguration,
+} from './configuration.ts'
 
 export interface LegacyRoadmapConfiguration {
   schemaVersion: 1 | 2
@@ -21,6 +27,26 @@ const LOCAL_CONNECTION: RoadmapConfiguration['connections'][number] = {
   name: 'Local',
   builtIn: true,
 }
+
+const LEGACY_CLASSIFICATION_PROMPT_TEMPLATE = `Perform a Roadmap Classification Run for the task ticket below.
+Map pointer: {{roadmap.map}}
+Ticket pointer: {{roadmap.ticket}}
+
+Load both from the tracker. Do not claim, edit, or resolve anything.
+Classify the ticket as:
+- afk: an agent can complete it without live human input or action;
+- hitl: completion requires live human judgment, input, or action;
+- unable: the available tracker facts do not support a confident verdict.
+
+Write only one JSON object to stdout with exactly schemaVersion 1, a verdict of afk, hitl, or unable, and a non-empty reason of at most 1000 characters.
+`
+
+const LEGACY_WAYFINDER_PROMPT_TEMPLATE = `Invoke the Wayfinder skill for exactly this map and ticket.
+Map pointer: {{roadmap.map}}
+Ticket pointer: {{roadmap.ticket}}
+
+Reload both from the tracker. Confirm that the ticket is an open, unblocked, unassigned child of the map. If it is no longer on the frontier, stop without assigning it or making any other mutation. If it is still on the frontier, claim it before any work, then resolve exactly this ticket through the normal Wayfinder workflow. Do not choose or resolve another ticket.
+`
 
 /** Migrates the one reachable v1 input and reads the legacy Registry only on that path. */
 export async function migrateConfigurationV1(
@@ -79,7 +105,7 @@ export async function migrateConfigurationV1(
 
   return {
     document: {
-      schemaVersion: 4,
+      schemaVersion: 5,
       configurationVersion: legacy.configurationVersion + 1,
       connections,
       projects,
@@ -93,7 +119,7 @@ export async function migrateConfigurationV1(
 export function migrateConfigurationV2(legacy: LegacyRoadmapConfiguration): ConfigurationMigration {
   return {
     document: {
-      schemaVersion: 4,
+      schemaVersion: 5,
       configurationVersion: legacy.configurationVersion + 1,
       connections: legacy.connections,
       projects: legacy.projects,
@@ -109,20 +135,67 @@ export function migrateConfigurationV3(
 ): ConfigurationMigration {
   return {
     document: {
-      schemaVersion: 4,
+      schemaVersion: 5,
       configurationVersion: legacy.configurationVersion + 1,
       connections: legacy.connections,
       projects: legacy.projects,
       automation: {
         enabled: false,
         ...(legacy.classification.command
-          ? { classificationCommand: legacy.classification.command }
+          ? {
+              classificationCommand: migrateHarnessCommand(
+                legacy.classification.command,
+                LEGACY_CLASSIFICATION_PROMPT_TEMPLATE,
+              ),
+            }
           : {}),
         enabledProjects: [],
       },
     },
     notices: [],
   }
+}
+
+/** Materializes the formerly built-in prompts while retaining inert Automation consent. */
+export function migrateConfigurationV4(
+  legacy: LegacyRoadmapConfigurationV4,
+): ConfigurationMigration {
+  return {
+    document: {
+      schemaVersion: 5,
+      configurationVersion: legacy.configurationVersion + 1,
+      connections: legacy.connections,
+      projects: legacy.projects,
+      automation: {
+        enabled: legacy.automation.enabled,
+        ...(legacy.automation.classificationCommand
+          ? {
+              classificationCommand: migrateHarnessCommand(
+                legacy.automation.classificationCommand,
+                LEGACY_CLASSIFICATION_PROMPT_TEMPLATE,
+              ),
+            }
+          : {}),
+        ...(legacy.automation.wayfinderCommand
+          ? {
+              wayfinderCommand: migrateHarnessCommand(
+                legacy.automation.wayfinderCommand,
+                LEGACY_WAYFINDER_PROMPT_TEMPLATE,
+              ),
+            }
+          : {}),
+        enabledProjects: legacy.automation.enabledProjects,
+      },
+    },
+    notices: [],
+  }
+}
+
+function migrateHarnessCommand(
+  command: LegacyHarnessCommand,
+  promptTemplate: string,
+): HarnessCommand {
+  return { ...command, promptTemplate }
 }
 
 function migratedConnections(

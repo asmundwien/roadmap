@@ -23,7 +23,7 @@ const LOCAL_CONNECTION: RoadmapConfiguration['connections'][number] = {
   builtIn: true,
 }
 const BASE_CONFIGURATION: RoadmapConfiguration = {
-  schemaVersion: 4,
+  schemaVersion: 5,
   configurationVersion: 1,
   connections: [LOCAL_CONNECTION],
   projects: [],
