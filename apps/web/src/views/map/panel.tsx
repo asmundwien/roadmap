@@ -1,7 +1,14 @@
-import type { Blocker, Ticket, WayfinderMap } from '@roadmap/contracts'
+import {
+  type Blocker,
+  type ProjectKey,
+  type Ticket,
+  ticketTypeOf,
+  type WayfinderMap,
+} from '@roadmap/contracts'
 import type { ResolvedSelection } from '../../router.ts'
 import { stripInlineMarkdown } from '../gist.ts'
 import './map.css'
+import { type ProseLinkTarget, resolveProseLink } from './link-targets.ts'
 import { Prose } from './prose.tsx'
 import { STATE_META } from './state-meta.ts'
 
@@ -10,9 +17,6 @@ import { STATE_META } from './state-meta.ts'
  * page and eats its width, so the map stays clickable and item after item opens without closing
  * anything in between. One Panel per screen, fed by every map; what it shows is the hash's
  * selection, resolved by the router (`ResolvedSelection`).
- *
- * Its whole content: the navbar riding its top — two equal prev/next buttons walking the trace's
- * items in on-screen order, then a square » dismiss — and below it whatever the pick resolves to.
  */
 export function Panel({
   map,
@@ -26,18 +30,13 @@ export function Panel({
   map: WayfinderMap
   item: ResolvedSelection
   onClose: () => void
-  /** Move the pick by ±1 through the on-screen sequence. */
   onStep: (delta: number) => void
-  /** Select another item on this map — how the Panel's own item links navigate. */
   onSelect: (item: ResolvedSelection) => void
   hasPrev: boolean
   hasNext: boolean
 }) {
   return (
     <>
-      {/* Part of the screen's single-tab-stop navbar: reached with ArrowRight from the item
-          list, never with Tab. Native buttons — Space and Enter both activate, per standard.
-          The square » dismiss sits at the far right, past the two equal prev/next buttons. */}
       <div className="panel-nav" role="toolbar" aria-label="panel navigation">
         <button
           type="button"
@@ -92,7 +91,6 @@ function Chevron({ up = false }: { up?: boolean }) {
   )
 }
 
-/** The dismiss glyph: the Panel slides away to the right. */
 function ChevronsRight() {
   return (
     <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
@@ -119,15 +117,16 @@ function PanelBody({
 }) {
   switch (selection.kind) {
     case 'map':
-      return <MapContent map={map} />
+      return <MapContent map={map} onSelect={onSelect} />
     case 'ticket':
-      return <TicketContent map={map} number={selection.number} onSelect={onSelect} />
+      return <TicketContent map={map} id={selection.id} onSelect={onSelect} />
     case 'fog':
       return (
         <ListItemContent
           map={map}
           caption="fog · not yet specified"
           markdown={rawListItem(map.body.notYetSpecified, selection.text)}
+          onSelect={onSelect}
         />
       )
     case 'scope':
@@ -136,54 +135,58 @@ function PanelBody({
           map={map}
           caption="left out of scope"
           markdown={rawListItem(map.body.outOfScope, selection.text)}
+          onSelect={onSelect}
         />
       )
     case 'scope-all':
-      return <ScopeAllContent map={map} />
+      return <ScopeAllContent map={map} onSelect={onSelect} />
   }
 }
 
-/** The map's own prose — the cartouche: destination, notes, scope, and the honesty detail. */
-function MapContent({ map }: { map: WayfinderMap }) {
-  const partial = map.ticketsTruncated || map.tickets.some((ticket) => ticket.blockersTruncated)
+function MapContent({
+  map,
+  onSelect,
+}: {
+  map: WayfinderMap
+  onSelect: (item: ResolvedSelection) => void
+}) {
+  const partial = !map.ticketsComplete || map.tickets.some((ticket) => !ticket.blockersComplete)
+  const resolveLink = proseLinkResolver(map, map.sourcePath)
 
   return (
     <div className="cartouche">
       <p className="cart-caption">
-        {map.title} · #{map.number}
+        {map.title}
+        {map.displayId ? ` · ${map.displayId}` : ''}
       </p>
-      <GithubButton url={map.url} label="View map in GitHub" />
-      <Prose markdown={map.body.destination} />
+      <SourceButton url={map.url} label="View map in source" />
+      <Prose markdown={map.body.destination} resolveLink={resolveLink} onSelect={onSelect} />
       {map.body.notes.length > 0 && (
         <>
           <p className="cart-head">notes</p>
           <ul>
             {map.body.notes.map((note) => (
               <li key={note}>
-                <Prose markdown={note} />
+                <Prose markdown={note} resolveLink={resolveLink} onSelect={onSelect} />
               </li>
             ))}
           </ul>
         </>
       )}
+      {map.body.decisions.length > 0 && <DecisionList map={map} onSelect={onSelect} />}
       {map.body.outOfScope.length > 0 && (
         <>
           <p className="cart-head">out of scope</p>
           <ul>
             {map.body.outOfScope.map((item) => (
               <li key={item}>
-                <Prose markdown={item} />
+                <Prose markdown={item} resolveLink={resolveLink} onSelect={onSelect} />
               </li>
             ))}
           </ul>
         </>
       )}
-      {partial && (
-        <p className="cart-warn">
-          Partial view — GitHub returned only the first page of{' '}
-          {map.ticketsTruncated ? 'tickets' : 'some tickets’ blockers'}.
-        </p>
-      )}
+      {partial && <p className="cart-warn">Partial view — some tickets or blockers are missing.</p>}
       {map.body.missingSections.length > 0 && (
         <p className="cart-warn">
           Map body is missing sections: {map.body.missingSections.join(', ')}.
@@ -193,47 +196,47 @@ function MapContent({ map }: { map: WayfinderMap }) {
   )
 }
 
-/** One ticket, everything the snapshot knows about it: the issue body, the decision's gist when
- * the map records one, the state, and the dependency edges. */
 function TicketContent({
   map,
-  number,
+  id,
   onSelect,
 }: {
   map: WayfinderMap
-  number: number
+  id: string
   onSelect: (item: ResolvedSelection) => void
 }) {
-  const ticket = map.tickets.find((t) => t.number === number)
+  const ticket = map.tickets.find((t) => t.id === id)
   if (!ticket) return null
   const meta = STATE_META[ticket.state]
   const gist = map.body.decisions.find((d) => d.title === ticket.title)
-  const login = ticket.assignees[0]?.login
+  const assignee = ticket.assignees[0]?.name
   const body = ticket.body.trim()
+  const type = ticketTypeOf(ticket.typeEvidence)
+  const resolveLink = proseLinkResolver(map, ticket.sourcePath)
 
   return (
     <div className="cartouche">
       <p className="cart-caption">
-        #{ticket.number}
-        {ticket.type !== 'untyped' ? ` · ${ticket.type}` : ''}
+        {ticket.displayId ?? ticket.id}
+        {type !== 'untyped' ? ` · ${type}` : ''}
       </p>
-      <GithubButton url={ticket.url} label="View item in GitHub" />
+      <SourceButton url={ticket.url} label="View item in source" />
       <p className="panel-item-title">{ticket.title}</p>
       <p className="panel-item-state" style={{ color: meta.color }}>
         {meta.glyph} {meta.word}
-        {login !== undefined ? ` · ${login}` : ''}
-        {ticket.closedAt !== null ? ` · ${shortDate(ticket.closedAt)}` : ''}
+        {assignee !== undefined ? ` · ${assignee}` : ''}
+        {ticket.closedAt !== undefined ? ` · ${shortDate(ticket.closedAt)}` : ''}
       </p>
-      {body !== '' && <Prose markdown={body} />}
+      {body !== '' && <Prose markdown={body} resolveLink={resolveLink} onSelect={onSelect} />}
       {gist !== undefined && (
         <>
           <p className="cart-head">the decision</p>
-          <Prose markdown={gist.gist} />
+          <Prose markdown={gist.gist} resolveLink={resolveLink} onSelect={onSelect} />
         </>
       )}
       <BlockerList map={map} ticket={ticket} onSelect={onSelect} />
-      {ticket.blockersTruncated && (
-        <p className="cart-warn">GitHub returned only the first page of blockers.</p>
+      {!ticket.blockersComplete && (
+        <p className="cart-warn">Some blockers could not be resolved.</p>
       )}
     </div>
   )
@@ -256,7 +259,7 @@ function BlockerList({
       <div className="item-links">
         {ticket.blockedBy.map((blocker) => (
           <ItemLink
-            key={`${blocker.nameWithOwner}#${blocker.number}`}
+            key={`${blocker.project.integration}:${blocker.project.id}:${blocker.ticketId}`}
             map={map}
             itemRef={blocker}
             onSelect={onSelect}
@@ -267,12 +270,75 @@ function BlockerList({
   )
 }
 
-/**
- * THE one presentation of a referenced item, wherever the Panel mentions one: the title over the
- * item's state — glyph and word in the map's colors, exactly as the ledger's rows say it. A
- * reference to a ticket on this map is a button that selects it (the URL moves, the Panel
- * follows); anything beyond the map links out to GitHub with what little is known of it.
- */
+function DecisionList({
+  map,
+  onSelect,
+}: {
+  map: WayfinderMap
+  onSelect: (item: ResolvedSelection) => void
+}) {
+  const resolveLink = proseLinkResolver(map, map.sourcePath)
+  return (
+    <>
+      <p className="cart-head">decisions so far</p>
+      <div className="item-links">
+        {map.body.decisions.map((decision) => (
+          <DecisionLink
+            key={`${decision.title}:${decision.url ?? 'plain'}`}
+            title={decision.title}
+            gist={decision.gist}
+            target={resolveLink(decision.url ?? undefined)}
+            onSelect={onSelect}
+          />
+        ))}
+      </div>
+    </>
+  )
+}
+
+function DecisionLink({
+  title,
+  gist,
+  target,
+  onSelect,
+}: {
+  title: string
+  gist: string
+  target: ProseLinkTarget | null
+  onSelect: (item: ResolvedSelection) => void
+}) {
+  const gistNode = gist ? (
+    <div className="item-link-state item-link-gist">
+      <Prose markdown={gist} />
+    </div>
+  ) : null
+
+  if (target?.kind === 'selection') {
+    return (
+      <button type="button" className="item-link" onClick={() => onSelect(target.selection)}>
+        <span className="item-link-title">{title}</span>
+        {gistNode}
+      </button>
+    )
+  }
+
+  if (target?.kind === 'href') {
+    return (
+      <a className="item-link" href={target.href} target="_blank" rel="noreferrer">
+        <span className="item-link-title">{title} ↗</span>
+        {gistNode}
+      </a>
+    )
+  }
+
+  return (
+    <span className="item-link" aria-disabled="true" title={target?.reason}>
+      <span className="item-link-title">{title}</span>
+      {gistNode}
+    </span>
+  )
+}
+
 export function ItemLink({
   map,
   itemRef,
@@ -282,10 +348,9 @@ export function ItemLink({
   itemRef: Blocker
   onSelect: (item: ResolvedSelection) => void
 }) {
-  const local =
-    itemRef.nameWithOwner === map.nameWithOwner
-      ? map.tickets.find((t) => t.number === itemRef.number)
-      : undefined
+  const local = sameProject(itemRef.project, map.project)
+    ? map.tickets.find((t) => t.id === itemRef.ticketId)
+    : undefined
 
   if (local) {
     const meta = STATE_META[local.state]
@@ -293,7 +358,7 @@ export function ItemLink({
       <button
         type="button"
         className="item-link"
-        onClick={() => onSelect({ kind: 'ticket', number: local.number })}
+        onClick={() => onSelect({ kind: 'ticket', id: local.id })}
       >
         <span className="item-link-title">{local.title}</span>
         <span className="item-link-state" style={{ color: meta.color }}>
@@ -303,52 +368,69 @@ export function ItemLink({
     )
   }
 
+  if (itemRef.url) {
+    return (
+      <a className="item-link" href={itemRef.url} target="_blank" rel="noreferrer">
+        <span className="item-link-title">{itemRef.title} ↗</span>
+        <span className="item-link-state">{itemRef.state} · source</span>
+      </a>
+    )
+  }
+
   return (
-    <a className="item-link" href={itemRef.url} target="_blank" rel="noreferrer">
-      <span className="item-link-title">{itemRef.title} ↗</span>
-      <span className="item-link-state">{itemRef.isOpen ? 'open' : 'closed'} · github</span>
-    </a>
+    <span className="item-link" aria-disabled="true">
+      <span className="item-link-title">
+        {itemRef.title ?? itemRef.displayId ?? itemRef.ticketId}
+      </span>
+      <span className="item-link-state">{itemRef.state}</span>
+    </span>
   )
 }
 
-/**
- * Selections carry the ledger's stripped text — it doubles as the pick's identity — so the raw
- * markdown it names is looked back up for rendering. A miss (a snapshot replace racing the pick)
- * falls back to the stripped text itself: plain, but never wrong.
- */
 function rawListItem(items: string[], stripped: string): string {
   return items.find((item) => stripInlineMarkdown(item) === stripped) ?? stripped
 }
 
-/** A fog patch or scope entry in full — these live on the map issue itself, title-less. */
 function ListItemContent({
   map,
   caption,
   markdown,
+  onSelect,
 }: {
   map: WayfinderMap
   caption: string
   markdown: string
+  onSelect: (item: ResolvedSelection) => void
 }) {
   return (
     <div className="cartouche">
       <p className="cart-caption">{caption}</p>
-      <GithubButton url={map.url} label="View map in GitHub" />
-      <Prose markdown={markdown} />
+      <SourceButton url={map.url} label="View map in source" />
+      <Prose
+        markdown={markdown}
+        resolveLink={proseLinkResolver(map, map.sourcePath)}
+        onSelect={onSelect}
+      />
     </div>
   )
 }
 
-/** The aggregate ⊘ stop's payload: the whole out-of-scope list, off the map's back. */
-function ScopeAllContent({ map }: { map: WayfinderMap }) {
+function ScopeAllContent({
+  map,
+  onSelect,
+}: {
+  map: WayfinderMap
+  onSelect: (item: ResolvedSelection) => void
+}) {
+  const resolveLink = proseLinkResolver(map, map.sourcePath)
   return (
     <div className="cartouche">
       <p className="cart-caption">left out of scope · {map.body.outOfScope.length} things</p>
-      <GithubButton url={map.url} label="View map in GitHub" />
+      <SourceButton url={map.url} label="View map in source" />
       <ul>
         {map.body.outOfScope.map((item) => (
           <li key={item}>
-            <Prose markdown={item} />
+            <Prose markdown={item} resolveLink={resolveLink} onSelect={onSelect} />
           </li>
         ))}
       </ul>
@@ -356,7 +438,8 @@ function ScopeAllContent({ map }: { map: WayfinderMap }) {
   )
 }
 
-function GithubButton({ url, label }: { url: string; label: string }) {
+function SourceButton({ url, label }: { url?: string; label: string }) {
+  if (!url) return null
   return (
     <p className="gh-row">
       <a className="gh-link" href={url} target="_blank" rel="noreferrer">
@@ -366,10 +449,21 @@ function GithubButton({ url, label }: { url: string; label: string }) {
   )
 }
 
+function proseLinkResolver(
+  map: WayfinderMap,
+  sourcePath: string | undefined,
+): (href: string | undefined) => ProseLinkTarget | null {
+  return (href) => resolveProseLink(map, sourcePath, href)
+}
+
 function shortDate(ms: number): string {
   return new Date(ms).toLocaleDateString(undefined, {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
   })
+}
+
+function sameProject(a: ProjectKey, b: ProjectKey): boolean {
+  return a.integration === b.integration && a.id === b.id
 }

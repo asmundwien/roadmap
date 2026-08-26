@@ -695,7 +695,7 @@
 }
 
 /* THE one presentation of a referenced item: the title over its state word, row-shaped like the
- * ledger's own rows. On-map references are buttons that select; off-map ones link to GitHub. */
+ * ledger's own rows. On-map references are buttons that select; off-map ones link to their source. */
 .item-links {
   display: flex;
   flex-direction: column;
@@ -729,6 +729,20 @@
 
 .item-link-state {
   font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.item-link[aria-disabled="true"] {
+  cursor: default;
+}
+
+.item-link[aria-disabled="true"]:hover {
+  background: none;
+  box-shadow: none;
+}
+
+.item-link-gist {
+  display: block;
   color: var(--muted);
 }
 
@@ -808,15 +822,32 @@
   margin-right: 0.4em;
 }
 
-.prose a {
+.prose a,
+.prose .prose-link,
+.prose .prose-link-button,
+.prose .prose-link-disabled {
   color: inherit;
   text-decoration: underline;
   text-decoration-color: var(--muted);
   text-underline-offset: 2px;
 }
 
-.prose a:hover {
+.prose a:hover,
+.prose .prose-link-button:hover {
   text-decoration-color: currentcolor;
+}
+
+.prose .prose-link-button {
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+.prose .prose-link-disabled {
+  color: var(--muted);
+  text-decoration-style: dotted;
 }
 
 .prose code {

@@ -54,11 +54,11 @@ export function ledgerSequence(map: WayfinderMap): LedgerSelection[] {
     })),
     ...ledger.rows.map(({ ticket, y }) => ({
       y,
-      sel: { kind: 'ticket' as const, number: ticket.number },
+      sel: { kind: 'ticket' as const, id: ticket.id },
     })),
     ...ledger.closedRows.map(({ ticket, y }) => ({
       y,
-      sel: { kind: 'ticket' as const, number: ticket.number },
+      sel: { kind: 'ticket' as const, id: ticket.id },
     })),
   ]
   return entries.sort((a, b) => a.y - b.y).map((entry) => entry.sel)

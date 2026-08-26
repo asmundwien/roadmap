@@ -1,33 +1,42 @@
-import type { Snapshot, Ticket, WayfinderMap } from '@roadmap/contracts'
+import type { Project, ProjectKey, Snapshot, Ticket, WayfinderMap } from '@roadmap/contracts'
 
 /** A ticket named by an event, carrying the map it sits on so subscribers need no lookup. */
 export interface EventTicket {
-  number: number
-  title: string
-  url: string
-  mapTitle: string
-  /** The map's repo — a cross-repo child still reports where its map lives. */
-  nameWithOwner: string
+  project: ProjectKey
+  projectName: string
+  mapId: string
+  mapDisplayId?: string
+  mapTitle?: string
+  id: string
+  displayId?: string
+  title?: string
+  url?: string
 }
 
 /** A map named by an event. */
 export interface EventMap {
-  nameWithOwner: string
-  number: number
-  title: string
-  url: string
+  project: ProjectKey
+  projectName: string
+  id: string
+  displayId?: string
+  title?: string
+  url?: string
 }
 
 /**
- * The domain events the change feed emits — derived by diffing consecutive snapshots, so they are
- * source-blind by construction: whether a webhook or a reconciling sweep caught the change is
- * invisible here (CONTEXT.md, "Change feed").
+ * The domain events the change feed emits are derived from consecutive snapshots. The Integration
+ * and observation mechanism that found a change are invisible to consumers.
  */
 export type ChangeEvent =
   | { type: 'map-appeared'; map: EventMap }
   | { type: 'ticket-claimed'; ticket: EventTicket }
   | { type: 'ticket-closed'; ticket: EventTicket }
   | { type: 'frontier-changed'; map: EventMap; entered: EventTicket[]; left: EventTicket[] }
+
+interface MapEntry {
+  project: Project
+  map: WayfinderMap
+}
 
 /**
  * Diffs two consecutive snapshots into domain events. Pure; order is stable: map appearances,
@@ -37,37 +46,38 @@ export function diffSnapshots(previous: Snapshot, next: Snapshot): ChangeEvent[]
   const previousMaps = mapsByKey(previous)
   const nextMaps = mapsByKey(next)
   const events: ChangeEvent[] = []
-  for (const [key, map] of nextMaps) {
-    if (!previousMaps.has(key)) events.push({ type: 'map-appeared', map: toEventMap(map) })
+  for (const [key, entry] of nextMaps) {
+    if (!previousMaps.has(key)) events.push({ type: 'map-appeared', map: toEventMap(entry) })
   }
   events.push(...ticketTransitions(previousMaps, nextMaps))
-  for (const [key, map] of nextMaps) {
+  for (const [key, entry] of nextMaps) {
     const before = previousMaps.get(key)
     if (!before) continue
-    const delta = frontierDelta(before, map)
+    const delta = frontierDelta(before, entry)
     if (delta) events.push(delta)
   }
   return events
 }
 
 function ticketTransitions(
-  previousMaps: Map<string, WayfinderMap>,
-  nextMaps: Map<string, WayfinderMap>,
+  previousMaps: Map<string, MapEntry>,
+  nextMaps: Map<string, MapEntry>,
 ): ChangeEvent[] {
   const events: ChangeEvent[] = []
   // A ticket can sit under more than one map in the snapshot; each transition fires once.
   const seen = new Set<string>()
-  for (const [key, map] of nextMaps) {
+  for (const [key, entry] of nextMaps) {
     const before = previousMaps.get(key)
     if (!before) continue
-    const beforeTickets = ticketsByUrl(before)
-    for (const ticket of map.tickets) {
-      const was = beforeTickets.get(ticket.url)
-      if (!was || seen.has(ticket.url)) continue
+    const beforeTickets = ticketsById(before.map)
+    for (const ticket of entry.map.tickets) {
+      const was = beforeTickets.get(ticket.id)
+      const ticketKey = keyedTicket(entry.map.project, ticket.id)
+      if (!was || seen.has(ticketKey)) continue
       const transition = ticketTransition(was, ticket)
       if (!transition) continue
-      seen.add(ticket.url)
-      events.push({ type: transition, ticket: toEventTicket(ticket, map) })
+      seen.add(ticketKey)
+      events.push({ type: transition, ticket: toEventTicket(ticket, entry) })
     }
   }
   return events
@@ -80,22 +90,24 @@ function ticketTransition(was: Ticket, now: Ticket): 'ticket-closed' | 'ticket-c
   return null
 }
 
-function frontierDelta(before: WayfinderMap, map: WayfinderMap): ChangeEvent | null {
-  const wasFrontier = new Set(before.frontier.map((ticket) => ticket.url))
-  const isFrontier = new Set(map.frontier.map((ticket) => ticket.url))
-  const entered = map.frontier
-    .filter((ticket) => !wasFrontier.has(ticket.url))
-    .map((ticket) => toEventTicket(ticket, map))
-  const left = before.frontier
-    .filter((ticket) => !isFrontier.has(ticket.url))
+function frontierDelta(before: MapEntry, after: MapEntry): ChangeEvent | null {
+  const wasFrontier = new Set(before.map.frontier.map((ticket) => ticket.id))
+  const isFrontier = new Set(after.map.frontier.map((ticket) => ticket.id))
+  const entered = after.map.frontier
+    .filter((ticket) => !wasFrontier.has(ticket.id))
+    .map((ticket) => toEventTicket(ticket, after))
+  const left = before.map.frontier
+    .filter((ticket) => !isFrontier.has(ticket.id))
     .map((ticket) => toEventTicket(ticket, before))
   if (entered.length === 0 && left.length === 0) return null
-  return { type: 'frontier-changed', map: toEventMap(map), entered, left }
+  return { type: 'frontier-changed', map: toEventMap(after), entered, left }
 }
 
 export interface ChangeFeed {
   /** Registers for event batches — one batch per snapshot change that produced any events. */
   onEvent(listener: (events: ChangeEvent[]) => void): () => void
+  /** Replaces the comparison baseline without emitting activity. */
+  reset(snapshot: Snapshot): void
   stop(): void
 }
 
@@ -130,6 +142,9 @@ export function createChangeFeed(source: SnapshotSource): ChangeFeed {
         listeners.delete(listener)
       }
     },
+    reset(snapshot) {
+      previous = snapshot
+    },
     stop() {
       listeners.clear()
       unsubscribe()
@@ -137,30 +152,49 @@ export function createChangeFeed(source: SnapshotSource): ChangeFeed {
   }
 }
 
-function mapsByKey(snapshot: Snapshot): Map<string, WayfinderMap> {
-  const maps = new Map<string, WayfinderMap>()
+function mapsByKey(snapshot: Snapshot): Map<string, MapEntry> {
+  const maps = new Map<string, MapEntry>()
   for (const project of snapshot.projects) {
     for (const map of [...project.openMaps, ...project.closedMaps]) {
-      maps.set(`${map.nameWithOwner}#${map.number}`, map)
+      maps.set(keyedMap(map.project, map.id), { project, map })
     }
   }
   return maps
 }
 
-function ticketsByUrl(map: WayfinderMap): Map<string, Ticket> {
-  return new Map(map.tickets.map((ticket) => [ticket.url, ticket]))
+function ticketsById(map: WayfinderMap): Map<string, Ticket> {
+  return new Map(map.tickets.map((ticket) => [ticket.id, ticket]))
 }
 
-function toEventMap(map: WayfinderMap): EventMap {
-  return { nameWithOwner: map.nameWithOwner, number: map.number, title: map.title, url: map.url }
-}
-
-function toEventTicket(ticket: Ticket, map: WayfinderMap): EventTicket {
+function toEventMap(entry: MapEntry): EventMap {
   return {
-    number: ticket.number,
+    project: entry.map.project,
+    projectName: entry.project.name,
+    id: entry.map.id,
+    displayId: entry.map.displayId,
+    title: entry.map.title,
+    url: entry.map.url,
+  }
+}
+
+function toEventTicket(ticket: Ticket, entry: MapEntry): EventTicket {
+  return {
+    project: entry.map.project,
+    projectName: entry.project.name,
+    mapId: entry.map.id,
+    mapDisplayId: entry.map.displayId,
+    mapTitle: entry.map.title,
+    id: ticket.id,
+    displayId: ticket.displayId,
     title: ticket.title,
     url: ticket.url,
-    mapTitle: map.title,
-    nameWithOwner: map.nameWithOwner,
   }
+}
+
+function keyedMap(project: ProjectKey, mapId: string): string {
+  return `${project.integration}:${project.id}:map:${mapId}`
+}
+
+function keyedTicket(project: ProjectKey, ticketId: string): string {
+  return `${project.integration}:${project.id}:ticket:${ticketId}`
 }

@@ -2,13 +2,20 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ChangeEvent, EventTicket } from './change-feed.ts'
 import { createNotifier, NOTIFY_ICON } from './notify.ts'
 
-function eventTicket(number: number): EventTicket {
+function eventTicket(
+  id: string,
+  url: string | undefined = `https://github.com/a/roadmap/issues/${id}`,
+): EventTicket {
   return {
-    number,
-    title: `Ticket ${number}`,
-    url: `https://github.com/a/roadmap/issues/${number}`,
+    project: { integration: 'github', id: 'a/roadmap' },
+    projectName: 'a/roadmap',
+    mapId: '1',
+    mapDisplayId: '#1',
     mapTitle: 'Map 1',
-    nameWithOwner: 'a/roadmap',
+    id,
+    displayId: `#${id}`,
+    title: `Ticket ${id}`,
+    url,
   }
 }
 
@@ -23,8 +30,8 @@ describe('createNotifier', () => {
       calls.push(args)
     })
     const events: ChangeEvent[] = [
-      { type: 'ticket-claimed', ticket: eventTicket(2) },
-      { type: 'ticket-closed', ticket: eventTicket(3) },
+      { type: 'ticket-claimed', ticket: eventTicket('2') },
+      { type: 'ticket-closed', ticket: eventTicket('3') },
     ]
     notify(events)
     expect(calls).toEqual([
@@ -59,15 +66,45 @@ describe('createNotifier', () => {
     ])
   })
 
+  it('falls back to a non-linking banner when the ticket has no url', () => {
+    const calls: string[][] = []
+    const notify = createNotifier(async (args) => {
+      calls.push(args)
+    })
+
+    notify([{ type: 'ticket-claimed', ticket: { ...eventTicket('2'), url: undefined } }])
+
+    expect(calls).toEqual([
+      [
+        '-title',
+        'Roadmap',
+        '-subtitle',
+        'Map 1',
+        '-message',
+        'Claimed: Ticket 2',
+        '-group',
+        'Map 1#2',
+        '-contentImage',
+        NOTIFY_ICON,
+      ],
+    ])
+  })
+
   it('stays silent for the rest of the feed', () => {
     const calls: string[][] = []
     const notify = createNotifier(async (args) => {
       calls.push(args)
     })
-    const map = { nameWithOwner: 'a/roadmap', number: 1, title: 'Map 1', url: 'https://x' }
+    const map = {
+      project: { integration: 'github' as const, id: 'a/roadmap' },
+      projectName: 'a/roadmap',
+      id: '1',
+      title: 'Map 1',
+      url: 'https://x',
+    }
     notify([
       { type: 'map-appeared', map },
-      { type: 'frontier-changed', map, entered: [eventTicket(2)], left: [] },
+      { type: 'frontier-changed', map, entered: [eventTicket('2')], left: [] },
     ])
     expect(calls).toEqual([])
   })
@@ -75,8 +112,8 @@ describe('createNotifier', () => {
   it('warns once, and never throws, when the notifier binary fails', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const notify = createNotifier(() => Promise.reject(new Error('ENOENT')))
-    notify([{ type: 'ticket-claimed', ticket: eventTicket(2) }])
-    notify([{ type: 'ticket-closed', ticket: eventTicket(2) }])
+    notify([{ type: 'ticket-claimed', ticket: eventTicket('2') }])
+    notify([{ type: 'ticket-closed', ticket: eventTicket('2') }])
     await settle()
     expect(warn).toHaveBeenCalledTimes(1)
     warn.mockRestore()

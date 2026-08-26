@@ -1,37 +1,18 @@
-import type { Ticket, TicketState, TicketType, WayfinderMap } from '@roadmap/contracts'
+import {
+  type Ticket,
+  type TicketState,
+  type TicketType,
+  ticketTypeOf,
+  type WayfinderMap,
+} from '@roadmap/contracts'
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { buildLedger, type Ledger, type LedgerEdge } from './geometry.ts'
 import './map.css'
 import { type LedgerSelection, scopePlan } from './sequence.ts'
 import { STATE_META } from './state-meta.ts'
 
-/**
- * The unified ledger — one left-aligned gutter and text column through three sections (fog,
- * charted ahead, ground covered) with the trunk's rail running through all of them: dashed ahead,
- * solid behind, the transition is HEAD.
- *
- * The map renders titles only; every descriptive text lives in the docked Panel. Rows are not
- * GitHub links — clicking one reports a selection upward and the Panel opens it, with "View item
- * in GitHub" inside. Out-of-scope joins the fog band as ⊘ stops, but only inline while the list
- * is small: a vast list collapses to ONE aggregate ⊘ stop carrying the count, so scope can never
- * drown the fog — the Panel holds the full list. Fog and scope stops are clickable too.
- *
- * Two live behaviours: hovering a row lights its dependency lineage — the ticket, everything it
- * waits on transitively, its direct dependents, and exactly the edges between those tickets — and
- * rows whose state just changed under the snapshot feed animate in.
- */
-
-/** Ink overshoot past the viewBox, in svg units: section rules and row bands run right until the
- * layout clips them at the docked Panel's border — no gap between the map's rules and the Panel.
- * Needs `overflow: visible` on the svg (map.css); the map column's own overflow does the
- * clipping at exactly the Panel edge. */
 const EXT = 800
 
-/**
- * Click and keyboard activation for an svg row standing in for a button — one member of the
- * screen's single-tab-stop navbar. Roving tabindex: only the selected item is the Tab entry;
- * Space/Enter select; arrows are handled by the screen, which reads these data attributes.
- */
 function pressProps(
   select: () => void,
   selected: boolean,
@@ -63,33 +44,23 @@ export function MapLedger({
   kbNav,
 }: {
   map: WayfinderMap
-  /** Run the solid trunk to the svg's own bottom edge, so the rail continues into whatever the
-   * page renders below. The stride accordion passes it for every map except the earliest — one
-   * unbroken line from the active destination down to the journey's origin. */
   trunkToEdge?: boolean
   onSelect: (selection: LedgerSelection) => void
-  /** The pick currently in the Panel, when it belongs to this map — drawn as the active band,
-   * and re-drawn as the Panel's prev/next move it. */
   selected: LedgerSelection | null
-  /** True while the keyboard was the last mover: the focused row then counts as hovered. Any
-   * pointer movement flips it off, handing the hover back to the mouse. */
   kbNav: boolean
 }) {
   const { aggregated, aggLabel, scopeSet, fogMap } = useMemo(() => scopePlan(map), [map])
   const ledger = useMemo(() => buildLedger(fogMap), [fogMap])
   const fresh = useFreshTickets(map)
-  const [hover, setHover] = useState<number | null>(null)
-  const [focusRow, setFocusRow] = useState<number | null>(null)
-  const stateOf = useMemo(() => new Map(map.tickets.map((t) => [t.number, t.state])), [map])
+  const [hover, setHover] = useState<string | null>(null)
+  const [focusRow, setFocusRow] = useState<string | null>(null)
+  const stateOf = useMemo(
+    () => new Map(map.tickets.map((ticket) => [ticket.id, ticket.state])),
+    [map],
+  )
 
-  // The lineage's source ticket: the ONE hover entity, owned by whichever hand moved last. In
-  // pointer mode that is the row under the cursor; in keyboard mode the focused row — the
-  // pointer may still rest on its old row, but the entity has moved on.
   const hot = kbNav ? focusRow : hover
-
-  // The hot ticket, its blockers walked transitively upstream, and its direct dependents.
   const related = useMemo(() => lineageOf(hot, ledger), [hot, ledger])
-
   const fogLabel = fogLabelOf(map)
 
   return (
@@ -101,17 +72,12 @@ export function MapLedger({
       >
         <title>{map.title}</title>
 
-        {/* section boundaries — captions live in the text column like every other word. A map
-            that reached its destination has no fog left to lift: what remains was left out on
-            purpose. An empty charted-ahead section is not drawn at all. */}
         <Section ledger={ledger} y={ledger.sepFog} label={fogLabel} />
         {ledger.rows.length > 0 && (
           <Section ledger={ledger} y={ledger.sepAhead} label="charted ahead" />
         )}
         <Section ledger={ledger} y={ledger.sepBehind} label="ground covered" />
 
-        {/* the trunk's lane: dashed while the destination is ahead — solid once the map closes,
-            the whole road reached */}
         <line
           x1={ledger.gutterX}
           y1={ledger.trunkDashed.y1}
@@ -136,7 +102,6 @@ export function MapLedger({
           />
         )}
 
-        {/* the weave: rails, merges, and origin forks — solid into settled work, dashed ahead */}
         {ledger.edges.map((edge) => {
           const target = stateOf.get(edge.to)
           return (
@@ -158,8 +123,6 @@ export function MapLedger({
           )
         })}
 
-        {/* fog rows — ghost stops, clickable: the Panel holds each one's full text. A small
-            out-of-scope list rides inline as ⊘ stops; a vast one is the single aggregate stop. */}
         {ledger.fogRows.map(({ item, x, y }) => {
           const sel: LedgerSelection =
             aggregated && item === aggLabel
@@ -201,30 +164,30 @@ export function MapLedger({
           )
         })}
 
-        {/* ahead rows — the title and the state word; everything else waits in the Panel.
-            Reversed: the array is takeable-first (bottom-up), the DOM must read top-down so the
-            keyboard's roving hover walks the picture in order. */}
         {[...ledger.rows].reverse().map(({ ticket, x, y }) => {
           const meta = STATE_META[ticket.state]
-          const login = ticket.assignees[0]?.login
-          const waits = ticket.blockedBy.filter((b) => b.isOpen)
-          const isHot = related?.tickets.has(ticket.number) ?? false
-          const isSelected = selected?.kind === 'ticket' && selected.number === ticket.number
+          const title = ticketTitle(ticket)
+          const assignee = ticket.assignees[0]?.name
+          const waits = ticket.blockedBy.filter((blocker) => blocker.state !== 'closed')
+          const isHot = related?.tickets.has(ticket.id) ?? false
+          const isSelected = selected?.kind === 'ticket' && selected.id === ticket.id
           return (
             <g
-              key={ticket.number}
-              className={`row${isHot ? ' is-hot' : ''}${fresh.has(ticket.number) ? ' is-fresh' : ''}${isSelected ? ' is-selected' : ''}`}
-              onPointerEnter={() => setHover(ticket.number)}
+              key={ticket.id}
+              className={`row${isHot ? ' is-hot' : ''}${fresh.has(ticket.id) ? ' is-fresh' : ''}${isSelected ? ' is-selected' : ''}`}
+              onPointerEnter={() => setHover(ticket.id)}
               onPointerLeave={() => setHover(null)}
               {...pressProps(
-                () => onSelect({ kind: 'ticket', number: ticket.number }),
+                () => onSelect({ kind: 'ticket', id: ticket.id }),
                 isSelected,
-                (focused) => setFocusRow(focused ? ticket.number : null),
+                (focused) => setFocusRow(focused ? ticket.id : null),
               )}
             >
               <title>
-                {ticket.title}
-                {waits.length > 0 ? ` — waits on: ${waits.map((b) => b.title).join(' · ')}` : ''}
+                {title}
+                {waits.length > 0
+                  ? ` — waits on: ${waits.map((blocker) => blocker.title ?? blocker.displayId ?? blocker.ticketId).join(' · ')}`
+                  : ''}
               </title>
               <rect
                 className="row-hit"
@@ -234,7 +197,7 @@ export function MapLedger({
                 height={52}
                 fill="transparent"
               />
-              {fresh.has(ticket.number) && (
+              {fresh.has(ticket.id) && (
                 <circle className="fresh-ping" cx={x} cy={y} r="10" stroke={meta.color} />
               )}
               <StateMarker ticket={ticket} x={x} y={y} />
@@ -243,40 +206,40 @@ export function MapLedger({
                 y={y - 4}
                 className={`row-title${ticket.state === 'blocked' ? ' is-dim' : ''}`}
               >
-                {truncate(ticket.title, 46)}
+                {truncate(title, 46)}
               </text>
               <TypeChip
-                type={ticket.type}
-                title={truncate(ticket.title, 46)}
+                type={ticketTypeOf(ticket.typeEvidence)}
+                title={truncate(title, 46)}
                 titleWeight={600}
                 x={ledger.textX}
                 baselineY={y - 4}
               />
               <text x={ledger.textX} y={y + 11} className="row-word" fill={meta.color}>
                 {meta.glyph} {meta.word}
-                {login !== undefined ? ` · ${login}` : ''}
+                {assignee !== undefined ? ` · ${assignee}` : ''}
               </text>
             </g>
           )
         })}
 
-        {/* ground covered — title only, one line; the decision's gist lives in the Panel */}
         {ledger.closedRows.map(({ ticket, x, y }) => {
-          const isHot = related?.tickets.has(ticket.number) ?? false
-          const isSelected = selected?.kind === 'ticket' && selected.number === ticket.number
+          const title = ticketTitle(ticket)
+          const isHot = related?.tickets.has(ticket.id) ?? false
+          const isSelected = selected?.kind === 'ticket' && selected.id === ticket.id
           return (
             <g
-              key={ticket.number}
-              className={`row${isHot ? ' is-hot' : ''}${fresh.has(ticket.number) ? ' is-fresh' : ''}${isSelected ? ' is-selected' : ''}`}
-              onPointerEnter={() => setHover(ticket.number)}
+              key={ticket.id}
+              className={`row${isHot ? ' is-hot' : ''}${fresh.has(ticket.id) ? ' is-fresh' : ''}${isSelected ? ' is-selected' : ''}`}
+              onPointerEnter={() => setHover(ticket.id)}
               onPointerLeave={() => setHover(null)}
               {...pressProps(
-                () => onSelect({ kind: 'ticket', number: ticket.number }),
+                () => onSelect({ kind: 'ticket', id: ticket.id }),
                 isSelected,
-                (focused) => setFocusRow(focused ? ticket.number : null),
+                (focused) => setFocusRow(focused ? ticket.id : null),
               )}
             >
-              <title>{ticket.title}</title>
+              <title>{title}</title>
               <rect
                 className="row-hit"
                 x="0"
@@ -285,7 +248,7 @@ export function MapLedger({
                 height={40}
                 fill="transparent"
               />
-              {fresh.has(ticket.number) && (
+              {fresh.has(ticket.id) && (
                 <circle className="fresh-ping" cx={x} cy={y} r="10" stroke="var(--state-closed)" />
               )}
               <circle cx={x} cy={y} r="10" fill="var(--fg)" />
@@ -293,11 +256,11 @@ export function MapLedger({
                 ✓
               </text>
               <text x={ledger.textX} y={y + 4} className="behind-title">
-                {truncate(ticket.title, 46)}
+                {truncate(title, 46)}
               </text>
               <TypeChip
-                type={ticket.type}
-                title={truncate(ticket.title, 46)}
+                type={ticketTypeOf(ticket.typeEvidence)}
+                title={truncate(title, 46)}
                 titleWeight={500}
                 x={ledger.textX}
                 baselineY={y + 4}
@@ -306,14 +269,12 @@ export function MapLedger({
           )
         })}
 
-        {/* empty sections say so in words — same mechanism everywhere, never a node */}
         {ledger.placeholders.map(({ y, text }) => (
           <text key={y} x={ledger.textX} y={y + 4} className="empty-note">
             {truncate(text, 96)}
           </text>
         ))}
 
-        {/* the destination — the trunk's final stop, and the one warm thing on the map */}
         <circle
           cx={ledger.gutterX}
           cy={ledger.destY}
@@ -342,14 +303,10 @@ export function MapLedger({
   )
 }
 
-/**
- * An edge lights when it touches the hot ticket itself — scenery included — or when it is a real
- * blocked-by whose both ends are lit, so the highlight follows the graph, not the lanes.
- */
 function isHotEdge(
   edge: LedgerEdge,
-  hot: number | null,
-  related: { tickets: Set<number> } | null,
+  hot: string | null,
+  related: { tickets: Set<string> } | null,
 ): boolean {
   if (!related) return false
   if (edge.from === hot || edge.to === hot) return true
@@ -368,24 +325,22 @@ function fogLabelOf(map: WayfinderMap): string {
     : 'fog · not yet specified'
 }
 
-/** The hot ticket's lineage: itself, its blockers walked transitively, its direct dependents. */
-function lineageOf(hot: number | null, ledger: Ledger): { tickets: Set<number> } | null {
+function lineageOf(hot: string | null, ledger: Ledger): { tickets: Set<string> } | null {
   if (hot === null) return null
-  const tickets = new Set<number>([hot])
+  const tickets = new Set<string>([hot])
   const stack = [hot]
-  for (let n = stack.pop(); n !== undefined; n = stack.pop()) {
-    for (const b of ledger.blockersOf.get(n) ?? []) {
-      if (!tickets.has(b)) {
-        tickets.add(b)
-        stack.push(b)
+  for (let id = stack.pop(); id !== undefined; id = stack.pop()) {
+    for (const blocker of ledger.blockersOf.get(id) ?? []) {
+      if (!tickets.has(blocker)) {
+        tickets.add(blocker)
+        stack.push(blocker)
       }
     }
   }
-  for (const d of ledger.dependentsOf.get(hot) ?? []) tickets.add(d)
+  for (const dependent of ledger.dependentsOf.get(hot) ?? []) tickets.add(dependent)
   return { tickets }
 }
 
-/** Whether the Panel's pick is this ghost stop. */
 function ghostSelected(selected: LedgerSelection | null, sel: LedgerSelection): boolean {
   if (selected === null || selected.kind !== sel.kind) return false
   if (selected.kind === 'fog' && sel.kind === 'fog') return selected.text === sel.text
@@ -393,7 +348,6 @@ function ghostSelected(selected: LedgerSelection | null, sel: LedgerSelection): 
   return true
 }
 
-/** The three ghost-stop marks: dashed maybe-someday, struck ⊘, and the stacked aggregate ⊘. */
 function GhostMark({ kind, x, y }: { kind: LedgerSelection['kind']; x: number; y: number }) {
   if (kind === 'fog') {
     return (
@@ -455,13 +409,6 @@ function Section({ ledger, y, label }: { ledger: Ledger; y: number; label: strin
   )
 }
 
-/**
- * The kind-of-work layer: the ticket's `wayfinder:<type>` label as a chip after the title —
- * GitHub's label shape in this map's tones (wash fill, edge stroke, muted word). Inline placement
- * needs the title's real width, hence the canvas measurement. An untyped ticket shows nothing
- * rather than a shrug. Positioned off the title's baseline, so it rides one-line and two-line
- * rows alike.
- */
 function TypeChip({
   type,
   title,
@@ -472,9 +419,7 @@ function TypeChip({
   type: TicketType
   title: string
   titleWeight: number
-  /** The text column's left edge; the chip rides inline after the title. */
   x: number
-  /** The title's text baseline — the chip aligns to the line, wherever the row centers it. */
   baselineY: number
 }) {
   if (type === 'untyped') return null
@@ -491,12 +436,10 @@ function TypeChip({
   )
 }
 
-/** Must mirror the root font-family in index.css, or the measured widths drift from the render. */
 const FONT_STACK = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif'
 
 let measureCtx: CanvasRenderingContext2D | null = null
 
-/** Rendered width of `text` in viewBox units — the svg's 12px is the canvas's 12px. */
 function textWidth(text: string, font: string): number {
   measureCtx ??= document.createElement('canvas').getContext('2d')
   if (!measureCtx) return text.length * 6.5
@@ -504,7 +447,6 @@ function textWidth(text: string, font: string): number {
   return measureCtx.measureText(text).width
 }
 
-/** The one 9px node family. `closed` is drawn by the ground-covered section, not here. */
 function StateMarker({ ticket, x, y }: { ticket: Ticket; x: number; y: number }) {
   const meta = STATE_META[ticket.state]
   if (ticket.state === 'frontier') {
@@ -540,28 +482,24 @@ function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`
 }
 
-const NO_FRESH: ReadonlySet<number> = new Set()
+const NO_FRESH: ReadonlySet<string> = new Set()
 
-/**
- * Tickets whose state just changed under the snapshot feed — new arrivals count too. The set
- * stays populated a beat longer than the animation so an unrelated re-render can't cut it short.
- */
-function useFreshTickets(map: WayfinderMap): ReadonlySet<number> {
-  const mapKey = `${map.nameWithOwner}#${map.number}`
-  const prevRef = useRef<{ mapKey: string; states: Map<number, TicketState> } | null>(null)
-  const [fresh, setFresh] = useState<ReadonlySet<number>>(NO_FRESH)
+function useFreshTickets(map: WayfinderMap): ReadonlySet<string> {
+  const mapKey = `${map.project.integration}:${map.project.id}#${map.id}`
+  const prevRef = useRef<{ mapKey: string; states: Map<string, TicketState> } | null>(null)
+  const [fresh, setFresh] = useState<ReadonlySet<string>>(NO_FRESH)
 
   useEffect(() => {
     const prev = prevRef.current
-    const states = new Map(map.tickets.map((t) => [t.number, t.state]))
+    const states = new Map(map.tickets.map((ticket) => [ticket.id, ticket.state]))
     prevRef.current = { mapKey, states }
     if (!prev || prev.mapKey !== mapKey) {
       setFresh(NO_FRESH)
       return
     }
-    const changed = new Set<number>()
-    for (const [number, state] of states) {
-      if (prev.states.get(number) !== state) changed.add(number)
+    const changed = new Set<string>()
+    for (const [id, state] of states) {
+      if (prev.states.get(id) !== state) changed.add(id)
     }
     if (changed.size === 0) return
     setFresh(changed)
@@ -570,4 +508,8 @@ function useFreshTickets(map: WayfinderMap): ReadonlySet<number> {
   }, [map, mapKey])
 
   return fresh
+}
+
+function ticketTitle(ticket: Ticket): string {
+  return ticket.title ?? ticket.displayId ?? ticket.id
 }

@@ -1,57 +1,63 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_PORT, readServerConfig } from './config.ts'
+import { DEFAULT_PORT, DEFAULT_WEB_ORIGIN, readServerConfig } from './config.ts'
 
 const FULL_ENV = {
-  ROADMAP_GITHUB_TOKEN: 't0ken',
-  ROADMAP_GITHUB_USER: 'asmundwien',
-  ROADMAP_SMEE_URL: 'https://smee.io/abc',
-  ROADMAP_WEBHOOK_SECRET: 's3cret',
+  ROADMAP_GITHUB_APP_CLIENT_ID: 'Iv1.public-client-id',
+  ROADMAP_GITHUB_APP_SLUG: 'roadmap-reader',
   ROADMAP_SERVER_PORT: '9000',
 }
 
 describe('readServerConfig', () => {
-  it('reads a full environment without warnings', () => {
+  it('reads the public GitHub App identity without warnings', () => {
     const result = readServerConfig(FULL_ENV)
     expect(result).toEqual({
       ok: true,
       config: {
-        token: 't0ken',
-        user: 'asmundwien',
-        smeeUrl: 'https://smee.io/abc',
-        webhookSecret: 's3cret',
+        githubApp: { clientId: 'Iv1.public-client-id', slug: 'roadmap-reader' },
         port: 9000,
+        allowedOrigin: DEFAULT_WEB_ORIGIN,
       },
       warnings: [],
     })
   })
 
-  it('refuses to start without the GitHub token and user', () => {
+  it('starts Local-only when no GitHub App is configured', () => {
     const result = readServerConfig({})
-    expect(result.ok).toBe(false)
-    if (!result.ok) {
-      expect(result.missing).toEqual(['ROADMAP_GITHUB_TOKEN', 'ROADMAP_GITHUB_USER'])
-      expect(result.message).toContain('.env.local')
-    }
+    expect(result).toEqual({
+      ok: true,
+      config: { githubApp: null, port: DEFAULT_PORT, allowedOrigin: DEFAULT_WEB_ORIGIN },
+      warnings: ['GitHub Connections are disabled until the public GitHub App is configured.'],
+    })
   })
 
-  it('degrades to poll-only with a warning when the webhook pieces are unset', () => {
-    const result = readServerConfig({ ROADMAP_GITHUB_TOKEN: 't', ROADMAP_GITHUB_USER: 'u' })
-    expect(result.ok).toBe(true)
-    if (result.ok) {
-      expect(result.config.smeeUrl).toBeNull()
-      expect(result.config.webhookSecret).toBeNull()
-      expect(result.warnings).toHaveLength(2)
-    }
+  it('rejects a half-configured GitHub App', () => {
+    expect(readServerConfig({ ROADMAP_GITHUB_APP_CLIENT_ID: 'client' })).toMatchObject({
+      ok: false,
+      missing: ['ROADMAP_GITHUB_APP_SLUG'],
+    })
+    expect(readServerConfig({ ROADMAP_GITHUB_APP_SLUG: 'app' })).toMatchObject({
+      ok: false,
+      missing: ['ROADMAP_GITHUB_APP_CLIENT_ID'],
+    })
   })
 
   it('falls back to the default port on absent or nonsense values', () => {
     for (const port of [undefined, '', 'abc', '-1', '70000']) {
-      const result = readServerConfig({
-        ROADMAP_GITHUB_TOKEN: 't',
-        ROADMAP_GITHUB_USER: 'u',
-        ROADMAP_SERVER_PORT: port,
-      })
+      const result = readServerConfig({ ...FULL_ENV, ROADMAP_SERVER_PORT: port })
       expect(result.ok && result.config.port).toBe(DEFAULT_PORT)
+    }
+  })
+
+  it('accepts one exact configured web origin and rejects paths or non-HTTP schemes', () => {
+    const configured = readServerConfig({
+      ...FULL_ENV,
+      ROADMAP_WEB_ORIGIN: 'https://roadmap.example',
+    })
+    expect(configured.ok && configured.config.allowedOrigin).toBe('https://roadmap.example')
+
+    for (const origin of ['http://localhost:5173/', 'file:///tmp/roadmap']) {
+      const result = readServerConfig({ ...FULL_ENV, ROADMAP_WEB_ORIGIN: origin })
+      expect(result.ok).toBe(false)
     }
   })
 })

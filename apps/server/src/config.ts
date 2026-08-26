@@ -1,65 +1,67 @@
-/**
- * Where the server's configuration comes from: the root `.env.local`, loaded into `process.env`
- * by `main.ts` before this runs. Every name is `ROADMAP_`-prefixed, never `VITE_` — the PAT and
- * the webhook secrets are the server's alone, and an unprefixed name is what keeps Vite from
- * ever exposing them to the browser.
- */
+/** Server-only process configuration loaded from the root `.env.local`. */
 
-/** The default port for the HTTP + WebSocket server; `ROADMAP_SERVER_PORT` overrides. */
 export const DEFAULT_PORT = 8790
+export const DEFAULT_WEB_ORIGIN = 'http://localhost:5173'
 
 export interface ServerConfig {
-  /** A personal access token. Fine-grained with `Issues: read` is enough. */
-  token: string
-  /** The account whose repos are searched for `wayfinder:map` issues. */
-  user: string
-  /** The smee.io channel the App delivers to; null runs the server poll-only. */
-  smeeUrl: string | null
-  /** The App's webhook secret; null skips signature verification entirely. */
-  webhookSecret: string | null
+  githubApp: { clientId: string; slug: string } | null
   port: number
+  allowedOrigin: string
 }
 
 export type ConfigResult =
   | { ok: true; config: ServerConfig; warnings: string[] }
   | { ok: false; missing: string[]; message: string }
 
-/**
- * Reads config from the environment, reporting what is missing rather than throwing. The token
- * and user are required — without them there is nothing to serve. The webhook pieces degrade:
- * no smee URL means the reconciler is the only funnel, no secret means unverified deliveries —
- * each is a warning, not a refusal, so the server always starts once reads work.
- */
 export function readServerConfig(env: Record<string, string | undefined>): ConfigResult {
-  const token = env.ROADMAP_GITHUB_TOKEN?.trim() ?? ''
-  const user = env.ROADMAP_GITHUB_USER?.trim() ?? ''
-  const smeeUrl = env.ROADMAP_SMEE_URL?.trim() || null
-  const webhookSecret = env.ROADMAP_WEBHOOK_SECRET?.trim() || null
+  const clientId = env.ROADMAP_GITHUB_APP_CLIENT_ID?.trim() ?? ''
+  const slug = env.ROADMAP_GITHUB_APP_SLUG?.trim() ?? ''
   const port = readPort(env.ROADMAP_SERVER_PORT)
+  const allowedOrigin = readOrigin(env.ROADMAP_WEB_ORIGIN)
 
-  const missing: string[] = []
-  if (token === '') missing.push('ROADMAP_GITHUB_TOKEN')
-  if (user === '') missing.push('ROADMAP_GITHUB_USER')
-  if (missing.length > 0) {
+  if (allowedOrigin === null) {
+    return {
+      ok: false,
+      missing: [],
+      message: 'ROADMAP_WEB_ORIGIN must be one exact http or https origin without a path.',
+    }
+  }
+  if ((clientId === '') !== (slug === '')) {
+    const missing = clientId === '' ? ['ROADMAP_GITHUB_APP_CLIENT_ID'] : ['ROADMAP_GITHUB_APP_SLUG']
     return {
       ok: false,
       missing,
-      message: `Missing ${missing.join(' and ')} — copy .env.example to .env.local and fill it in.`,
+      message: `Missing ${missing[0]}; both GitHub App settings are required together.`,
     }
   }
 
-  const warnings: string[] = []
-  if (smeeUrl === null) {
-    warnings.push('ROADMAP_SMEE_URL is unset — no webhook funnel; the reconciler is on its own.')
+  return {
+    ok: true,
+    config: {
+      githubApp: clientId && slug ? { clientId, slug } : null,
+      port,
+      allowedOrigin,
+    },
+    warnings:
+      clientId && slug
+        ? []
+        : ['GitHub Connections are disabled until the public GitHub App is configured.'],
   }
-  if (webhookSecret === null) {
-    warnings.push('ROADMAP_WEBHOOK_SECRET is unset — deliveries will not be verified.')
-  }
-
-  return { ok: true, config: { token, user, smeeUrl, webhookSecret, port }, warnings }
 }
 
 function readPort(raw: string | undefined): number {
   const parsed = Number.parseInt(raw ?? '', 10)
   return Number.isInteger(parsed) && parsed > 0 && parsed < 65536 ? parsed : DEFAULT_PORT
+}
+
+function readOrigin(raw: string | undefined): string | null {
+  const value = raw?.trim() || DEFAULT_WEB_ORIGIN
+  try {
+    const url = new URL(value)
+    return (url.protocol === 'http:' || url.protocol === 'https:') && url.origin === value
+      ? value
+      : null
+  } catch {
+    return null
+  }
 }

@@ -49,10 +49,10 @@ describe('ledgerSequence', () => {
     expect(ledgerSequence(map)).toEqual([
       { kind: 'scope', text: 'dropped' },
       { kind: 'fog', text: 'mist' },
-      { kind: 'ticket', number: 3 },
-      { kind: 'ticket', number: 2 },
-      { kind: 'ticket', number: 5 },
-      { kind: 'ticket', number: 4 },
+      { kind: 'ticket', id: '3' },
+      { kind: 'ticket', id: '2' },
+      { kind: 'ticket', id: '5' },
+      { kind: 'ticket', id: '4' },
     ])
   })
 
@@ -64,7 +64,7 @@ describe('ledgerSequence', () => {
     expect(ledgerSequence(map)).toEqual([
       { kind: 'scope-all' },
       { kind: 'fog', text: 'mist' },
-      { kind: 'ticket', number: 2 },
+      { kind: 'ticket', id: '2' },
     ])
   })
 

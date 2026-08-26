@@ -30,26 +30,19 @@ export function MapChild({
   open: boolean
   /** A single-map project has nothing to open or close against — no accordion, content only. */
   solo: boolean
-  /** The earliest map is the journey's start: its trunk ends at the last decision, v1-style;
-   * every other map runs its trunk to the svg's edge, into the map below. */
+  /** The earliest map is the journey's start: its trunk ends at the last decision, every other
+   * map runs its trunk to the svg's edge, into the map below. */
   last: boolean
   onSelect: (item: ResolvedSelection) => void
   /** Re-pin the hash to this map so its accordion unfolds — without touching the selection. */
   onUnfold: () => void
-  /** Whether the Panel is open at all (whatever it shows) — it decides what a trigger click
-   * means on a folded map: unfold only while closed, unfold AND select while open. */
   panelOpen: boolean
-  /** The Panel's current pick when it belongs to this map — drawn as the active item. */
   selected: ResolvedSelection | null
-  /** True while the keyboard was the last mover — the ledger treats its focused row as hovered. */
   kbNav: boolean
-  /** True when nothing is selected anywhere and this is the first map — the navbar's Tab entry
-   * point. Every other element in the unit is reached with arrows, never Tab. */
   entry: boolean
 }) {
-  // Aligns the trigger's text with the embedded ledger's text column (exact at full render width).
   const textLeft = useMemo(() => buildLedger(map).textX * LEDGER_SCALE, [map])
-  const partial = map.ticketsTruncated || map.tickets.some((ticket) => ticket.blockersTruncated)
+  const partial = !map.ticketsComplete || map.tickets.some((ticket) => !ticket.blockersComplete)
   const ledgerSelected = selected !== null && selected.kind !== 'map' ? selected : null
   const isMapSelected = selected?.kind === 'map'
 
@@ -84,12 +77,6 @@ export function MapChild({
   )
 
   const charted = map.isOpen ? ' is-charted' : ''
-
-  // The destination is an item like any other, but its click reads the accordion and the Panel:
-  // a folded map with the Panel closed unfolds first — click again to open the Panel on it; with
-  // the Panel already open, one click unfolds AND selects; and activating the already-selected
-  // destination deselects it (the screen's toggle), closing the Panel. The GitHub link lives in
-  // the Panel.
   const expanded = solo || open
   const activate = () => {
     if (!expanded && !panelOpen) {
@@ -122,17 +109,12 @@ export function MapChild({
 
 /** True when two picks point at the same thing — how the Panel finds itself in the sequence. */
 export function sameSelection(a: ResolvedSelection, b: ResolvedSelection): boolean {
-  if (a.kind === 'ticket') return b.kind === 'ticket' && b.number === a.number
+  if (a.kind === 'ticket') return b.kind === 'ticket' && b.id === a.id
   if (a.kind === 'fog') return b.kind === 'fog' && b.text === a.text
   if (a.kind === 'scope') return b.kind === 'scope' && b.text === a.text
   return a.kind === b.kind
 }
 
-/**
- * The node tree alone: the ledger minus its destination section — the trigger already is that
- * section. `trunkToEdge` asks the ledger to draw its solid trunk to its own bottom edge, so the
- * rail continues into the older map below inside the svg itself.
- */
 function CroppedLedger({
   map,
   trunkToEdge,
@@ -162,10 +144,6 @@ function CroppedLedger({
   )
 }
 
-/**
- * The animated single-open fold: always mounted so the open/close motion has content to move.
- * grid-template-rows 0fr→1fr is the transition — no measured heights, no jump at the end.
- */
 function Fold({ open, children }: { open: boolean; children: ReactNode }) {
   return (
     <div className={`fold${open ? ' is-open' : ''}`} aria-hidden={!open}>

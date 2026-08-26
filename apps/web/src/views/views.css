@@ -26,6 +26,35 @@
   font-weight: 600;
   letter-spacing: -0.02em;
 }
+.site-nav {
+  display: flex;
+  align-self: stretch;
+  margin-right: auto;
+  border-left: 1px solid var(--edge);
+}
+
+.site-nav a {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--sp-4);
+  border-right: 1px solid var(--edge);
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-decoration: none;
+}
+
+.site-nav a:hover,
+.site-nav a:focus-visible {
+  background: var(--wash);
+  color: var(--fg);
+  outline: 0;
+}
+
+.site-nav a.is-current {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  color: var(--fg);
+  font-weight: 600;
+}
 
 .brand svg {
   display: block;
@@ -56,12 +85,51 @@
   background: var(--state-blocked);
 }
 
-.list-header {
-  margin-bottom: 1.5rem;
+.overview-shell {
+  max-width: 74rem;
 }
 
-.list-header p {
+.overview-head {
+  margin-bottom: var(--sp-8);
+}
+
+.overview-head h1,
+.overview-head p {
   margin: 0;
+}
+
+.overview-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem var(--sp-4);
+  margin-top: var(--sp-3);
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.overview-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.overview-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.overview-dot.is-decided {
+  background: var(--fg);
+}
+
+.overview-dot.is-active {
+  background: var(--signal-decided);
+}
+
+.overview-dot.is-attention {
+  background: var(--state-blocked);
 }
 
 .small {
@@ -106,130 +174,218 @@
   vertical-align: middle;
 }
 
-/*
- * The journey-at-a-glance cards: the project screen at a second density, everything collapsed.
- * Flag-led destination lines, newest first, date tail, no rail — as the stride prototype settled.
- */
-
-.fl-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
-  gap: var(--sp-3);
-  align-items: start;
+/* The whole-product road: registered Projects as one trace, never a dashboard of cards. */
+.overview-road {
+  position: relative;
 }
 
-.fl-card {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: var(--sp-2);
-  padding: var(--sp-4);
-  border: 1px solid var(--edge);
-  border-radius: var(--radius);
+.overview-road::before {
+  position: absolute;
+  z-index: 0;
+  top: 1.3rem;
+  bottom: 1.3rem;
+  left: 3rem;
+  width: 2px;
+  background: var(--trunk);
+  content: "";
+}
+
+.overview-section {
+  position: relative;
+  padding: 2.3rem 0 var(--sp-4);
+  border-top: 1px solid var(--edge);
+}
+
+.overview-section:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.overview-section-label {
+  margin: 0 0 var(--sp-3) 9rem;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.66rem;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.overview-row {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 6rem minmax(0, 1fr) auto;
+  gap: 0.85rem;
+  align-items: center;
+  width: 100%;
+  min-height: 64px;
+  padding: var(--sp-2) 0.8rem var(--sp-2) 0;
   color: inherit;
+  text-align: left;
   text-decoration: none;
 }
 
-.fl-card:hover,
-.fl-card:focus-visible {
-  border-color: var(--signal-decided);
+a.overview-row:hover,
+a.overview-row:focus-visible {
+  background: var(--wash);
+  outline: 1px solid var(--edge);
+  outline-offset: 0;
 }
 
-.fl-card-name {
-  font-weight: 600;
+.overview-row.is-map {
+  margin: 0.35rem 0;
+  padding-top: 0.9rem;
+  padding-bottom: 0.9rem;
+  border: 1px solid var(--edge);
+  background: var(--wash);
 }
 
-.fl-card-trace {
+.overview-node {
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  justify-self: center;
+  width: 21px;
+  height: 21px;
+  border: 2px solid var(--bg);
+  border-radius: 50%;
+  background: var(--muted);
+  color: var(--bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.67rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.overview-node.is-attention {
+  background: var(--state-blocked);
+}
+
+.overview-node.is-closed {
+  background: var(--fg);
+}
+
+.overview-node.is-flag {
+  width: 38px;
+  height: 38px;
+  background: color-mix(in srgb, var(--goal) 20%, var(--bg));
+  color: var(--goal);
+  font-size: 1rem;
+}
+
+.overview-node.is-open {
+  border: 2px dashed var(--muted);
+  background: var(--bg);
+  color: var(--muted);
+}
+
+.overview-copy {
   display: flex;
   flex-direction: column;
-}
-
-.fl-card-line {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  padding: var(--sp-1) 0;
   min-width: 0;
 }
 
-.fl-card-flag {
-  flex: none;
-  width: 13px;
-  text-align: center;
-  font-size: 11px;
-  color: var(--goal);
-}
-
-.fl-card-dest {
-  font-size: 0.85rem;
-  white-space: nowrap;
+.overview-copy strong,
+.overview-detail,
+.overview-priority {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.fl-card-dest.is-active {
-  font-weight: 600;
-}
-
-.fl-card-tail {
-  margin-left: auto;
-  font-size: 0.75rem;
   white-space: nowrap;
 }
 
-/* The active map's meter and the at-rest note sit in the text column, under the head flag. */
-.fl-card-meter,
-.fl-card-rest {
-  display: block;
-  margin-left: calc(13px + var(--sp-2));
-  padding: var(--sp-1) 0;
+.overview-kicker {
+  margin-bottom: 0.22rem;
+  color: var(--goal);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
-/* The progress signal: a same-hue meter for tickets, a textured tail for fog. */
-
-.signal {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.signal-strip {
-  display: flex;
-  gap: 2px;
-  height: 6px;
-}
-
-.signal-strip > span {
-  border-radius: 3px;
-  min-width: 6px;
-}
-
-.signal-decided {
-  background: var(--signal-decided);
-}
-
-.signal-open {
-  background: var(--signal-open);
-}
-
-.signal-fog {
-  background: repeating-linear-gradient(
-    45deg,
-    var(--signal-fog),
-    var(--signal-fog) 1.5px,
-    transparent 1.5px,
-    transparent 4.5px
-  );
-}
-
-.signal-caption {
+.overview-connection {
+  margin-left: var(--sp-2);
   color: var(--muted);
-  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
-.list-footer {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  margin-top: 2rem;
+.overview-detail,
+.overview-priority,
+.overview-tail,
+.overview-empty {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.overview-priority {
+  margin-top: 0.15rem;
+}
+
+.overview-tail {
+  white-space: nowrap;
+}
+
+.overview-tail.is-active {
+  color: var(--signal-decided);
+}
+
+.overview-tail.is-unavailable {
+  color: var(--state-blocked);
+}
+
+.overview-empty {
+  margin-left: 9rem;
+}
+
+.project-empty {
+  padding: var(--sp-4) 0;
+  border-top: 1px solid var(--edge);
+  border-bottom: 1px solid var(--edge);
+}
+
+@media (max-width: 640px) {
+  .site-header {
+    flex-wrap: wrap;
+  }
+
+  .site-nav {
+    order: 3;
+    flex-basis: 100%;
+  }
+
+  .site-nav a {
+    min-height: 36px;
+  }
+}
+
+@media (max-width: 640px) {
+  .overview-road::before {
+    left: 1.9rem;
+  }
+
+  .overview-section-label,
+  .overview-empty {
+    margin-left: 4.6rem;
+  }
+
+  .overview-row {
+    grid-template-columns: 3.8rem minmax(0, 1fr);
+    padding-right: 0;
+  }
+
+  .overview-tail {
+    grid-column: 2;
+  }
+
+  .overview-copy strong,
+  .overview-detail,
+  .overview-priority {
+    white-space: normal;
+  }
 }

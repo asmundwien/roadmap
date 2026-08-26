@@ -1,26 +1,19 @@
 import { createServer } from 'node:http'
 import { fileURLToPath } from 'node:url'
-import { createChangeFeed } from './change-feed.ts'
+import { createProjectAdmission } from './application/admission.ts'
+import { type AdapterRuntime, createRoadmapApplication } from './application/application.ts'
+import { createAutomationDocument, createAutomationLauncher } from './application/automation.ts'
+import { createConfigurationDocument } from './application/configuration.ts'
+import { createMacOsCredentialVault } from './application/credential-vault.ts'
+import { createApplicationOperations } from './application/operations.ts'
 import { readServerConfig } from './config.ts'
-import { createGitHubClient } from './github/client.ts'
+import { createGitHubAdapter, type GitHubAdapter } from './github/adapter.ts'
+import { createGitHubProjectAdmission } from './github/admission.ts'
+import { createGitHubConnectionPort } from './github/connections.ts'
+import { createLocalAdapter } from './local/adapter.ts'
+import { createLocalProjectAdmission } from './local/admission.ts'
 import { createNotifier } from './notify.ts'
-import { startRelay } from './relay.ts'
-import { createSnapshotSocket } from './socket.ts'
-import { createSnapshotStore } from './store.ts'
-import { createWebhookHandler } from './webhook.ts'
-
-/**
- * The demoted poll. Webhooks are the engine now; this is the net under them — it trues up
- * whatever smee silently dropped (docs/research/webhook-path.md §4). Down from 90s in v2.
- */
-const RECONCILE_MS = 5 * 60_000
-
-/** Budget valve, unchanged in spirit from the v2 store: polling is the only spend we can shrink. */
-const THROTTLE_STEPS: { remainingBelow: number; multiplier: number }[] = [
-  { remainingBelow: 300, multiplier: 8 },
-  { remainingBelow: 1000, multiplier: 4 },
-  { remainingBelow: 2000, multiplier: 2 },
-]
+import { createRoadmapTransport, type RoadmapTransport } from './transport.ts'
 
 async function main(): Promise<void> {
   loadRootEnv()
@@ -33,31 +26,83 @@ async function main(): Promise<void> {
   const { config, warnings } = result
   for (const warning of warnings) console.warn(warning)
 
-  const client = createGitHubClient({ token: config.token })
-  const store = createSnapshotStore(client, config.user)
-
-  const handleWebhook = createWebhookHandler({
-    secret: config.webhookSecret,
-    knownMaps: () => store.knownMaps(),
-    onInvalidation: (invalidation) => store.invalidate(invalidation),
+  const github = config.githubApp
+    ? createGitHubConnectionPort({
+        clientId: config.githubApp.clientId,
+        appSlug: config.githubApp.slug,
+      })
+    : undefined
+  const credentialVault = github ? createMacOsCredentialVault() : undefined
+  let githubAdapter: GitHubAdapter | null = null
+  const operations = createApplicationOperations({
+    async refreshGitHub(project) {
+      return (await githubAdapter?.refresh(project)) ?? false
+    },
+  })
+  const admission = createProjectAdmission({
+    local: createLocalProjectAdmission(),
+    ...(github ? { github: createGitHubProjectAdmission({ github }) } : {}),
   })
 
+  const application = createRoadmapApplication({
+    configuration: createConfigurationDocument(
+      fileURLToPath(new URL('../../../roadmap.config.json', import.meta.url)),
+    ),
+    automation: {
+      document: createAutomationDocument(
+        fileURLToPath(new URL('../../../roadmap.automation.json', import.meta.url)),
+      ),
+      launcher: createAutomationLauncher(),
+    },
+    ...(github && credentialVault
+      ? {
+          github,
+          credentialVault,
+        }
+      : {}),
+    admission,
+    operations,
+    createAdapters(configuration, runtime: AdapterRuntime) {
+      const adapters = [createLocalAdapter({ registrations: configuration.projects })]
+      if (github) {
+        githubAdapter = createGitHubAdapter({
+          connections: configuration.connections,
+          registrations: configuration.projects,
+          accessToken: runtime.accessToken,
+          onConnectionAvailability: runtime.setConnectionAvailability,
+        })
+        adapters.push(githubAdapter)
+      } else {
+        githubAdapter = null
+      }
+      return adapters
+    },
+    onChangeEvents: createNotifier(),
+  })
+
+  let transport: RoadmapTransport | null = null
   const server = createServer((request, response) => {
-    if (request.method === 'POST' && request.url === '/webhook') {
-      handleWebhook(request, response)
-      return
-    }
+    if (transport?.handle(request, response)) return
     if (request.method === 'GET' && (request.url === '/' || request.url === '/health')) {
-      const snapshot = store.snapshot()
+      const state = application.current()
+      const diagnostics = githubAdapter?.diagnostics() ?? { rateLimit: null }
       response.writeHead(200, { 'Content-Type': 'application/json' })
       response.end(
         JSON.stringify({
-          capturedAt: snapshot.capturedAt,
-          projects: snapshot.projects.length,
-          maps: store.knownMaps().length,
-          unreachable: snapshot.unreachable.length,
-          rateLimit: snapshot.rateLimit,
-          clients: socket.clientCount(),
+          capturedAt: state.roadmap.capturedAt,
+          projects: state.projects.length,
+          maps: state.projects.reduce(
+            (count, project) => count + project.openMaps.length + project.closedMaps.length,
+            0,
+          ),
+          unavailable: state.projects.filter(
+            (project) => project.availability.status === 'unavailable',
+          ).length,
+          rateLimit: diagnostics.rateLimit,
+          githubConnections: state.connections.filter(
+            (connection) => connection.integration === 'github',
+          ).length,
+          clients: transport?.clientCount() ?? 0,
         }),
       )
       return
@@ -66,63 +111,35 @@ async function main(): Promise<void> {
     response.end('not found')
   })
 
-  const socket = createSnapshotSocket(server)
-  store.onChange((snapshot) => {
-    socket.broadcast(snapshot)
+  transport = createRoadmapTransport({
+    server,
+    application,
+    allowedOrigin: config.allowedOrigin,
+  })
+
+  application.subscribe((state) => {
+    const snapshot = state.roadmap
     console.info(
-      `snapshot: ${snapshot.projects.length} projects, ` +
-        `${snapshot.unreachable.length} unreachable → ${socket.clientCount()} clients`,
+      `state ${state.stateSequence}: ${snapshot.projects.length} projects, ` +
+        `${snapshot.unreachable.length} unreachable → ${transport?.clientCount() ?? 0} clients`,
     )
   })
 
-  // The change feed sees the baseline as its first snapshot — observed, never diffed — so no
-  // triggers fire from the baseline sweep. Its first subscriber banners what agents do.
-  const feed = createChangeFeed(store)
-  feed.onEvent(createNotifier())
+  await new Promise<void>((resolve) => server.listen(config.port, '127.0.0.1', resolve))
+  await application.start()
+  console.info(
+    `listening on http://127.0.0.1:${config.port} ` +
+      `(operations: /api/query + /api/command, state: /ws)`,
+  )
 
-  await new Promise<void>((resolve) => server.listen(config.port, resolve))
-  console.info(`listening on http://localhost:${config.port} (webhook: /webhook, socket: /ws)`)
-
-  // Baseline before the relay starts: state exists before the first delivery can touch it.
-  await store.reconcile('baseline')
-  console.info(`baseline: ${store.knownMaps().length} maps`)
-
-  const relay =
-    config.smeeUrl === null
-      ? null
-      : await startRelay({
-          source: config.smeeUrl,
-          target: `http://localhost:${config.port}/webhook`,
-          onReconnect: () => void store.reconcile('relay reconnect'),
-        })
-  if (relay) console.info(`relaying ${config.smeeUrl} → /webhook`)
-
-  // The reconciler: a timeout chain rather than an interval, so a slow sweep never overlaps the
-  // next, and each delay can stretch with the remaining budget.
-  let reconcileTimer: ReturnType<typeof setTimeout> | null = null
-  function scheduleReconcile(): void {
-    reconcileTimer = setTimeout(async () => {
-      await store.reconcile('interval')
-      scheduleReconcile()
-    }, nextReconcileDelay())
-  }
-  function nextReconcileDelay(): number {
-    const remaining = store.snapshot().rateLimit?.remaining
-    if (remaining === undefined) return RECONCILE_MS
-    const step = THROTTLE_STEPS.find((candidate) => remaining < candidate.remainingBelow)
-    return RECONCILE_MS * (step?.multiplier ?? 1)
-  }
-  scheduleReconcile()
-
+  let shuttingDown = false
   const shutdown = (): void => {
+    if (shuttingDown) return
+    shuttingDown = true
     console.info('shutting down')
-    if (reconcileTimer !== null) clearTimeout(reconcileTimer)
-    feed.stop()
-    store.stop()
-    socket.close()
+    transport?.close()
     server.close()
-    const stopped = relay ? relay.stop() : Promise.resolve()
-    void stopped.finally(() => process.exit(0))
+    void application.stop().finally(() => process.exit(0))
   }
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
@@ -133,7 +150,7 @@ function loadRootEnv(): void {
   try {
     process.loadEnvFile(fileURLToPath(new URL('../../../.env.local', import.meta.url)))
   } catch {
-    // No .env.local — the environment itself must carry the config.
+    // No .env.local. The environment itself may carry the configuration.
   }
 }
 

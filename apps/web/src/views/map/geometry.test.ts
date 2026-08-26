@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { buildLedger } from './geometry.ts'
 import { blocker, makeMap, ticket } from './test-fixtures.ts'
 
+const id = (value: number | string) => String(value)
+
 /** Every straight vertical (a rail or a merge's drop) riding through an unrelated node's center. */
 function passThroughs(ledger: ReturnType<typeof buildLedger>): string[] {
   const nodes = [...ledger.rows, ...ledger.closedRows]
@@ -12,14 +14,21 @@ function passThroughs(ledger: ReturnType<typeof buildLedger>): string[] {
     const x = Number(m[1])
     const top = Math.min(Number(m[2]), Number(m[4]))
     const bottom = Math.max(Number(m[2]), Number(m[4]))
-    for (const n of nodes) {
-      if (n.ticket.number === edge.from || n.ticket.number === edge.to) continue
-      if (Math.abs(n.x - x) < 1 && n.y > top + 2 && n.y < bottom - 2)
-        offenders.push(`${edge.key} rides through #${n.ticket.number}`)
+    for (const node of nodes) {
+      if (node.ticket.id === edge.from || node.ticket.id === edge.to) continue
+      if (Math.abs(node.x - x) < 1 && node.y > top + 2 && node.y < bottom - 2)
+        offenders.push(`${edge.key} rides through #${node.ticket.id}`)
     }
   }
   return offenders
 }
+
+const rowY = (ledger: ReturnType<typeof buildLedger>, n: number) =>
+  ledger.rows.find((row) => row.ticket.id === id(n))?.y ?? Number.NaN
+const rowX = (ledger: ReturnType<typeof buildLedger>, n: number) =>
+  ledger.rows.find((row) => row.ticket.id === id(n))?.x
+const closedRow = (ledger: ReturnType<typeof buildLedger>, n: number) =>
+  ledger.closedRows.find((row) => row.ticket.id === id(n))
 
 describe('buildLedger', () => {
   it('stacks charted-ahead rows by remaining distance: takeable at the bottom, deepest at the top', () => {
@@ -29,11 +38,10 @@ describe('buildLedger', () => {
       ticket(4, 'blocked', [blocker(3)]),
     ])
     const ledger = buildLedger(map)
-    const y = (n: number) => ledger.rows.find((r) => r.ticket.number === n)?.y ?? Number.NaN
-    expect(y(2)).toBeGreaterThan(y(3))
-    expect(y(3)).toBeGreaterThan(y(4))
-    expect(y(2)).toBeLessThan(ledger.sepBehind)
-    expect(y(4)).toBeGreaterThan(ledger.sepAhead)
+    expect(rowY(ledger, 2)).toBeGreaterThan(rowY(ledger, 3))
+    expect(rowY(ledger, 3)).toBeGreaterThan(rowY(ledger, 4))
+    expect(rowY(ledger, 2)).toBeLessThan(ledger.sepBehind)
+    expect(rowY(ledger, 4)).toBeGreaterThan(ledger.sepAhead)
   })
 
   it('gives the heaviest chain forked off HEAD the trunk lane, tributaries rightward', () => {
@@ -44,11 +52,10 @@ describe('buildLedger', () => {
       ticket(5, 'frontier'),
     ])
     const ledger = buildLedger(map)
-    const x = (n: number) => ledger.rows.find((r) => r.ticket.number === n)?.x
-    expect(x(2)).toBe(ledger.gutterX)
-    expect(x(3)).toBe(ledger.gutterX)
-    expect(x(4)).toBe(ledger.gutterX)
-    expect(x(5)).toBeGreaterThan(ledger.gutterX)
+    expect(rowX(ledger, 2)).toBe(ledger.gutterX)
+    expect(rowX(ledger, 3)).toBe(ledger.gutterX)
+    expect(rowX(ledger, 4)).toBe(ledger.gutterX)
+    expect(rowX(ledger, 5)).toBeGreaterThan(ledger.gutterX)
   })
 
   it('leaves a rootless takeable bare — no invented line to HEAD or the trunk', () => {
@@ -59,9 +66,8 @@ describe('buildLedger', () => {
       ticket(5, 'frontier'),
     ])
     const ledger = buildLedger(map)
-    // 5 has no recorded relations, so no stroke claims one: only its tip toward the fog.
-    expect(ledger.edges.filter((e) => e.to === 5 && e.kind !== 'tip')).toEqual([])
-    expect(ledger.edges.find((e) => e.kind === 'tip' && e.to === 5)).toBeDefined()
+    expect(ledger.edges.filter((edge) => edge.to === id(5) && edge.kind !== 'tip')).toEqual([])
+    expect(ledger.edges.find((edge) => edge.kind === 'tip' && edge.to === id(5))).toBeDefined()
   })
 
   it('lands a merge on the heavier rail and draws the lighter rail in as a merge edge', () => {
@@ -72,25 +78,23 @@ describe('buildLedger', () => {
       ticket(7, 'blocked', [blocker(3), blocker(5)]),
     ])
     const ledger = buildLedger(map)
-    const x = (n: number) => ledger.rows.find((r) => r.ticket.number === n)?.x
-    expect(x(7)).toBe(x(3))
-    const merge = ledger.edges.find((e) => e.kind === 'merge')
-    expect(merge).toMatchObject({ from: 5, to: 7 })
+    expect(rowX(ledger, 7)).toBe(rowX(ledger, 3))
+    const merge = ledger.edges.find((edge) => edge.kind === 'merge')
+    expect(merge).toMatchObject({ from: id(5), to: id(7) })
   })
 
-  it('counts a cross-repo blocker as one step of depth but never draws or follows it', () => {
+  it('counts a cross-project blocker as one step of depth but never draws or follows it', () => {
     const map = makeMap([
       ticket(2, 'frontier'),
       ticket(3, 'blocked', [blocker(2, true, 'other/repo')]),
     ])
     const ledger = buildLedger(map)
-    const rowOf = (n: number) => ledger.rows.find((r) => r.ticket.number === n)
-    // Ticket 3 is genuinely blocked, so it sits a layer above the frontier...
-    expect(rowOf(3)?.y).toBeLessThan(rowOf(2)?.y ?? Number.NaN)
-    // ...but the same-number ticket in this repo is a stranger: no edge, no hover neighbour.
-    expect(ledger.edges.some((e) => e.kind === 'merge')).toBe(false)
-    expect(ledger.edges.filter((e) => e.kind === 'fork').every((e) => e.from === null)).toBe(true)
-    expect(ledger.blockersOf.get(3)).toBeUndefined()
+    expect(rowY(ledger, 3)).toBeLessThan(rowY(ledger, 2))
+    expect(ledger.edges.some((edge) => edge.kind === 'merge')).toBe(false)
+    expect(
+      ledger.edges.filter((edge) => edge.kind === 'fork').every((edge) => edge.from === null),
+    ).toBe(true)
+    expect(ledger.blockersOf.get(id(3))).toBeUndefined()
   })
 
   it('is deterministic: the same snapshot builds the same ledger', () => {
@@ -117,32 +121,32 @@ describe('buildLedger', () => {
       ticket(4, 'closed', [blocker(2, false)], 300),
     ])
     const ledger = buildLedger(map)
-    const row = (n: number) => ledger.closedRows.find((r) => r.ticket.number === n)
-    // 2's thread holds lane 0 until its last dependent (4) inherits it; 3 branched out earlier.
-    expect(row(2)?.x).toBe(ledger.gutterX)
-    expect(row(4)?.x).toBe(ledger.gutterX)
-    expect(row(3)?.x).toBeGreaterThan(ledger.gutterX)
-    expect(ledger.edges.find((e) => e.kind === 'run')).toMatchObject({ from: 2, to: 4 })
-    expect(ledger.edges.find((e) => e.kind === 'merge')).toMatchObject({ from: 2, to: 3 })
+    expect(closedRow(ledger, 2)?.x).toBe(ledger.gutterX)
+    expect(closedRow(ledger, 4)?.x).toBe(ledger.gutterX)
+    expect(closedRow(ledger, 3)?.x).toBeGreaterThan(ledger.gutterX)
+    expect(ledger.edges.find((edge) => edge.kind === 'run')).toMatchObject({
+      from: id(2),
+      to: id(4),
+    })
+    expect(ledger.edges.find((edge) => edge.kind === 'merge')).toMatchObject({
+      from: id(2),
+      to: id(3),
+    })
     expect(ledger.edges).toHaveLength(2)
   })
 
   it('forks a spawned chain off the non-research ticket that closed just before its creation', () => {
     const map = makeMap([
-      // The trunk: a task resolved at 100, its dependent at 400.
       ticket(2, 'closed', [], 100),
       ticket(3, 'closed', [blocker(2, false)], 400),
-      // Research created at 150 — right after the task closed — then resolved by its subagent.
       ticket(6, 'closed', [], 300, 150, 'research'),
       ticket(7, 'closed', [blocker(6, false)], 500),
-      // A research decoy that closed nearer the creation moment: research never spawns.
       ticket(8, 'closed', [], 140, 0, 'research'),
     ])
     const ledger = buildLedger(map)
-    const row = (n: number) => ledger.closedRows.find((r) => r.ticket.number === n)
-    expect(row(6)?.x).toBeGreaterThan(ledger.gutterX)
-    const fork = ledger.edges.find((e) => e.kind === 'fork' && e.to === 6)
-    expect(fork).toMatchObject({ from: 2, isDependency: false })
+    expect(closedRow(ledger, 6)?.x).toBeGreaterThan(ledger.gutterX)
+    const fork = ledger.edges.find((edge) => edge.kind === 'fork' && edge.to === id(6))
+    expect(fork).toMatchObject({ from: id(2), isDependency: false })
   })
 
   it('reuses a freed lane instead of growing the graph rightward', () => {
@@ -154,17 +158,14 @@ describe('buildLedger', () => {
       ticket(6, 'closed', [blocker(5, false)], 300),
     ])
     const ledger = buildLedger(map)
-    const row = (n: number) => ledger.closedRows.find((r) => r.ticket.number === n)
-    // Both lanes freed at the 2+3 → 4 merge, so 5's new thread reclaims the leftmost —
-    // the graph never grows a third column while old ones sit empty.
-    expect(row(5)?.x).toBe(ledger.gutterX)
+    expect(closedRow(ledger, 5)?.x).toBe(ledger.gutterX)
     expect(ledger.laneCount).toBe(2)
   })
 
   it('keeps unconnected closed tickets edge-free, sharing the leftmost lane as log entries', () => {
     const map = makeMap([ticket(2, 'closed', [], 100), ticket(3, 'closed', [], 200)])
     const ledger = buildLedger(map)
-    expect(ledger.closedRows.every((r) => r.x === ledger.gutterX)).toBe(true)
+    expect(ledger.closedRows.every((row) => row.x === ledger.gutterX)).toBe(true)
     expect(ledger.edges).toHaveLength(0)
   })
 
@@ -177,15 +178,11 @@ describe('buildLedger', () => {
       ticket(5, 'frontier', [blocker(2, false)]),
     ])
     const ledger = buildLedger(map)
-    // 2's thread waits for 5, so 5 inherits its lane — one rail crossing the separator...
-    const crossing = ledger.edges.find((e) => e.to === 5)
-    expect(crossing).toMatchObject({ kind: 'run', from: 2, isDependency: true })
-    expect(ledger.rows.find((r) => r.ticket.number === 5)?.x).toBe(
-      ledger.closedRows.find((r) => r.ticket.number === 2)?.x,
-    )
-    // ...and hovering either end relates them.
-    expect(ledger.blockersOf.get(5)).toContain(2)
-    expect(ledger.dependentsOf.get(2)).toContain(5)
+    const crossing = ledger.edges.find((edge) => edge.to === id(5))
+    expect(crossing).toMatchObject({ kind: 'run', from: id(2), isDependency: true })
+    expect(rowX(ledger, 5)).toBe(closedRow(ledger, 2)?.x)
+    expect(ledger.blockersOf.get(id(5))).toContain(id(2))
+    expect(ledger.dependentsOf.get(id(2))).toContain(id(5))
   })
 
   it('continues the trunk across HEAD: the last decision’s dependent inherits lane 0', () => {
@@ -197,17 +194,15 @@ describe('buildLedger', () => {
       ticket(6, 'blocked', [blocker(5)]),
     ])
     const ledger = buildLedger(map)
-    const x = (n: number) => ledger.rows.find((r) => r.ticket.number === n)?.x
-    // 5 is what closing 3 unblocked, so lane 0 reads 2 → 3 → HEAD → 5 → 6: one road...
-    expect(x(5)).toBe(ledger.gutterX)
-    expect(x(6)).toBe(ledger.gutterX)
-    expect(x(4)).toBeGreaterThan(ledger.gutterX)
-    // ...whose crossing of HEAD is one real dependency edge, drawn once.
-    const crossing = ledger.edges.filter((e) => e.from === 3 && e.to === 5)
+    expect(rowX(ledger, 5)).toBe(ledger.gutterX)
+    expect(rowX(ledger, 6)).toBe(ledger.gutterX)
+    expect(rowX(ledger, 4)).toBeGreaterThan(ledger.gutterX)
+    const crossing = ledger.edges.filter((edge) => edge.from === id(3) && edge.to === id(5))
     expect(crossing).toHaveLength(1)
     expect(crossing[0]).toMatchObject({ kind: 'run', isDependency: true })
-    // 4 retires into 5 as an ordinary merge from its tributary lane.
-    expect(ledger.edges.find((e) => e.kind === 'merge' && e.to === 5)).toMatchObject({ from: 4 })
+    expect(ledger.edges.find((edge) => edge.kind === 'merge' && edge.to === id(5))).toMatchObject({
+      from: id(4),
+    })
   })
 
   it('drops a merge a longer chain already implies — the Hasse rule', () => {
@@ -217,10 +212,8 @@ describe('buildLedger', () => {
       ticket(4, 'blocked', [blocker(3), blocker(2)]),
     ])
     const ledger = buildLedger(map)
-    // The rail draws 2 → 3 → 4, so the direct 2 → 4 shortcut adds no order — no edge...
-    expect(ledger.edges.some((e) => e.from === 2 && e.to === 4)).toBe(false)
-    // ...but hover still knows: the raw graph keeps the shortcut.
-    expect(ledger.blockersOf.get(4)).toContain(2)
+    expect(ledger.edges.some((edge) => edge.from === id(2) && edge.to === id(4))).toBe(false)
+    expect(ledger.blockersOf.get(id(4))).toContain(id(2))
   })
 
   it('cuts a rail into one segment per blocked-by pair, never one stroke past a node', () => {
@@ -230,12 +223,12 @@ describe('buildLedger', () => {
       ticket(4, 'blocked', [blocker(3)]),
     ])
     const ledger = buildLedger(map)
-    const runs = ledger.edges.filter((e) => e.kind === 'run')
-    expect(runs.map((e) => [e.from, e.to])).toEqual([
-      [2, 3],
-      [3, 4],
+    const runs = ledger.edges.filter((edge) => edge.kind === 'run')
+    expect(runs.map((edge) => [edge.from, edge.to])).toEqual([
+      [id(2), id(3)],
+      [id(3), id(4)],
     ])
-    expect(runs.every((e) => e.isDependency)).toBe(true)
+    expect(runs.every((edge) => edge.isDependency)).toBe(true)
   })
 
   it('draws each blocked-by exactly once — a rail segment or a merge, never both', () => {
@@ -246,11 +239,10 @@ describe('buildLedger', () => {
       ticket(5, 'blocked', [blocker(2)]),
     ])
     const ledger = buildLedger(map)
-    // 5 is 2's last dependent, so it inherits the rail; 3 branched out with a merge earlier.
-    const pair = ledger.edges.filter((e) => e.from === 2 && e.to === 5)
+    const pair = ledger.edges.filter((edge) => edge.from === id(2) && edge.to === id(5))
     expect(pair).toHaveLength(1)
     expect(pair[0]).toMatchObject({ kind: 'run', isDependency: true })
-    expect(ledger.edges.filter((e) => e.from === 2 && e.to === 3)).toHaveLength(1)
+    expect(ledger.edges.filter((edge) => edge.from === id(2) && edge.to === id(3))).toHaveLength(1)
   })
 
   it('flows a finished side-thread straight into the open work it unblocked', () => {
@@ -262,13 +254,14 @@ describe('buildLedger', () => {
       ticket(6, 'frontier', [blocker(5, false)]),
     ])
     const ledger = buildLedger(map)
-    // 4 → 5 rides its own lane, and 6 inherits it — the thread crosses HEAD as one rail,
-    // with no decorative stroke faking a convergence at HEAD.
-    const row5 = ledger.closedRows.find((r) => r.ticket.number === 5)
-    const row6 = ledger.rows.find((r) => r.ticket.number === 6)
+    const row5 = closedRow(ledger, 5)
+    const row6 = ledger.rows.find((row) => row.ticket.id === id(6))
     expect(row5?.x).toBeGreaterThan(ledger.gutterX)
     expect(row6?.x).toBe(row5?.x)
-    expect(ledger.edges.find((e) => e.to === 6)).toMatchObject({ kind: 'run', from: 5 })
+    expect(ledger.edges.find((edge) => edge.to === id(6))).toMatchObject({
+      kind: 'run',
+      from: id(5),
+    })
   })
 
   it('branches a mid-thread dependent out so the rail can continue to the later one', () => {
@@ -276,33 +269,35 @@ describe('buildLedger', () => {
       ticket(2, 'closed', [], 100),
       ticket(6, 'closed', [blocker(2, false)], 200),
       ticket(14, 'closed', [blocker(6, false)], 300),
-      // 15 also waits on 6 and arrives last, so IT inherits 6's rail; 14 branched out.
       ticket(15, 'frontier', [blocker(6, false)]),
     ])
     const ledger = buildLedger(map)
-    expect(ledger.rows.find((r) => r.ticket.number === 15)?.x).toBe(ledger.gutterX)
-    expect(ledger.closedRows.find((r) => r.ticket.number === 14)?.x ?? Number.NaN).toBeGreaterThan(
-      ledger.gutterX,
-    )
-    expect(ledger.edges.find((e) => e.to === 15)).toMatchObject({ kind: 'run', from: 6 })
-    expect(ledger.edges.find((e) => e.to === 14)).toMatchObject({ kind: 'merge', from: 6 })
+    expect(rowX(ledger, 15)).toBe(ledger.gutterX)
+    expect(closedRow(ledger, 14)?.x ?? Number.NaN).toBeGreaterThan(ledger.gutterX)
+    expect(ledger.edges.find((edge) => edge.to === id(15))).toMatchObject({
+      kind: 'run',
+      from: id(6),
+    })
+    expect(ledger.edges.find((edge) => edge.to === id(14))).toMatchObject({
+      kind: 'merge',
+      from: id(6),
+    })
   })
 
   it('compresses lanes evenly once the braid outgrows ten, guarding the text column', () => {
-    // Eleven independent closed spokes all feeding one hub: every spoke earns a lane.
-    const spokes = Array.from({ length: 11 }, (_, i) => ticket(2 + i, 'closed', [], 100 + i))
+    const spokes = Array.from({ length: 11 }, (_, index) =>
+      ticket(2 + index, 'closed', [], 100 + index),
+    )
     const hub = ticket(
       20,
       'closed',
-      spokes.map((s) => blocker(s.number, false)),
+      spokes.map((spoke) => blocker(spoke.id, false)),
       900,
     )
     const ledger = buildLedger(makeMap([...spokes, hub]))
-    const xs = [...new Set(ledger.closedRows.map((r) => r.x))].sort((a, b) => a - b)
-    // The lane field never exceeds its budget...
+    const xs = [...new Set(ledger.closedRows.map((row) => row.x))].sort((a, b) => a - b)
     expect(Math.max(...xs)).toBeLessThanOrEqual(ledger.gutterX + 340)
-    // ...and the squeeze is uniform: every gap between adjacent lanes is the same.
-    const gaps = xs.slice(1).map((x, i) => x - (xs[i] ?? 0))
+    const gaps = xs.slice(1).map((x, index) => x - (xs[index] ?? 0))
     for (const gap of gaps) expect(gap).toBeCloseTo(gaps[0] ?? 0, 6)
     expect(gaps[0] ?? 0).toBeLessThan(34)
   })
@@ -316,11 +311,12 @@ describe('buildLedger', () => {
       ticket(6, 'blocked', [blocker(5), blocker(4, false)]),
     ])
     const ledger = buildLedger(map)
-    // 4 feeds open 6, so it is no longer a mute log entry: it earns a lane off the trunk...
-    const row4 = ledger.closedRows.find((r) => r.ticket.number === 4)
-    expect(row4?.x).toBeGreaterThan(ledger.gutterX)
-    // ...and its lineage up to 6 is drawn rather than silently swallowed by the trunk.
-    expect(ledger.edges.find((e) => e.kind === 'merge' && e.to === 6 && e.from === 4)).toBeDefined()
+    expect(closedRow(ledger, 4)?.x).toBeGreaterThan(ledger.gutterX)
+    expect(
+      ledger.edges.find(
+        (edge) => edge.kind === 'merge' && edge.to === id(6) && edge.from === id(4),
+      ),
+    ).toBeDefined()
   })
 
   it('anchors a takeable by its real origin below the line, never a fork off HEAD on top', () => {
@@ -333,12 +329,13 @@ describe('buildLedger', () => {
       ticket(27, 'blocked', [blocker(26)]),
     ])
     const ledger = buildLedger(map)
-    // 19 inherits 18's thread — one rail, nothing decorative beside it...
-    expect(ledger.edges.some((e) => e.kind === 'fork' && e.to === 19)).toBe(false)
-    expect(ledger.edges.find((e) => e.to === 19)).toMatchObject({ kind: 'run', from: 18 })
-    // ...while rootless 26 starts bare on a lane freed below the line — no line to HEAD.
-    expect(ledger.edges.some((e) => e.to === 26)).toBe(false)
-    expect(ledger.rows.find((r) => r.ticket.number === 26)?.x).toBe(ledger.gutterX)
+    expect(ledger.edges.some((edge) => edge.kind === 'fork' && edge.to === id(19))).toBe(false)
+    expect(ledger.edges.find((edge) => edge.to === id(19))).toMatchObject({
+      kind: 'run',
+      from: id(18),
+    })
+    expect(ledger.edges.some((edge) => edge.to === id(26))).toBe(false)
+    expect(rowX(ledger, 26)).toBe(ledger.gutterX)
   })
 
   it('never lets a drawn line pass through a node it does not touch', () => {
@@ -362,16 +359,14 @@ describe('buildLedger', () => {
       notYetSpecified: ['A [foggy](https://example.test) `thing`'],
     })
     const ledger = buildLedger(map)
-    expect(ledger.closedRows.map((r) => r.ticket.number)).toEqual([2, 3])
+    expect(ledger.closedRows.map((row) => row.ticket.id)).toEqual(['2', '3'])
     expect(ledger.destination).toBe('Reach the end.')
     expect(ledger.fogRows[0]?.item).toBe('A foggy thing')
     expect(ledger.trunkSolid).not.toBeNull()
   })
 
   it('scatters fog across the gutter, clear of the trunk and the text column', () => {
-    const map = makeMap([], {
-      notYetSpecified: ['one', 'two', 'three', 'four', 'five'],
-    })
+    const map = makeMap([], { notYetSpecified: ['one', 'two', 'three', 'four', 'five'] })
     const ledger = buildLedger(map)
     for (const fog of ledger.fogRows) {
       expect(fog.x).toBeGreaterThan(ledger.gutterX + 9)
@@ -382,20 +377,21 @@ describe('buildLedger', () => {
   it('marks empty fog and ground covered with placeholder lines, never a node', () => {
     const ledger = buildLedger(makeMap([]))
     expect(ledger.fogRows).toEqual([])
-    expect(ledger.placeholders.map((p) => p.text)).toEqual([
+    expect(ledger.placeholders.map((placeholder) => placeholder.text)).toEqual([
       'no fog recorded',
       'nothing decided yet',
     ])
-    expect(ledger.placeholders.map((p) => p.y)).toEqual(
-      [...ledger.placeholders.map((p) => p.y)].sort((a, b) => a - b),
+    expect(ledger.placeholders.map((placeholder) => placeholder.y)).toEqual(
+      [...ledger.placeholders.map((placeholder) => placeholder.y)].sort((a, b) => a - b),
     )
   })
 
   it('collapses the charted-ahead section entirely when nothing is charted', () => {
     const ledger = buildLedger(makeMap([ticket(2, 'closed', [], 100)]))
-    // No band, no placeholder — fog flows straight into ground covered at one separator.
     expect(ledger.sepAhead).toBe(ledger.sepBehind)
-    expect(ledger.placeholders.some((p) => p.text === 'nothing charted ahead')).toBe(false)
+    expect(
+      ledger.placeholders.some((placeholder) => placeholder.text === 'nothing charted ahead'),
+    ).toBe(false)
   })
 
   it('shows the fog section’s prose as the empty note instead of a ghost node', () => {
@@ -422,7 +418,6 @@ describe('buildLedger', () => {
   it('sits two-line ahead rows on the 52-unit pitch, single-line fog and covered rows on 40', () => {
     const map = makeMap(
       [
-        // A three-deep open chain and three closed decisions — consecutive rows in each section.
         ticket(2, 'frontier'),
         ticket(3, 'blocked', [blocker(2)]),
         ticket(4, 'blocked', [blocker(3)]),
@@ -435,10 +430,10 @@ describe('buildLedger', () => {
     const ledger = buildLedger(map)
     const pitches = (ys: number[]) => {
       const sorted = [...ys].sort((a, b) => a - b)
-      return sorted.slice(1).map((y, i) => y - (sorted[i] ?? Number.NaN))
+      return sorted.slice(1).map((y, index) => y - (sorted[index] ?? Number.NaN))
     }
-    expect(pitches(ledger.rows.map((r) => r.y))).toEqual([52, 52])
-    expect(pitches(ledger.fogRows.map((r) => r.y))).toEqual([40, 40])
-    expect(pitches(ledger.closedRows.map((r) => r.y))).toEqual([40, 40])
+    expect(pitches(ledger.rows.map((row) => row.y))).toEqual([52, 52])
+    expect(pitches(ledger.fogRows.map((row) => row.y))).toEqual([40, 40])
+    expect(pitches(ledger.closedRows.map((row) => row.y))).toEqual([40, 40])
   })
 })

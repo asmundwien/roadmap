@@ -9,9 +9,9 @@ projects on GitHub. It discovers every repo carrying a `wayfinder:map` issue and
 as a living map: the dependency graph of tickets alongside the decisions made and the fog ahead.
 
 Read-only, solo user, local-first. The repo is a pnpm workspace: `apps/web` is the SPA, `apps/server`
-is the v3 server (owns the snapshot: webhook invalidations + a reconciling poll feed one in-memory
-state, broadcast whole over WebSocket at `/ws`), and `packages/contracts` (`@roadmap/contracts`)
-holds the shared domain vocabulary — exactly what crosses the WebSocket.
+owns one coherent `ApplicationState`, and `packages/contracts` (`@roadmap/contracts`) holds shared
+domain and strict transport-envelope vocabulary. WebSocket sends full state replacements; bounded
+HTTP requests carry queries and commands.
 
 ## Commands
 
@@ -40,10 +40,9 @@ Vitest runs in the `node` environment and picks up `apps/web/src/**/*.test.ts` �
 nothing has needed one yet. The first component test that does should add jsdom and Testing Library
 then.
 
-`.env.local` stays at the repo root — the server loads it directly, and the web app reaches it via
-`envDir` in its Vite config. Every secret in it is `ROADMAP_`-prefixed, never `VITE_`: the browser
-sees no credentials, only (optionally) `VITE_ROADMAP_SERVER_URL` when the socket moves off the
-default `ws://localhost:8790/ws`.
+`.env.local` stays at the repo root. The server reads secrets only from `ROADMAP_` values. The
+browser sees no credentials; optional `VITE_ROADMAP_SERVER_URL` names the server HTTP origin
+(default `http://localhost:8790`), from which the web store derives both HTTP endpoints and `/ws`.
 
 ## Conventions
 
@@ -56,26 +55,27 @@ default `ws://localhost:8790/ws`.
 
 ## GitHub API
 
-Everything the data layer needs was established up front — endpoints, CORS, auth, rate-limit
-budget, ETag behaviour, and the single GraphQL query that fetches a whole map with all its
-blocked-by edges: **[docs/research/github-api-primitives.md](docs/research/github-api-primitives.md)**.
-Read it before writing fetch code; don't re-derive it.
+The registered-repository endpoints, authorization boundary, rate-limit strategy, and GraphQL map
+query are documented in
+**[docs/research/github-api-primitives.md](docs/research/github-api-primitives.md)**. Read it before
+writing fetch code; do not re-derive it.
 
-Auth is a personal access token read by the server as `ROADMAP_GITHUB_TOKEN` — copy `.env.example`
-to `.env.local`. The token never enters the browser: only the server talks to GitHub, and nothing
-`VITE_`-prefixed carries a secret. Local-only remains the deal — nothing here is deployed.
+GitHub uses a maintainer-owned public GitHub App configured by
+`ROADMAP_GITHUB_APP_CLIENT_ID` and `ROADMAP_GITHUB_APP_SLUG`. Device-flow credentials stay in
+macOS Keychain; they never enter configuration, browser state, URLs, logs, health output, or wire
+messages. Local-only startup remains supported when the App identifiers are absent.
 
 ## The data layer
 
-Views never fetch. They read `useRoadmap()` and get a snapshot; the SPA is a pure renderer:
+Views never fetch. They read `useRoadmap()`; the SPA remains a pure renderer:
 
-- `packages/contracts/` — the domain vocabulary (`Project`, `WayfinderMap`, `Ticket`, states…,
-  plus `Snapshot`/`ServerMessage`, the wire), imported everywhere as `@roadmap/contracts`.
-- `apps/web/src/store/` — the SPA's whole data layer: a WebSocket subscription
-  (`roadmap-store.ts`) with wholesale snapshot replace, a `connection` state
-  (`connecting | live | disconnected`), and auto-reconnect with backoff; server down keeps the
-  last snapshot on screen, honestly marked stale. `RoadmapProvider` / `useRoadmap` bind it to
-  React.
+- `packages/contracts/` — the domain vocabulary (`Project`, `WayfinderMap`, `Ticket`,
+  `ApplicationState`, queries, commands, results) plus strict runtime transport codecs under
+  `@roadmap/contracts/codecs`.
+- `apps/web/src/store/` — the SPA's whole data layer: full-state WebSocket replacement, bounded
+  HTTP `query`/`execute`, epoch/sequence ordering across both wires, `transport` liveness
+  (`connecting | live | disconnected`), stale-state retention, command activity/error state, and
+  reconnect backoff. `RoadmapProvider` / `useRoadmap` project the roadmap for current views.
 - `apps/web/src/router.ts` — the hash owns ALL URL state: `#/owner/repo/<map>` pins the open map
   and one more segment (`/map`, `/ticket/<n>`, `/fog/<i>`, `/scope/<i>`, `/scope-all`) names the
   Panel's selection. `PanelSelection` (as the hash carries it) resolves against the live snapshot
@@ -89,17 +89,21 @@ Views never fetch. They read `useRoadmap()` and get a snapshot; the SPA is a pur
   navigation is one roving-tabindex composite owned by `project-screen.tsx`: Tab lands on one
   item, arrows move the shared hover, Space/Enter select.
 
-Everything that talks to GitHub lives in the server (`apps/server/src/`): `github/` (transport —
-auth, GraphQL errors, REST ETag replay, discovery search, the aliased map query), `wayfinder/`
-(domain logic — tolerant map-body parsing, ticket-state derivation, payload → `Project[]`).
-On top of them: `store.ts` (the one snapshot both funnels feed, with coalescing invalidation),
-`invalidation.ts` (delivery payload → refetch decision, per `docs/research/webhook-path.md` §2),
-`webhook.ts` (best-effort HMAC, dedup, ACK-fast receiver), `relay.ts` (smee subscription,
-reconcile on reconnect), `socket.ts` (full-snapshot WebSocket broadcast), `change-feed.ts` (the
-trigger seam: consecutive snapshots diffed into source-blind domain events; the baseline is
-observed, never diffed), `notify.ts` (the feed's first subscriber — terminal-notifier banners for
-agent actions: claimed and completed), `main.ts` (composition: baseline sweep, then relay, then a
-5-minute reconciler stretched by the rate-limit valve).
+The server (`apps/server/src/`) is composed through `application/application.ts`: the deep,
+transport-agnostic `RoadmapApplication` owns coherent `ApplicationState`, Adapter generations,
+serialized configuration mutations, and the current source-blind roadmap. Its only public
+Interface is `start/current/subscribe/query/execute/stop`; callers and tests cross that seam.
+`application/configuration.ts` owns the strict `roadmap.config.json` codec, live validation, and
+same-directory flush + atomic-rename persistence. Invalid manual saves leave the last valid runtime
+active and gate writes until repaired.
+
+Integration mechanics remain behind `github/` and `local/`; `wayfinder/` holds tolerant parsing.
+`store.ts` composes one complete baseline Slice per Integration and keeps partial generations
+private. `change-feed.ts` derives source-blind events from consecutive complete snapshots.
+`transport.ts` is the one network Module: strict-origin full-state WebSocket plus bounded HTTP
+query/command handlers. `main.ts` only composes Modules and binds loopback. Configuration and
+credentials stay server-side; `roadmap.config.json` is gitignored and secrets are unrepresentable
+in its codec, `ApplicationState`, and strict transport envelopes.
 
 Data that may be partial says so rather than looking whole: `ticketsTruncated`, `blockersTruncated`,
 `unreachable`, and `MapBody.missingSections`. Keep that habit.

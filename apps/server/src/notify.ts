@@ -37,17 +37,19 @@ export function createNotifier(
 }
 
 function bannerArgs(verb: string, ticket: EventTicket): string[] {
+  const subtitle = ticket.mapTitle ?? ticket.projectName
+  const message = `${verb}: ${ticket.title ?? ticket.displayId ?? ticket.id}`
+  const group = ticket.url ?? `${subtitle}#${ticket.id}`
   return [
     '-title',
     'Roadmap',
     '-subtitle',
-    ticket.mapTitle,
+    subtitle,
     '-message',
-    `${verb}: ${ticket.title}`,
-    '-open',
-    ticket.url,
+    message,
+    ...(ticket.url ? (['-open', ticket.url] as const) : []),
     '-group',
-    ticket.url,
+    group,
     '-contentImage',
     NOTIFY_ICON,
   ]

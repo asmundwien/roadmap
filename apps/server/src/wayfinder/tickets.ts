@@ -1,18 +1,30 @@
-import type { Ticket, TicketState, TicketType } from '@roadmap/contracts'
+import type {
+  RecognizedTicketType,
+  Ticket,
+  TicketState,
+  TicketTypeEvidence,
+} from '@roadmap/contracts'
 
-const TICKET_TYPES: TicketType[] = ['research', 'prototype', 'grilling', 'task']
+const TICKET_TYPES: RecognizedTicketType[] = ['research', 'prototype', 'grilling', 'task']
 const TYPE_LABEL_PREFIX = 'wayfinder:'
 
-/** Reads the `wayfinder:<type>` label off a ticket's labels, ignoring every other label. */
-export function ticketTypeFromLabels(labels: readonly string[]): TicketType {
-  for (const label of labels) {
-    const normalised = label.trim().toLowerCase()
-    if (!normalised.startsWith(TYPE_LABEL_PREFIX)) continue
-    const suffix = normalised.slice(TYPE_LABEL_PREFIX.length)
-    const match = TICKET_TYPES.find((type) => type === suffix)
-    if (match) return match
-  }
-  return 'untyped'
+/** Retains every normalized `wayfinder:*` label so malformed evidence stays classifiable. */
+export function ticketTypeEvidenceFromLabels(labels: readonly string[]): TicketTypeEvidence {
+  const typeLabels = [
+    ...new Set(
+      labels
+        .map((label) => label.trim().toLowerCase())
+        .filter((label) => label.startsWith(TYPE_LABEL_PREFIX))
+        .map((label) => label.slice(TYPE_LABEL_PREFIX.length)),
+    ),
+  ].sort()
+  if (typeLabels.length === 0) return { kind: 'missing', labels: [] }
+  if (typeLabels.length > 1) return { kind: 'conflicting', labels: typeLabels }
+  const value = typeLabels[0]
+  const recognized = TICKET_TYPES.find((type) => type === value)
+  return recognized
+    ? { kind: 'recognized', value: recognized, labels: typeLabels }
+    : { kind: 'unknown', labels: typeLabels }
 }
 
 export interface TicketSignals {

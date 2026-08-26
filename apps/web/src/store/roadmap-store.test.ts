@@ -1,4 +1,4 @@
-import type { Project, Snapshot } from '@roadmap/contracts'
+import type { ApplicationState, CommandOutcome, Project, QueryResult } from '@roadmap/contracts'
 import { describe, expect, it } from 'vitest'
 import { createRoadmapStore, type SocketLike } from './roadmap-store.ts'
 
@@ -25,35 +25,76 @@ class FakeSocket implements SocketLike {
   }
 }
 
-function project(nameWithOwner: string): Project {
-  const [owner = '', repo = ''] = nameWithOwner.split('/')
-  return { nameWithOwner, owner, repo, isPrivate: false, openMaps: [], closedMaps: [] }
+function project(name: string): Project {
+  return {
+    key: { integration: 'github', id: name },
+    name,
+    visibility: 'public',
+    openMaps: [],
+    closedMaps: [],
+    warnings: [],
+  }
 }
 
-function snapshot(overrides: Partial<Snapshot> = {}): Snapshot {
-  return { capturedAt: 1000, projects: [], unreachable: [], rateLimit: null, ...overrides }
+function state(
+  stateSequence: number,
+  serverEpoch = 'epoch-a',
+  projects: Project[] = [],
+): ApplicationState {
+  return {
+    serverEpoch,
+    stateSequence,
+    configurationVersion: 1,
+    supportedIntegrations: [],
+    connections: [],
+    registrations: [],
+    projects: [],
+    authorizationOperations: [],
+    configuration: { valid: true, issues: [], notices: [] },
+    automation: { enabled: false, enabledProjects: [], availability: { status: 'ready' } },
+    roadmap: { capturedAt: stateSequence * 1000, projects, unreachable: [] },
+  }
 }
 
-function wire(message: Snapshot): string {
-  return JSON.stringify({ type: 'snapshot', snapshot: message })
+function wire(value: ApplicationState): string {
+  return JSON.stringify({ type: 'state', state: value })
 }
 
-/** A store wired to fakes: sockets are captured for driving, reconnect fires via `delays`. */
-function harness() {
+function jsonResponse(value: unknown, status = 200): Response {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+function deferred<T>() {
+  let resolve: (value: T) => void = () => undefined
+  let reject: (reason: unknown) => void = () => undefined
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
+function harness(fetchRequest: typeof fetch = fetch) {
   const sockets: FakeSocket[] = []
+  const socketUrls: string[] = []
   const delays: number[] = []
-  const store = createRoadmapStore('ws://test/ws', {
-    createSocket: () => {
+  const store = createRoadmapStore('http://test:8790', {
+    createSocket: (url) => {
+      socketUrls.push(url)
       const socket = new FakeSocket()
       sockets.push(socket)
       return socket
     },
+    fetch: fetchRequest,
     reconnectDelayMs: (attempt) => {
       delays.push(attempt)
       return 0
     },
   })
-  return { store, sockets, delays }
+  return { store, sockets, socketUrls, delays }
 }
 
 function flushTimers(): Promise<void> {
@@ -61,82 +102,71 @@ function flushTimers(): Promise<void> {
 }
 
 describe('createRoadmapStore', () => {
-  it('starts connecting with an empty snapshot', () => {
+  it('starts with transport liveness separated from domain state', () => {
     const { store, sockets } = harness()
     expect(store.getSnapshot()).toEqual({
-      connection: 'connecting',
-      projects: [],
-      unreachable: [],
-      rateLimit: null,
-      capturedAt: null,
+      transport: 'connecting',
+      state: null,
+      command: { inFlight: false, error: null },
     })
     expect(sockets).toHaveLength(0)
   })
 
-  it('opens one socket no matter how many watchers start', () => {
-    const { store, sockets } = harness()
+  it('opens one derived state socket and accepts full authoritative replacements', () => {
+    const { store, sockets, socketUrls } = harness()
     store.start()
     store.start()
-    expect(sockets).toHaveLength(1)
-  })
+    expect(socketUrls).toEqual(['ws://test:8790/ws'])
 
-  it('goes live on open and replaces the snapshot wholesale on every message', () => {
-    const { store, sockets } = harness()
-    store.start()
-    const socket = sockets[0]
-    if (!socket) throw new Error('no socket opened')
-
-    socket.emit('open')
-    expect(store.getSnapshot().connection).toBe('live')
-
-    socket.emit('message', wire(snapshot({ capturedAt: 1000, projects: [project('a/one')] })))
-    expect(store.getSnapshot().projects.map((p) => p.nameWithOwner)).toEqual(['a/one'])
-
-    socket.emit('message', wire(snapshot({ capturedAt: 2000, projects: [project('b/two')] })))
-    const replaced = store.getSnapshot()
-    expect(replaced.projects.map((p) => p.nameWithOwner)).toEqual(['b/two'])
-    expect(replaced.capturedAt).toBe(2000)
-  })
-
-  it('drops unparsable and unknown messages, keeping the last snapshot', () => {
-    const { store, sockets } = harness()
-    store.start()
-    const socket = sockets[0]
-    if (!socket) throw new Error('no socket opened')
-
-    socket.emit('open')
-    socket.emit('message', wire(snapshot({ capturedAt: 1000 })))
-    socket.emit('message', 'not json')
-    socket.emit('message', JSON.stringify({ type: 'mystery' }))
-    socket.emit('message', 12345)
-
-    expect(store.getSnapshot().capturedAt).toBe(1000)
-    expect(store.getSnapshot().connection).toBe('live')
-  })
-
-  it('marks the kept snapshot disconnected when the socket drops, then reconnects', async () => {
-    const { store, sockets } = harness()
-    store.start()
     sockets[0]?.emit('open')
-    sockets[0]?.emit('message', wire(snapshot({ capturedAt: 1000, projects: [project('a/one')] })))
+    sockets[0]?.emit('message', wire(state(1, 'epoch-a', [project('a/one')])))
+    sockets[0]?.emit('message', wire(state(2, 'epoch-a', [project('b/two')])))
 
-    sockets[0]?.emit('close')
-    const stale = store.getSnapshot()
-    expect(stale.connection).toBe('disconnected')
-    expect(stale.projects.map((p) => p.nameWithOwner)).toEqual(['a/one'])
-    expect(stale.capturedAt).toBe(1000)
-
-    await flushTimers()
-    expect(sockets).toHaveLength(2)
-    sockets[1]?.emit('open')
-    expect(store.getSnapshot().connection).toBe('live')
+    expect(store.getSnapshot().transport).toBe('live')
+    expect(store.getSnapshot().state?.roadmap.projects.map((value) => value.name)).toEqual([
+      'b/two',
+    ])
   })
 
-  it('backs off with the attempt count and resets it on a successful open', async () => {
+  it('ignores equal and older states, accepts a new epoch, then retires the old epoch', () => {
+    const { store, sockets } = harness()
+    store.start()
+    const socket = sockets[0]
+    socket?.emit('message', wire(state(4, 'epoch-a', [project('newest-a')])))
+    socket?.emit('message', wire(state(4, 'epoch-a', [project('equal-a')])))
+    socket?.emit('message', wire(state(3, 'epoch-a', [project('older-a')])))
+    expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe('newest-a')
+
+    socket?.emit('message', wire(state(0, 'epoch-b', [project('restart-b')])))
+    socket?.emit('message', wire(state(9, 'epoch-a', [project('late-a')])))
+    expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe('restart-b')
+  })
+
+  it('rejects malformed state deeply and retains the last valid state', () => {
+    const { store, sockets } = harness()
+    store.start()
+    sockets[0]?.emit('message', wire(state(1)))
+    sockets[0]?.emit('message', 'not json')
+    sockets[0]?.emit(
+      'message',
+      JSON.stringify({ type: 'state', state: { ...state(2), token: 'x' } }),
+    )
+    sockets[0]?.emit(
+      'message',
+      JSON.stringify({ type: 'state', state: { ...state(2), roadmap: { projects: [] } } }),
+    )
+    expect(store.getSnapshot().state?.stateSequence).toBe(1)
+  })
+
+  it('keeps stale state through disconnect and reconnect with reset backoff', async () => {
     const { store, sockets, delays } = harness()
     store.start()
-
+    sockets[0]?.emit('open')
+    sockets[0]?.emit('message', wire(state(1, 'epoch-a', [project('kept')])))
     sockets[0]?.emit('close')
+
+    expect(store.getSnapshot().transport).toBe('disconnected')
+    expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe('kept')
     await flushTimers()
     sockets[1]?.emit('close')
     await flushTimers()
@@ -148,32 +178,101 @@ describe('createRoadmapStore', () => {
     expect(delays).toEqual([0, 1, 0])
   })
 
-  it('closes the socket and stops reconnecting once the last watcher stops', async () => {
+  it('stops reconnecting only after the last watcher leaves', async () => {
     const { store, sockets } = harness()
     const stopFirst = store.start()
     const stopLast = store.start()
-
     stopFirst()
     expect(sockets[0]?.closed).toBe(false)
-
     stopLast()
     expect(sockets[0]?.closed).toBe(true)
-
-    // A close event from the socket we abandoned must not schedule a comeback.
     sockets[0]?.emit('close')
     await flushTimers()
     expect(sockets).toHaveLength(1)
-    expect(store.getSnapshot().connection).toBe('connecting')
+    expect(store.getSnapshot().transport).toBe('connecting')
   })
 
-  it('reconnects rather than double-connecting when a watcher restarts mid-backoff', async () => {
-    const { store, sockets } = harness()
-    store.start()
-    sockets[0]?.emit('close')
+  it('applies a command response before resolving execute and records application errors', async () => {
+    const response = deferred<Response>()
+    const fetchRequest = () => response.promise
+    const { store } = harness(fetchRequest as typeof fetch)
+    const execution = store.execute({
+      type: 'rename-connection',
+      expectedConfigurationVersion: 1,
+      connectionId: 'github-1',
+      name: 'Renamed',
+    })
+    expect(store.getSnapshot().command.inFlight).toBe(true)
 
-    // A second watcher arrives while the reconnect timer is pending.
+    const outcome: CommandOutcome = {
+      ok: false,
+      error: { code: 'conflict', message: 'Configuration changed.' },
+      state: state(2),
+    }
+    response.resolve(jsonResponse({ type: 'command-result', outcome }, 409))
+    await expect(execution).resolves.toEqual(outcome)
+    expect(store.getSnapshot().state?.stateSequence).toBe(2)
+    expect(store.getSnapshot().command).toEqual({ inFlight: false, error: outcome.error })
+  })
+
+  it('lets newer WebSocket state win a cross-wire race', async () => {
+    const response = deferred<Response>()
+    const { store, sockets } = harness((() => response.promise) as typeof fetch)
     store.start()
-    await flushTimers()
-    expect(sockets).toHaveLength(2)
+    sockets[0]?.emit('message', wire(state(1)))
+
+    const execution = store.execute({
+      type: 'refresh-project',
+      expectedConfigurationVersion: 1,
+      project: { integration: 'github', id: 'a/one' },
+    })
+    sockets[0]?.emit('message', wire(state(3, 'epoch-a', [project('newer')])))
+    const outcome: CommandOutcome = {
+      ok: true,
+      result: { type: 'project-refreshed', project: { integration: 'github', id: 'a/one' } },
+      state: state(2, 'epoch-a', [project('older-response')]),
+    }
+    response.resolve(jsonResponse({ type: 'command-result', outcome }))
+    await execution
+
+    expect(store.getSnapshot().state?.stateSequence).toBe(3)
+    expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe('newer')
+  })
+
+  it('surfaces HTTP failure ambiguity without replacing authoritative state', async () => {
+    const { store, sockets } = harness((async () => {
+      throw new Error('connection reset')
+    }) as typeof fetch)
+    store.start()
+    sockets[0]?.emit('message', wire(state(1)))
+
+    await expect(
+      store.execute({
+        type: 'refresh-project',
+        expectedConfigurationVersion: 1,
+        project: { integration: 'github', id: 'a/one' },
+      }),
+    ).rejects.toThrow('connection reset')
+    expect(store.getSnapshot().state?.stateSequence).toBe(1)
+    expect(store.getSnapshot().command.error).toMatchObject({ code: 'transport-failed' })
+  })
+
+  it('decodes query results and reports malformed results as transport failures', async () => {
+    const success: QueryResult = {
+      ok: true,
+      type: 'workspace-selection',
+      path: '/selected/workspace',
+    }
+    const replies = [
+      jsonResponse({ type: 'query-result', result: success }),
+      jsonResponse({ type: 'query-result', result: { ...success, token: 'secret' } }),
+    ]
+    const { store } = harness((async () => replies.shift() ?? new Response()) as typeof fetch)
+
+    await expect(store.query({ type: 'select-workspace' })).resolves.toEqual(success)
+    await expect(store.query({ type: 'select-workspace' })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'transport-failed' },
+    })
   })
 })

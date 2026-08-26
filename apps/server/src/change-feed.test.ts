@@ -2,36 +2,36 @@ import type { Snapshot, Ticket, TicketState, WayfinderMap } from '@roadmap/contr
 import { describe, expect, it } from 'vitest'
 import { createChangeFeed, diffSnapshots } from './change-feed.ts'
 
-function ticket(number: number, state: TicketState, overrides: Partial<Ticket> = {}): Ticket {
+function ticket(id: string, state: TicketState, overrides: Partial<Ticket> = {}): Ticket {
   return {
-    number,
-    title: `Ticket ${number}`,
-    url: `https://github.com/a/roadmap/issues/${number}`,
+    id,
+    displayId: `#${id}`,
+    title: `Ticket ${id}`,
+    url: `https://github.com/a/roadmap/issues/${id}`,
     body: '',
-    type: 'task',
+    typeEvidence: { kind: 'recognized', value: 'task', labels: ['task'] },
     state,
     isClaimed: state === 'claimed',
     isBlocked: state === 'blocked',
     createdAt: 1,
-    closedAt: state === 'closed' ? 2 : null,
+    closedAt: state === 'closed' ? 2 : undefined,
     assignees: [],
     blockedBy: [],
-    blockersTruncated: false,
+    blockersComplete: true,
+    warnings: [],
     ...overrides,
   }
 }
 
-function wayfinderMap(number: number, tickets: Ticket[]): WayfinderMap {
+function wayfinderMap(id: string, tickets: Ticket[]): WayfinderMap {
   return {
-    owner: 'a',
-    repo: 'roadmap',
-    nameWithOwner: 'a/roadmap',
-    number,
-    title: `Map ${number}`,
-    url: `https://github.com/a/roadmap/issues/${number}`,
+    project: { integration: 'github', id: 'a/roadmap' },
+    id,
+    displayId: `#${id}`,
+    title: `Map ${id}`,
+    url: `https://github.com/a/roadmap/issues/${id}`,
     isOpen: true,
     updatedAt: 1,
-    closedAt: null,
     body: {
       raw: '',
       destination: '',
@@ -45,8 +45,9 @@ function wayfinderMap(number: number, tickets: Ticket[]): WayfinderMap {
     },
     tickets,
     frontier: tickets.filter((candidate) => candidate.state === 'frontier'),
-    progress: { total: tickets.length, completed: 0, percentCompleted: 0 },
-    ticketsTruncated: false,
+    progress: { total: tickets.length, completed: 0 },
+    ticketsComplete: true,
+    warnings: [],
   }
 }
 
@@ -55,78 +56,83 @@ function snapshot(maps: WayfinderMap[]): Snapshot {
     capturedAt: 1,
     projects: [
       {
-        nameWithOwner: 'a/roadmap',
-        owner: 'a',
-        repo: 'roadmap',
-        isPrivate: false,
+        key: { integration: 'github', id: 'a/roadmap' },
+        name: 'a/roadmap',
+        visibility: 'public',
         openMaps: maps,
         closedMaps: [],
+        warnings: [],
       },
     ],
     unreachable: [],
-    rateLimit: null,
   }
 }
 
 describe('diffSnapshots', () => {
   it('emits nothing when nothing changed', () => {
-    const before = snapshot([wayfinderMap(1, [ticket(2, 'frontier')])])
-    const after = snapshot([wayfinderMap(1, [ticket(2, 'frontier')])])
+    const before = snapshot([wayfinderMap('1', [ticket('2', 'frontier')])])
+    const after = snapshot([wayfinderMap('1', [ticket('2', 'frontier')])])
     expect(diffSnapshots(before, after)).toEqual([])
   })
 
   it('emits ticket-claimed when a takeable ticket is claimed', () => {
-    const before = snapshot([wayfinderMap(1, [ticket(2, 'frontier')])])
-    const after = snapshot([wayfinderMap(1, [ticket(2, 'claimed')])])
+    const before = snapshot([wayfinderMap('1', [ticket('2', 'frontier')])])
+    const after = snapshot([wayfinderMap('1', [ticket('2', 'claimed')])])
     const events = diffSnapshots(before, after)
     expect(events).toContainEqual({
       type: 'ticket-claimed',
       ticket: {
-        number: 2,
+        project: { integration: 'github', id: 'a/roadmap' },
+        projectName: 'a/roadmap',
+        mapId: '1',
+        mapDisplayId: '#1',
+        mapTitle: 'Map 1',
+        id: '2',
+        displayId: '#2',
         title: 'Ticket 2',
         url: 'https://github.com/a/roadmap/issues/2',
-        mapTitle: 'Map 1',
-        nameWithOwner: 'a/roadmap',
       },
     })
   })
 
   it('emits ticket-closed when an open ticket closes', () => {
-    const before = snapshot([wayfinderMap(1, [ticket(2, 'claimed')])])
-    const after = snapshot([wayfinderMap(1, [ticket(2, 'closed')])])
+    const before = snapshot([wayfinderMap('1', [ticket('2', 'claimed')])])
+    const after = snapshot([wayfinderMap('1', [ticket('2', 'closed')])])
     const events = diffSnapshots(before, after)
     expect(events.map((event) => event.type)).toContain('ticket-closed')
   })
 
   it('emits closed, not claimed, when a claim and close land in one diff', () => {
-    const before = snapshot([wayfinderMap(1, [ticket(2, 'frontier')])])
-    const after = snapshot([wayfinderMap(1, [ticket(2, 'closed', { isClaimed: true })])])
+    const before = snapshot([wayfinderMap('1', [ticket('2', 'frontier')])])
+    const after = snapshot([wayfinderMap('1', [ticket('2', 'closed', { isClaimed: true })])])
     const types = diffSnapshots(before, after).map((event) => event.type)
     expect(types).toContain('ticket-closed')
     expect(types).not.toContain('ticket-claimed')
   })
 
   it('emits frontier-changed with entered and left tickets', () => {
-    const before = snapshot([wayfinderMap(1, [ticket(2, 'frontier'), ticket(3, 'blocked')])])
-    const after = snapshot([wayfinderMap(1, [ticket(2, 'claimed'), ticket(3, 'frontier')])])
+    const before = snapshot([wayfinderMap('1', [ticket('2', 'frontier'), ticket('3', 'blocked')])])
+    const after = snapshot([wayfinderMap('1', [ticket('2', 'claimed'), ticket('3', 'frontier')])])
     const events = diffSnapshots(before, after)
     const frontier = events.find((event) => event.type === 'frontier-changed')
     expect(frontier).toBeDefined()
     if (frontier?.type !== 'frontier-changed') return
-    expect(frontier.entered.map((entry) => entry.number)).toEqual([3])
-    expect(frontier.left.map((entry) => entry.number)).toEqual([2])
+    expect(frontier.entered.map((entry) => entry.id)).toEqual(['3'])
+    expect(frontier.left.map((entry) => entry.id)).toEqual(['2'])
   })
 
   it('emits map-appeared for a new map, without ticket events for its tickets', () => {
     const before = snapshot([])
-    const after = snapshot([wayfinderMap(1, [ticket(2, 'closed'), ticket(3, 'frontier')])])
+    const after = snapshot([wayfinderMap('1', [ticket('2', 'closed'), ticket('3', 'frontier')])])
     const events = diffSnapshots(before, after)
     expect(events).toEqual([
       {
         type: 'map-appeared',
         map: {
-          nameWithOwner: 'a/roadmap',
-          number: 1,
+          project: { integration: 'github', id: 'a/roadmap' },
+          projectName: 'a/roadmap',
+          id: '1',
+          displayId: '#1',
           title: 'Map 1',
           url: 'https://github.com/a/roadmap/issues/1',
         },
@@ -135,7 +141,7 @@ describe('diffSnapshots', () => {
   })
 
   it('stays silent about tickets on a map that vanished', () => {
-    const before = snapshot([wayfinderMap(1, [ticket(2, 'frontier')])])
+    const before = snapshot([wayfinderMap('1', [ticket('2', 'frontier')])])
     const after = snapshot([])
     expect(diffSnapshots(before, after)).toEqual([])
   })
@@ -162,7 +168,7 @@ describe('createChangeFeed', () => {
     const feed = createChangeFeed(source)
     const batches: unknown[] = []
     feed.onEvent((events) => batches.push(events))
-    source.push(snapshot([wayfinderMap(1, [ticket(2, 'frontier')])]))
+    source.push(snapshot([wayfinderMap('1', [ticket('2', 'frontier')])]))
     expect(batches).toEqual([])
   })
 
@@ -173,10 +179,25 @@ describe('createChangeFeed', () => {
     feed.onEvent((events) => {
       for (const event of events) types.push(event.type)
     })
-    source.push(snapshot([wayfinderMap(1, [ticket(2, 'frontier')])]))
-    source.push(snapshot([wayfinderMap(1, [ticket(2, 'claimed')])]))
-    source.push(snapshot([wayfinderMap(1, [ticket(2, 'closed')])]))
+    source.push(snapshot([wayfinderMap('1', [ticket('2', 'frontier')])]))
+    source.push(snapshot([wayfinderMap('1', [ticket('2', 'claimed')])]))
+    source.push(snapshot([wayfinderMap('1', [ticket('2', 'closed')])]))
     expect(types).toEqual(['ticket-claimed', 'frontier-changed', 'ticket-closed'])
+  })
+
+  it('resets topology baselines without emitting false Wayfinder activity', () => {
+    const source = fakeSource()
+    const feed = createChangeFeed(source)
+    const types: string[] = []
+    feed.onEvent((events) => {
+      for (const event of events) types.push(event.type)
+    })
+    source.push(snapshot([wayfinderMap('1', [ticket('2', 'frontier')])]))
+
+    feed.reset(snapshot([wayfinderMap('3', [ticket('4', 'frontier')])]))
+    source.push(snapshot([wayfinderMap('3', [ticket('4', 'claimed')])]))
+
+    expect(types).toEqual(['ticket-claimed', 'frontier-changed'])
   })
 
   it('skips listeners entirely when a change produced no events', () => {
@@ -186,7 +207,7 @@ describe('createChangeFeed', () => {
     feed.onEvent(() => {
       calls += 1
     })
-    const same = snapshot([wayfinderMap(1, [ticket(2, 'frontier')])])
+    const same = snapshot([wayfinderMap('1', [ticket('2', 'frontier')])])
     source.push(same)
     source.push(same)
     expect(calls).toBe(0)

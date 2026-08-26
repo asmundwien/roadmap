@@ -69,15 +69,18 @@ describe('toWayfinderMap', () => {
       ]),
     )
 
+    expect(map.project).toEqual({ integration: 'github', id: 'a/r' })
+    expect(map.id).toBe('1')
     expect(map.tickets.map((ticket) => ticket.state)).toEqual([
       'closed',
       'claimed',
       'frontier',
       'blocked',
     ])
-    expect(map.frontier.map((ticket) => ticket.number)).toEqual([4])
+    expect(map.frontier.map((ticket) => ticket.id)).toEqual(['4'])
     expect(map.tickets[0]?.closedAt).toBe(Date.parse('2026-07-30T09:00:00Z'))
-    expect(map.tickets[1]?.closedAt).toBeNull()
+    expect(map.tickets[1]?.closedAt).toBeUndefined()
+    expect(map.tickets[1]?.assignees).toEqual([{ name: 'asmundwien', avatarUrl: 'a', url: 'u' }])
   })
 
   it('treats a ticket whose blockers are all closed as unblocked', () => {
@@ -108,8 +111,11 @@ describe('toWayfinderMap', () => {
       ]),
     )
 
-    expect(map.tickets[0]?.state).toBe('frontier')
-    expect(map.tickets[0]?.isBlocked).toBe(false)
+    expect(map.tickets[0]).toMatchObject({
+      state: 'frontier',
+      isBlocked: false,
+      blockersComplete: true,
+    })
   })
 
   it('keeps blocked and claimed visible independently of the collapsed state', () => {
@@ -137,7 +143,7 @@ describe('toWayfinderMap', () => {
     expect(map.tickets[0]).toMatchObject({ state: 'blocked', isBlocked: true, isClaimed: true })
   })
 
-  it('carries the repo on a cross-repo blocker', () => {
+  it('carries the blocker project key across repos', () => {
     const map = toWayfinderMap(
       fetchedMap([
         subIssue({
@@ -158,10 +164,10 @@ describe('toWayfinderMap', () => {
       ]),
     )
 
-    expect(map.tickets[0]?.blockedBy[0]?.nameWithOwner).toBe('a/other')
+    expect(map.tickets[0]?.blockedBy[0]?.project).toEqual({ integration: 'github', id: 'a/other' })
   })
 
-  it('flags truncation rather than presenting a partial graph as whole', () => {
+  it('flags incompleteness rather than presenting a partial graph as whole', () => {
     const base = fetchedMap([subIssue({ number: 2, blockedBy: { totalCount: 60, nodes: [] } })])
     const truncated = {
       ...base,
@@ -176,8 +182,8 @@ describe('toWayfinderMap', () => {
     }
 
     const map = toWayfinderMap(truncated)
-    expect(map.ticketsTruncated).toBe(true)
-    expect(map.tickets[0]?.blockersTruncated).toBe(true)
+    expect(map.ticketsComplete).toBe(false)
+    expect(map.tickets[0]?.blockersComplete).toBe(false)
   })
 
   it('handles a map with no children at all', () => {
@@ -189,7 +195,7 @@ describe('toWayfinderMap', () => {
 
     expect(map.tickets).toEqual([])
     expect(map.frontier).toEqual([])
-    expect(map.progress).toEqual({ total: 0, completed: 0, percentCompleted: 0 })
+    expect(map.progress).toEqual({ total: 0, completed: 0 })
   })
 
   it('parses the map body', () => {
@@ -213,11 +219,12 @@ describe('toProjects', () => {
 
     const projects = toProjects([closed, open, elsewhere])
 
-    expect(projects.map((project) => project.nameWithOwner)).toEqual(['a/other', 'a/r'])
-    const repo = projects.find((project) => project.nameWithOwner === 'a/r')
-    expect(repo?.openMaps.map((map) => map.number)).toEqual([1])
-    expect(repo?.closedMaps.map((map) => map.number)).toEqual([7])
-    expect(repo?.isPrivate).toBe(true)
+    expect(projects.map((project) => project.name)).toEqual(['a/other', 'a/r'])
+    const repo = projects.find((project) => project.name === 'a/r')
+    expect(repo?.key).toEqual({ integration: 'github', id: 'a/r' })
+    expect(repo?.openMaps.map((map) => map.id)).toEqual(['1'])
+    expect(repo?.closedMaps.map((map) => map.id)).toEqual(['7'])
+    expect(repo?.visibility).toBe('private')
   })
 
   it('orders open maps most recently updated first, so the head is the active map', () => {
@@ -230,8 +237,8 @@ describe('toProjects', () => {
 
     const projects = toProjects([stale, active])
 
-    expect(projects[0]?.openMaps.map((map) => map.number)).toEqual([11, 1])
-    expect(projects[0] && activeMapOf(projects[0])?.number).toBe(11)
+    expect(projects[0]?.openMaps.map((map) => map.id)).toEqual(['11', '1'])
+    expect(projects[0] && activeMapOf(projects[0])?.id).toBe('11')
   })
 
   it('orders closed maps most recently closed first', () => {
@@ -249,7 +256,7 @@ describe('toProjects', () => {
 
     const projects = toProjects([earlier, later, open])
 
-    expect(projects[0]?.closedMaps.map((map) => map.number)).toEqual([3, 2])
+    expect(projects[0]?.closedMaps.map((map) => map.id)).toEqual(['3', '2'])
   })
 
   it('reports a resting project as having no active map', () => {
@@ -270,7 +277,7 @@ describe('toProjects', () => {
       issue: { ...live.issue, state: 'CLOSED' },
     }
 
-    expect(toProjects([history, live]).map((project) => project.nameWithOwner)).toEqual([
+    expect(toProjects([history, live]).map((project) => project.name)).toEqual([
       'a/r',
       'a/aaa-archive',
     ])

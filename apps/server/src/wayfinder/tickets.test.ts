@@ -1,24 +1,30 @@
 import { describe, expect, it } from 'vitest'
-import { deriveTicketState, ticketTypeFromLabels } from './tickets.ts'
+import { deriveTicketState, ticketTypeEvidenceFromLabels } from './tickets.ts'
 
-describe('ticketTypeFromLabels', () => {
-  it('reads the wayfinder type label', () => {
-    expect(ticketTypeFromLabels(['wayfinder:research'])).toBe('research')
-    expect(ticketTypeFromLabels(['wayfinder:prototype'])).toBe('prototype')
-    expect(ticketTypeFromLabels(['wayfinder:grilling'])).toBe('grilling')
-    expect(ticketTypeFromLabels(['wayfinder:task'])).toBe('task')
+describe('ticketTypeEvidenceFromLabels', () => {
+  it('retains recognized type evidence', () => {
+    expect(ticketTypeEvidenceFromLabels(['wayfinder:research'])).toEqual({
+      kind: 'recognized',
+      value: 'research',
+      labels: ['research'],
+    })
+    expect(ticketTypeEvidenceFromLabels(['bug', 'Wayfinder:Task'])).toEqual({
+      kind: 'recognized',
+      value: 'task',
+      labels: ['task'],
+    })
   })
 
-  it('ignores labels that are not wayfinder types', () => {
-    expect(ticketTypeFromLabels(['bug', 'wayfinder:map', 'p1'])).toBe('untyped')
-  })
-
-  it('finds the type label among others, whatever its case', () => {
-    expect(ticketTypeFromLabels(['bug', 'Wayfinder:Task'])).toBe('task')
-  })
-
-  it('falls back to untyped when a ticket carries no labels', () => {
-    expect(ticketTypeFromLabels([])).toBe('untyped')
+  it('distinguishes missing, unknown, and conflicting evidence', () => {
+    expect(ticketTypeEvidenceFromLabels(['bug'])).toEqual({ kind: 'missing', labels: [] })
+    expect(ticketTypeEvidenceFromLabels(['wayfinder:map'])).toEqual({
+      kind: 'unknown',
+      labels: ['map'],
+    })
+    expect(ticketTypeEvidenceFromLabels(['wayfinder:task', 'wayfinder:research'])).toEqual({
+      kind: 'conflicting',
+      labels: ['research', 'task'],
+    })
   })
 })
 

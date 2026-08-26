@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node --experimental-strip-types src/main.ts",
+    "dev": "node --watch --experimental-strip-types src/main.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -16,7 +16,6 @@
   },
   "dependencies": {
     "@roadmap/contracts": "workspace:*",
-    "smee-client": "^5.0.0",
     "ws": "^8.21.3"
   }
 }

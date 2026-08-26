@@ -49,6 +49,19 @@ describe('graphql', () => {
       status: 401,
     })
   })
+
+  it('classifies a network failure without exposing fetch details', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('socket detail')
+      }),
+    )
+
+    await expect(createGitHubClient(CONFIG).graphql('query {}')).rejects.toEqual(
+      new GitHubError('GitHub could not be reached.', 0),
+    )
+  })
 })
 
 describe('restGet', () => {

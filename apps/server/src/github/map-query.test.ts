@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { GitHubClient } from './client.ts'
-import type { MapRef } from './discovery.ts'
+import { type GitHubClient, GitHubError } from './client.ts'
 import { buildMapsQuery, fetchMaps, readMapsResponse } from './map-query.ts'
+import type { MapRef } from './repository.ts'
 
 const REFS: MapRef[] = [
   { owner: 'a', repo: 'roadmap', nameWithOwner: 'a/roadmap', number: 1 },
@@ -124,7 +124,7 @@ describe('fetchMaps', () => {
     expect(graphql).toHaveBeenCalledTimes(3)
   })
 
-  it('keeps the maps a surviving batch returned when another batch fails', async () => {
+  it('rejects a partial refresh so the Adapter can retain the last-good slice', async () => {
     const refs = Array.from({ length: 11 }, (_, i) => ({
       owner: 'a',
       repo: `r${i}`,
@@ -134,17 +134,13 @@ describe('fetchMaps', () => {
     let call = 0
     const graphql = vi.fn(async () => {
       call += 1
-      if (call === 1) throw new Error('boom')
+      if (call === 1) throw new GitHubError('Service unavailable', 503)
       return { m0: repository('a/r10'), rateLimit: null }
     })
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
 
-    const result = await fetchMaps(
-      clientReturning(graphql as unknown as GitHubClient['graphql']),
-      refs,
-    )
-
-    expect(result.maps).toHaveLength(1)
+    await expect(
+      fetchMaps(clientReturning(graphql as unknown as GitHubClient['graphql']), refs),
+    ).rejects.toThrow('Service unavailable')
   })
 
   it('throws when every batch fails, rather than reporting an empty roadmap', async () => {

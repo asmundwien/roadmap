@@ -1,25 +1,54 @@
+import {
+  automationSettingsHash,
+  connectionSettingsHash,
+  overviewHash,
+  projectSettingsHash,
+  type Route,
+} from '../router.ts'
 import { useRoadmap } from '../store/roadmap-provider.tsx'
 import './views.css'
 
 /**
- * The persistent top bar: the fork-tile mark and wordmark leading home, the socket's health on
- * the right. The connection readout lives here because it is global truth — every screen renders
- * the same snapshot, so its liveness belongs to the frame, not to any one view.
+ * The persistent top bar: the fork-tile mark and wordmark leading home, with transport health on
+ * the right. The readout lives here because liveness is global truth; domain Connections are not.
  */
-export function SiteHeader() {
-  const { connection, capturedAt } = useRoadmap()
+export function SiteHeader({ route }: { route: Route }) {
+  const { transport, capturedAt } = useRoadmap()
 
   return (
     <header className="site-header">
-      <a className="brand" href="#/">
+      <a className="brand" href={overviewHash}>
         <BrandMark />
         Roadmap
       </a>
-      <span className={`conn conn-${connection}`}>
+      <nav className="site-nav" aria-label="Primary navigation">
+        <a className={route.screen === 'projects' ? 'is-current' : ''} href={overviewHash}>
+          Overview
+        </a>
+        <a
+          className={route.screen === 'project-settings' ? 'is-current' : ''}
+          href={projectSettingsHash}
+        >
+          Projects
+        </a>
+        <a
+          className={route.screen === 'connection-settings' ? 'is-current' : ''}
+          href={connectionSettingsHash}
+        >
+          Connections
+        </a>
+        <a
+          className={route.screen === 'automation-settings' ? 'is-current' : ''}
+          href={automationSettingsHash}
+        >
+          Automation
+        </a>
+      </nav>
+      <span className={`conn conn-${transport}`}>
         <i className="conn-dot" aria-hidden="true" />
-        {connection === 'connecting' && 'Connecting…'}
-        {connection === 'live' && `Live · updated ${formatClock(capturedAt)}`}
-        {connection === 'disconnected' && 'Disconnected'}
+        {transport === 'connecting' && 'Connecting…'}
+        {transport === 'live' && `Live · updated ${formatClock(capturedAt)}`}
+        {transport === 'disconnected' && 'Disconnected'}
       </span>
     </header>
   )

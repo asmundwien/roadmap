@@ -1,5 +1,5 @@
 import type { GitHubClient, RateLimit } from './client.ts'
-import type { MapRef } from './discovery.ts'
+import type { MapRef } from './repository.ts'
 
 /**
  * Maps fetched per GraphQL request. One aliased query pulls whole maps — sub-issues *and* every
@@ -178,11 +178,7 @@ export function readMapsResponse(
   return { maps, missing }
 }
 
-/**
- * Fetches every map in `refs`, batching into as few requests as the node budget allows. A failed
- * batch throws only if *every* batch failed; otherwise the good batches still land, so one
- * unreachable repo can't blank the whole view.
- */
+/** Fetches every map in `refs`, batching into as few requests as the node budget allows. */
 export async function fetchMaps(client: GitHubClient, refs: MapRef[]): Promise<MapFetchResult> {
   if (refs.length === 0) return { maps: [], rateLimit: null, missing: [] }
 
@@ -206,11 +202,8 @@ export async function fetchMaps(client: GitHubClient, refs: MapRef[]): Promise<M
     }
   }
 
-  if (failures.length === batches.length) {
-    throw failures[0] ?? new Error('Every map request failed')
-  }
   if (failures.length > 0) {
-    console.warn(`${failures.length} of ${batches.length} map requests failed`, failures)
+    throw failures[0] ?? new Error('A map request failed')
   }
 
   return { maps, rateLimit, missing }

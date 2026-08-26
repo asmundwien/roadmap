@@ -1,66 +1,79 @@
-import type { Blocker, Project, Ticket, WayfinderMap } from '@roadmap/contracts'
+import type { Blocker, Project, ProjectKey, Ticket, WayfinderMap } from '@roadmap/contracts'
 import type { FetchedMap, RawSubIssue } from '../github/map-query.ts'
 import { parseMapBody } from './map-body.ts'
-import { deriveTicketState, frontierOf, ticketTypeFromLabels } from './tickets.ts'
+import { deriveTicketState, frontierOf, ticketTypeEvidenceFromLabels } from './tickets.ts'
 
 /** Turns one map's raw GraphQL payload into the domain object the views read. */
-export function toWayfinderMap(fetched: FetchedMap): WayfinderMap {
-  const { ref, issue } = fetched
+export function toWayfinderMap(
+  fetched: FetchedMap,
+  project: ProjectKey = githubProjectKey(fetched.ref.nameWithOwner),
+  resolveProject: (nameWithOwner: string) => ProjectKey | undefined = githubProjectKey,
+): WayfinderMap {
+  const { issue } = fetched
   const rawTickets = issue.subIssues?.nodes ?? []
-  const tickets = rawTickets.map(toTicket)
+  const tickets = rawTickets.map((ticket) => toTicket(ticket, resolveProject))
   const summary = issue.subIssuesSummary
-
   return {
-    owner: ref.owner,
-    repo: ref.repo,
-    nameWithOwner: ref.nameWithOwner,
-    number: issue.number,
+    project,
+    id: String(issue.number),
+    displayId: `#${issue.number}`,
     title: issue.title,
     url: issue.url,
     isOpen: issue.state === 'OPEN',
     updatedAt: parseTime(issue.updatedAt),
-    closedAt: issue.closedAt === null ? null : parseTime(issue.closedAt),
+    closedAt: issue.closedAt === null ? undefined : parseTime(issue.closedAt),
     body: parseMapBody(issue.body ?? ''),
     tickets,
     frontier: frontierOf(tickets),
     progress: {
       total: summary?.total ?? tickets.length,
-      completed: summary?.completed ?? tickets.filter((t) => t.state === 'closed').length,
-      percentCompleted: summary?.percentCompleted ?? 0,
+      completed: summary?.completed ?? tickets.filter((ticket) => ticket.state === 'closed').length,
     },
-    ticketsTruncated: issue.subIssues?.pageInfo.hasNextPage ?? false,
+    ticketsComplete: !(issue.subIssues?.pageInfo.hasNextPage ?? false),
+    warnings: [],
   }
 }
-
-function toTicket(raw: RawSubIssue): Ticket {
+function toTicket(
+  raw: RawSubIssue,
+  resolveProject: (nameWithOwner: string) => ProjectKey | undefined,
+): Ticket {
   const labels = (raw.labels?.nodes ?? []).map((label) => label.name)
-  const assignees = raw.assignees?.nodes ?? []
+  const assignees = (raw.assignees?.nodes ?? []).map((assignee) => ({
+    name: assignee.login,
+    url: assignee.url,
+    avatarUrl: assignee.avatarUrl,
+  }))
   const blockedBy: Blocker[] = (raw.blockedBy?.nodes ?? []).map((blocker) => ({
-    number: blocker.number,
+    project:
+      resolveProject(blocker.repository.nameWithOwner) ??
+      githubProjectKey(blocker.repository.nameWithOwner),
+    ticketId: String(blocker.number),
+    displayId: `#${blocker.number}`,
     title: blocker.title,
     url: blocker.url,
-    nameWithOwner: blocker.repository.nameWithOwner,
-    isOpen: blocker.state === 'OPEN',
+    state: blocker.state === 'OPEN' ? 'open' : 'closed',
   }))
 
   const isOpen = raw.state === 'OPEN'
   const isClaimed = assignees.length > 0
-  const hasOpenBlockers = blockedBy.some((blocker) => blocker.isOpen)
+  const hasOpenBlockers = blockedBy.some((blocker) => blocker.state !== 'closed')
 
   return {
-    number: raw.number,
+    id: String(raw.number),
+    displayId: `#${raw.number}`,
     title: raw.title,
     url: raw.url,
     body: raw.body ?? '',
-    type: ticketTypeFromLabels(labels),
+    typeEvidence: ticketTypeEvidenceFromLabels(labels),
     state: deriveTicketState({ isOpen, isClaimed, hasOpenBlockers }),
     isClaimed,
     isBlocked: hasOpenBlockers,
     createdAt: parseTime(raw.createdAt),
-    closedAt: raw.closedAt === null ? null : parseTime(raw.closedAt),
+    closedAt: raw.closedAt === null ? undefined : parseTime(raw.closedAt),
     assignees,
     blockedBy,
-    blockersTruncated: (raw.blockedBy?.totalCount ?? 0) > blockedBy.length,
+    blockersComplete: (raw.blockedBy?.totalCount ?? 0) <= blockedBy.length,
+    warnings: [],
   }
 }
 
@@ -76,12 +89,12 @@ export function toProjects(fetched: readonly FetchedMap[]): Project[] {
     let project = projects.get(key)
     if (!project) {
       project = {
-        nameWithOwner: key,
-        owner: entry.ref.owner,
-        repo: entry.ref.repo,
-        isPrivate: entry.repository.isPrivate,
+        key: githubProjectKey(key),
+        name: key,
+        visibility: entry.repository.isPrivate ? 'private' : 'public',
         openMaps: [],
         closedMaps: [],
+        warnings: [],
       }
       projects.set(key, project)
     }
@@ -100,8 +113,7 @@ export function toProjects(fetched: readonly FetchedMap[]): Project[] {
   // Projects with live efforts sort first; the rest are browsable history.
   return [...projects.values()].sort(
     (a, b) =>
-      Number(b.openMaps.length > 0) - Number(a.openMaps.length > 0) ||
-      a.nameWithOwner.localeCompare(b.nameWithOwner),
+      Number(b.openMaps.length > 0) - Number(a.openMaps.length > 0) || a.name.localeCompare(b.name),
   )
 }
 
@@ -117,4 +129,8 @@ export function activeMapOf(project: Project): WayfinderMap | null {
 function parseTime(iso: string): number {
   const ms = Date.parse(iso)
   return Number.isNaN(ms) ? 0 : ms
+}
+
+function githubProjectKey(nameWithOwner: string): ProjectKey {
+  return { integration: 'github', id: nameWithOwner }
 }

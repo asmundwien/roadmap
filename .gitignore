@@ -9,10 +9,22 @@ dist
 dist-ssr
 *.local
 
-# Secrets — the GitHub PAT lives here (see .env.example)
+# Server-local environment and credentials
 .env
 .env.*
 !.env.example
+
+# Legacy v1 Local Registry migration input
+local-projects.json
+
+# In-app project and Connection configuration
+roadmap.config.json
+.roadmap.config.json.*.tmp
+roadmap.automation.json
+.roadmap.automation.json.*.tmp
+
+# Disposable Wayfinder orchestration artifacts
+.wayfinder-orchestrator/
 
 # Editor directories and files
 .vscode/*

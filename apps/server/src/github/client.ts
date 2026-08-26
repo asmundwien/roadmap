@@ -1,13 +1,14 @@
-import type { RateLimit } from '@roadmap/contracts'
-
 const API_ROOT = 'https://api.github.com'
 const REST_API_VERSION = '2022-11-28'
 
-// The budget shape now lives in contracts — it rides inside every snapshot — but the client's
-// consumers keep importing it from here, so the transport stays self-contained.
-export type { RateLimit }
+export interface RateLimit {
+  cost: number
+  remaining: number
+  limit: number
+  resetAt: string
+}
 
-/** All the client needs: the PAT. Reads stay on the PAT; the App's secret never touches here. */
+/** All the client needs: one Connection's current access token. */
 export interface GitHubAuth {
   token: string
 }
@@ -54,9 +55,16 @@ export function createGitHubClient(config: GitHubAuth): GitHubClient {
       Accept: 'application/vnd.github+json',
     }
   }
+  async function request(input: string, init: RequestInit): Promise<Response> {
+    try {
+      return await fetch(input, init)
+    } catch {
+      throw new GitHubError('GitHub could not be reached.', 0)
+    }
+  }
 
   async function graphql<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
-    const response = await fetch(`${API_ROOT}/graphql`, {
+    const response = await request(`${API_ROOT}/graphql`, {
       method: 'POST',
       headers: { ...authHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ query, variables }),
@@ -91,7 +99,7 @@ export function createGitHubClient(config: GitHubAuth): GitHubClient {
     }
     if (cached) headers['If-None-Match'] = cached.etag
 
-    const response = await fetch(url, { headers })
+    const response = await request(url, { headers })
 
     if (response.status === 304 && cached) return cached.body as T
 

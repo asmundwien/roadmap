@@ -1,36 +1,45 @@
-import type { MapRef, Project, RateLimit, ServerMessage } from '@roadmap/contracts'
+import type {
+  ApplicationState,
+  Command,
+  CommandOutcome,
+  Query,
+  QueryResult,
+  SafeError,
+} from '@roadmap/contracts'
+import {
+  commandResultEnvelopeCodec,
+  queryResultEnvelopeCodec,
+  stateEnvelopeCodec,
+} from '@roadmap/contracts/codecs'
 
-/** Reconnect backoff: quick first retry, doubling to a lazy ceiling — the server may be down. */
 const RECONNECT_BASE_MS = 1_000
 const RECONNECT_MAX_MS = 30_000
 
-/**
- * How the SPA stands relative to the server.
- *
- * - `connecting` — no socket yet; nothing has arrived.
- * - `live` — the socket is open; what is on screen is what the server last broadcast.
- * - `disconnected` — the socket dropped; the last snapshot is kept but stale, reconnect pending.
- */
-export type ConnectionState = 'connecting' | 'live' | 'disconnected'
+/** Browser transport liveness, deliberately distinct from a domain Connection. */
+export type TransportLiveness = 'connecting' | 'live' | 'disconnected'
 
-export interface RoadmapSnapshot {
-  connection: ConnectionState
-  projects: Project[]
-  /** Discovered maps the map query returned nothing for — deleted, renamed, or now invisible. */
-  unreachable: MapRef[]
-  rateLimit: RateLimit | null
-  /** When the server assembled what is on screen; null until the first snapshot arrives. */
-  capturedAt: number | null
+export interface CommandActivity {
+  inFlight: boolean
+  error: SafeError | null
+}
+
+export interface RoadmapStoreSnapshot {
+  transport: TransportLiveness
+  /** Last authoritative replacement; retained while disconnected. */
+  state: ApplicationState | null
+  command: CommandActivity
 }
 
 export interface RoadmapStore {
   subscribe(listener: () => void): () => void
-  getSnapshot(): RoadmapSnapshot
+  getSnapshot(): RoadmapStoreSnapshot
+  query(query: Query): Promise<QueryResult>
+  /** Rejects only when HTTP failure makes command completion unknowable. */
+  execute(command: Command): Promise<CommandOutcome>
   /** Opens the socket. Ref-counted, so React StrictMode's double-subscribe is harmless. */
   start(): () => void
 }
 
-/** The sliver of `WebSocket` the store touches, so tests can hand in a fake. */
 export interface SocketLike {
   addEventListener(
     type: 'open' | 'message' | 'close',
@@ -41,74 +50,140 @@ export interface SocketLike {
 
 export interface RoadmapStoreOptions {
   createSocket?: (url: string) => SocketLike
-  /** Injected so tests need no real clock; defaults to exponential backoff. */
+  fetch?: typeof fetch
   reconnectDelayMs?: (attempt: number) => number
 }
 
-const EMPTY_SNAPSHOT: RoadmapSnapshot = {
-  connection: 'connecting',
-  projects: [],
-  unreachable: [],
-  rateLimit: null,
-  capturedAt: null,
+const EMPTY_SNAPSHOT: RoadmapStoreSnapshot = {
+  transport: 'connecting',
+  state: null,
+  command: { inFlight: false, error: null },
 }
 
 /**
- * The SPA's whole data layer: a subscription to the server's WebSocket. Every message replaces
- * the snapshot wholesale — the wire carries no patches — and a dropped socket keeps the last
- * snapshot on screen, marked `disconnected`, while reconnecting on its own.
+ * The SPA's whole data Module. It orders full state from both wires, keeps stale state during
+ * reconnects, and makes command ambiguity explicit instead of inventing an optimistic result.
  */
-export function createRoadmapStore(url: string, options: RoadmapStoreOptions = {}): RoadmapStore {
+export function createRoadmapStore(
+  serverUrl: string,
+  options: RoadmapStoreOptions = {},
+): RoadmapStore {
+  const httpUrl = normalizedHttpUrl(serverUrl)
+  const socketUrl = new URL('/ws', httpUrl)
+  socketUrl.protocol = socketUrl.protocol === 'https:' ? 'wss:' : 'ws:'
   const createSocket = options.createSocket ?? defaultCreateSocket
+  const fetchRequest = options.fetch ?? fetch
   const reconnectDelayMs = options.reconnectDelayMs ?? defaultReconnectDelay
 
-  let snapshot: RoadmapSnapshot = EMPTY_SNAPSHOT
+  let snapshot: RoadmapStoreSnapshot = EMPTY_SNAPSHOT
   const listeners = new Set<() => void>()
-
+  const retiredEpochs = new Set<string>()
+  let activeCommands = 0
   let socket: SocketLike | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let attempts = 0
   let watchers = 0
 
-  function publish(patch: Partial<RoadmapSnapshot>): void {
-    // A fresh object every publish, and only on publish — `getSnapshot` must stay referentially
-    // stable between changes or `useSyncExternalStore` loops.
+  function publish(patch: Partial<RoadmapStoreSnapshot>): void {
     snapshot = { ...snapshot, ...patch }
     for (const listener of listeners) listener()
   }
 
+  function applyState(next: ApplicationState): boolean {
+    const current = snapshot.state
+    if (current !== null) {
+      if (current.serverEpoch === next.serverEpoch) {
+        if (next.stateSequence <= current.stateSequence) return false
+      } else {
+        if (retiredEpochs.has(next.serverEpoch)) return false
+        retiredEpochs.add(current.serverEpoch)
+      }
+    }
+    snapshot = { ...snapshot, state: next }
+    return true
+  }
+
   function connect(): void {
-    const current = createSocket(url)
+    const current = createSocket(socketUrl.href)
     socket = current
 
     current.addEventListener('open', () => {
       if (socket !== current) return
       attempts = 0
-      publish({ connection: 'live' })
+      publish({ transport: 'live' })
     })
 
     current.addEventListener('message', (event) => {
       if (socket !== current) return
-      const message = parseMessage(event.data)
+      const message = parseJson(event.data)
       if (message === null) return
-      publish({
-        connection: 'live',
-        projects: message.snapshot.projects,
-        unreachable: message.snapshot.unreachable,
-        rateLimit: message.snapshot.rateLimit,
-        capturedAt: message.snapshot.capturedAt,
-      })
+      const decoded = stateEnvelopeCodec.decode(message)
+      if (!decoded.ok) return
+      const changed = applyState(decoded.value.state)
+      if (changed || snapshot.transport !== 'live') publish({ transport: 'live' })
     })
 
     current.addEventListener('close', () => {
       if (socket !== current) return
       socket = null
-      publish({ connection: 'disconnected' })
+      publish({ transport: 'disconnected' })
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null
         if (watchers > 0) connect()
       }, reconnectDelayMs(attempts++))
     })
+  }
+
+  async function query(queryValue: Query): Promise<QueryResult> {
+    try {
+      const response = await fetchRequest(new URL('/api/query', httpUrl), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'query', query: queryValue }),
+      })
+      const decoded = queryResultEnvelopeCodec.decode(await response.json())
+      if (!decoded.ok) return transportQueryFailure('Server returned a malformed query result.')
+      return decoded.value.result
+    } catch {
+      return transportQueryFailure('The query did not receive a valid server response.')
+    }
+  }
+
+  async function execute(command: Command): Promise<CommandOutcome> {
+    activeCommands += 1
+    publish({ command: { inFlight: true, error: null } })
+    try {
+      const response = await fetchRequest(new URL('/api/command', httpUrl), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'command', command }),
+      })
+      const decoded = commandResultEnvelopeCodec.decode(await response.json())
+      if (!decoded.ok) throw new Error('Server returned a malformed command result.')
+      applyState(decoded.value.outcome.state)
+      publish({
+        command: {
+          inFlight: activeCommands > 1,
+          error: decoded.value.outcome.ok ? null : decoded.value.outcome.error,
+        },
+      })
+      return decoded.value.outcome
+    } catch (error) {
+      const failure: SafeError = {
+        code: 'transport-failed',
+        message:
+          error instanceof Error
+            ? `${error.message} The command may have completed; wait for live state before retrying.`
+            : 'The command may have completed; wait for live state before retrying.',
+      }
+      publish({ command: { inFlight: activeCommands > 1, error: failure } })
+      throw error
+    } finally {
+      activeCommands -= 1
+      if (activeCommands === 0 && snapshot.command.inFlight) {
+        publish({ command: { ...snapshot.command, inFlight: false } })
+      }
+    }
   }
 
   function start(): () => void {
@@ -123,22 +198,34 @@ export function createRoadmapStore(url: string, options: RoadmapStoreOptions = {
       }
       if (socket !== null) {
         const closing = socket
-        socket = null // Detach first, so the close handler neither publishes nor reconnects.
+        socket = null
         closing.close()
       }
+      publish({ transport: 'connecting' })
     }
   }
 
   return {
     subscribe(listener) {
       listeners.add(listener)
-      return () => {
-        listeners.delete(listener)
-      }
+      return () => listeners.delete(listener)
     },
     getSnapshot: () => snapshot,
+    query,
+    execute,
     start,
   }
+}
+
+function normalizedHttpUrl(value: string): URL {
+  const url = new URL(value)
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('Roadmap server URL must use http or https.')
+  }
+  url.pathname = '/'
+  url.search = ''
+  url.hash = ''
+  return url
 }
 
 function defaultCreateSocket(url: string): SocketLike {
@@ -149,19 +236,15 @@ function defaultReconnectDelay(attempt: number): number {
   return Math.min(RECONNECT_BASE_MS * 2 ** attempt, RECONNECT_MAX_MS)
 }
 
-/** The server is trusted, the transport is not: anything unparsable is dropped, never thrown. */
-function parseMessage(data: unknown): ServerMessage | null {
+function parseJson(data: unknown): unknown | null {
   if (typeof data !== 'string') return null
-  let parsed: unknown
   try {
-    parsed = JSON.parse(data)
+    return JSON.parse(data) as unknown
   } catch {
     return null
   }
-  if (typeof parsed !== 'object' || parsed === null) return null
-  if (!('type' in parsed) || parsed.type !== 'snapshot') return null
-  if (!('snapshot' in parsed) || typeof parsed.snapshot !== 'object' || parsed.snapshot === null) {
-    return null
-  }
-  return parsed as ServerMessage
+}
+
+function transportQueryFailure(message: string): QueryResult {
+  return { ok: false, error: { code: 'transport-failed', message } }
 }

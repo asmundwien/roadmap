@@ -10,39 +10,47 @@ import type {
 /** Map-view test fixtures — the one place tests build snapshot-shaped maps from shorthand. */
 
 export const HOME = 'me/repo'
-
-export function blocker(number: number, isOpen = true, nameWithOwner = HOME): Blocker {
+export const HOME_PROJECT = { integration: 'github' as const, id: HOME }
+export function blocker(id: number | string, open: boolean = true, projectId = HOME): Blocker {
+  const value = String(id)
   return {
-    number,
-    title: `Ticket ${number}`,
-    url: `https://example.test/${nameWithOwner}/${number}`,
-    nameWithOwner,
-    isOpen,
+    project: { integration: 'github', id: projectId },
+    ticketId: value,
+    displayId: `#${value}`,
+    title: `Ticket ${value}`,
+    url: `https://example.test/${projectId}/${value}`,
+    state: open ? 'open' : 'closed',
   }
 }
 
 export function ticket(
-  number: number,
+  id: number | string,
   state: TicketState,
   blockedBy: Blocker[] = [],
-  closedAt: number | null = null,
+  closedAt?: number,
   createdAt = 0,
   type: TicketType = 'task',
 ): Ticket {
+  const value = String(id)
   return {
-    number,
-    title: `Ticket ${number}`,
-    url: `https://example.test/${HOME}/${number}`,
+    id: value,
+    displayId: `#${value}`,
+    title: `Ticket ${value}`,
+    url: `https://example.test/${HOME}/${value}`,
     body: '',
-    type,
+    typeEvidence:
+      type === 'untyped'
+        ? { kind: 'missing', labels: [] }
+        : { kind: 'recognized', value: type, labels: [type] },
     state,
     isClaimed: state === 'claimed',
-    isBlocked: blockedBy.some((b) => b.isOpen),
+    isBlocked: blockedBy.some((b) => b.state !== 'closed'),
     createdAt,
     closedAt,
     assignees: [],
     blockedBy,
-    blockersTruncated: false,
+    blockersComplete: true,
+    warnings: [],
   }
 }
 
@@ -63,23 +71,21 @@ export function body(overrides: Partial<MapBody> = {}): MapBody {
 
 export function makeMap(tickets: Ticket[], bodyOverrides: Partial<MapBody> = {}): WayfinderMap {
   return {
-    owner: 'me',
-    repo: 'repo',
-    nameWithOwner: HOME,
-    number: 1,
+    project: HOME_PROJECT,
+    id: '1',
+    displayId: '#1',
     title: 'Test map',
     url: `https://example.test/${HOME}/1`,
     isOpen: true,
     updatedAt: 0,
-    closedAt: null,
     body: body(bodyOverrides),
     tickets,
     frontier: tickets.filter((t) => t.state === 'frontier'),
     progress: {
       total: tickets.length,
       completed: tickets.filter((t) => t.state === 'closed').length,
-      percentCompleted: 0,
     },
-    ticketsTruncated: false,
+    ticketsComplete: true,
+    warnings: [],
   }
 }

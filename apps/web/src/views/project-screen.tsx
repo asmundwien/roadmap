@@ -1,5 +1,5 @@
-import type { Project, WayfinderMap } from '@roadmap/contracts'
-import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from 'react'
+import type { Project, ProjectKey, WayfinderMap } from '@roadmap/contracts'
+import { useEffect, useRef, useState } from 'react'
 import {
   encodeSelection,
   mapHash,
@@ -16,6 +16,7 @@ import { MapChild, sameSelection } from './map/map-child.tsx'
 import { Panel } from './map/panel.tsx'
 import { ledgerSequence } from './map/sequence.ts'
 import { LEGEND_ORDER, STATE_META } from './map/state-meta.ts'
+import { integrationLabel } from './project-meta.ts'
 import './views.css'
 
 /**
@@ -25,11 +26,17 @@ import './views.css'
  * layer every map feeds.
  */
 export function ProjectScreen({ route }: { route: Extract<Route, { screen: 'project' }> }) {
-  const { connection, projects, capturedAt } = useRoadmap()
+  const { transport, projects, roadmapProjects, capturedAt } = useRoadmap()
 
-  const project = projects.find(
-    (candidate) => candidate.owner === route.owner && candidate.repo === route.repo,
-  )
+  const registration = projects.find((candidate) => sameProject(candidate.key, route.project))
+  const source = roadmapProjects.find((candidate) => sameProject(candidate.key, route.project))
+  const project = registration
+    ? {
+        ...registration,
+        ...(source?.visibility === undefined ? {} : { visibility: source.visibility }),
+        ...(source?.sourcePath === undefined ? {} : { sourcePath: source.sourcePath }),
+      }
+    : source
 
   if (!project) {
     return (
@@ -37,15 +44,13 @@ export function ProjectScreen({ route }: { route: Extract<Route, { screen: 'proj
         <p>
           <a href="#/">← All projects</a>
         </p>
-        {connection === 'disconnected' && (
+        {transport === 'disconnected' && (
           <p className="banner" role="alert">
             Server unreachable — reconnecting.
           </p>
         )}
         <p className="muted">
-          {capturedAt !== null
-            ? `No project at ${route.owner}/${route.repo}.`
-            : 'Waiting for the server…'}
+          {capturedAt !== null ? `No project at ${route.project.id}.` : 'Waiting for the server…'}
         </p>
       </main>
     )
@@ -53,11 +58,14 @@ export function ProjectScreen({ route }: { route: Extract<Route, { screen: 'proj
 
   return (
     <PanelScreen
-      key={project.nameWithOwner}
+      key={`${project.key.integration}:${project.key.id}`}
       project={project}
       selected={route.selected}
       selection={route.selection}
-      disconnected={connection === 'disconnected'}
+      disconnected={transport === 'disconnected'}
+      unavailable={
+        registration?.availability.status === 'unavailable' ? registration.availability.cause : null
+      }
     />
   )
 }
@@ -67,37 +75,35 @@ export function ProjectScreen({ route }: { route: Extract<Route, { screen: 'proj
  * its width, so the map stays clickable and picks swap the Panel's content without a close in
  * between.
  *
- * ALL state lives in the hash: `#/owner/repo/<map>` pins the open map and its selection segment
- * names the Panel's item — one router owns it all, resolved against the live snapshot on every
- * render, no useState mirrors anywhere. The prev/next sequence spans the WHOLE trace in
- * on-screen order, so stepping past a map's edge walks into the neighbouring map: the pin
- * follows the pick, and the accordion unfolds with it.
+ * ALL state lives in the hash: `#/projects/<integration>/<project-id>/maps/<map-id>` pins the
+ * open map and its selection segment names the Panel's item — one router owns it all, resolved
+ * against the live snapshot on every render, no useState mirrors anywhere. The prev/next sequence
+ * spans the WHOLE trace in on-screen order, so stepping past a map's edge walks into the
+ * neighbouring map: the pin follows the pick, and the accordion unfolds with it.
  */
 function PanelScreen({
   project,
   selected,
   selection,
   disconnected,
+  unavailable,
 }: {
   project: Project
-  selected: number | null
+  selected: string | null
   selection: PanelSelection | null
   disconnected: boolean
+  unavailable: string | null
 }) {
   const trace = [...project.openMaps, ...project.closedMaps]
-  // The selection rides the pinned map: a stale pin or a vanished item is no selection.
-  const pinnedMap = selected !== null ? trace.find((m) => m.number === selected) : undefined
+  const pinnedMap = selected !== null ? trace.find((m) => m.id === selected) : undefined
   const item = pinnedMap && selection ? resolveSelection(pinnedMap, selection) : null
   const pick: { map: WayfinderMap; item: ResolvedSelection } | null =
     pinnedMap && item ? { map: pinnedMap, item } : null
 
-  // Not state — the URL is the only truth. Like the fold keeping its children mounted, the rail
-  // needs content to move while collapsing, so the last pick lingers for the closing animation.
   const lastPickRef = useRef(pick)
   if (pick) lastPickRef.current = pick
   const shown = pick ?? lastPickRef.current
 
-  // Every selectable thing on the screen, top to bottom, across every map in the trace.
   const flat: { map: WayfinderMap; item: ResolvedSelection }[] = trace.flatMap((map) => [
     { map, item: { kind: 'map' } },
     ...ledgerSequence(map).map((item): { map: WayfinderMap; item: ResolvedSelection } => ({
@@ -107,19 +113,15 @@ function PanelScreen({
   ])
   const at = pick
     ? flat.findIndex(
-        (entry) => entry.map.number === pick.map.number && sameSelection(entry.item, pick.item),
+        (entry) => entry.map.id === pick.map.id && sameSelection(entry.item, pick.item),
       )
     : -1
 
-  // Selecting names the item's map AND its selection in one hash write, so the accordion always
-  // unfolds the map the Panel is describing. Activating the item that is already selected
-  // deselects it — the Panel folds shut, the pin stays.
   const close = () => {
-    if (selected !== null)
-      replaceHash(mapHash({ owner: project.owner, repo: project.repo, number: selected }))
+    if (selected !== null) replaceHash(mapHash({ project: project.key, id: selected }))
   }
   const select = (map: WayfinderMap, selectedItem: ResolvedSelection) => {
-    if (pick && pick.map.number === map.number && sameSelection(pick.item, selectedItem)) {
+    if (pick && pick.map.id === map.id && sameSelection(pick.item, selectedItem)) {
       close()
       return
     }
@@ -131,28 +133,18 @@ function PanelScreen({
     if (target) select(target.map, target.item)
   }
 
-  // Escape closes the Panel, like its » button — keyed off the hash's selection segment, so it
-  // also cleans a segment that resolved to nothing.
   useEffect(() => {
     if (selection === null || selected === null) return
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape')
-        replaceHash(mapHash({ owner: project.owner, repo: project.repo, number: selected }))
+      if (event.key === 'Escape') replaceHash(mapHash({ project: project.key, id: selected }))
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selection, selected, project.owner, project.repo])
+  }, [selection, selected, project.key])
 
-  // The whole navigation is ONE tab stop: roving tabindex puts Tab on the selected item (or the
-  // first destination). ArrowUp/Down move a keyboard HOVER — DOM focus roving over the visible
-  // items, drawn like the pointer's hover, lineage included — and only Space/Enter select what
-  // is under it. ArrowRight enters the Panel's buttons, ArrowLeft walks them back to the item
-  // list. Any pointer movement hands the hover back to the mouse (kbNav below).
   const [kbNav, setKbNav] = useState(false)
-  // The hover is ONE entity shared by both hands. The pointer's side of it is the item the mouse
-  // last rested on (not state — presentation memory, like the fold's): an arrow press steps from
-  // THERE when the mouse was the last mover, and any mouse movement snaps the hover back to it.
   const lastHoverRef = useRef<Element | null>(null)
+  const screenRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const onMove = () => setKbNav((now) => (now ? false : now))
     const onOver = (event: PointerEvent) => {
@@ -161,7 +153,6 @@ function PanelScreen({
       const item = target.closest('[data-nav-item]')
       if (item) lastHoverRef.current = item
     }
-    // Tab is keyboard movement too — entering the unit with it must show the ring and band.
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Tab') setKbNav((now) => (now ? now : true))
     }
@@ -185,16 +176,12 @@ function PanelScreen({
       document.querySelector('[data-nav-item]')
     if (el instanceof HTMLElement || el instanceof SVGElement) el.focus()
   }
-  // The keyboard hover walks what is on screen: every item in DOM order (which the ledger keeps
-  // aligned with the visual order), skipping the insides of folded maps.
   const visibleItems = () =>
     [...document.querySelectorAll('[data-nav-item]')].filter(
       (el): el is HTMLElement | SVGElement =>
         (el instanceof HTMLElement || el instanceof SVGElement) &&
         el.closest('.fold[aria-hidden="true"]') === null,
     )
-  // A step starts from wherever the hover entity currently sits: the pointer's last item while
-  // the mouse was the last mover, the focused element once the keyboard has taken over.
   const moveFocus = (delta: number) => {
     const items = visibleItems()
     const active = document.activeElement
@@ -208,7 +195,7 @@ function PanelScreen({
     const target = at === -1 ? items[0] : items[at + delta]
     target?.focus()
   }
-  const onItemArrow = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+  const onItemArrow = (event: KeyboardEvent) => {
     if (event.key === 'ArrowDown') {
       event.preventDefault()
       setKbNav(true)
@@ -222,7 +209,7 @@ function PanelScreen({
       focusNav(0)
     }
   }
-  const onButtonArrow = (event: ReactKeyboardEvent<HTMLDivElement>, index: number) => {
+  const onButtonArrow = (event: KeyboardEvent, index: number) => {
     if (event.key === 'ArrowRight') {
       event.preventDefault()
       focusNav(index + 1)
@@ -232,7 +219,7 @@ function PanelScreen({
       else focusNav(index - 1)
     }
   }
-  const onNavKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+  const onNavKey = (event: KeyboardEvent) => {
     const target = event.target
     if (!(target instanceof Element)) return
     if (target.hasAttribute('data-nav-item')) {
@@ -242,32 +229,36 @@ function PanelScreen({
     const nav = target.closest('[data-panel-nav]')
     if (nav) onButtonArrow(event, Number(nav.getAttribute('data-panel-nav')))
   }
+  useEffect(() => {
+    const screen = screenRef.current
+    if (!screen) return
+    screen.addEventListener('keydown', onNavKey)
+    return () => screen.removeEventListener('keydown', onNavKey)
+  })
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: keydown routing for the roving-focus navbar; focus always sits on real buttons inside.
-    <div className={`panel-screen${kbNav ? ' is-kbnav' : ''}`} onKeyDown={onNavKey}>
+    <div ref={screenRef} className={`panel-screen${kbNav ? ' is-kbnav' : ''}`}>
       <main className="shell map-shell">
         <p>
           <a href="#/">← All projects</a>
         </p>
 
-        {disconnected && (
-          <p className="banner" role="alert">
-            Server unreachable — reconnecting. Showing the last snapshot.
-          </p>
-        )}
+        <ProjectStateNotices
+          disconnected={disconnected}
+          unavailable={unavailable}
+          hasMaps={trace.length > 0}
+        />
 
         <ProjectHead project={project} />
         <MapTrace
           project={project}
           selected={selected}
           onPickItem={select}
-          pick={pick ? { mapNumber: pick.map.number, item: pick.item } : null}
+          pick={pick ? { mapId: pick.map.id, item: pick.item } : null}
           kbNav={kbNav}
         />
       </main>
 
-      {/* The rail is always mounted: opening and closing is the fold's 0fr→1fr, sideways. */}
       <aside
         className={`panel-rail${pick ? ' is-open' : ''}`}
         aria-label="the panel"
@@ -294,25 +285,54 @@ function PanelScreen({
   )
 }
 
+function ProjectStateNotices({
+  disconnected,
+  unavailable,
+  hasMaps,
+}: {
+  disconnected: boolean
+  unavailable: string | null
+  hasMaps: boolean
+}) {
+  return (
+    <>
+      {disconnected && (
+        <p className="banner" role="alert">
+          Server unreachable — reconnecting. Showing the last snapshot.
+        </p>
+      )}
+      {unavailable !== null && (
+        <p className="banner" role="alert">
+          Project unavailable — {unavailable} Showing the last observed roadmap trace.
+        </p>
+      )}
+      {!hasMaps && <p className="project-empty muted">No Wayfinder maps yet.</p>}
+    </>
+  )
+}
+
 function ProjectHead({ project }: { project: Project }) {
   const open = project.openMaps.length
   const closed = project.closedMaps.length
   const tickets = [...project.openMaps, ...project.closedMaps].flatMap((map) => map.tickets)
+  const title = githubRepoName(project) ?? project.name
+  const subtitle = githubOwnerName(project)
 
   return (
     <header className="project-head">
       <h1>
-        {project.repo}
-        {project.isPrivate && <span className="badge">private</span>}
+        {title}
+        <span className="badge">{integrationLabel(project.key.integration)}</span>
+        {project.visibility === 'private' && <span className="badge">private</span>}
       </h1>
       <p className="muted small">
-        {project.owner}
-        {' · '}
+        {subtitle ? `${subtitle} · ` : ''}
         {open > 0
           ? `${maps(open)} open · ${closed} closed`
-          : `resting · all ${maps(closed)} closed`}
+          : closed > 0
+            ? `resting · all ${maps(closed)} closed`
+            : 'registered · no Wayfinder maps yet'}
       </p>
-      {/* The wayfinder states counted across the whole project — never a single map. */}
       <p className="project-legend muted small">
         {LEGEND_ORDER.map((state) => (
           <span key={state} className="legend-item">
@@ -329,9 +349,9 @@ function ProjectHead({ project }: { project: Project }) {
 
 /**
  * The trace, newest first: open maps by recency (the active map leads), then closed history down
- * to the earliest. Bare `#/owner/repo` unfolds the active map; a number in the hash pins another
- * one. The URL is the only state — the pin alone decides what is open, so folding-shut has no
- * home here: clicking the open map's trigger selects it instead.
+ * to the earliest. Bare `#/projects/<integration>/<project-id>` unfolds the active map; a map id
+ * in the hash pins another one. The URL is the only state — the pin alone decides what is open,
+ * so folding-shut has no home here: clicking the open map's trigger selects it instead.
  */
 function MapTrace({
   project,
@@ -341,39 +361,35 @@ function MapTrace({
   kbNav,
 }: {
   project: Project
-  selected: number | null
-  /** Receives every click on a map item — the screen turns it into the Panel's pick. */
+  selected: string | null
   onPickItem: (map: WayfinderMap, item: ResolvedSelection) => void
-  /** The Panel's current pick, so its map can draw the active item. */
-  pick: { mapNumber: number; item: ResolvedSelection } | null
-  /** Keyboard-was-last-mover — focused rows draw as hovered. */
+  pick: { mapId: string; item: ResolvedSelection } | null
   kbNav: boolean
 }) {
   const trace = [...project.openMaps, ...project.closedMaps]
   const active = activeMapOf(project)
 
-  // A pin that matches no map is a stale URL, not an error — fall back to the default.
-  const pinned = selected !== null && trace.some((m) => m.number === selected) ? selected : null
-  const openNumber = pinned ?? active?.number ?? null
+  const pinned = selected !== null && trace.some((m) => m.id === selected) ? selected : null
+  const openId = pinned ?? active?.id ?? null
 
-  const unfold = (mapNumber: number) => {
-    if (openNumber === mapNumber) return
-    replaceHash(mapHash({ owner: project.owner, repo: project.repo, number: mapNumber }))
+  const unfold = (mapId: string) => {
+    if (openId === mapId) return
+    replaceHash(mapHash({ project: project.key, id: mapId }))
   }
 
   return (
     <div className="fl-trace">
       {trace.map((map, i) => (
         <MapChild
-          key={map.number}
+          key={map.id}
           map={map}
-          open={openNumber === map.number}
+          open={openId === map.id}
           solo={trace.length === 1}
           last={i === trace.length - 1}
           onSelect={(item) => onPickItem(map, item)}
-          onUnfold={() => unfold(map.number)}
+          onUnfold={() => unfold(map.id)}
           panelOpen={Boolean(pick)}
-          selected={pick && pick.mapNumber === map.number ? pick.item : null}
+          selected={pick && pick.mapId === map.id ? pick.item : null}
           entry={!pick && i === 0}
           kbNav={kbNav}
         />
@@ -384,4 +400,20 @@ function MapTrace({
 
 function maps(count: number): string {
   return count === 1 ? '1 map' : `${count} maps`
+}
+
+function sameProject(a: ProjectKey, b: ProjectKey): boolean {
+  return a.integration === b.integration && a.id === b.id
+}
+
+function githubRepoName(project: Project): string | null {
+  if (project.key.integration !== 'github') return null
+  const parts = project.name.split('/')
+  return parts.length >= 2 ? (parts.at(-1) ?? project.name) : project.name
+}
+
+function githubOwnerName(project: Project): string | null {
+  if (project.key.integration !== 'github') return null
+  const parts = project.name.split('/')
+  return parts.length >= 2 ? parts.slice(0, -1).join('/') : null
 }

@@ -41,16 +41,114 @@ drawn there.
 _Avoid_: current map, default map, main map
 
 **Change feed**:
-The stream of domain events — a ticket closed, a frontier changed, a map appeared — derived by
-diffing consecutive snapshots of roadmap state. Source-blind by construction: whether a change was
-caught by a webhook or a reconciling sweep is invisible to consumers. Triggers subscribe to the
-feed, never to transports.
-_Avoid_: webhook stream, event log, activity feed
+The stream of domain events derived by diffing consecutive snapshots of roadmap state. Source-blind
+by construction: which Integration or observation mechanism found a change is invisible to
+consumers. Triggers subscribe to the feed, never to transports.
+_Avoid_: integration event stream, event log, activity feed
+
+**Automation**:
+The opt-in, opportunistic path that may hand one eligible frontier task to Wayfinder. Global and
+Project enablement are both required. It is one-shot dispatch, not managed execution.
+_Avoid_: scheduler, queue, autonomous mode
+
+**Automation opportunity**:
+One Project, map, and ticket identity that Roadmap may classify once and, after an AFK result, hand
+to one Wayfinder Session once. Edits and frontier re-entry do not create a new opportunity.
+_Avoid_: job, retry candidate, fingerprint
+
+**Classification Run**:
+The single-lane assessment of one eligible Automation opportunity through the configured
+Classification Harness Command. Its strict result is a Classification Verdict.
+_Avoid_: classifier event, triage job
+
+**Classification Verdict**:
+The private AFK, HITL, or unable terminal result of one Classification Run. AFK alone admits a
+Wayfinder Session. A Verdict is not tracker truth, public Application State, or history UI.
+_Avoid_: tracker status, Verdict label, human override
+
+**Wayfinder Session**:
+The detached child process Roadmap may launch once for an AFK Automation opportunity from the
+registered Workspace. The session reloads and claims through Wayfinder; Roadmap does not supervise
+it or infer its result.
+_Avoid_: Execution Run, worker, managed agent
+
+**One-shot ledger**:
+Roadmap's private durable record of Classification and Wayfinder launch attempts, keyed by
+Automation opportunity. It prevents retries and stores no raw process output.
+_Avoid_: Run history, queue, tracker state
+
+**Harness Command**:
+A globally configured literal executable, argument list, and prompt-delivery method launched
+without a shell. Automation has one Classification command and one Wayfinder Session command;
+per-Project command profiles do not exist.
+_Avoid_: Project command, command profile, automation hook
 
 **Resting**:
 The state of a project whose maps are all closed — between efforts, its trace intact. A legitimate,
 visible state, not an error or an empty case.
 _Avoid_: archived, inactive, finished, empty
+
+**Integration**:
+The kind of source a project reaches roadmap through — GitHub, local markdown. A project has
+exactly one, named by a tag on the wire (`github`, `local`); the badge shows it at project level
+and it is invisible everywhere below.
+_Avoid_: source, provider, backend, connector
+
+**Connection**:
+A configured instance of one Integration. It carries the identity and authorization context through
+which registered Projects reach that Integration; one Connection may serve several Projects.
+_Avoid_: account, credential, adapter instance
+
+**Project registration**:
+Roadmap's durable declaration of one Project: an immutable admitted coupling of Connection,
+Integration-specific locator, and required Workspace, plus separately editable presentation
+metadata. Runtime unavailability never unregisters it.
+_Avoid_: discovered project, registry entry, bookmark
+
+**Adapter**:
+The code-role counterpart of an integration: the server module satisfying the seam's interface for
+one integration, with everything source-specific — transports, watching, cadence, budget valves —
+hidden behind it. Views never meet adapters; they see integrations.
+_Avoid_: plugin, driver, service
+
+**Slice**:
+One adapter's whole contribution to the snapshot — its projects and its unreachables, delivered
+entire whenever the adapter decides something changed. The store composes slices; it never fetches.
+_Avoid_: partial snapshot, patch, delta
+
+**Capability**:
+Something an integration may express but need not — linking out is the canonical example. A
+capability is optional data on the wire, never an optional method at the seam; absence renders
+gracefully, it is not an error.
+_Avoid_: feature flag, extension point
+
+**Registry**:
+The historical hand-edited `local-projects.json` input. Configuration migration imports it once;
+Project registrations are authoritative afterward, and Integration Adapters never read it.
+_Avoid_: current project list, steady-state configuration
+
+**Workspace**:
+The required local directory in every Project registration. Roadmap admits it only after proving
+that it belongs to the registration's locator through its Connection. A moved Workspace may be
+repaired only by proving the same Project identity. Wayfinder-map presence is a separate fact.
+_Avoid_: optional checkout, source path
+
+**Degraded**:
+The state of a Connection whose observations have repeatedly failed while Roadmap retains its last
+successful Project data. The Connection carries the last successful observation time; its Projects
+remain available until a source-specific hard failure proves otherwise.
+_Avoid_: unavailable Project, disconnected
+
+**Unreachable**:
+The state of a registered Project or known map that cannot currently be read. It remains visible
+with a plain cause and any last-known roadmap trace rather than disappearing; recovery updates the
+same identity. A never-read Project can be Unreachable with no maps.
+_Avoid_: missing, deleted (the cause may be unknown)
+
+**Badge**:
+The project-level marker naming a project's integration — provenance made visible exactly once,
+invisible everywhere below the project.
+_Avoid_: source label, origin tag
 
 **Panel**:
 The docked column that eats the page — the map view's one detail layer. It flexes in beside the
