@@ -835,15 +835,6 @@ function validatePromptTemplate(
       issue(issues, `${path}.promptTemplate`, `Unknown template marker ${JSON.stringify(marker)}.`)
     }
   }
-  for (const marker of allowed) {
-    if (markers.filter((candidate) => candidate === marker).length !== 1) {
-      issue(
-        issues,
-        `${path}.promptTemplate`,
-        `Must contain exactly one ${JSON.stringify(marker)} marker.`,
-      )
-    }
-  }
 }
 
 function literalCommandString(

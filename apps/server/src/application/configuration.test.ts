@@ -228,7 +228,7 @@ describe('roadmap configuration', () => {
             command: '/usr/bin/agent',
             args: [],
             promptDelivery: 'stdin',
-            promptTemplate: 'Map {{roadmap.map}} ticket {{roadmap.ticket}}',
+            promptTemplate: '/skill:wayfinder {{roadmap.ticket}}',
           },
           enabledProjects: [project.key],
         },
