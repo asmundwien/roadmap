@@ -10,6 +10,7 @@ import { buildLedger, type Ledger, type LedgerEdge } from './geometry.ts'
 import './map.css'
 import { type LedgerSelection, scopePlan } from './sequence.ts'
 import { STATE_META } from './state-meta.ts'
+import { TicketNodePrototypeMark } from './ticket-node-prototype.tsx'
 
 const EXT = 800
 
@@ -200,7 +201,13 @@ export function MapLedger({
               {fresh.has(ticket.id) && (
                 <circle className="fresh-ping" cx={x} cy={y} r="10" stroke={meta.color} />
               )}
-              <StateMarker ticket={ticket} x={x} y={y} />
+              <TicketNodePrototypeMark
+                map={map}
+                ticket={ticket}
+                type={ticketTypeOf(ticket.typeEvidence)}
+                x={x}
+                y={y}
+              />
               <text
                 x={ledger.textX}
                 y={y - 4}
@@ -251,10 +258,13 @@ export function MapLedger({
               {fresh.has(ticket.id) && (
                 <circle className="fresh-ping" cx={x} cy={y} r="10" stroke="var(--state-closed)" />
               )}
-              <circle cx={x} cy={y} r="10" fill="var(--fg)" />
-              <text x={x} y={y + 3.5} textAnchor="middle" className="check">
-                ✓
-              </text>
+              <TicketNodePrototypeMark
+                map={map}
+                ticket={ticket}
+                type={ticketTypeOf(ticket.typeEvidence)}
+                x={x}
+                y={y}
+              />
               <text x={ledger.textX} y={y + 4} className="behind-title">
                 {truncate(title, 46)}
               </text>
@@ -445,37 +455,6 @@ function textWidth(text: string, font: string): number {
   if (!measureCtx) return text.length * 6.5
   measureCtx.font = font
   return measureCtx.measureText(text).width
-}
-
-function StateMarker({ ticket, x, y }: { ticket: Ticket; x: number; y: number }) {
-  const meta = STATE_META[ticket.state]
-  if (ticket.state === 'frontier') {
-    return (
-      <>
-        <circle cx={x} cy={y} r="18" fill={meta.color} fillOpacity="0.16" />
-        <rect
-          x={x - 8}
-          y={y - 8}
-          width="16"
-          height="16"
-          transform={`rotate(45 ${x} ${y})`}
-          fill={meta.color}
-        />
-      </>
-    )
-  }
-  if (ticket.state === 'claimed') {
-    return (
-      <>
-        <circle cx={x} cy={y} r="9" fill="var(--bg)" stroke={meta.color} strokeWidth="2.25" />
-        <path d={`M ${x} ${y - 9} A 9 9 0 0 0 ${x} ${y + 9} Z`} fill={meta.color} />
-      </>
-    )
-  }
-  if (ticket.state === 'blocked') {
-    return <circle cx={x} cy={y} r="9" fill="var(--bg)" stroke={meta.color} strokeWidth="2.25" />
-  }
-  return null
 }
 
 function truncate(text: string, max: number): string {

@@ -16,6 +16,7 @@ import { MapChild, sameSelection } from './map/map-child.tsx'
 import { Panel } from './map/panel.tsx'
 import { ledgerSequence } from './map/sequence.ts'
 import { LEGEND_ORDER, STATE_META } from './map/state-meta.ts'
+import { TicketNodePrototypeProvider } from './map/ticket-node-prototype.tsx'
 import { integrationLabel } from './project-meta.ts'
 import './views.css'
 
@@ -26,7 +27,7 @@ import './views.css'
  * layer every map feeds.
  */
 export function ProjectScreen({ route }: { route: Extract<Route, { screen: 'project' }> }) {
-  const { transport, projects, roadmapProjects, capturedAt } = useRoadmap()
+  const { transport, projects, roadmapProjects, capturedAt, automation } = useRoadmap()
 
   const registration = projects.find((candidate) => sameProject(candidate.key, route.project))
   const source = roadmapProjects.find((candidate) => sameProject(candidate.key, route.project))
@@ -57,16 +58,20 @@ export function ProjectScreen({ route }: { route: Extract<Route, { screen: 'proj
   }
 
   return (
-    <PanelScreen
-      key={`${project.key.integration}:${project.key.id}`}
-      project={project}
-      selected={route.selected}
-      selection={route.selection}
-      disconnected={transport === 'disconnected'}
-      unavailable={
-        registration?.availability.status === 'unavailable' ? registration.availability.cause : null
-      }
-    />
+    <TicketNodePrototypeProvider evidence={automation.evidence}>
+      <PanelScreen
+        key={`${project.key.integration}:${project.key.id}`}
+        project={project}
+        selected={route.selected}
+        selection={route.selection}
+        disconnected={transport === 'disconnected'}
+        unavailable={
+          registration?.availability.status === 'unavailable'
+            ? registration.availability.cause
+            : null
+        }
+      />
+    </TicketNodePrototypeProvider>
   )
 }
 

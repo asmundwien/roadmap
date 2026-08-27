@@ -1,0 +1,244 @@
+/* PROTOTYPE — ticket-node language only. Delete from main after human review. */
+
+.node-prototype-switcher {
+  position: fixed;
+  z-index: 20;
+  left: 50%;
+  bottom: var(--sp-4);
+  display: grid;
+  grid-template-columns: auto 2.25rem minmax(12rem, auto) 2.25rem;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--fg) 35%, var(--edge));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg) 94%, var(--fg));
+  box-shadow: 0 8px 28px color-mix(in srgb, var(--fg) 18%, transparent);
+  color: var(--fg);
+  transform: translateX(-50%);
+}
+
+.node-prototype-kicker {
+  padding: 0 var(--sp-3) 0 var(--sp-4);
+  border-right: 1px solid var(--edge);
+  color: var(--muted);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.node-prototype-switcher button {
+  align-self: stretch;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.node-prototype-switcher button:hover,
+.node-prototype-switcher button:focus-visible {
+  outline: none;
+  background: var(--wash);
+  box-shadow: inset 0 0 0 2px var(--ring);
+}
+
+.node-prototype-switcher strong {
+  padding: 0.55rem var(--sp-3);
+  border-right: 1px solid var(--edge);
+  border-left: 1px solid var(--edge);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.node-prototype {
+  --node-type: var(--muted);
+  --node-state: var(--state-closed);
+  --effect-classification: #7656c9;
+  --effect-wayfinder: #087f8c;
+  pointer-events: none;
+}
+
+.node-prototype.is-research {
+  --node-type: var(--type-research);
+}
+
+.node-prototype.is-prototype {
+  --node-type: var(--type-prototype);
+}
+
+.node-prototype.is-grilling {
+  --node-type: var(--type-grilling);
+}
+
+.node-prototype.is-task {
+  --node-type: var(--type-task);
+}
+
+.node-prototype.state-frontier {
+  --node-state: var(--state-frontier);
+}
+
+.node-prototype.state-claimed {
+  --node-state: var(--state-claimed);
+}
+
+.node-prototype.state-blocked {
+  --node-state: var(--state-blocked);
+}
+
+.node-prototype .state-frame {
+  fill: var(--bg);
+  stroke-width: 2.25px;
+}
+
+.node-prototype .state-frame.is-blocked {
+  stroke-dasharray: 2.5 2.5;
+}
+
+.node-prototype .state-frame.is-closed {
+  stroke: var(--bg);
+  stroke-width: 2px;
+}
+
+.node-prototype .state-halo {
+  fill-opacity: 0.14;
+}
+
+.node-prototype .type-core {
+  fill: color-mix(in srgb, var(--node-type) 24%, var(--bg));
+  stroke: var(--node-type);
+  stroke-width: 1.35px;
+}
+
+.node-prototype .type-core-glyph,
+.node-prototype .type-tab-glyph,
+.node-prototype .aura-type-glyph {
+  fill: var(--node-type);
+  font-size: 7px;
+  font-weight: 800;
+}
+
+.node-prototype .automation-effect {
+  --effect-color: var(--effect-classification);
+}
+
+.node-prototype .automation-effect.is-wayfinder {
+  --effect-color: var(--effect-wayfinder);
+}
+
+.node-prototype .effect-token {
+  fill: color-mix(in srgb, var(--effect-color) 18%, var(--bg));
+  stroke: var(--effect-color);
+  stroke-width: 1.35px;
+}
+
+.node-prototype .effect-glyph {
+  fill: var(--effect-color);
+  font-size: 7px;
+  font-weight: 800;
+}
+
+.node-prototype .effect-stage {
+  fill: var(--bg);
+  paint-order: stroke;
+  stroke: var(--effect-color);
+  stroke-width: 3px;
+  font-size: 4.5px;
+  font-weight: 900;
+}
+
+.node-prototype .automation-effect.is-active .effect-token,
+.node-prototype .automation-effect.is-active .effect-aura {
+  animation: prototype-effect-pulse 1.4s ease-in-out infinite;
+}
+
+.node-prototype .automation-effect.is-human .effect-token,
+.node-prototype .automation-effect.is-human .effect-aura {
+  stroke-dasharray: 2 1.5;
+}
+
+.node-prototype .automation-effect.is-warning .effect-token,
+.node-prototype .automation-effect.is-warning .effect-aura {
+  stroke-width: 2px;
+  stroke-dasharray: 3 1.5;
+}
+
+.node-prototype .automation-effect.is-failure .effect-token,
+.node-prototype .automation-effect.is-failure .effect-aura {
+  fill: color-mix(in srgb, var(--effect-color) 35%, var(--bg));
+  stroke-width: 2.25px;
+}
+
+.node-prototype .automation-effect.is-unknown .effect-token,
+.node-prototype .automation-effect.is-unknown .effect-aura {
+  opacity: 0.65;
+  stroke-dasharray: 1.5 2.5;
+}
+
+/* Variant A: type is the character core, tracker state is the outer frame, effects orbit it. */
+.node-prototype.is-orbit .type-core-glyph {
+  fill: color-mix(in srgb, var(--node-type) 88%, var(--fg));
+}
+
+/* Variant B: preserve the tracker marker untouched; type and effects occupy equipment slots. */
+.node-prototype.is-loadout .type-tab {
+  fill: color-mix(in srgb, var(--node-type) 22%, var(--bg));
+  stroke: var(--node-type);
+  stroke-width: 1.2px;
+}
+
+.node-prototype.is-loadout .effect-stage {
+  transform: translate(-1px, 1px);
+}
+
+/* Variant C: stage rings behave like game auras/cooldowns; type is a centre rune plus notches. */
+.node-prototype.is-aura .automation-effect .effect-aura {
+  fill: none;
+  stroke: var(--effect-color);
+  stroke-width: 2.25px;
+  stroke-dasharray: 62 38;
+  stroke-linecap: round;
+}
+
+.node-prototype.is-aura .effect-aura-glyph {
+  fill: var(--bg);
+  paint-order: stroke;
+  stroke: var(--effect-color);
+  stroke-width: 3px;
+  font-size: 5px;
+  font-weight: 900;
+}
+
+.node-prototype.is-aura .aura-type-glyph {
+  fill: var(--bg);
+  paint-order: stroke;
+  stroke: color-mix(in srgb, var(--node-type) 75%, var(--fg));
+  stroke-width: 2.5px;
+}
+
+.node-prototype.is-aura .type-notches line {
+  stroke: var(--node-type);
+  stroke-width: 1.4px;
+  stroke-linecap: round;
+}
+
+@keyframes prototype-effect-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .node-prototype {
+    --effect-classification: #ad8cff;
+    --effect-wayfinder: #43c7d2;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .node-prototype .automation-effect.is-active .effect-token,
+  .node-prototype .automation-effect.is-active .effect-aura {
+    animation: none;
+  }
+}
