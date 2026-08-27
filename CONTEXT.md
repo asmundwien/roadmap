@@ -47,9 +47,16 @@ consumers. Triggers subscribe to the feed, never to transports.
 _Avoid_: integration event stream, event log, activity feed
 
 **Automation**:
-The opt-in, opportunistic path that may hand one eligible frontier task to Wayfinder. Global and
-Project enablement are both required. It is one-shot dispatch, not managed execution.
+The opt-in path that may classify and hand one eligible frontier task to Wayfinder. Global and
+Project enablement admit automatic triggers; an Automation override admits one run without them.
+It is one-shot dispatch, not managed execution.
 _Avoid_: scheduler, queue, autonomous mode
+
+**Automation override**:
+A human-triggered Classification Run or Wayfinder Session for one eligible opportunity. It admits
+that stage without global or Project enablement, but later automatic stages still require both.
+Eligibility, verdict, and one-shot rules remain unchanged.
+_Avoid_: manual flow, forced run
 
 **Automation opportunity**:
 One Project, map, and ticket identity that Roadmap may classify once and, after an AFK result, hand
@@ -62,19 +69,30 @@ Classification Harness Command. Its strict result is a Classification Verdict.
 _Avoid_: classifier event, triage job
 
 **Classification Verdict**:
-The private AFK, HITL, or unable terminal result of one Classification Run. AFK alone admits a
-Wayfinder Session. A Verdict is not tracker truth, public Application State, or history UI.
+The durable AFK, HITL, or unable result of one Classification Run. AFK alone admits a Wayfinder
+Session. The Verdict is Automation evidence attached to its ticket, not tracker state.
 _Avoid_: tracker status, Verdict label, human override
 
 **Wayfinder Session**:
-The detached child process Roadmap may launch once for an AFK Automation opportunity from the
-registered Workspace. The session reloads and claims through Wayfinder; Roadmap does not supervise
-it or infer its result.
+The agent process Roadmap may launch once for an AFK Automation opportunity from the registered
+Workspace. A recorded session marks autonomous handling or an attempt at it, whether Automation or
+an Automation override admitted it; ordinary human Wayfinder work remains the unmarked default.
 _Avoid_: Execution Run, worker, managed agent
 
+**Session report**:
+The Wayfinder Session's structured terminal claim: completed, stopped, or failed, with a reason.
+Process exit and tracker state remain independent facts; Roadmap derives no combined outcome from
+them.
+_Avoid_: exit status, tracker result, mismatch
+
+**Automation status effect**:
+A compact, durable mark added to a ticket node when Automation evidence exists. It leaves the
+ticket type chip and tracker-state marker intact; ordinary human work has no status effect.
+_Avoid_: Automation icon, agent state
+
 **One-shot ledger**:
-Roadmap's private durable record of Classification and Wayfinder launch attempts, keyed by
-Automation opportunity. It prevents retries and stores no raw process output.
+Roadmap's durable record of Classification and Wayfinder attempts, keyed by Automation opportunity.
+It prevents retries and stores the structured facts needed to explain each attempt.
 _Avoid_: Run history, queue, tracker state
 
 **Harness Command**:
