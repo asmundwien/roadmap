@@ -289,6 +289,69 @@ export interface ConfigurationStatus {
   issues: ConfigurationIssue[]
   notices: string[]
 }
+export type AutomationAdmission = 'automatic' | 'override'
+
+export interface AutomationTarget {
+  project: ProjectKey
+  mapId: string
+  ticketId: string
+}
+
+export type AutomationProcessResult =
+  | { status: 'exited'; code: number }
+  | { status: 'signaled'; signal: string }
+  | { status: 'unavailable'; reason: string }
+
+export interface ClassificationVerdict {
+  value: 'afk' | 'hitl' | 'unable'
+  reason: string
+}
+
+export type ClassificationAttempt =
+  | { status: 'running'; admission: AutomationAdmission }
+  | {
+      status: 'completed'
+      admission: AutomationAdmission
+      processResult: AutomationProcessResult
+      verdict: ClassificationVerdict
+    }
+  | {
+      status: 'failed'
+      admission: AutomationAdmission
+      processResult: AutomationProcessResult
+      reason: string
+    }
+  | { status: 'launch-failed'; admission: AutomationAdmission; reason: string }
+  | { status: 'outcome-unknown'; admission: AutomationAdmission; reason: string }
+
+export interface SessionReport {
+  outcome: 'completed' | 'stopped' | 'failed'
+  reason: string
+}
+
+export type SessionReportEvidence =
+  | { status: 'received'; report: SessionReport }
+  | { status: 'missing'; reason: string }
+  | { status: 'invalid'; reason: string }
+
+export type WayfinderSession =
+  | { status: 'launching'; admission: AutomationAdmission }
+  | { status: 'running'; admission: AutomationAdmission }
+  | {
+      status: 'finished'
+      admission: AutomationAdmission
+      processResult: AutomationProcessResult
+      report: SessionReportEvidence
+    }
+  | { status: 'launch-failed'; admission: AutomationAdmission; reason: string }
+  | { status: 'outcome-unknown'; admission: AutomationAdmission; reason: string }
+
+export interface AutomationEvidence {
+  target: AutomationTarget
+  classification: ClassificationAttempt
+  wayfinder?: WayfinderSession
+}
+
 export type AutomationAvailability = { status: 'ready' } | { status: 'unavailable'; cause: string }
 
 /** Browser-safe Automation controls; Harness Commands remain private configuration. */
@@ -296,6 +359,7 @@ export interface AutomationState {
   enabled: boolean
   enabledProjects: ProjectKey[]
   availability: AutomationAvailability
+  evidence: AutomationEvidence[]
 }
 
 /** The sole authoritative read model owned by the server application Module. */

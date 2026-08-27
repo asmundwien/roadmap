@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -19,6 +19,7 @@ import {
   type AutomationLauncher,
   type AutomationLedgerRecord,
   type ClassificationProcessResult,
+  createAutomationDocument,
   createAutomationLauncher,
 } from './automation.ts'
 import { classificationResultSchemaJson } from './classification-contract.ts'
@@ -202,9 +203,12 @@ function configuration(
 }
 
 function processResult(
-  overrides: Partial<ClassificationProcessResult> = {},
+  overrides: Partial<
+    Omit<Extract<ClassificationProcessResult, { status: 'finished' }>, 'status'>
+  > = {},
 ): ClassificationProcessResult {
   return {
+    status: 'finished',
     code: 0,
     signal: null,
     stdout: JSON.stringify({ schemaVersion: 1, verdict: 'afk', reason: 'Agent-ready.' }),
@@ -286,6 +290,119 @@ async function harness(options: {
 }
 
 describe('RoadmapApplication Automation', () => {
+  it('migrates the launch-only ledger to durable observable evidence', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'roadmap-automation-ledger-'))
+    roots.push(root)
+    const path = join(root, 'automation.json')
+    await writeFile(
+      path,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        records: [
+          {
+            target: {
+              project: { integration: 'local', id: 'legacy' },
+              mapId: 'map',
+              ticketId: '1',
+            },
+            classification: { status: 'afk', reason: 'Ready.' },
+            wayfinder: { status: 'started' },
+          },
+        ],
+      })}\n`,
+      'utf8',
+    )
+
+    const records = await createAutomationDocument(path).load()
+
+    expect(records).toEqual([
+      {
+        target: {
+          project: { integration: 'local', id: 'legacy' },
+          mapId: 'map',
+          ticketId: '1',
+        },
+        classification: {
+          status: 'completed',
+          admission: 'automatic',
+          processResult: { status: 'exited', code: 0 },
+          verdict: { value: 'afk', reason: 'Ready.' },
+        },
+        wayfinder: {
+          status: 'outcome-unknown',
+          admission: 'automatic',
+          reason: expect.stringContaining('restarted'),
+        },
+      },
+    ])
+    expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject({
+      schemaVersion: 2,
+      records,
+    })
+  })
+
+  it('strictly rejects impossible durable Automation evidence', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'roadmap-automation-ledger-'))
+    roots.push(root)
+    const path = join(root, 'automation.json')
+    await writeFile(
+      path,
+      `${JSON.stringify({
+        schemaVersion: 2,
+        records: [
+          {
+            target: {
+              project: { integration: 'local', id: 'invalid' },
+              mapId: 'map',
+              ticketId: '1',
+            },
+            classification: {
+              status: 'completed',
+              admission: 'automatic',
+              processResult: { status: 'exited', code: 0 },
+              verdict: { value: 'hitl', reason: 'Human needed.' },
+            },
+            wayfinder: { status: 'running', admission: 'automatic' },
+          },
+        ],
+      })}\n`,
+      'utf8',
+    )
+
+    await expect(createAutomationDocument(path).load()).rejects.toThrow(
+      'requires an AFK Classification Verdict',
+    )
+  })
+
+  it('converts unfinished current-schema attempts to outcome unknown on startup', async () => {
+    const sourceProject = project('restart', [ticket('1')])
+    const ledger = memoryAutomationDocument([
+      {
+        target: { project: sourceProject.key, mapId: 'map', ticketId: '1' },
+        classification: {
+          status: 'completed',
+          admission: 'override',
+          processResult: { status: 'exited', code: 0 },
+          verdict: { value: 'afk', reason: 'Ready.' },
+        },
+        wayfinder: { status: 'running', admission: 'override' },
+      },
+    ])
+    const current = await harness({
+      projects: [sourceProject],
+      launcher: deferredLauncher().launcher,
+      document: ledger,
+    })
+
+    expect(ledger.records()[0]?.wayfinder).toMatchObject({
+      status: 'outcome-unknown',
+      admission: 'override',
+      reason: expect.stringContaining('restarted'),
+    })
+    expect(current.application.current().automation.evidence).toEqual(ledger.records())
+    await current.application.stop()
+  })
+
   it('renders configured map and ticket pointers for both Harness Commands', async () => {
     const mapUrl = 'https://github.com/example/project/issues/1'
     const ticketUrl = 'https://github.com/example/project/issues/2'
@@ -323,11 +440,16 @@ describe('RoadmapApplication Automation', () => {
     const launches = deferredLauncher({
       beforeClassify() {
         expect(ledger.records()).toEqual([
-          expect.objectContaining({ classification: { status: 'attempted' } }),
+          expect.objectContaining({
+            classification: { status: 'running', admission: 'automatic' },
+          }),
         ])
       },
       beforeDispatch() {
-        expect(ledger.records()[0]?.wayfinder).toEqual({ status: 'attempted' })
+        expect(ledger.records()[0]?.wayfinder).toEqual({
+          status: 'launching',
+          admission: 'automatic',
+        })
       },
     })
     const first = await harness({
@@ -339,7 +461,12 @@ describe('RoadmapApplication Automation', () => {
     expect(launches.classifications).toHaveLength(1)
     launches.classifications[0]?.resolve(processResult())
     await vi.waitFor(() => expect(launches.dispatches).toHaveLength(1))
-    await vi.waitFor(() => expect(ledger.records()[0]?.wayfinder).toEqual({ status: 'started' }))
+    await vi.waitFor(() =>
+      expect(ledger.records()[0]?.wayfinder).toEqual({
+        status: 'running',
+        admission: 'automatic',
+      }),
+    )
 
     first.source.push([project('one', [ticket('1', TASK, { body: 'Edited body.' })])])
     first.source.push([project('one', [])])
@@ -437,7 +564,13 @@ describe('RoadmapApplication Automation', () => {
     ],
     ['malformed output', processResult({ stdout: '{bad-json' })],
     ['nonzero exit', processResult({ code: 7 })],
-    ['launch failure', processResult({ launchError: 'The command was not found.' })],
+    [
+      'launch failure',
+      {
+        status: 'launch-failed',
+        reason: 'The command was not found.',
+      } satisfies ClassificationProcessResult,
+    ],
   ])('records %s as terminal without dispatch or retry', async (_name, result) => {
     const sourceProject = project('one', [ticket('1')])
     const ledger = memoryAutomationDocument()
@@ -449,7 +582,7 @@ describe('RoadmapApplication Automation', () => {
     })
     launches.classifications[0]?.resolve(result)
 
-    await vi.waitFor(() => expect(ledger.records()[0]?.classification.status).not.toBe('attempted'))
+    await vi.waitFor(() => expect(ledger.records()[0]?.classification.status).not.toBe('running'))
     expect(launches.dispatches).toHaveLength(0)
     current.source.push([sourceProject])
     await delay(10)
@@ -468,7 +601,9 @@ describe('RoadmapApplication Automation', () => {
     })
     launches.classifications[0]?.reject(new Error('lost'))
 
-    await vi.waitFor(() => expect(ledger.records()[0]?.classification.status).toBe('failed'))
+    await vi.waitFor(() =>
+      expect(ledger.records()[0]?.classification.status).toBe('outcome-unknown'),
+    )
     expect(launches.dispatches).toHaveLength(0)
     await current.application.stop()
   })
@@ -481,7 +616,10 @@ describe('RoadmapApplication Automation', () => {
     launches.classifications[0]?.resolve(processResult())
 
     await vi.waitFor(() =>
-      expect(ledger.records()[0]?.wayfinder).toEqual({ status: 'launch-failed' }),
+      expect(ledger.records()[0]?.wayfinder).toMatchObject({
+        status: 'launch-failed',
+        admission: 'automatic',
+      }),
     )
     await vi.waitFor(() => expect(launches.classifications).toHaveLength(2))
     expect(launches.maximumRunning()).toBe(1)

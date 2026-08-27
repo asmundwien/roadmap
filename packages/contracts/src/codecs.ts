@@ -379,10 +379,113 @@ const automationAvailability = discriminated('Automation availability', 'status'
     cause: required(stringValue),
   }),
 })
+const automationAdmission = literal('automatic', 'override')
+const automationProcessResult = discriminated('Automation process result', 'status', {
+  exited: object({
+    status: required(literal('exited')),
+    code: required(nonnegativeInteger),
+  }),
+  signaled: object({
+    status: required(literal('signaled')),
+    signal: required(stringValue),
+  }),
+  unavailable: object({
+    status: required(literal('unavailable')),
+    reason: required(stringValue),
+  }),
+})
+const classificationVerdict = object({
+  value: required(literal('afk', 'hitl', 'unable')),
+  reason: required(stringValue),
+})
+const classificationAttempt = discriminated('Classification attempt', 'status', {
+  running: object({
+    status: required(literal('running')),
+    admission: required(automationAdmission),
+  }),
+  completed: object({
+    status: required(literal('completed')),
+    admission: required(automationAdmission),
+    processResult: required(automationProcessResult),
+    verdict: required(classificationVerdict),
+  }),
+  failed: object({
+    status: required(literal('failed')),
+    admission: required(automationAdmission),
+    processResult: required(automationProcessResult),
+    reason: required(stringValue),
+  }),
+  'launch-failed': object({
+    status: required(literal('launch-failed')),
+    admission: required(automationAdmission),
+    reason: required(stringValue),
+  }),
+  'outcome-unknown': object({
+    status: required(literal('outcome-unknown')),
+    admission: required(automationAdmission),
+    reason: required(stringValue),
+  }),
+})
+const sessionReport = object({
+  outcome: required(literal('completed', 'stopped', 'failed')),
+  reason: required(stringValue),
+})
+const sessionReportEvidence = discriminated('Session report evidence', 'status', {
+  received: object({
+    status: required(literal('received')),
+    report: required(sessionReport),
+  }),
+  missing: object({
+    status: required(literal('missing')),
+    reason: required(stringValue),
+  }),
+  invalid: object({
+    status: required(literal('invalid')),
+    reason: required(stringValue),
+  }),
+})
+const wayfinderSession = discriminated('Wayfinder Session', 'status', {
+  launching: object({
+    status: required(literal('launching')),
+    admission: required(automationAdmission),
+  }),
+  running: object({
+    status: required(literal('running')),
+    admission: required(automationAdmission),
+  }),
+  finished: object({
+    status: required(literal('finished')),
+    admission: required(automationAdmission),
+    processResult: required(automationProcessResult),
+    report: required(sessionReportEvidence),
+  }),
+  'launch-failed': object({
+    status: required(literal('launch-failed')),
+    admission: required(automationAdmission),
+    reason: required(stringValue),
+  }),
+  'outcome-unknown': object({
+    status: required(literal('outcome-unknown')),
+    admission: required(automationAdmission),
+    reason: required(stringValue),
+  }),
+})
+const automationTarget = object({
+  project: required(projectKey),
+  mapId: required(stringValue),
+  ticketId: required(stringValue),
+})
+const automationEvidence = object({
+  target: required(automationTarget),
+  classification: required(classificationAttempt),
+  wayfinder: optional(wayfinderSession),
+})
+
 const automationState = object({
   enabled: required(booleanValue),
   enabledProjects: required(arrayOf(projectKey)),
   availability: required(automationAvailability),
+  evidence: required(arrayOf(automationEvidence)),
 })
 const safeError = object({
   code: required(

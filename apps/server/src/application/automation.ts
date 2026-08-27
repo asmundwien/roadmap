@@ -2,11 +2,22 @@ import { type ChildProcess, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { open, readFile, rename, unlink } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
-import type { ProjectKey, RegisteredProject, Ticket } from '@roadmap/contracts'
+import type {
+  AutomationAdmission,
+  AutomationEvidence,
+  AutomationProcessResult,
+  AutomationTarget,
+  ClassificationAttempt,
+  ClassificationVerdict,
+  ProjectKey,
+  RegisteredProject,
+  SessionReportEvidence,
+  Ticket,
+  WayfinderSession,
+} from '@roadmap/contracts'
 import { isRecord } from '../type-guards.ts'
 import {
   CLASSIFICATION_RESULT_SCHEMA_MARKER,
-  type ClassificationResult,
   classificationResultSchemaJson,
   decodeClassificationResult,
 } from './classification-contract.ts'
@@ -15,44 +26,43 @@ import type { HarnessCommand, RoadmapConfiguration } from './configuration.ts'
 const PROMPT_MARKER = '{{roadmap.prompt}}'
 const STDOUT_LIMIT = 16 * 1024
 const STDERR_LIMIT = 64 * 1024
+const RESTART_UNKNOWN_REASON = 'Roadmap restarted before this attempt recorded a terminal result.'
+const LEGACY_PROCESS_REASON = 'The previous Automation ledger did not record a process result.'
 
-interface AutomationTarget {
-  project: ProjectKey
-  mapId: string
-  ticketId: string
-}
-
-type ClassificationAttempt =
+type LegacyClassificationAttempt =
   | { status: 'attempted' }
-  | { status: ClassificationResult['verdict'] | 'failed'; reason: string }
+  | { status: 'afk' | 'hitl' | 'unable' | 'failed'; reason: string }
 
-type WayfinderAttempt = { status: 'attempted' | 'started' | 'launch-failed' }
+type LegacyWayfinderAttempt = { status: 'attempted' | 'started' | 'launch-failed' }
 
-interface AutomationRecord {
+interface LegacyAutomationRecord {
   target: AutomationTarget
-  classification: ClassificationAttempt
-  wayfinder?: WayfinderAttempt
+  classification: LegacyClassificationAttempt
+  wayfinder?: LegacyWayfinderAttempt
 }
-
-export type AutomationLedgerRecord = AutomationRecord
 
 interface AutomationStore {
-  schemaVersion: 1
-  records: AutomationRecord[]
+  schemaVersion: 2
+  records: AutomationEvidence[]
 }
+
+export type AutomationLedgerRecord = AutomationEvidence
 
 export interface AutomationDocument {
-  load(): Promise<AutomationRecord[]>
-  write(records: readonly AutomationRecord[]): Promise<void>
+  load(): Promise<AutomationEvidence[]>
+  write(records: readonly AutomationEvidence[]): Promise<void>
 }
 
-export interface ClassificationProcessResult {
-  code: number | null
-  signal: NodeJS.Signals | null
-  stdout: string
-  stdoutOversized: boolean
-  launchError?: string
-}
+export type ClassificationProcessResult =
+  | {
+      status: 'finished'
+      code: number | null
+      signal: NodeJS.Signals | null
+      stdout: string
+      stdoutOversized: boolean
+    }
+  | { status: 'launch-failed'; reason: string }
+  | { status: 'outcome-unknown'; reason: string }
 
 export interface ClassificationProcess {
   completed: Promise<ClassificationProcessResult>
@@ -78,6 +88,7 @@ interface AutomationSource {
 
 export interface AutomationLoop {
   start(): Promise<void>
+  evidence(): AutomationEvidence[]
   reconcile(): void
   stop(): Promise<void>
 }
@@ -93,14 +104,15 @@ interface Candidate {
 interface ActiveClassification {
   candidate: Candidate
   process: ClassificationProcess
+  admission: AutomationAdmission
 }
-
 export function createAutomationLoop(options: {
   document: AutomationDocument
   launcher: AutomationLauncher
   source(): AutomationSource
+  onEvidenceChange?(): void
 }): AutomationLoop {
-  let records = new Map<string, AutomationRecord>()
+  let records = new Map<string, AutomationEvidence>()
   let active: ActiveClassification | null = null
   let started = false
   let accepting = true
@@ -113,10 +125,11 @@ export function createAutomationLoop(options: {
     return next
   }
 
-  async function persist(next: Map<string, AutomationRecord>): Promise<boolean> {
+  async function persist(next: Map<string, AutomationEvidence>): Promise<boolean> {
     try {
       await options.document.write([...next.values()])
       records = next
+      options.onEvidenceChange?.()
       return true
     } catch {
       faulted = true
@@ -124,7 +137,7 @@ export function createAutomationLoop(options: {
     }
   }
 
-  async function replace(record: AutomationRecord): Promise<boolean> {
+  async function replace(record: AutomationEvidence): Promise<boolean> {
     const next = new Map(records)
     next.set(targetKey(record.target), record)
     return persist(next)
@@ -144,22 +157,33 @@ export function createAutomationLoop(options: {
   ): Promise<boolean> {
     const record = records.get(targetKey(candidate.target))
     if (!record) {
-      await beginClassification(candidate, configuration.automation.classificationCommand)
+      await beginClassification(
+        candidate,
+        configuration.automation.classificationCommand,
+        'automatic',
+      )
       return false
     }
-    if (record.classification.status !== 'afk' || record.wayfinder) return true
-    await beginDispatch(candidate, record, configuration.automation.wayfinderCommand)
+    if (
+      record.classification.status !== 'completed' ||
+      record.classification.verdict.value !== 'afk' ||
+      record.wayfinder
+    ) {
+      return true
+    }
+    await beginDispatch(candidate, record, configuration.automation.wayfinderCommand, 'automatic')
     return !faulted
   }
 
   async function beginClassification(
     candidate: Candidate,
     command: HarnessCommand | undefined,
+    admission: AutomationAdmission,
   ): Promise<void> {
     if (!command) return
-    const marker: AutomationRecord = {
+    const marker: AutomationEvidence = {
       target: candidate.target,
-      classification: { status: 'attempted' },
+      classification: { status: 'running', admission },
     }
     if (!(await replace(marker)) || !accepting) return
 
@@ -170,7 +194,8 @@ export function createAutomationLoop(options: {
       await replace({
         ...marker,
         classification: {
-          status: 'failed',
+          status: 'launch-failed',
+          admission,
           reason: 'The Classification Harness Command could not be launched.',
         },
       })
@@ -178,18 +203,15 @@ export function createAutomationLoop(options: {
       return
     }
 
-    const launched: ActiveClassification = { candidate, process }
+    const launched: ActiveClassification = { candidate, process, admission }
     active = launched
     void process.completed.then(
       (result) => enqueue(() => finishClassification(launched, result)),
       () =>
         enqueue(() =>
           finishClassification(launched, {
-            code: null,
-            signal: null,
-            stdout: '',
-            stdoutOversized: false,
-            launchError: 'The Classification process result was lost.',
+            status: 'outcome-unknown',
+            reason: 'The Classification process result was lost.',
           }),
         ),
     )
@@ -203,21 +225,24 @@ export function createAutomationLoop(options: {
     active = null
     if (!accepting) return
 
-    const record: AutomationRecord = {
+    const classification = classificationResult(result, launched.admission)
+    const record: AutomationEvidence = {
       target: launched.candidate.target,
-      classification: classificationResult(result),
+      classification,
     }
     if (!(await replace(record))) return
 
     const source = options.source()
     if (
-      record.classification.status === 'afk' &&
+      classification.status === 'completed' &&
+      classification.verdict.value === 'afk' &&
       isEffectivelyEnabled(source.configuration, launched.candidate.target.project)
     ) {
       await beginDispatch(
         launched.candidate,
         record,
         source.configuration.automation.wayfinderCommand,
+        'automatic',
       )
     }
     await reconcileNow()
@@ -225,18 +250,29 @@ export function createAutomationLoop(options: {
 
   async function beginDispatch(
     candidate: Candidate,
-    record: AutomationRecord,
+    record: AutomationEvidence,
     command: HarnessCommand | undefined,
+    admission: AutomationAdmission,
   ): Promise<void> {
     if (!command || record.wayfinder) return
-    const marker: AutomationRecord = { ...record, wayfinder: { status: 'attempted' } }
+    const marker: AutomationEvidence = {
+      ...record,
+      wayfinder: { status: 'launching', admission },
+    }
     if (!(await replace(marker)) || !accepting) return
 
     try {
       await options.launcher.dispatch(launchRequest(candidate, command, 'wayfinder'))
-      await replace({ ...marker, wayfinder: { status: 'started' } })
+      await replace({ ...marker, wayfinder: { status: 'running', admission } })
     } catch {
-      await replace({ ...marker, wayfinder: { status: 'launch-failed' } })
+      await replace({
+        ...marker,
+        wayfinder: {
+          status: 'launch-failed',
+          admission,
+          reason: 'The Wayfinder Session Command could not be launched.',
+        },
+      })
     }
   }
 
@@ -244,10 +280,19 @@ export function createAutomationLoop(options: {
     async start() {
       if (started) return
       const loaded = await options.document.load()
-      records = new Map(loaded.map((record) => [targetKey(record.target), record]))
+      const recovered = loaded.map(recoverAfterRestart)
+      const next = new Map(recovered.map((record) => [targetKey(record.target), record]))
+      const changed = recovered.some((record, index) => record !== loaded[index])
+      if (changed) {
+        if (!(await persist(next))) return
+      } else {
+        records = next
+        options.onEvidenceChange?.()
+      }
       started = true
       await enqueue(reconcileNow)
     },
+    evidence: () => [...records.values()],
     reconcile() {
       if (!started || !accepting) return
       void enqueue(reconcileNow)
@@ -332,24 +377,58 @@ function renderPrompt(promptTemplate: string, candidate: Candidate): string {
     .replaceAll(CLASSIFICATION_RESULT_SCHEMA_MARKER, () => classificationResultSchemaJson)
 }
 
-function classificationResult(result: ClassificationProcessResult): ClassificationAttempt {
-  if (result.launchError) return { status: 'failed', reason: result.launchError }
+function classificationResult(
+  result: ClassificationProcessResult,
+  admission: AutomationAdmission,
+): ClassificationAttempt {
+  if (result.status === 'launch-failed') {
+    return { status: 'launch-failed', admission, reason: result.reason }
+  }
+  if (result.status === 'outcome-unknown') {
+    return { status: 'outcome-unknown', admission, reason: result.reason }
+  }
+  const processResult = observedProcessResult(result)
   if (result.signal || result.code !== 0) {
     const detail = result.signal
       ? `signal ${result.signal}`
       : `exit code ${result.code ?? 'unknown'}`
-    return { status: 'failed', reason: `Classification process failed with ${detail}.` }
+    return {
+      status: 'failed',
+      admission,
+      processResult,
+      reason: `Classification process failed with ${detail}.`,
+    }
   }
   if (result.stdoutOversized) {
-    return { status: 'failed', reason: `Classification stdout exceeded ${STDOUT_LIMIT} bytes.` }
+    return {
+      status: 'failed',
+      admission,
+      processResult,
+      reason: `Classification stdout exceeded ${STDOUT_LIMIT} bytes.`,
+    }
   }
   const decoded = decodeClassificationResult(result.stdout)
   return decoded
-    ? { status: decoded.verdict, reason: decoded.reason }
+    ? {
+        status: 'completed',
+        admission,
+        processResult,
+        verdict: { value: decoded.verdict, reason: decoded.reason },
+      }
     : {
         status: 'failed',
+        admission,
+        processResult,
         reason: 'Classification stdout did not match the current result contract.',
       }
+}
+
+function observedProcessResult(
+  result: Extract<ClassificationProcessResult, { status: 'finished' }>,
+): AutomationProcessResult {
+  if (result.signal) return { status: 'signaled', signal: result.signal }
+  if (result.code !== null) return { status: 'exited', code: result.code }
+  return { status: 'unavailable', reason: 'The Classification process result was lost.' }
 }
 
 export function createAutomationDocument(path: string): AutomationDocument {
@@ -368,41 +447,75 @@ export function createAutomationDocument(path: string): AutomationDocument {
       } catch {
         throw new Error('The Automation ledger contains invalid JSON.')
       }
-      return decodeStore(input)
+      const decoded = decodeStore(input)
+      if (decoded.migrated) await writeAutomationStore(path, decoded.records)
+      return decoded.records
     },
-    async write(records) {
-      const store: AutomationStore = { schemaVersion: 1, records: [...records] }
-      await atomicWrite(path, `${JSON.stringify(store, null, 2)}\n`)
+    write(records) {
+      return writeAutomationStore(path, records)
     },
   }
 }
 
-function decodeStore(input: unknown): AutomationRecord[] {
+async function writeAutomationStore(
+  path: string,
+  records: readonly AutomationEvidence[],
+): Promise<void> {
+  const store: AutomationStore = { schemaVersion: 2, records: [...records] }
+  await atomicWrite(path, `${JSON.stringify(store, null, 2)}\n`)
+}
+
+function decodeStore(input: unknown): { records: AutomationEvidence[]; migrated: boolean } {
   if (
     !isRecord(input) ||
     !exactKeys(input, ['schemaVersion', 'records']) ||
-    input.schemaVersion !== 1 ||
     !Array.isArray(input.records)
   ) {
     throw new Error('The Automation ledger has an unsupported shape.')
   }
-  const records = input.records.map(decodeRecord)
+  const migrated = input.schemaVersion === 1
+  if (!migrated && input.schemaVersion !== 2) {
+    throw new Error('The Automation ledger has an unsupported shape.')
+  }
+  const records = migrated
+    ? input.records.map((record) => migrateLegacyRecord(decodeLegacyRecord(record)))
+    : input.records.map(decodeRecord)
   const targets = new Set<string>()
   for (const record of records) {
     const key = targetKey(record.target)
     if (targets.has(key)) throw new Error('The Automation ledger repeats a ticket identity.')
     targets.add(key)
   }
-  return records
+  return { records, migrated }
 }
 
-function decodeRecord(input: unknown): AutomationRecord {
+function decodeRecord(input: unknown): AutomationEvidence {
   if (!isRecord(input) || !exactKeys(input, ['target', 'classification', 'wayfinder'])) {
     throw new Error('An Automation record has an unsupported shape.')
   }
   const classification = decodeClassificationAttempt(input.classification)
   const wayfinder =
-    input.wayfinder === undefined ? undefined : decodeWayfinderAttempt(input.wayfinder)
+    input.wayfinder === undefined ? undefined : decodeWayfinderSession(input.wayfinder)
+  if (
+    wayfinder &&
+    (classification.status !== 'completed' || classification.verdict.value !== 'afk')
+  ) {
+    throw new Error('An Automation Wayfinder Session requires an AFK Classification Verdict.')
+  }
+  return {
+    target: decodeTarget(input.target),
+    classification,
+    ...(wayfinder ? { wayfinder } : {}),
+  }
+}
+
+function decodeLegacyRecord(input: unknown): LegacyAutomationRecord {
+  if (!isRecord(input) || !exactKeys(input, ['target', 'classification', 'wayfinder'])) {
+    throw new Error('An Automation record has an unsupported shape.')
+  }
+  const classification = decodeLegacyClassificationAttempt(input.classification)
+  const wayfinder =
+    input.wayfinder === undefined ? undefined : decodeLegacyWayfinderAttempt(input.wayfinder)
   if (wayfinder && classification.status !== 'afk') {
     throw new Error('An Automation Wayfinder attempt requires an AFK classification.')
   }
@@ -436,6 +549,145 @@ function decodeProjectKey(input: unknown): ProjectKey {
 
 function decodeClassificationAttempt(input: unknown): ClassificationAttempt {
   if (!isRecord(input) || typeof input.status !== 'string') {
+    throw new Error('An Automation Classification attempt is invalid.')
+  }
+  const admission = decodeAdmission(input.admission)
+  if (input.status === 'running' && exactKeys(input, ['status', 'admission'])) {
+    return { status: 'running', admission }
+  }
+  if (
+    input.status === 'completed' &&
+    exactKeys(input, ['status', 'admission', 'processResult', 'verdict'])
+  ) {
+    return {
+      status: 'completed',
+      admission,
+      processResult: decodeProcessResult(input.processResult),
+      verdict: decodeClassificationVerdict(input.verdict),
+    }
+  }
+  if (
+    input.status === 'failed' &&
+    exactKeys(input, ['status', 'admission', 'processResult', 'reason'])
+  ) {
+    return {
+      status: 'failed',
+      admission,
+      processResult: decodeProcessResult(input.processResult),
+      reason: limitedReason(input.reason),
+    }
+  }
+  if (
+    (input.status === 'launch-failed' || input.status === 'outcome-unknown') &&
+    exactKeys(input, ['status', 'admission', 'reason'])
+  ) {
+    return { status: input.status, admission, reason: limitedReason(input.reason) }
+  }
+  throw new Error('An Automation Classification attempt is invalid.')
+}
+
+function decodeWayfinderSession(input: unknown): WayfinderSession {
+  if (!isRecord(input) || typeof input.status !== 'string') {
+    throw new Error('An Automation Wayfinder Session is invalid.')
+  }
+  const admission = decodeAdmission(input.admission)
+  if (
+    (input.status === 'launching' || input.status === 'running') &&
+    exactKeys(input, ['status', 'admission'])
+  ) {
+    return { status: input.status, admission }
+  }
+  if (
+    input.status === 'finished' &&
+    exactKeys(input, ['status', 'admission', 'processResult', 'report'])
+  ) {
+    return {
+      status: 'finished',
+      admission,
+      processResult: decodeProcessResult(input.processResult),
+      report: decodeSessionReportEvidence(input.report),
+    }
+  }
+  if (
+    (input.status === 'launch-failed' || input.status === 'outcome-unknown') &&
+    exactKeys(input, ['status', 'admission', 'reason'])
+  ) {
+    return { status: input.status, admission, reason: limitedReason(input.reason) }
+  }
+  throw new Error('An Automation Wayfinder Session is invalid.')
+}
+
+function decodeAdmission(input: unknown): AutomationAdmission {
+  if (input !== 'automatic' && input !== 'override') {
+    throw new Error('An Automation admission is invalid.')
+  }
+  return input
+}
+
+function decodeProcessResult(input: unknown): AutomationProcessResult {
+  if (!isRecord(input) || typeof input.status !== 'string') {
+    throw new Error('An Automation process result is invalid.')
+  }
+  if (
+    input.status === 'exited' &&
+    exactKeys(input, ['status', 'code']) &&
+    typeof input.code === 'number' &&
+    Number.isSafeInteger(input.code) &&
+    input.code >= 0
+  ) {
+    return { status: 'exited', code: input.code }
+  }
+  if (input.status === 'signaled' && exactKeys(input, ['status', 'signal'])) {
+    return { status: 'signaled', signal: requiredString(input.signal) }
+  }
+  if (input.status === 'unavailable' && exactKeys(input, ['status', 'reason'])) {
+    return { status: 'unavailable', reason: limitedReason(input.reason) }
+  }
+  throw new Error('An Automation process result is invalid.')
+}
+
+function decodeClassificationVerdict(input: unknown): ClassificationVerdict {
+  if (
+    !isRecord(input) ||
+    !exactKeys(input, ['value', 'reason']) ||
+    (input.value !== 'afk' && input.value !== 'hitl' && input.value !== 'unable')
+  ) {
+    throw new Error('An Automation Classification Verdict is invalid.')
+  }
+  return { value: input.value, reason: limitedReason(input.reason) }
+}
+
+function decodeSessionReportEvidence(input: unknown): SessionReportEvidence {
+  if (!isRecord(input) || typeof input.status !== 'string') {
+    throw new Error('Automation Session report evidence is invalid.')
+  }
+  if (input.status === 'received' && exactKeys(input, ['status', 'report'])) {
+    const report = input.report
+    if (
+      !isRecord(report) ||
+      !exactKeys(report, ['outcome', 'reason']) ||
+      (report.outcome !== 'completed' &&
+        report.outcome !== 'stopped' &&
+        report.outcome !== 'failed')
+    ) {
+      throw new Error('An Automation Session report is invalid.')
+    }
+    return {
+      status: 'received',
+      report: { outcome: report.outcome, reason: limitedReason(report.reason) },
+    }
+  }
+  if (
+    (input.status === 'missing' || input.status === 'invalid') &&
+    exactKeys(input, ['status', 'reason'])
+  ) {
+    return { status: input.status, reason: limitedReason(input.reason) }
+  }
+  throw new Error('Automation Session report evidence is invalid.')
+}
+
+function decodeLegacyClassificationAttempt(input: unknown): LegacyClassificationAttempt {
+  if (!isRecord(input) || typeof input.status !== 'string') {
     throw new Error('An Automation classification attempt is invalid.')
   }
   if (input.status === 'attempted' && exactKeys(input, ['status'])) return { status: 'attempted' }
@@ -451,7 +703,7 @@ function decodeClassificationAttempt(input: unknown): ClassificationAttempt {
   throw new Error('An Automation classification attempt is invalid.')
 }
 
-function decodeWayfinderAttempt(input: unknown): WayfinderAttempt {
+function decodeLegacyWayfinderAttempt(input: unknown): LegacyWayfinderAttempt {
   if (
     !isRecord(input) ||
     !exactKeys(input, ['status']) ||
@@ -460,6 +712,67 @@ function decodeWayfinderAttempt(input: unknown): WayfinderAttempt {
     throw new Error('An Automation Wayfinder attempt is invalid.')
   }
   return { status: input.status }
+}
+
+function migrateLegacyRecord(record: LegacyAutomationRecord): AutomationEvidence {
+  const classification = migrateLegacyClassification(record.classification)
+  return {
+    target: record.target,
+    classification,
+    ...(record.wayfinder ? { wayfinder: migrateLegacyWayfinder(record.wayfinder) } : {}),
+  }
+}
+
+function migrateLegacyClassification(input: LegacyClassificationAttempt): ClassificationAttempt {
+  if (input.status === 'attempted') {
+    return { status: 'outcome-unknown', admission: 'automatic', reason: RESTART_UNKNOWN_REASON }
+  }
+  if (input.status === 'failed') {
+    return {
+      status: 'failed',
+      admission: 'automatic',
+      processResult: { status: 'unavailable', reason: LEGACY_PROCESS_REASON },
+      reason: input.reason,
+    }
+  }
+  return {
+    status: 'completed',
+    admission: 'automatic',
+    processResult: { status: 'exited', code: 0 },
+    verdict: { value: input.status, reason: input.reason },
+  }
+}
+
+function migrateLegacyWayfinder(input: LegacyWayfinderAttempt): WayfinderSession {
+  if (input.status === 'launch-failed') {
+    return {
+      status: 'launch-failed',
+      admission: 'automatic',
+      reason: 'The previous ledger recorded that the Wayfinder Session failed to launch.',
+    }
+  }
+  return { status: 'outcome-unknown', admission: 'automatic', reason: RESTART_UNKNOWN_REASON }
+}
+
+function recoverAfterRestart(record: AutomationEvidence): AutomationEvidence {
+  const classification =
+    record.classification.status === 'running'
+      ? {
+          status: 'outcome-unknown' as const,
+          admission: record.classification.admission,
+          reason: RESTART_UNKNOWN_REASON,
+        }
+      : record.classification
+  const wayfinder =
+    record.wayfinder?.status === 'launching' || record.wayfinder?.status === 'running'
+      ? {
+          status: 'outcome-unknown' as const,
+          admission: record.wayfinder.admission,
+          reason: RESTART_UNKNOWN_REASON,
+        }
+      : record.wayfinder
+  if (classification === record.classification && wayfinder === record.wayfinder) return record
+  return { target: record.target, classification, ...(wayfinder ? { wayfinder } : {}) }
 }
 
 function limitedReason(input: unknown): string {
@@ -477,7 +790,7 @@ export function createAutomationLauncher(
       const child = spawnCommand(request, ['pipe', 'pipe'])
       const stdout = boundedCapture(child.stdout, STDOUT_LIMIT, false)
       boundedCapture(child.stderr, STDERR_LIMIT, true)
-      let launchError: string | undefined
+      let launchError: string | null = null
       let closed = false
       const { promise: completed, resolve } = Promise.withResolvers<ClassificationProcessResult>()
       child.once('error', (error) => {
@@ -485,13 +798,17 @@ export function createAutomationLauncher(
       })
       child.once('close', (code, signal) => {
         closed = true
-        resolve({
-          code,
-          signal,
-          stdout: stdout.text(),
-          stdoutOversized: stdout.truncated(),
-          ...(launchError ? { launchError } : {}),
-        })
+        resolve(
+          launchError
+            ? { status: 'launch-failed', reason: launchError }
+            : {
+                status: 'finished',
+                code,
+                signal,
+                stdout: stdout.text(),
+                stdoutOversized: stdout.truncated(),
+              },
+        )
       })
       deliverStdin(child, request)
       return {

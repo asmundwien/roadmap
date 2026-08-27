@@ -32,7 +32,12 @@ function state(stateSequence: number, serverEpoch = 'epoch-a'): ApplicationState
     projects: [],
     authorizationOperations: [],
     configuration: { valid: true, issues: [], notices: [] },
-    automation: { enabled: false, enabledProjects: [], availability: { status: 'ready' } },
+    automation: {
+      enabled: false,
+      enabledProjects: [],
+      availability: { status: 'ready' },
+      evidence: [],
+    },
     roadmap: { capturedAt: stateSequence * 1000, projects: [], unreachable: [] },
   }
 }

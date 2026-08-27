@@ -342,6 +342,7 @@ describe('RoadmapApplication', () => {
       enabled: false,
       enabledProjects: [],
       availability: { status: 'ready' },
+      evidence: [],
     })
     const projectOn = await application.execute({
       type: 'set-project-automation-enabled',

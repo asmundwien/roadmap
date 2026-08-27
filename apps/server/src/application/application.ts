@@ -189,6 +189,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
         document: options.automation.document,
         launcher: options.automation.launcher,
         source: () => ({ configuration, projects: registeredProjects() }),
+        onEvidenceChange: publish,
       })
     : null
   let stateSequence = 0
@@ -232,6 +233,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       enabled: configuration.automation.enabled,
       enabledProjects: [...configuration.automation.enabledProjects],
       availability: automationAvailability(),
+      evidence: automationLoop?.evidence() ?? [],
     }
   }
 
@@ -1235,6 +1237,7 @@ function semanticFingerprint(state: ApplicationState): string {
     projects: state.projects,
     authorizationOperations: state.authorizationOperations,
     configuration: state.configuration,
+    automation: state.automation,
     roadmap: { projects: state.roadmap.projects, unreachable: state.roadmap.unreachable },
   })
 }

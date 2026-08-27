@@ -20,7 +20,12 @@ function state(): ApplicationState {
     projects: [],
     authorizationOperations: [],
     configuration: { valid: true, issues: [], notices: [] },
-    automation: { enabled: false, enabledProjects: [], availability: { status: 'ready' } },
+    automation: {
+      enabled: false,
+      enabledProjects: [],
+      availability: { status: 'ready' },
+      evidence: [],
+    },
     roadmap: { capturedAt: 1, projects: [], unreachable: [] },
   }
 }

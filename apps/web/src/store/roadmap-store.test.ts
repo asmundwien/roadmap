@@ -51,7 +51,12 @@ function state(
     projects: [],
     authorizationOperations: [],
     configuration: { valid: true, issues: [], notices: [] },
-    automation: { enabled: false, enabledProjects: [], availability: { status: 'ready' } },
+    automation: {
+      enabled: false,
+      enabledProjects: [],
+      availability: { status: 'ready' },
+      evidence: [],
+    },
     roadmap: { capturedAt: stateSequence * 1000, projects, unreachable: [] },
   }
 }
@@ -140,6 +145,75 @@ describe('createRoadmapStore', () => {
     socket?.emit('message', wire(state(0, 'epoch-b', [project('restart-b')])))
     socket?.emit('message', wire(state(9, 'epoch-a', [project('late-a')])))
     expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe('restart-b')
+  })
+
+  it('accepts independently observable Automation evidence', () => {
+    const { store, sockets } = harness()
+    store.start()
+    const next = state(1)
+    next.automation.evidence = [
+      {
+        target: {
+          project: { integration: 'github', id: 'asmundwien/roadmap' },
+          mapId: '81',
+          ticketId: '82',
+        },
+        classification: {
+          status: 'completed',
+          admission: 'override',
+          processResult: { status: 'exited', code: 0 },
+          verdict: { value: 'afk', reason: 'Ready.' },
+        },
+        wayfinder: {
+          status: 'finished',
+          admission: 'automatic',
+          processResult: { status: 'signaled', signal: 'SIGTERM' },
+          report: {
+            status: 'received',
+            report: { outcome: 'completed', reason: 'Ticket resolved.' },
+          },
+        },
+      },
+    ]
+
+    sockets[0]?.emit('message', wire(next))
+
+    expect(store.getSnapshot().state?.automation.evidence).toEqual(next.automation.evidence)
+  })
+
+  it('rejects contradictory fields in Automation evidence', () => {
+    const { store, sockets } = harness()
+    store.start()
+    sockets[0]?.emit('message', wire(state(1)))
+    const invalid = state(2)
+    sockets[0]?.emit(
+      'message',
+      JSON.stringify({
+        type: 'state',
+        state: {
+          ...invalid,
+          automation: {
+            ...invalid.automation,
+            evidence: [
+              {
+                target: {
+                  project: { integration: 'local', id: 'invalid' },
+                  mapId: 'map',
+                  ticketId: 'ticket',
+                },
+                classification: {
+                  status: 'running',
+                  admission: 'automatic',
+                  verdict: { value: 'afk', reason: 'Impossible while running.' },
+                },
+              },
+            ],
+          },
+        },
+      }),
+    )
+
+    expect(store.getSnapshot().state?.stateSequence).toBe(1)
   })
 
   it('rejects malformed state deeply and retains the last valid state', () => {

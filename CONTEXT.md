@@ -58,6 +58,12 @@ that stage without global or Project enablement, but later automatic stages stil
 Eligibility, verdict, and one-shot rules remain unchanged.
 _Avoid_: manual flow, forced run
 
+**Automation admission**:
+The reason a Classification Run or Wayfinder Session was allowed: either effective global and
+Project enablement (`automatic`) or a human's one-stage Automation override (`override`). Each
+stage records its own admission; a Classification override does not admit its later handoff.
+_Avoid_: trigger source, execution mode
+
 **Automation opportunity**:
 One Project, map, and ticket identity that Roadmap may classify once and, after an AFK result, hand
 to one Wayfinder Session once. Edits and frontier re-entry do not create a new opportunity.
@@ -84,6 +90,12 @@ The Wayfinder Session's structured terminal claim: completed, stopped, or failed
 Process exit and tracker state remain independent facts; Roadmap derives no combined outcome from
 them.
 _Avoid_: exit status, tracker result, mismatch
+**Process result**:
+The durable observation that an Automation-owned process exited with a code or ended by signal.
+Legacy evidence that never recorded this fact says unavailable rather than inventing one. It does
+not interpret the Session report or tracker state.
+_Avoid_: outcome, success, Session status
+
 
 **Automation status effect**:
 A compact, durable mark added to a ticket node when Automation evidence exists. It leaves the
