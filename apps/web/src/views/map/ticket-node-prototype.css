@@ -1,16 +1,15 @@
-/* PROTOTYPE — ticket-node language only. Delete from main after human review. */
+/* PROTOTYPE — angular ticket-node language only. Delete from main after human review. */
 
 .node-prototype-switcher {
   position: fixed;
-  z-index: 20;
+  z-index: 40;
   left: 50%;
   bottom: var(--sp-4);
   display: grid;
-  grid-template-columns: auto 2.25rem minmax(12rem, auto) 2.25rem;
-  align-items: center;
+  grid-template-columns: auto 2.25rem minmax(12rem, auto) 2.25rem auto;
+  align-items: stretch;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--fg) 35%, var(--edge));
-  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--fg) 40%, var(--edge));
   background: color-mix(in srgb, var(--bg) 94%, var(--fg));
   box-shadow: 0 8px 28px color-mix(in srgb, var(--fg) 18%, transparent);
   color: var(--fg);
@@ -18,6 +17,8 @@
 }
 
 .node-prototype-kicker {
+  display: grid;
+  place-items: center;
   padding: 0 var(--sp-3) 0 var(--sp-4);
   border-right: 1px solid var(--edge);
   color: var(--muted);
@@ -28,22 +29,32 @@
 }
 
 .node-prototype-switcher button {
-  align-self: stretch;
+  min-height: 2.5rem;
+  padding: 0 var(--sp-3);
   border: 0;
+  border-left: 1px solid var(--edge);
   background: transparent;
   color: var(--fg);
   font: inherit;
+  font-size: 0.75rem;
   cursor: pointer;
 }
 
+.node-prototype-switcher button:first-of-type {
+  border-left: 0;
+}
+
 .node-prototype-switcher button:hover,
-.node-prototype-switcher button:focus-visible {
+.node-prototype-switcher button:focus-visible,
+.node-prototype-switcher button.is-active {
   outline: none;
   background: var(--wash);
   box-shadow: inset 0 0 0 2px var(--ring);
 }
 
 .node-prototype-switcher strong {
+  display: grid;
+  place-items: center;
   padding: 0.55rem var(--sp-3);
   border-right: 1px solid var(--edge);
   border-left: 1px solid var(--edge);
@@ -51,194 +62,370 @@
   text-align: center;
 }
 
-.node-prototype {
+.angular-node {
   --node-type: var(--muted);
   --node-state: var(--state-closed);
-  --effect-classification: #7656c9;
-  --effect-wayfinder: #087f8c;
+  --classification: #7656c9;
+  --wayfinder: #087f8c;
+  --effect: var(--classification);
   pointer-events: none;
 }
 
-.node-prototype.is-research {
+.angular-node.type-research {
   --node-type: var(--type-research);
 }
 
-.node-prototype.is-prototype {
+.angular-node.type-prototype {
   --node-type: var(--type-prototype);
 }
 
-.node-prototype.is-grilling {
+.angular-node.type-grilling {
   --node-type: var(--type-grilling);
 }
 
-.node-prototype.is-task {
+.angular-node.type-task {
   --node-type: var(--type-task);
 }
 
-.node-prototype.state-frontier {
+.angular-node.state-frontier {
   --node-state: var(--state-frontier);
 }
 
-.node-prototype.state-claimed {
+.angular-node.state-claimed {
   --node-state: var(--state-claimed);
 }
 
-.node-prototype.state-blocked {
+.angular-node.state-blocked {
   --node-state: var(--state-blocked);
 }
 
-.node-prototype .state-frame {
-  fill: var(--bg);
-  stroke-width: 2.25px;
+.node-field path {
+  fill: color-mix(in srgb, var(--classification) 9%, transparent);
+  stroke: color-mix(in srgb, var(--classification) 26%, transparent);
+  stroke-width: 1px;
 }
 
-.node-prototype .state-frame.is-blocked {
-  stroke-dasharray: 2.5 2.5;
+.node-field.is-wayfinder path {
+  fill: color-mix(in srgb, var(--wayfinder) 10%, transparent);
+  stroke: color-mix(in srgb, var(--wayfinder) 28%, transparent);
 }
 
-.node-prototype .state-frame.is-closed {
-  stroke: var(--bg);
+.node-field.is-active path {
+  stroke-dasharray: 2 2;
+  animation: angular-field-pulse 1.4s ease-in-out infinite;
+}
+
+.node-field.is-human path {
+  fill: color-mix(in srgb, var(--classification) 14%, transparent);
+  stroke-dasharray: 4 2;
+}
+
+.node-field.is-warning path {
+  fill: color-mix(in srgb, var(--type-prototype) 13%, transparent);
+  stroke: color-mix(in srgb, var(--type-prototype) 45%, transparent);
+}
+
+.node-field.is-failure path {
+  fill: color-mix(in srgb, var(--state-blocked) 13%, transparent);
+  stroke: color-mix(in srgb, var(--state-blocked) 45%, transparent);
+}
+
+.node-field.is-unknown path {
+  fill: color-mix(in srgb, var(--muted) 8%, transparent);
+  stroke: color-mix(in srgb, var(--muted) 40%, transparent);
+  stroke-dasharray: 1 3;
+}
+
+.main-diamond .diamond-face {
+  fill: color-mix(in srgb, var(--node-state) 13%, var(--bg));
+  stroke: var(--node-state);
   stroke-width: 2px;
+  stroke-linejoin: miter;
 }
 
-.node-prototype .state-halo {
-  fill-opacity: 0.14;
+.angular-node.state-frontier .diamond-face {
+  fill: var(--node-state);
 }
 
-.node-prototype .type-core {
-  fill: color-mix(in srgb, var(--node-type) 24%, var(--bg));
-  stroke: var(--node-type);
-  stroke-width: 1.35px;
-}
-
-.node-prototype .type-core-glyph,
-.node-prototype .type-tab-glyph,
-.node-prototype .aura-type-glyph {
-  fill: var(--node-type);
-  font-size: 7px;
-  font-weight: 800;
-}
-
-.node-prototype .automation-effect {
-  --effect-color: var(--effect-classification);
-}
-
-.node-prototype .automation-effect.is-wayfinder {
-  --effect-color: var(--effect-wayfinder);
-}
-
-.node-prototype .effect-token {
-  fill: color-mix(in srgb, var(--effect-color) 18%, var(--bg));
-  stroke: var(--effect-color);
-  stroke-width: 1.35px;
-}
-
-.node-prototype .effect-glyph {
-  fill: var(--effect-color);
-  font-size: 7px;
-  font-weight: 800;
-}
-
-.node-prototype .effect-stage {
+.angular-node.state-claimed .diamond-face {
   fill: var(--bg);
+}
+
+.angular-node.state-closed .diamond-face {
+  fill: var(--fg);
+  stroke: var(--fg);
+}
+
+.main-diamond .frontier-field {
+  fill: color-mix(in srgb, var(--state-frontier) 12%, transparent);
+}
+
+.main-diamond .claimed-half {
+  fill: var(--state-claimed);
+}
+
+.main-diamond .blocked-corner {
+  fill: var(--state-blocked);
+}
+
+.main-diamond .claimed-corner {
+  fill: var(--state-claimed);
+}
+
+.main-diamond .type-rune {
+  fill: var(--node-type);
   paint-order: stroke;
-  stroke: var(--effect-color);
-  stroke-width: 3px;
-  font-size: 4.5px;
+  stroke: var(--bg);
+  stroke-width: 2.75px;
+  font-size: 7px;
   font-weight: 900;
 }
 
-.node-prototype .automation-effect.is-active .effect-token,
-.node-prototype .automation-effect.is-active .effect-aura {
-  animation: prototype-effect-pulse 1.4s ease-in-out infinite;
+.angular-node.state-frontier .type-rune,
+.angular-node.state-closed .type-rune {
+  fill: var(--bg);
+  stroke: color-mix(in srgb, var(--node-state) 82%, var(--fg));
 }
 
-.node-prototype .automation-effect.is-human .effect-token,
-.node-prototype .automation-effect.is-human .effect-aura {
-  stroke-dasharray: 2 1.5;
+.main-diamond .type-corners path {
+  fill: none;
+  stroke: var(--node-type);
+  stroke-width: 1.4px;
+  stroke-linecap: square;
 }
 
-.node-prototype .automation-effect.is-warning .effect-token,
-.node-prototype .automation-effect.is-warning .effect-aura {
-  stroke-width: 2px;
+.angular-node.state-frontier .type-corners path,
+.angular-node.state-closed .type-corners path {
+  stroke: var(--bg);
+}
+
+.status-diamond {
+  --effect: var(--classification);
+}
+
+.status-diamond.is-wayfinder {
+  --effect: var(--wayfinder);
+}
+
+.status-diamond .status-face {
+  fill: color-mix(in srgb, var(--effect) 16%, var(--bg));
+  stroke: var(--effect);
+  stroke-width: 1.4px;
+  stroke-linejoin: miter;
+}
+
+.status-diamond.is-active .status-face {
+  stroke-dasharray: 2 1;
+  animation: angular-effect-pulse 1.4s ease-in-out infinite;
+}
+
+.status-diamond.is-human .status-face {
+  fill: color-mix(in srgb, var(--effect) 25%, var(--bg));
   stroke-dasharray: 3 1.5;
 }
 
-.node-prototype .automation-effect.is-failure .effect-token,
-.node-prototype .automation-effect.is-failure .effect-aura {
-  fill: color-mix(in srgb, var(--effect-color) 35%, var(--bg));
-  stroke-width: 2.25px;
+.status-diamond.is-warning .status-face {
+  stroke-width: 2px;
+  stroke-dasharray: 3 1;
 }
 
-.node-prototype .automation-effect.is-unknown .effect-token,
-.node-prototype .automation-effect.is-unknown .effect-aura {
+.status-diamond.is-failure .status-face {
+  fill: color-mix(in srgb, var(--effect) 34%, var(--bg));
+  stroke-width: 2.2px;
+}
+
+.status-diamond.is-unknown .status-face {
   opacity: 0.65;
-  stroke-dasharray: 1.5 2.5;
+  stroke-dasharray: 1 2;
 }
 
-/* Variant A: type is the character core, tracker state is the outer frame, effects orbit it. */
-.node-prototype.is-orbit .type-core-glyph {
-  fill: color-mix(in srgb, var(--node-type) 88%, var(--fg));
+.status-diamond .override-corner {
+  fill: var(--goal);
 }
 
-/* Variant B: preserve the tracker marker untouched; type and effects occupy equipment slots. */
-.node-prototype.is-loadout .type-tab {
-  fill: color-mix(in srgb, var(--node-type) 22%, var(--bg));
-  stroke: var(--node-type);
-  stroke-width: 1.2px;
-}
-
-.node-prototype.is-loadout .effect-stage {
-  transform: translate(-1px, 1px);
-}
-
-/* Variant C: stage rings behave like game auras/cooldowns; type is a centre rune plus notches. */
-.node-prototype.is-aura .automation-effect .effect-aura {
-  fill: none;
-  stroke: var(--effect-color);
-  stroke-width: 2.25px;
-  stroke-dasharray: 62 38;
-  stroke-linecap: round;
-}
-
-.node-prototype.is-aura .effect-aura-glyph {
-  fill: var(--bg);
-  paint-order: stroke;
-  stroke: var(--effect-color);
-  stroke-width: 3px;
-  font-size: 5px;
+.status-diamond .status-glyph {
+  fill: var(--effect);
+  font-size: 7px;
   font-weight: 900;
 }
 
-.node-prototype.is-aura .aura-type-glyph {
+.status-diamond .status-stage {
   fill: var(--bg);
   paint-order: stroke;
-  stroke: color-mix(in srgb, var(--node-type) 75%, var(--fg));
-  stroke-width: 2.5px;
+  stroke: var(--effect);
+  stroke-width: 3px;
+  font-size: 4px;
+  font-weight: 900;
 }
 
-.node-prototype.is-aura .type-notches line {
-  stroke: var(--node-type);
-  stroke-width: 1.4px;
-  stroke-linecap: round;
+/* The field variant spends the background tint on Classification and only draws Wayfinder. */
+.angular-node.is-field .node-field path {
+  stroke-width: 1.25px;
 }
 
-@keyframes prototype-effect-pulse {
+/* ---------------------------------------------------------------- state matrix */
+
+.node-state-matrix {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  overflow: auto;
+  padding: var(--sp-6) max(var(--sp-6), calc((100vw - 74rem) / 2)) 6rem;
+  background: color-mix(in srgb, var(--bg) 98%, var(--fg));
+  color: var(--fg);
+}
+
+.node-state-matrix > header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  padding-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--edge);
+}
+
+.node-state-matrix > header p {
+  margin: 0 0 var(--sp-1);
+  color: var(--goal);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.node-state-matrix h2,
+.node-state-matrix h3 {
+  margin: 0;
+}
+
+.node-state-matrix h2 {
+  font-size: 1.5rem;
+}
+
+.node-state-matrix h3 {
+  font-size: 0.9rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.node-state-matrix > header button {
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--edge);
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.matrix-section {
+  padding: var(--sp-6) 0;
+  border-bottom: 1px solid var(--edge);
+}
+
+.node-state-matrix .matrix-section > p {
+  margin: var(--sp-1) 0 var(--sp-4);
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.type-state-matrix {
+  display: grid;
+  grid-template-columns: 8rem repeat(4, minmax(7rem, 1fr));
+  border-top: 1px solid var(--edge);
+  border-left: 1px solid var(--edge);
+}
+
+.type-state-matrix > * {
+  display: grid;
+  place-items: center;
+  min-height: 3.5rem;
+  border-right: 1px solid var(--edge);
+  border-bottom: 1px solid var(--edge);
+}
+
+.type-state-matrix > strong {
+  padding: var(--sp-2);
+  color: var(--muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.matrix-node {
+  width: 100%;
+  min-width: 5.5rem;
+}
+
+.matrix-node svg {
+  display: block;
+  width: 100%;
+  height: 3rem;
+  overflow: visible;
+}
+
+.automation-matrix {
+  border-top: 1px solid var(--edge);
+  border-left: 1px solid var(--edge);
+}
+
+.matrix-head,
+.matrix-row {
+  display: grid;
+  grid-template-columns: 1.25fr 0.8fr 1.5fr 1.5fr 7rem;
+}
+
+.matrix-head > *,
+.matrix-row > * {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 3.25rem;
+  padding: var(--sp-2) var(--sp-3);
+  border-right: 1px solid var(--edge);
+  border-bottom: 1px solid var(--edge);
+}
+
+.matrix-head strong {
+  min-height: 2rem;
+  color: var(--muted);
+  font-size: 0.65rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.matrix-row {
+  font-size: 0.72rem;
+}
+
+.matrix-row > span {
+  color: var(--muted);
+}
+
+.matrix-row .matrix-node {
+  padding: 0;
+}
+
+@keyframes angular-effect-pulse {
   50% {
     opacity: 0.45;
   }
 }
 
+@keyframes angular-field-pulse {
+  50% {
+    fill-opacity: 0.25;
+  }
+}
+
 @media (prefers-color-scheme: dark) {
-  .node-prototype {
-    --effect-classification: #ad8cff;
-    --effect-wayfinder: #43c7d2;
+  .angular-node {
+    --classification: #ad8cff;
+    --wayfinder: #43c7d2;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .node-prototype .automation-effect.is-active .effect-token,
-  .node-prototype .automation-effect.is-active .effect-aura {
+  .node-field.is-active path,
+  .status-diamond.is-active .status-face {
     animation: none;
   }
 }
