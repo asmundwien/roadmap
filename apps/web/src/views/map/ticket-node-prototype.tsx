@@ -186,21 +186,27 @@ function MainDiamond({ spec, x, y }: { spec: NodeSpec; x: number; y: number }) {
   return (
     <g className="main-diamond">
       <g className="node-shape">
-        <path className="node-outer" d={diamondPath(x, y, 12)} />
-        <path className="node-inner" d={diamondPath(x, y, 8.5)} />
+        {spec.state === 'frontier' && <path className="frontier-field" d={diamondPath(x, y, 17)} />}
+        <path className="diamond-face" d={diamondPath(x, y, 11)} />
+        {spec.state === 'claimed' && (
+          <path
+            className="claimed-half"
+            d={`M ${x} ${y - 11} L ${x} ${y + 11} L ${x - 11} ${y} Z`}
+          />
+        )}
         {spec.isBlocked && spec.state !== 'blocked' && (
           <path
             className="blocked-corner"
-            d={`M ${x - 12} ${y} L ${x} ${y + 12} L ${x - 4} ${y + 8} Z`}
+            d={`M ${x - 11} ${y} L ${x} ${y + 11} L ${x - 4} ${y + 7} Z`}
           />
         )}
         {spec.isClaimed && spec.state !== 'claimed' && (
           <path
             className="claimed-corner"
-            d={`M ${x} ${y - 12} L ${x + 12} ${y} L ${x + 5} ${y - 7} Z`}
+            d={`M ${x} ${y - 11} L ${x + 11} ${y} L ${x + 5} ${y - 6} Z`}
           />
         )}
-        <text className="node-glyph" x={x} y={y + 3.5} textAnchor="middle">
+        <text className="type-rune" x={x} y={y + 3.3} textAnchor="middle">
           {spec.state === 'closed' ? '✓' : typeGlyph(spec.type)}
         </text>
         <TypeCorners type={spec.type} x={x} y={y} />
@@ -214,10 +220,10 @@ function TypeCorners({ type, x, y }: { type: TicketType; x: number; y: number })
   const count = typeRank(type)
   if (count === 0) return null
   const corners = [
-    `M ${x - 8} ${y - 4} L ${x} ${y - 12}`,
-    `M ${x + 4} ${y - 8} L ${x + 12} ${y}`,
-    `M ${x + 8} ${y + 4} L ${x} ${y + 12}`,
-    `M ${x - 4} ${y + 8} L ${x - 12} ${y}`,
+    `M ${x - 7} ${y - 4} L ${x} ${y - 11}`,
+    `M ${x + 4} ${y - 7} L ${x + 11} ${y}`,
+    `M ${x + 7} ${y + 4} L ${x} ${y + 11}`,
+    `M ${x - 4} ${y + 7} L ${x - 11} ${y}`,
   ]
   return (
     <g className="type-corners">
@@ -326,8 +332,8 @@ function StateMatrix({ variant, onClose }: { variant: PrototypeVariant; onClose:
       <section className="matrix-section">
         <h3>Ticket type × tracker state</h3>
         <p>
-          Every tracker state follows the completed diamond's double-edged construction. Type
-          remains on the node as its rune and 1–4 outer corner strokes.
+          Every tracker state is a visual variant of the completed node's single-diamond component.
+          Type remains on the node as its rune and 1–4 outer corner strokes.
         </p>
         <div className="type-state-matrix">
           <span />

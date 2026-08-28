@@ -123,42 +123,67 @@
   transform: scale(1.14);
 }
 
-.main-diamond .node-outer,
-.main-diamond .node-inner {
-  fill: var(--node-state);
-  stroke: var(--bg);
-  stroke-width: 1.25px;
+.main-diamond .diamond-face {
+  fill: color-mix(in srgb, var(--node-state) 13%, var(--bg));
+  stroke: var(--node-state);
+  stroke-width: 2px;
   stroke-linejoin: miter;
 }
 
-.main-diamond .node-inner {
-  stroke: color-mix(in srgb, var(--bg) 72%, var(--fg));
-  stroke-width: 0.8px;
+.hud-node.state-frontier .diamond-face {
+  fill: var(--node-state);
+}
+
+.hud-node.state-claimed .diamond-face {
+  fill: var(--bg);
+}
+
+.hud-node.state-closed .diamond-face {
+  fill: var(--fg);
+  stroke: var(--fg);
+}
+
+.main-diamond .frontier-field {
+  fill: color-mix(in srgb, var(--state-frontier) 12%, transparent);
+}
+
+.main-diamond .claimed-half {
+  fill: var(--state-claimed);
 }
 
 .main-diamond .blocked-corner {
   fill: var(--state-blocked);
-  stroke: var(--bg);
-  stroke-width: 0.7px;
 }
 
 .main-diamond .claimed-corner {
   fill: var(--state-claimed);
-  stroke: var(--bg);
-  stroke-width: 0.7px;
 }
 
-.main-diamond .node-glyph {
-  fill: var(--bg);
+.main-diamond .type-rune {
+  fill: var(--node-type);
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 2.75px;
   font-size: 7px;
   font-weight: 900;
 }
 
+.hud-node.state-frontier .type-rune,
+.hud-node.state-closed .type-rune {
+  fill: var(--bg);
+  stroke: color-mix(in srgb, var(--node-state) 82%, var(--fg));
+}
+
 .main-diamond .type-corners path {
   fill: none;
-  stroke: var(--bg);
-  stroke-width: 1px;
+  stroke: var(--node-type);
+  stroke-width: 1.4px;
   stroke-linecap: square;
+}
+
+.hud-node.state-frontier .type-corners path,
+.hud-node.state-closed .type-corners path {
+  stroke: var(--bg);
 }
 
 .data-diamond.stage-classification {
