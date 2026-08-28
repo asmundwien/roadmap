@@ -69,6 +69,10 @@
   pointer-events: none;
 }
 
+.row:has(.hud-node) .fresh-ping {
+  display: none;
+}
+
 .hud-node.type-research {
   --node-type: var(--type-research);
 }
@@ -97,70 +101,64 @@
   --node-state: var(--state-blocked);
 }
 
+.hud-node.state-closed {
+  --node-state: var(--fg);
+}
+
+.main-diamond,
+.data-diamond {
+  pointer-events: all;
+  cursor: help;
+}
+
+.main-diamond .node-shape,
+.data-diamond .tag-shape {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 0.12s ease-out;
+}
+
+.main-diamond:hover .node-shape,
+.data-diamond:hover .tag-shape {
+  transform: scale(1.14);
+}
+
 .main-diamond .node-outer,
 .main-diamond .node-inner {
-  fill: var(--bg);
-  stroke: var(--node-state);
-  stroke-width: 2px;
+  fill: var(--node-state);
+  stroke: var(--bg);
+  stroke-width: 1.25px;
   stroke-linejoin: miter;
 }
 
 .main-diamond .node-inner {
-  stroke-width: 1.25px;
-}
-
-.hud-node.state-frontier .node-outer,
-.hud-node.state-frontier .node-inner {
-  fill: var(--state-frontier);
-}
-
-.hud-node.state-claimed .node-inner {
-  fill: var(--bg);
-}
-
-.hud-node.state-closed .node-outer,
-.hud-node.state-closed .node-inner {
-  fill: var(--fg);
-  stroke: var(--bg);
-}
-
-.main-diamond .claimed-half {
-  fill: var(--state-claimed);
+  stroke: color-mix(in srgb, var(--bg) 72%, var(--fg));
+  stroke-width: 0.8px;
 }
 
 .main-diamond .blocked-corner {
   fill: var(--state-blocked);
+  stroke: var(--bg);
+  stroke-width: 0.7px;
 }
 
 .main-diamond .claimed-corner {
   fill: var(--state-claimed);
+  stroke: var(--bg);
+  stroke-width: 0.7px;
 }
 
 .main-diamond .node-glyph {
-  fill: var(--node-type);
-  paint-order: stroke;
-  stroke: var(--bg);
-  stroke-width: 2.75px;
+  fill: var(--bg);
   font-size: 7px;
   font-weight: 900;
 }
 
-.hud-node.state-frontier .node-glyph,
-.hud-node.state-closed .node-glyph {
-  fill: var(--bg);
-  stroke: color-mix(in srgb, var(--node-state) 82%, var(--fg));
-}
-
 .main-diamond .type-corners path {
   fill: none;
-  stroke: var(--node-type);
-  stroke-width: 1.3px;
-  stroke-linecap: square;
-}
-
-.hud-node.state-frontier .type-corners path,
-.hud-node.state-closed .type-corners path {
   stroke: var(--bg);
+  stroke-width: 1px;
+  stroke-linecap: square;
 }
 
 .data-diamond.stage-classification {
@@ -175,88 +173,62 @@
   --tag-color: var(--fg);
 }
 
-.data-diamond .tag-outer,
-.data-diamond .tag-inner {
-  fill: var(--bg);
-  stroke: var(--tag-color);
-  stroke-width: 1.15px;
+.data-diamond.tone-human {
+  --tag-color: var(--type-grilling);
+}
+
+.data-diamond.tone-warning {
+  --tag-color: var(--type-prototype);
+}
+
+.data-diamond.tone-failure {
+  --tag-color: var(--state-blocked);
+}
+
+.data-diamond.tone-unknown {
+  --tag-color: var(--muted);
+}
+
+.data-diamond .tag-face {
+  fill: var(--tag-color);
+  stroke: var(--bg);
+  stroke-width: 0.8px;
   stroke-linejoin: miter;
 }
 
-.data-diamond .tag-inner {
-  stroke-width: 0.75px;
-}
-
-.data-diamond.tone-positive .tag-outer,
-.data-diamond.tone-positive .tag-inner {
-  fill: var(--fg);
-  stroke: var(--bg);
-}
-
-.data-diamond.tone-active .tag-outer,
-.data-diamond.tone-active .tag-inner {
-  fill: var(--tag-color);
-  animation: hud-tag-pulse 1.4s ease-in-out infinite;
-}
-
-.data-diamond.tone-human .tag-outer {
-  stroke-width: 2px;
-}
-
-.data-diamond.tone-warning .tag-outer {
-  stroke-width: 2px;
-  stroke-dasharray: 3 1;
-}
-
-.data-diamond.tone-failure .tag-outer,
-.data-diamond.tone-failure .tag-inner {
-  stroke: var(--state-blocked);
-  stroke-width: 1.8px;
-}
-
-.data-diamond.tone-unknown .tag-outer,
-.data-diamond.tone-unknown .tag-inner {
-  stroke: var(--muted);
-  stroke-dasharray: 1 2;
-  opacity: 0.7;
-}
-
-.data-diamond .override-corner {
-  fill: var(--goal);
+.data-diamond.is-override .tag-face {
+  stroke: var(--goal);
+  stroke-width: 1.15px;
 }
 
 .data-diamond .tag-glyph {
-  fill: var(--tag-color);
-  paint-order: stroke;
-  stroke: var(--bg);
-  stroke-width: 2.25px;
+  fill: var(--bg);
   font-size: 5.5px;
   font-weight: 900;
 }
 
-.data-diamond.tone-positive .tag-glyph,
-.data-diamond.tone-active .tag-glyph {
-  fill: var(--bg);
-  stroke: var(--fg);
+.node-tooltip {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.08s linear;
 }
 
-.data-diamond.tone-failure .tag-glyph {
-  fill: var(--state-blocked);
+.main-diamond:hover .node-tooltip,
+.data-diamond:hover .node-tooltip {
+  opacity: 1;
 }
 
-.data-diamond .tag-slot {
-  fill: var(--bg);
-  paint-order: stroke;
-  stroke: var(--tag-color);
-  stroke-width: 2.5px;
-  font-size: 3.5px;
-  font-weight: 900;
-}
-
-.data-diamond.tone-positive .tag-slot,
-.data-diamond.tone-active .tag-slot {
+.node-tooltip rect {
   fill: var(--fg);
   stroke: var(--bg);
+  stroke-width: 0.75px;
+}
+
+.node-tooltip text {
+  fill: var(--bg);
+  font-size: 5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
 }
 
 /* ---------------------------------------------------------------- state matrix */
@@ -407,12 +379,6 @@
   padding: 0;
 }
 
-@keyframes hud-tag-pulse {
-  50% {
-    opacity: 0.45;
-  }
-}
-
 @media (prefers-color-scheme: dark) {
   .data-diamond.stage-classification {
     --tag-color: #ad8cff;
@@ -420,12 +386,5 @@
 
   .data-diamond.stage-wayfinder {
     --tag-color: #43c7d2;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .data-diamond.tone-active .tag-outer,
-  .data-diamond.tone-active .tag-inner {
-    animation: none;
   }
 }

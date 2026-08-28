@@ -169,7 +169,6 @@ export function MapLedger({
           const meta = STATE_META[ticket.state]
           const title = ticketTitle(ticket)
           const assignee = ticket.assignees[0]?.name
-          const waits = ticket.blockedBy.filter((blocker) => blocker.state !== 'closed')
           const isHot = related?.tickets.has(ticket.id) ?? false
           const isSelected = selected?.kind === 'ticket' && selected.id === ticket.id
           return (
@@ -184,12 +183,6 @@ export function MapLedger({
                 (focused) => setFocusRow(focused ? ticket.id : null),
               )}
             >
-              <title>
-                {title}
-                {waits.length > 0
-                  ? ` — waits on: ${waits.map((blocker) => blocker.title ?? blocker.displayId ?? blocker.ticketId).join(' · ')}`
-                  : ''}
-              </title>
               <rect
                 className="row-hit"
                 x="0"
@@ -246,7 +239,6 @@ export function MapLedger({
                 (focused) => setFocusRow(focused ? ticket.id : null),
               )}
             >
-              <title>{title}</title>
               <rect
                 className="row-hit"
                 x="0"

@@ -32,6 +32,7 @@ interface DataTag {
   stage: 'classification' | 'wayfinder' | 'report'
   glyph: string
   label: string
+  word: string
   tone: TagTone
   admission?: AutomationAdmission
 }
@@ -52,9 +53,9 @@ interface PrototypeContextValue {
 const PrototypeContext = createContext<PrototypeContextValue>({ variant: null, evidence: [] })
 
 const VARIANTS: readonly { key: PrototypeVariant; name: string }[] = [
+  { key: 'ribbon', name: 'Tag ribbon' },
   { key: 'hud', name: 'Five-tag HUD' },
   { key: 'packed', name: 'Packed lattice' },
-  { key: 'ribbon', name: 'Tag ribbon' },
 ]
 
 export function TicketNodePrototypeProvider({
@@ -170,11 +171,9 @@ function HudNode({
   x: number
   y: number
 }) {
-  const label = nodeLabel(spec)
   const positions = tagPositions(variant, spec.tags)
   return (
     <g className={`hud-node is-${variant} type-${spec.type} state-${spec.state}`}>
-      <title>{label}</title>
       <MainDiamond spec={spec} x={x} y={y} />
       {positions.map(({ tag, dx, dy }) => (
         <DataDiamond key={tag.slot} tag={tag} x={x + dx} y={y + dy} />
@@ -186,30 +185,27 @@ function HudNode({
 function MainDiamond({ spec, x, y }: { spec: NodeSpec; x: number; y: number }) {
   return (
     <g className="main-diamond">
-      <path className="node-outer" d={diamondPath(x, y, 12)} />
-      <path className="node-inner" d={diamondPath(x, y, 8.5)} />
-      {spec.state === 'claimed' && (
-        <path
-          className="claimed-half"
-          d={`M ${x} ${y - 8.5} L ${x} ${y + 8.5} L ${x - 8.5} ${y} Z`}
-        />
-      )}
-      {spec.isBlocked && spec.state !== 'blocked' && (
-        <path
-          className="blocked-corner"
-          d={`M ${x - 12} ${y} L ${x} ${y + 12} L ${x - 4} ${y + 8} Z`}
-        />
-      )}
-      {spec.isClaimed && spec.state !== 'claimed' && (
-        <path
-          className="claimed-corner"
-          d={`M ${x} ${y - 12} L ${x + 12} ${y} L ${x + 5} ${y - 7} Z`}
-        />
-      )}
-      <text className="node-glyph" x={x} y={y + 3.5} textAnchor="middle">
-        {spec.state === 'closed' ? '✓' : typeGlyph(spec.type)}
-      </text>
-      <TypeCorners type={spec.type} x={x} y={y} />
+      <g className="node-shape">
+        <path className="node-outer" d={diamondPath(x, y, 12)} />
+        <path className="node-inner" d={diamondPath(x, y, 8.5)} />
+        {spec.isBlocked && spec.state !== 'blocked' && (
+          <path
+            className="blocked-corner"
+            d={`M ${x - 12} ${y} L ${x} ${y + 12} L ${x - 4} ${y + 8} Z`}
+          />
+        )}
+        {spec.isClaimed && spec.state !== 'claimed' && (
+          <path
+            className="claimed-corner"
+            d={`M ${x} ${y - 12} L ${x + 12} ${y} L ${x + 5} ${y - 7} Z`}
+          />
+        )}
+        <text className="node-glyph" x={x} y={y + 3.5} textAnchor="middle">
+          {spec.state === 'closed' ? '✓' : typeGlyph(spec.type)}
+        </text>
+        <TypeCorners type={spec.type} x={x} y={y} />
+      </g>
+      <NodeTooltip x={x} y={y - 20} word={stateWord(spec.state)} />
     </g>
   )
 }
@@ -234,21 +230,27 @@ function TypeCorners({ type, x, y }: { type: TicketType; x: number; y: number })
 
 function DataDiamond({ tag, x, y }: { tag: DataTag; x: number; y: number }) {
   return (
-    <g className={`data-diamond slot-${tag.slot} stage-${tag.stage} tone-${tag.tone}`}>
-      <title>{tag.label}</title>
-      <path className="tag-outer" d={diamondPath(x, y, 6.5)} />
-      <path className="tag-inner" d={diamondPath(x, y, 4.8)} />
-      {tag.admission === 'override' && (
-        <path
-          className="override-corner"
-          d={`M ${x} ${y - 6.5} L ${x + 6.5} ${y} L ${x + 2} ${y - 4.5} Z`}
-        />
-      )}
-      <text className="tag-glyph" x={x} y={y + 2.5} textAnchor="middle">
-        {tag.glyph}
-      </text>
-      <text className="tag-slot" x={x + 6} y={y - 4.5} textAnchor="middle">
-        {slotGlyph(tag.slot)}
+    <g
+      className={`data-diamond slot-${tag.slot} stage-${tag.stage} tone-${tag.tone}${tag.admission === 'override' ? ' is-override' : ''}`}
+    >
+      <g className="tag-shape">
+        <path className="tag-face" d={diamondPath(x, y, 6.5)} />
+        <text className="tag-glyph" x={x} y={y + 2.5} textAnchor="middle">
+          {tag.glyph}
+        </text>
+      </g>
+      <NodeTooltip x={x} y={y - 13} word={tag.word} />
+    </g>
+  )
+}
+
+function NodeTooltip({ x, y, word }: { x: number; y: number; word: string }) {
+  const width = Math.max(26, word.length * 4.4 + 8)
+  return (
+    <g className="node-tooltip" transform={`translate(${x - width / 2} ${y})`}>
+      <rect width={width} height="11" />
+      <text x={width / 2} y="7.5" textAnchor="middle">
+        {word}
       </text>
     </g>
   )
@@ -356,7 +358,8 @@ function StateMatrix({ variant, onClose }: { variant: PrototypeVariant; onClose:
         <h3>Independent Automation evidence</h3>
         <p>
           Five fixed facts can coexist: Classification, its process result, Wayfinder, its process
-          result, and the Session report. Human override cuts the stage tag's top-right corner.
+          result, and the Session report. Every fact uses the same solid minor-node shape; color and
+          one central icon provide its variant.
         </p>
         <table className="automation-matrix">
           <thead>
@@ -851,23 +854,48 @@ function tag(
   tone: TagTone,
   admission?: AutomationAdmission,
 ): DataTag {
-  return { slot, stage, glyph, label, tone, ...(admission === undefined ? {} : { admission }) }
+  return {
+    slot,
+    stage,
+    glyph,
+    label,
+    word: hoverWord(label),
+    tone,
+    ...(admission === undefined ? {} : { admission }),
+  }
 }
 
-function slotGlyph(slot: TagSlot): string {
-  switch (slot) {
-    case 'classification':
-      return 'C'
-    case 'classification-process':
-      return 'c'
-    case 'wayfinder':
-      return 'W'
-    case 'wayfinder-process':
-      return 'w'
-    case 'report':
-      return 'R'
+function hoverWord(label: string): string {
+  if (label.includes('AFK')) return 'AFK'
+  if (label.includes('HITL')) return 'HITL'
+  if (label.includes('running')) return 'running'
+  if (label.includes('launching')) return 'launching'
+  if (label.includes('unable')) return 'unable'
+  if (label.includes('unknown')) return 'unknown'
+  if (label.includes('unavailable')) return 'unavailable'
+  if (label.includes('invalid')) return 'invalid'
+  if (label.includes('missing')) return 'missing'
+  if (label.includes('completed')) return 'completed'
+  if (label.includes('stopped')) return 'stopped'
+  if (label.includes('failed')) return 'failed'
+  if (label.includes('ended by')) return 'signaled'
+  if (label.includes('exited')) return 'exited'
+  if (label.includes('finished')) return 'finished'
+  return 'evidence'
+}
+
+function stateWord(state: TicketState): string {
+  switch (state) {
+    case 'closed':
+      return 'decided'
+    case 'frontier':
+      return 'takeable'
+    case 'claimed':
+      return 'claimed'
+    case 'blocked':
+      return 'blocked'
     default: {
-      const _exhaustive: never = slot
+      const _exhaustive: never = state
       return _exhaustive
     }
   }
@@ -875,15 +903,6 @@ function slotGlyph(slot: TagSlot): string {
 
 function stageLabel(stage: 'classification' | 'wayfinder'): string {
   return stage === 'classification' ? 'Classification' : 'Wayfinder'
-}
-
-function nodeLabel(spec: NodeSpec): string {
-  const tracker = spec.isBlocked && spec.isClaimed ? 'blocked and claimed' : spec.state
-  const automation =
-    spec.tags.length === 0
-      ? 'no Automation evidence'
-      : spec.tags.map((value) => value.label).join('; ')
-  return `${spec.type} ticket; ${tracker}; ${automation}`
 }
 
 function diamondPath(x: number, y: number, radius: number): string {
@@ -937,7 +956,7 @@ function stableSlot(id: string, count: number): number {
 function readPrototypeUrl(): { variant: PrototypeVariant; matrix: boolean } {
   const url = new URL(window.location.href)
   const candidate = url.searchParams.get('variant')
-  const variant = candidate === 'packed' || candidate === 'ribbon' ? candidate : 'hud'
+  const variant = candidate === 'hud' || candidate === 'packed' ? candidate : 'ribbon'
   return { variant, matrix: url.searchParams.get('matrix') === '1' }
 }
 
