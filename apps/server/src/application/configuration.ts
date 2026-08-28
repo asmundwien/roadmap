@@ -20,6 +20,7 @@ import {
   migrateConfigurationV3,
   migrateConfigurationV4,
 } from './migration.ts'
+import { SESSION_REPORT_SCHEMA_MARKER } from './session-report-contract.ts'
 
 export interface ConfiguredConnection {
   id: string
@@ -87,6 +88,7 @@ const CLASSIFICATION_PROMPT_MARKERS = [
   ...POINTER_PROMPT_MARKERS,
   CLASSIFICATION_RESULT_SCHEMA_MARKER,
 ]
+const WAYFINDER_PROMPT_MARKERS = [...POINTER_PROMPT_MARKERS, SESSION_REPORT_SCHEMA_MARKER]
 
 export type ConfigurationRead =
   | { ok: true; document: RoadmapConfiguration; notices?: string[] }
@@ -699,7 +701,7 @@ function decodeAutomation(
           value.wayfinderCommand,
           `${path}.wayfinderCommand`,
           issues,
-          POINTER_PROMPT_MARKERS,
+          WAYFINDER_PROMPT_MARKERS,
         )
   const enabledProjects = decodeEnabledProjects(value.enabledProjects, path, issues)
   if (enabled === null) return null
