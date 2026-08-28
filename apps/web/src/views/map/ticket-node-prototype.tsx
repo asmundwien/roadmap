@@ -1,7 +1,9 @@
 import type {
   AutomationAdmission,
   AutomationEvidence,
+  AutomationProcessResult,
   ClassificationAttempt,
+  SessionReportEvidence,
   Ticket,
   TicketState,
   TicketType,
@@ -12,21 +14,26 @@ import { createContext, type ReactNode, useContext, useEffect, useMemo, useState
 import './ticket-node-prototype.css'
 
 /**
- * PROTOTYPE — three angular node arrays on the existing project route, switchable with
- * `?variant=ribbon|stack|field`. Add `&matrix=1` to inspect the complete type, tracker-state, and
- * Automation lifecycle matrix. Real evidence wins on the map; stable demo evidence fills gaps.
+ * PROTOTYPE — a game-HUD node and five independent data tags, with no enclosing tint or plate.
+ * `?variant=hud|packed|ribbon` changes only the tag lattice. Add `&matrix=1` for full coverage.
  */
 
-type PrototypeVariant = 'ribbon' | 'stack' | 'field'
-type EffectTone = 'active' | 'positive' | 'human' | 'warning' | 'failure' | 'unknown'
-type PlateTone = 'none' | 'classification' | 'wayfinder'
+type PrototypeVariant = 'hud' | 'packed' | 'ribbon'
+type TagTone = 'active' | 'positive' | 'human' | 'warning' | 'failure' | 'unknown'
+type TagSlot =
+  | 'classification'
+  | 'classification-process'
+  | 'wayfinder'
+  | 'wayfinder-process'
+  | 'report'
 
-interface StatusEffect {
-  stage: 'classification' | 'wayfinder'
+interface DataTag {
+  slot: TagSlot
+  stage: 'classification' | 'wayfinder' | 'report'
   glyph: string
   label: string
-  tone: EffectTone
-  admission: AutomationAdmission
+  tone: TagTone
+  admission?: AutomationAdmission
 }
 
 interface NodeSpec {
@@ -34,7 +41,7 @@ interface NodeSpec {
   isBlocked: boolean
   isClaimed: boolean
   type: TicketType
-  effects: StatusEffect[]
+  tags: DataTag[]
 }
 
 interface PrototypeContextValue {
@@ -45,9 +52,9 @@ interface PrototypeContextValue {
 const PrototypeContext = createContext<PrototypeContextValue>({ variant: null, evidence: [] })
 
 const VARIANTS: readonly { key: PrototypeVariant; name: string }[] = [
-  { key: 'ribbon', name: 'Diamond ribbon' },
-  { key: 'stack', name: 'Diamond stack' },
-  { key: 'field', name: 'Tinted field' },
+  { key: 'hud', name: 'Five-tag HUD' },
+  { key: 'packed', name: 'Packed lattice' },
+  { key: 'ribbon', name: 'Tag ribbon' },
 ]
 
 export function TicketNodePrototypeProvider({
@@ -93,7 +100,7 @@ export function TicketNodePrototypeProvider({
         <StateMatrix variant={prototype.variant} onClose={() => setMatrix(false, setPrototype)} />
       )}
       <nav className="node-prototype-switcher" aria-label="Ticket node prototype variants">
-        <span className="node-prototype-kicker">Angular node prototype</span>
+        <span className="node-prototype-kicker">HUD node prototype</span>
         <button
           type="button"
           aria-label="Previous ticket node variant"
@@ -146,13 +153,13 @@ export function TicketNodePrototypeMark({
     isBlocked: ticket.isBlocked,
     isClaimed: ticket.isClaimed,
     type,
-    effects: effectsOf(evidence),
+    tags: tagsOf(evidence),
   }
 
-  return <AngularNode variant={prototype.variant} spec={spec} x={x} y={y} />
+  return <HudNode variant={prototype.variant} spec={spec} x={x} y={y} />
 }
 
-function AngularNode({
+function HudNode({
   variant,
   spec,
   x,
@@ -164,99 +171,14 @@ function AngularNode({
   y: number
 }) {
   const label = nodeLabel(spec)
+  const positions = tagPositions(variant, spec.tags)
   return (
-    <g className={`angular-node is-${variant} type-${spec.type} state-${spec.state}`}>
+    <g className={`hud-node is-${variant} type-${spec.type} state-${spec.state}`}>
       <title>{label}</title>
-      {variant === 'ribbon' && <RibbonArray spec={spec} x={x} y={y} />}
-      {variant === 'stack' && <StackArray spec={spec} x={x} y={y} />}
-      {variant === 'field' && <FieldArray spec={spec} x={x} y={y} />}
-    </g>
-  )
-}
-
-function RibbonArray({ spec, x, y }: { spec: NodeSpec; x: number; y: number }) {
-  const width = spec.effects.length === 0 ? 28 : 36 + spec.effects.length * 14
-  return (
-    <>
-      <TintPlate tone={plateTone(spec.effects)} x={x - 14} y={y - 15} width={width} height={30} />
       <MainDiamond spec={spec} x={x} y={y} />
-      {spec.effects.map((effect, index) => (
-        <EffectDiamond key={effect.stage} effect={effect} x={x + 21 + index * 14} y={y} size={8} />
+      {positions.map(({ tag, dx, dy }) => (
+        <DataDiamond key={tag.slot} tag={tag} x={x + dx} y={y + dy} />
       ))}
-    </>
-  )
-}
-
-function StackArray({ spec, x, y }: { spec: NodeSpec; x: number; y: number }) {
-  const [classification, wayfinder] = spec.effects
-  return (
-    <>
-      <TintPlate
-        tone={plateTone(spec.effects)}
-        x={x - 14}
-        y={y - 19}
-        width={spec.effects.length === 0 ? 28 : 48}
-        height={38}
-      />
-      <MainDiamond spec={spec} x={x} y={y} />
-      {classification !== undefined && wayfinder === undefined && (
-        <EffectDiamond effect={classification} x={x + 21} y={y} size={8} />
-      )}
-      {classification !== undefined && wayfinder !== undefined && (
-        <>
-          <EffectDiamond effect={classification} x={x + 21} y={y - 8} size={7} />
-          <EffectDiamond effect={wayfinder} x={x + 21} y={y + 8} size={7} />
-        </>
-      )}
-    </>
-  )
-}
-
-function FieldArray({ spec, x, y }: { spec: NodeSpec; x: number; y: number }) {
-  const classification = spec.effects.find((effect) => effect.stage === 'classification')
-  const wayfinder = spec.effects.find((effect) => effect.stage === 'wayfinder')
-  return (
-    <>
-      <TintPlate
-        tone={classification === undefined ? 'none' : 'classification'}
-        detailTone={classification?.tone}
-        label={classification?.label}
-        x={x - 16}
-        y={y - 17}
-        width={wayfinder === undefined ? 32 : 50}
-        height={34}
-      />
-      <MainDiamond spec={spec} x={x} y={y} />
-      {wayfinder !== undefined && <EffectDiamond effect={wayfinder} x={x + 22} y={y} size={9} />}
-    </>
-  )
-}
-
-function TintPlate({
-  tone,
-  detailTone,
-  label,
-  x,
-  y,
-  width,
-  height,
-}: {
-  tone: PlateTone
-  detailTone?: EffectTone
-  label?: string
-  x: number
-  y: number
-  width: number
-  height: number
-}) {
-  if (tone === 'none') return null
-  const cut = 6
-  return (
-    <g className={`node-field is-${tone}${detailTone ? ` is-${detailTone}` : ''}`}>
-      {label && <title>{label}</title>}
-      <path
-        d={`M ${x + cut} ${y} H ${x + width - cut} L ${x + width} ${y + cut} V ${y + height - cut} L ${x + width - cut} ${y + height} H ${x + cut} L ${x} ${y + height - cut} V ${y + cut} Z`}
-      />
     </g>
   )
 }
@@ -264,24 +186,27 @@ function TintPlate({
 function MainDiamond({ spec, x, y }: { spec: NodeSpec; x: number; y: number }) {
   return (
     <g className="main-diamond">
-      {spec.state === 'frontier' && <path className="frontier-field" d={diamondPath(x, y, 17)} />}
-      <path className="diamond-face" d={diamondPath(x, y, 11)} />
+      <path className="node-outer" d={diamondPath(x, y, 12)} />
+      <path className="node-inner" d={diamondPath(x, y, 8.5)} />
       {spec.state === 'claimed' && (
-        <path className="claimed-half" d={`M ${x} ${y - 11} L ${x} ${y + 11} L ${x - 11} ${y} Z`} />
+        <path
+          className="claimed-half"
+          d={`M ${x} ${y - 8.5} L ${x} ${y + 8.5} L ${x - 8.5} ${y} Z`}
+        />
       )}
       {spec.isBlocked && spec.state !== 'blocked' && (
         <path
           className="blocked-corner"
-          d={`M ${x - 11} ${y} L ${x} ${y + 11} L ${x - 4} ${y + 7} Z`}
+          d={`M ${x - 12} ${y} L ${x} ${y + 12} L ${x - 4} ${y + 8} Z`}
         />
       )}
       {spec.isClaimed && spec.state !== 'claimed' && (
         <path
           className="claimed-corner"
-          d={`M ${x} ${y - 11} L ${x + 11} ${y} L ${x + 5} ${y - 6} Z`}
+          d={`M ${x} ${y - 12} L ${x + 12} ${y} L ${x + 5} ${y - 7} Z`}
         />
       )}
-      <text className="type-rune" x={x} y={y + 3.3} textAnchor="middle">
+      <text className="node-glyph" x={x} y={y + 3.5} textAnchor="middle">
         {spec.state === 'closed' ? '✓' : typeGlyph(spec.type)}
       </text>
       <TypeCorners type={spec.type} x={x} y={y} />
@@ -293,10 +218,10 @@ function TypeCorners({ type, x, y }: { type: TicketType; x: number; y: number })
   const count = typeRank(type)
   if (count === 0) return null
   const corners = [
-    `M ${x - 7} ${y - 4} L ${x} ${y - 11}`,
-    `M ${x + 4} ${y - 7} L ${x + 11} ${y}`,
-    `M ${x + 7} ${y + 4} L ${x} ${y + 11}`,
-    `M ${x - 4} ${y + 7} L ${x - 11} ${y}`,
+    `M ${x - 8} ${y - 4} L ${x} ${y - 12}`,
+    `M ${x + 4} ${y - 8} L ${x + 12} ${y}`,
+    `M ${x + 8} ${y + 4} L ${x} ${y + 12}`,
+    `M ${x - 4} ${y + 8} L ${x - 12} ${y}`,
   ]
   return (
     <g className="type-corners">
@@ -307,35 +232,80 @@ function TypeCorners({ type, x, y }: { type: TicketType; x: number; y: number })
   )
 }
 
-function EffectDiamond({
-  effect,
-  x,
-  y,
-  size,
-}: {
-  effect: StatusEffect
-  x: number
-  y: number
-  size: number
-}) {
+function DataDiamond({ tag, x, y }: { tag: DataTag; x: number; y: number }) {
   return (
-    <g className={`status-diamond is-${effect.stage} is-${effect.tone}`}>
-      <title>{effect.label}</title>
-      <path className="status-face" d={diamondPath(x, y, size)} />
-      {effect.admission === 'override' && (
+    <g className={`data-diamond slot-${tag.slot} stage-${tag.stage} tone-${tag.tone}`}>
+      <title>{tag.label}</title>
+      <path className="tag-outer" d={diamondPath(x, y, 6.5)} />
+      <path className="tag-inner" d={diamondPath(x, y, 4.8)} />
+      {tag.admission === 'override' && (
         <path
           className="override-corner"
-          d={`M ${x} ${y - size} L ${x + size} ${y} L ${x + 4} ${y - size + 4} Z`}
+          d={`M ${x} ${y - 6.5} L ${x + 6.5} ${y} L ${x + 2} ${y - 4.5} Z`}
         />
       )}
-      <text className="status-glyph" x={x} y={y + 2.7} textAnchor="middle">
-        {effect.glyph}
+      <text className="tag-glyph" x={x} y={y + 2.5} textAnchor="middle">
+        {tag.glyph}
       </text>
-      <text className="status-stage" x={x + size - 1} y={y - size + 3} textAnchor="middle">
-        {effect.stage === 'classification' ? 'C' : 'W'}
+      <text className="tag-slot" x={x + 6} y={y - 4.5} textAnchor="middle">
+        {slotGlyph(tag.slot)}
       </text>
     </g>
   )
+}
+
+function tagPositions(
+  variant: PrototypeVariant,
+  tags: DataTag[],
+): { tag: DataTag; dx: number; dy: number }[] {
+  if (variant === 'ribbon') {
+    return tags.map((tag, index) => ({ tag, dx: 19 + index * 14, dy: 0 }))
+  }
+  if (variant === 'packed') {
+    return packedPositions(tags).map(({ tag, dx, dy }) => ({ tag, dx: dx + 18, dy }))
+  }
+  const fixed: Record<TagSlot, { dx: number; dy: number }> = {
+    classification: { dx: 22, dy: -7 },
+    'classification-process': { dx: 36, dy: -7 },
+    wayfinder: { dx: 15, dy: 7 },
+    'wayfinder-process': { dx: 29, dy: 7 },
+    report: { dx: 43, dy: 7 },
+  }
+  return tags.map((tag) => ({ tag, ...fixed[tag.slot] }))
+}
+
+function packedPositions(tags: DataTag[]): { tag: DataTag; dx: number; dy: number }[] {
+  const layouts: Record<number, { dx: number; dy: number }[]> = {
+    0: [],
+    1: [{ dx: 0, dy: 0 }],
+    2: [
+      { dx: 0, dy: -7 },
+      { dx: 0, dy: 7 },
+    ],
+    3: [
+      { dx: 0, dy: -7 },
+      { dx: 14, dy: 0 },
+      { dx: 0, dy: 7 },
+    ],
+    4: [
+      { dx: 0, dy: -7 },
+      { dx: 14, dy: -7 },
+      { dx: 0, dy: 7 },
+      { dx: 14, dy: 7 },
+    ],
+    5: [
+      { dx: 7, dy: -7 },
+      { dx: 21, dy: -7 },
+      { dx: 0, dy: 7 },
+      { dx: 14, dy: 7 },
+      { dx: 28, dy: 7 },
+    ],
+  }
+  const layout = layouts[tags.length] ?? []
+  return tags.flatMap((tag, index) => {
+    const position = layout[index]
+    return position === undefined ? [] : [{ tag, ...position }]
+  })
 }
 
 function StateMatrix({ variant, onClose }: { variant: PrototypeVariant; onClose: () => void }) {
@@ -354,7 +324,8 @@ function StateMatrix({ variant, onClose }: { variant: PrototypeVariant; onClose:
       <section className="matrix-section">
         <h3>Ticket type × tracker state</h3>
         <p>
-          Type lives in the main diamond. Tracker state owns its fill, outline, and corner wedges.
+          Every tracker state follows the completed diamond's double-edged construction. Type
+          remains on the node as its rune and 1–4 outer corner strokes.
         </p>
         <div className="type-state-matrix">
           <span />
@@ -373,7 +344,7 @@ function StateMatrix({ variant, onClose }: { variant: PrototypeVariant; onClose:
                   isBlocked: state === 'blocked',
                   isClaimed: state === 'claimed',
                   type,
-                  effects: [],
+                  tags: [],
                 }}
               />
             )),
@@ -382,24 +353,24 @@ function StateMatrix({ variant, onClose }: { variant: PrototypeVariant; onClose:
       </section>
 
       <section className="matrix-section">
-        <h3>Automation lifecycle × overlap</h3>
+        <h3>Independent Automation evidence</h3>
         <p>
-          The field tint means Automation evidence exists; C and W diamonds carry stage outcomes. A
-          cut top-right corner means that stage was admitted by a human override.
+          Five fixed facts can coexist: Classification, its process result, Wayfinder, its process
+          result, and the Session report. Human override cuts the stage tag's top-right corner.
         </p>
         <table className="automation-matrix">
           <thead>
-            <tr className="matrix-head">
+            <tr>
               <th scope="col">Scenario</th>
               <th scope="col">Tracker overlap</th>
               <th scope="col">Classification</th>
               <th scope="col">Wayfinder</th>
-              <th scope="col">Node</th>
+              <th scope="col">Node + tags</th>
             </tr>
           </thead>
           <tbody>
             {AUTOMATION_CASES.map((entry) => (
-              <tr className="matrix-row" key={entry.name}>
+              <tr key={entry.name}>
                 <th scope="row">{entry.name}</th>
                 <td>{entry.tracker}</td>
                 <td>{entry.classification}</td>
@@ -427,8 +398,8 @@ function MatrixNode({
 }) {
   return (
     <div className="matrix-node" role="img" aria-label={label}>
-      <svg viewBox="0 0 94 50" aria-hidden="true">
-        <AngularNode variant={variant} spec={spec} x={28} y={25} />
+      <svg viewBox="0 0 112 50" aria-hidden="true">
+        <HudNode variant={variant} spec={spec} x={24} y={25} />
       </svg>
     </div>
   )
@@ -436,87 +407,199 @@ function MatrixNode({
 
 const MATRIX_TYPES: TicketType[] = ['research', 'prototype', 'grilling', 'task', 'untyped']
 const MATRIX_STATES: TicketState[] = ['frontier', 'blocked', 'claimed', 'closed']
-
 const AUTO: AutomationAdmission = 'automatic'
 const OVERRIDE: AutomationAdmission = 'override'
+const TARGET: AutomationEvidence['target'] = {
+  project: { integration: 'github', id: 'prototype/matrix' },
+  mapId: 'matrix',
+  ticketId: 'case',
+}
 
-const AUTOMATION_CASES: readonly {
-  name: string
-  tracker: string
-  classification: string
-  wayfinder: string
-  spec: NodeSpec
-}[] = [
-  matrixCase('Ordinary human work', 'frontier', false, false, 'task', []),
-  matrixCase('Classification running', 'frontier', false, false, 'research', [
-    effect('classification', '…', 'Classification running', 'active', AUTO),
-  ]),
-  matrixCase('Human decision required', 'claimed', false, true, 'grilling', [
-    effect('classification', 'H', 'Classification verdict: HITL', 'human', OVERRIDE),
-  ]),
-  matrixCase('Unable to classify', 'blocked', true, false, 'task', [
-    effect('classification', '×', 'Classification verdict: unable', 'warning', AUTO),
-  ]),
-  matrixCase('Classification failed', 'blocked', true, false, 'prototype', [
-    effect('classification', '!', 'Classification failed', 'failure', AUTO),
-  ]),
-  matrixCase('AFK; handoff pending', 'frontier', false, false, 'task', [
-    effect('classification', 'A', 'Classification verdict: AFK', 'positive', OVERRIDE),
-  ]),
-  matrixCase('Wayfinder running', 'claimed', false, true, 'task', [
-    effect('classification', 'A', 'Classification verdict: AFK', 'positive', AUTO),
-    effect('wayfinder', '▶', 'Wayfinder running', 'active', AUTO),
-  ]),
-  matrixCase('Session completed', 'closed', false, false, 'task', [
-    effect('classification', 'A', 'Classification verdict: AFK', 'positive', AUTO),
-    effect('wayfinder', '✓', 'Wayfinder report: completed', 'positive', AUTO),
-  ]),
-  matrixCase('Session stopped', 'frontier', false, false, 'prototype', [
-    effect('classification', 'A', 'Classification verdict: AFK', 'positive', AUTO),
-    effect('wayfinder', '■', 'Wayfinder report: stopped', 'warning', OVERRIDE),
-  ]),
-  matrixCase('Session failed', 'blocked', true, false, 'task', [
-    effect('classification', 'A', 'Classification verdict: AFK', 'positive', AUTO),
-    effect('wayfinder', '!', 'Wayfinder report: failed', 'failure', AUTO),
-  ]),
-  matrixCase('Report missing or invalid', 'claimed', true, true, 'research', [
-    effect('classification', 'A', 'Classification verdict: AFK', 'positive', AUTO),
-    effect('wayfinder', '∅', 'Wayfinder Session report unavailable', 'unknown', AUTO),
-  ]),
-  matrixCase('Outcome unknown', 'claimed', true, true, 'grilling', [
-    effect('classification', '?', 'Classification outcome unknown', 'unknown', AUTO),
-    effect('wayfinder', '?', 'Wayfinder outcome unknown', 'unknown', OVERRIDE),
-  ]),
+const AUTOMATION_CASES = [
+  matrixCase('Ordinary human work', 'frontier', 'task'),
+  matrixCase(
+    'Classification running',
+    'frontier',
+    'research',
+    evidence({ status: 'running', admission: AUTO }),
+  ),
+  matrixCase(
+    'Human decision required',
+    'claimed',
+    'grilling',
+    evidence({
+      status: 'completed',
+      admission: OVERRIDE,
+      processResult: { status: 'exited', code: 0 },
+      verdict: { value: 'hitl', reason: 'Needs a human decision.' },
+    }),
+  ),
+  matrixCase(
+    'Unable to classify',
+    'blocked',
+    'task',
+    evidence({
+      status: 'completed',
+      admission: AUTO,
+      processResult: { status: 'exited', code: 0 },
+      verdict: { value: 'unable', reason: 'Evidence was insufficient.' },
+    }),
+  ),
+  matrixCase(
+    'Classification failed',
+    'blocked',
+    'prototype',
+    evidence({
+      status: 'failed',
+      admission: AUTO,
+      processResult: { status: 'exited', code: 2 },
+      reason: 'Classifier failed.',
+    }),
+  ),
+  matrixCase('AFK; handoff pending', 'frontier', 'task', evidence(afkClassification(OVERRIDE))),
+  matrixCase(
+    'Wayfinder running',
+    'claimed',
+    'task',
+    evidence(afkClassification(AUTO), { status: 'running', admission: AUTO }),
+  ),
+  matrixCase(
+    'Session completed',
+    'closed',
+    'task',
+    evidence(
+      afkClassification(AUTO),
+      finishedSession({ status: 'exited', code: 0 }, receivedReport('completed')),
+    ),
+  ),
+  matrixCase(
+    'Session stopped',
+    'frontier',
+    'prototype',
+    evidence(
+      afkClassification(AUTO),
+      finishedSession(
+        { status: 'signaled', signal: 'SIGTERM' },
+        receivedReport('stopped'),
+        OVERRIDE,
+      ),
+    ),
+  ),
+  matrixCase(
+    'Session failed',
+    'blocked',
+    'task',
+    evidence(
+      afkClassification(AUTO),
+      finishedSession({ status: 'exited', code: 1 }, receivedReport('failed')),
+    ),
+  ),
+  matrixCase(
+    'Session report missing',
+    'claimed',
+    'research',
+    evidence(
+      afkClassification(AUTO),
+      finishedSession(
+        { status: 'exited', code: 0 },
+        { status: 'missing', reason: 'No terminal report.' },
+      ),
+    ),
+  ),
+  matrixCase(
+    'Session report invalid',
+    'claimed',
+    'research',
+    evidence(
+      afkClassification(AUTO),
+      finishedSession(
+        { status: 'exited', code: 0 },
+        { status: 'invalid', reason: 'Malformed terminal report.' },
+      ),
+    ),
+  ),
+  matrixCase(
+    'Process result unavailable',
+    'claimed',
+    'grilling',
+    evidence(
+      afkClassification(AUTO),
+      finishedSession(
+        { status: 'unavailable', reason: 'Legacy evidence.' },
+        receivedReport('completed'),
+      ),
+    ),
+    true,
+    true,
+  ),
+  matrixCase(
+    'Wayfinder outcome unknown',
+    'claimed',
+    'grilling',
+    evidence(afkClassification(AUTO), {
+      status: 'outcome-unknown',
+      admission: OVERRIDE,
+      reason: 'Roadmap restarted.',
+    }),
+    true,
+    true,
+  ),
 ]
 
 function matrixCase(
   name: string,
   state: TicketState,
-  isBlocked: boolean,
-  isClaimed: boolean,
   type: TicketType,
-  effects: StatusEffect[],
+  automation?: AutomationEvidence,
+  isBlocked = state === 'blocked',
+  isClaimed = state === 'claimed',
 ) {
+  const tags = tagsOf(automation)
   return {
     name,
     tracker: isBlocked && isClaimed ? 'blocked + claimed' : state,
-    classification: effects.find((value) => value.stage === 'classification')?.label ?? 'none',
-    wayfinder: effects.find((value) => value.stage === 'wayfinder')?.label ?? 'none',
-    spec: { state, isBlocked, isClaimed, type, effects },
+    classification: tags.find((tag) => tag.slot === 'classification')?.label ?? 'none',
+    wayfinder: tags.find((tag) => tag.slot === 'wayfinder')?.label ?? 'none',
+    spec: { state, isBlocked, isClaimed, type, tags },
   }
 }
 
-function plateTone(effects: StatusEffect[]): PlateTone {
-  if (effects.some((effectValue) => effectValue.stage === 'wayfinder')) return 'wayfinder'
-  return effects.length > 0 ? 'classification' : 'none'
+function evidence(
+  classification: ClassificationAttempt,
+  wayfinder?: WayfinderSession,
+): AutomationEvidence {
+  return { target: TARGET, classification, ...(wayfinder === undefined ? {} : { wayfinder }) }
+}
+
+function afkClassification(admission: AutomationAdmission): ClassificationAttempt {
+  return {
+    status: 'completed',
+    admission,
+    processResult: { status: 'exited', code: 0 },
+    verdict: { value: 'afk', reason: 'Safe for autonomous work.' },
+  }
+}
+
+function finishedSession(
+  processResult: AutomationProcessResult,
+  report: SessionReportEvidence,
+  admission: AutomationAdmission = AUTO,
+): WayfinderSession {
+  return { status: 'finished', admission, processResult, report }
+}
+
+function receivedReport(
+  outcome: 'completed' | 'stopped' | 'failed',
+): Extract<SessionReportEvidence, { status: 'received' }> {
+  return { status: 'received', report: { outcome, reason: `Session ${outcome}.` } }
 }
 
 function evidenceFor(
   map: WayfinderMap,
   ticket: Ticket,
-  evidence: AutomationEvidence[],
+  evidenceList: AutomationEvidence[],
 ): AutomationEvidence | undefined {
-  return evidence.find(
+  return evidenceList.find(
     (candidate) =>
       candidate.target.project.integration === map.project.integration &&
       candidate.target.project.id === map.project.id &&
@@ -554,42 +637,49 @@ function demoEvidence(map: WayfinderMap, ticket: Ticket): AutomationEvidence | u
   }
   return {
     target,
-    classification: {
-      status: 'completed',
-      admission: OVERRIDE,
-      processResult: { status: 'exited', code: 0 },
-      verdict: { value: 'afk', reason: 'Safe for autonomous work.' },
-    },
+    classification: afkClassification(OVERRIDE),
     wayfinder:
       ticket.state === 'closed'
-        ? {
-            status: 'finished',
-            admission: AUTO,
-            processResult: { status: 'exited', code: 1 },
-            report: {
-              status: 'received',
-              report: { outcome: 'failed', reason: 'The session reported a failure.' },
-            },
-          }
+        ? finishedSession({ status: 'exited', code: 1 }, receivedReport('failed'))
         : { status: 'running', admission: AUTO },
   }
 }
 
-function effectsOf(evidence: AutomationEvidence | undefined): StatusEffect[] {
-  if (evidence === undefined) return []
-  const effects = [classificationEffect(evidence.classification)]
-  if (evidence.wayfinder !== undefined) effects.push(wayfinderEffect(evidence.wayfinder))
-  return effects
+function tagsOf(automation: AutomationEvidence | undefined): DataTag[] {
+  if (automation === undefined) return []
+  const tags = [classificationTag(automation.classification)]
+  const classificationProcess = processOfClassification(automation.classification)
+  if (classificationProcess !== undefined) {
+    tags.push(processTag('classification-process', 'classification', classificationProcess))
+  }
+  if (automation.wayfinder !== undefined) {
+    tags.push(wayfinderTag(automation.wayfinder))
+    if (automation.wayfinder.status === 'finished') {
+      tags.push(
+        processTag('wayfinder-process', 'wayfinder', automation.wayfinder.processResult),
+        reportTag(automation.wayfinder.report),
+      )
+    }
+  }
+  return tags
 }
 
-function classificationEffect(attempt: ClassificationAttempt): StatusEffect {
+function classificationTag(attempt: ClassificationAttempt): DataTag {
   switch (attempt.status) {
     case 'running':
-      return effect('classification', '…', 'Classification running', 'active', attempt.admission)
+      return tag(
+        'classification',
+        'classification',
+        '…',
+        'Classification running',
+        'active',
+        attempt.admission,
+      )
     case 'completed':
       switch (attempt.verdict.value) {
         case 'afk':
-          return effect(
+          return tag(
+            'classification',
             'classification',
             'A',
             'Classification verdict: AFK',
@@ -597,7 +687,8 @@ function classificationEffect(attempt: ClassificationAttempt): StatusEffect {
             attempt.admission,
           )
         case 'hitl':
-          return effect(
+          return tag(
+            'classification',
             'classification',
             'H',
             'Classification verdict: HITL',
@@ -605,7 +696,8 @@ function classificationEffect(attempt: ClassificationAttempt): StatusEffect {
             attempt.admission,
           )
         case 'unable':
-          return effect(
+          return tag(
+            'classification',
             'classification',
             '×',
             'Classification verdict: unable',
@@ -618,9 +710,17 @@ function classificationEffect(attempt: ClassificationAttempt): StatusEffect {
         }
       }
     case 'failed':
-      return effect('classification', '!', 'Classification failed', 'failure', attempt.admission)
+      return tag(
+        'classification',
+        'classification',
+        '!',
+        'Classification failed',
+        'failure',
+        attempt.admission,
+      )
     case 'launch-failed':
-      return effect(
+      return tag(
+        'classification',
         'classification',
         '!',
         'Classification launch failed',
@@ -628,7 +728,8 @@ function classificationEffect(attempt: ClassificationAttempt): StatusEffect {
         attempt.admission,
       )
     case 'outcome-unknown':
-      return effect(
+      return tag(
+        'classification',
         'classification',
         '?',
         'Classification outcome unknown',
@@ -642,70 +743,40 @@ function classificationEffect(attempt: ClassificationAttempt): StatusEffect {
   }
 }
 
-function wayfinderEffect(session: WayfinderSession): StatusEffect {
+function processOfClassification(
+  attempt: ClassificationAttempt,
+): AutomationProcessResult | undefined {
+  return attempt.status === 'completed' || attempt.status === 'failed'
+    ? attempt.processResult
+    : undefined
+}
+
+function wayfinderTag(session: WayfinderSession): DataTag {
   switch (session.status) {
     case 'launching':
-      return effect('wayfinder', '↗', 'Wayfinder launching', 'active', session.admission)
+      return tag('wayfinder', 'wayfinder', '↗', 'Wayfinder launching', 'active', session.admission)
     case 'running':
-      return effect('wayfinder', '▶', 'Wayfinder running', 'active', session.admission)
-    case 'launch-failed':
-      return effect('wayfinder', '!', 'Wayfinder launch failed', 'failure', session.admission)
-    case 'outcome-unknown':
-      return effect('wayfinder', '?', 'Wayfinder outcome unknown', 'unknown', session.admission)
+      return tag('wayfinder', 'wayfinder', '▶', 'Wayfinder running', 'active', session.admission)
     case 'finished':
-      switch (session.report.status) {
-        case 'missing':
-          return effect(
-            'wayfinder',
-            '∅',
-            'Wayfinder finished; Session report missing',
-            'unknown',
-            session.admission,
-          )
-        case 'invalid':
-          return effect(
-            'wayfinder',
-            '!',
-            'Wayfinder finished; Session report invalid',
-            'failure',
-            session.admission,
-          )
-        case 'received':
-          switch (session.report.report.outcome) {
-            case 'completed':
-              return effect(
-                'wayfinder',
-                '✓',
-                'Wayfinder report: completed',
-                'positive',
-                session.admission,
-              )
-            case 'stopped':
-              return effect(
-                'wayfinder',
-                '■',
-                'Wayfinder report: stopped',
-                'warning',
-                session.admission,
-              )
-            case 'failed':
-              return effect(
-                'wayfinder',
-                '!',
-                'Wayfinder report: failed',
-                'failure',
-                session.admission,
-              )
-            default: {
-              const _exhaustive: never = session.report.report.outcome
-              return _exhaustive
-            }
-          }
-        default: {
-          const _exhaustive: never = session.report
-          return _exhaustive
-        }
-      }
+      return tag('wayfinder', 'wayfinder', '◆', 'Wayfinder finished', 'positive', session.admission)
+    case 'launch-failed':
+      return tag(
+        'wayfinder',
+        'wayfinder',
+        '!',
+        'Wayfinder launch failed',
+        'failure',
+        session.admission,
+      )
+    case 'outcome-unknown':
+      return tag(
+        'wayfinder',
+        'wayfinder',
+        '?',
+        'Wayfinder outcome unknown',
+        'unknown',
+        session.admission,
+      )
     default: {
       const _exhaustive: never = session
       return _exhaustive
@@ -713,22 +784,105 @@ function wayfinderEffect(session: WayfinderSession): StatusEffect {
   }
 }
 
-function effect(
-  stage: StatusEffect['stage'],
+function processTag(
+  slot: 'classification-process' | 'wayfinder-process',
+  stage: 'classification' | 'wayfinder',
+  result: AutomationProcessResult,
+): DataTag {
+  switch (result.status) {
+    case 'exited':
+      return result.code === 0
+        ? tag(slot, stage, '✓', `${stageLabel(stage)} process exited 0`, 'positive')
+        : tag(
+            slot,
+            stage,
+            String(result.code),
+            `${stageLabel(stage)} process exited ${result.code}`,
+            'failure',
+          )
+    case 'signaled':
+      return tag(
+        slot,
+        stage,
+        '!',
+        `${stageLabel(stage)} process ended by ${result.signal}`,
+        'failure',
+      )
+    case 'unavailable':
+      return tag(slot, stage, '∅', `${stageLabel(stage)} process result unavailable`, 'unknown')
+    default: {
+      const _exhaustive: never = result
+      return _exhaustive
+    }
+  }
+}
+
+function reportTag(report: SessionReportEvidence): DataTag {
+  switch (report.status) {
+    case 'missing':
+      return tag('report', 'report', '∅', 'Session report missing', 'unknown')
+    case 'invalid':
+      return tag('report', 'report', '!', 'Session report invalid', 'failure')
+    case 'received':
+      switch (report.report.outcome) {
+        case 'completed':
+          return tag('report', 'report', '✓', 'Session report: completed', 'positive')
+        case 'stopped':
+          return tag('report', 'report', '■', 'Session report: stopped', 'warning')
+        case 'failed':
+          return tag('report', 'report', '!', 'Session report: failed', 'failure')
+        default: {
+          const _exhaustive: never = report.report.outcome
+          return _exhaustive
+        }
+      }
+    default: {
+      const _exhaustive: never = report
+      return _exhaustive
+    }
+  }
+}
+
+function tag(
+  slot: TagSlot,
+  stage: DataTag['stage'],
   glyph: string,
   label: string,
-  tone: EffectTone,
-  admission: AutomationAdmission,
-): StatusEffect {
-  return { stage, glyph, label, tone, admission }
+  tone: TagTone,
+  admission?: AutomationAdmission,
+): DataTag {
+  return { slot, stage, glyph, label, tone, ...(admission === undefined ? {} : { admission }) }
+}
+
+function slotGlyph(slot: TagSlot): string {
+  switch (slot) {
+    case 'classification':
+      return 'C'
+    case 'classification-process':
+      return 'c'
+    case 'wayfinder':
+      return 'W'
+    case 'wayfinder-process':
+      return 'w'
+    case 'report':
+      return 'R'
+    default: {
+      const _exhaustive: never = slot
+      return _exhaustive
+    }
+  }
+}
+
+function stageLabel(stage: 'classification' | 'wayfinder'): string {
+  return stage === 'classification' ? 'Classification' : 'Wayfinder'
 }
 
 function nodeLabel(spec: NodeSpec): string {
   const tracker = spec.isBlocked && spec.isClaimed ? 'blocked and claimed' : spec.state
   const automation =
-    spec.effects.length === 0
+    spec.tags.length === 0
       ? 'no Automation evidence'
-      : spec.effects.map((value) => value.label).join('; ')
+      : spec.tags.map((value) => value.label).join('; ')
   return `${spec.type} ticket; ${tracker}; ${automation}`
 }
 
@@ -783,7 +937,7 @@ function stableSlot(id: string, count: number): number {
 function readPrototypeUrl(): { variant: PrototypeVariant; matrix: boolean } {
   const url = new URL(window.location.href)
   const candidate = url.searchParams.get('variant')
-  const variant = candidate === 'stack' || candidate === 'field' ? candidate : 'ribbon'
+  const variant = candidate === 'packed' || candidate === 'ribbon' ? candidate : 'hud'
   return { variant, matrix: url.searchParams.get('matrix') === '1' }
 }
 
@@ -809,8 +963,7 @@ function setMatrix(
   if (matrix) url.searchParams.set('matrix', '1')
   else url.searchParams.delete('matrix')
   window.history.replaceState(null, '', url)
-  const current = readPrototypeUrl()
-  setPrototype(current)
+  setPrototype(readPrototypeUrl())
 }
 
 function variantName(variant: PrototypeVariant): string {

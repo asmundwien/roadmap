@@ -1,4 +1,4 @@
-/* PROTOTYPE — angular ticket-node language only. Delete from main after human review. */
+/* PROTOTYPE — game-HUD ticket node and data-tag lattice. No enclosing tint or plate. */
 
 .node-prototype-switcher {
   position: fixed;
@@ -10,7 +10,7 @@
   align-items: stretch;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--fg) 40%, var(--edge));
-  background: color-mix(in srgb, var(--bg) 94%, var(--fg));
+  background: var(--bg);
   box-shadow: 0 8px 28px color-mix(in srgb, var(--fg) 18%, transparent);
   color: var(--fg);
   transform: translateX(-50%);
@@ -62,102 +62,66 @@
   text-align: center;
 }
 
-.angular-node {
+.hud-node {
   --node-type: var(--muted);
   --node-state: var(--state-closed);
-  --classification: #7656c9;
-  --wayfinder: #087f8c;
-  --effect: var(--classification);
+  --tag-color: var(--muted);
   pointer-events: none;
 }
 
-.angular-node.type-research {
+.hud-node.type-research {
   --node-type: var(--type-research);
 }
 
-.angular-node.type-prototype {
+.hud-node.type-prototype {
   --node-type: var(--type-prototype);
 }
 
-.angular-node.type-grilling {
+.hud-node.type-grilling {
   --node-type: var(--type-grilling);
 }
 
-.angular-node.type-task {
+.hud-node.type-task {
   --node-type: var(--type-task);
 }
 
-.angular-node.state-frontier {
+.hud-node.state-frontier {
   --node-state: var(--state-frontier);
 }
 
-.angular-node.state-claimed {
+.hud-node.state-claimed {
   --node-state: var(--state-claimed);
 }
 
-.angular-node.state-blocked {
+.hud-node.state-blocked {
   --node-state: var(--state-blocked);
 }
 
-.node-field path {
-  fill: color-mix(in srgb, var(--classification) 9%, transparent);
-  stroke: color-mix(in srgb, var(--classification) 26%, transparent);
-  stroke-width: 1px;
-}
-
-.node-field.is-wayfinder path {
-  fill: color-mix(in srgb, var(--wayfinder) 10%, transparent);
-  stroke: color-mix(in srgb, var(--wayfinder) 28%, transparent);
-}
-
-.node-field.is-active path {
-  stroke-dasharray: 2 2;
-  animation: angular-field-pulse 1.4s ease-in-out infinite;
-}
-
-.node-field.is-human path {
-  fill: color-mix(in srgb, var(--classification) 14%, transparent);
-  stroke-dasharray: 4 2;
-}
-
-.node-field.is-warning path {
-  fill: color-mix(in srgb, var(--type-prototype) 13%, transparent);
-  stroke: color-mix(in srgb, var(--type-prototype) 45%, transparent);
-}
-
-.node-field.is-failure path {
-  fill: color-mix(in srgb, var(--state-blocked) 13%, transparent);
-  stroke: color-mix(in srgb, var(--state-blocked) 45%, transparent);
-}
-
-.node-field.is-unknown path {
-  fill: color-mix(in srgb, var(--muted) 8%, transparent);
-  stroke: color-mix(in srgb, var(--muted) 40%, transparent);
-  stroke-dasharray: 1 3;
-}
-
-.main-diamond .diamond-face {
-  fill: color-mix(in srgb, var(--node-state) 13%, var(--bg));
+.main-diamond .node-outer,
+.main-diamond .node-inner {
+  fill: var(--bg);
   stroke: var(--node-state);
   stroke-width: 2px;
   stroke-linejoin: miter;
 }
 
-.angular-node.state-frontier .diamond-face {
-  fill: var(--node-state);
+.main-diamond .node-inner {
+  stroke-width: 1.25px;
 }
 
-.angular-node.state-claimed .diamond-face {
+.hud-node.state-frontier .node-outer,
+.hud-node.state-frontier .node-inner {
+  fill: var(--state-frontier);
+}
+
+.hud-node.state-claimed .node-inner {
   fill: var(--bg);
 }
 
-.angular-node.state-closed .diamond-face {
+.hud-node.state-closed .node-outer,
+.hud-node.state-closed .node-inner {
   fill: var(--fg);
-  stroke: var(--fg);
-}
-
-.main-diamond .frontier-field {
-  fill: color-mix(in srgb, var(--state-frontier) 12%, transparent);
+  stroke: var(--bg);
 }
 
 .main-diamond .claimed-half {
@@ -172,7 +136,7 @@
   fill: var(--state-claimed);
 }
 
-.main-diamond .type-rune {
+.main-diamond .node-glyph {
   fill: var(--node-type);
   paint-order: stroke;
   stroke: var(--bg);
@@ -181,8 +145,8 @@
   font-weight: 900;
 }
 
-.angular-node.state-frontier .type-rune,
-.angular-node.state-closed .type-rune {
+.hud-node.state-frontier .node-glyph,
+.hud-node.state-closed .node-glyph {
   fill: var(--bg);
   stroke: color-mix(in srgb, var(--node-state) 82%, var(--fg));
 }
@@ -190,77 +154,109 @@
 .main-diamond .type-corners path {
   fill: none;
   stroke: var(--node-type);
-  stroke-width: 1.4px;
+  stroke-width: 1.3px;
   stroke-linecap: square;
 }
 
-.angular-node.state-frontier .type-corners path,
-.angular-node.state-closed .type-corners path {
+.hud-node.state-frontier .type-corners path,
+.hud-node.state-closed .type-corners path {
   stroke: var(--bg);
 }
 
-.status-diamond {
-  --effect: var(--classification);
+.data-diamond.stage-classification {
+  --tag-color: #7656c9;
 }
 
-.status-diamond.is-wayfinder {
-  --effect: var(--wayfinder);
+.data-diamond.stage-wayfinder {
+  --tag-color: #087f8c;
 }
 
-.status-diamond .status-face {
-  fill: color-mix(in srgb, var(--effect) 16%, var(--bg));
-  stroke: var(--effect);
-  stroke-width: 1.4px;
+.data-diamond.stage-report {
+  --tag-color: var(--fg);
+}
+
+.data-diamond .tag-outer,
+.data-diamond .tag-inner {
+  fill: var(--bg);
+  stroke: var(--tag-color);
+  stroke-width: 1.15px;
   stroke-linejoin: miter;
 }
 
-.status-diamond.is-active .status-face {
-  stroke-dasharray: 2 1;
-  animation: angular-effect-pulse 1.4s ease-in-out infinite;
+.data-diamond .tag-inner {
+  stroke-width: 0.75px;
 }
 
-.status-diamond.is-human .status-face {
-  fill: color-mix(in srgb, var(--effect) 25%, var(--bg));
-  stroke-dasharray: 3 1.5;
+.data-diamond.tone-positive .tag-outer,
+.data-diamond.tone-positive .tag-inner {
+  fill: var(--fg);
+  stroke: var(--bg);
 }
 
-.status-diamond.is-warning .status-face {
+.data-diamond.tone-active .tag-outer,
+.data-diamond.tone-active .tag-inner {
+  fill: var(--tag-color);
+  animation: hud-tag-pulse 1.4s ease-in-out infinite;
+}
+
+.data-diamond.tone-human .tag-outer {
+  stroke-width: 2px;
+}
+
+.data-diamond.tone-warning .tag-outer {
   stroke-width: 2px;
   stroke-dasharray: 3 1;
 }
 
-.status-diamond.is-failure .status-face {
-  fill: color-mix(in srgb, var(--effect) 34%, var(--bg));
-  stroke-width: 2.2px;
+.data-diamond.tone-failure .tag-outer,
+.data-diamond.tone-failure .tag-inner {
+  stroke: var(--state-blocked);
+  stroke-width: 1.8px;
 }
 
-.status-diamond.is-unknown .status-face {
-  opacity: 0.65;
+.data-diamond.tone-unknown .tag-outer,
+.data-diamond.tone-unknown .tag-inner {
+  stroke: var(--muted);
   stroke-dasharray: 1 2;
+  opacity: 0.7;
 }
 
-.status-diamond .override-corner {
+.data-diamond .override-corner {
   fill: var(--goal);
 }
 
-.status-diamond .status-glyph {
-  fill: var(--effect);
-  font-size: 7px;
+.data-diamond .tag-glyph {
+  fill: var(--tag-color);
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 2.25px;
+  font-size: 5.5px;
   font-weight: 900;
 }
 
-.status-diamond .status-stage {
+.data-diamond.tone-positive .tag-glyph,
+.data-diamond.tone-active .tag-glyph {
+  fill: var(--bg);
+  stroke: var(--fg);
+}
+
+.data-diamond.tone-failure .tag-glyph {
+  fill: var(--state-blocked);
+}
+
+.data-diamond .tag-slot {
   fill: var(--bg);
   paint-order: stroke;
-  stroke: var(--effect);
-  stroke-width: 3px;
-  font-size: 4px;
+  stroke: var(--tag-color);
+  stroke-width: 2.5px;
+  font-size: 3.5px;
   font-weight: 900;
 }
 
-/* The field variant spends the background tint on Classification and only draws Wayfinder. */
-.angular-node.is-field .node-field path {
-  stroke-width: 1.25px;
+.data-diamond.tone-positive .tag-slot,
+.data-diamond.tone-active .tag-slot {
+  fill: var(--fg);
+  stroke: var(--bg);
 }
 
 /* ---------------------------------------------------------------- state matrix */
@@ -271,7 +267,7 @@
   inset: 0;
   overflow: auto;
   padding: var(--sp-6) max(var(--sp-6), calc((100vw - 74rem) / 2)) 6rem;
-  background: color-mix(in srgb, var(--bg) 98%, var(--fg));
+  background: var(--bg);
   color: var(--fg);
 }
 
@@ -352,7 +348,7 @@
 
 .matrix-node {
   width: 100%;
-  min-width: 5.5rem;
+  min-width: 6.5rem;
 }
 
 .matrix-node svg {
@@ -363,69 +359,73 @@
 }
 
 .automation-matrix {
-  border-top: 1px solid var(--edge);
-  border-left: 1px solid var(--edge);
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
 }
 
-.matrix-head,
-.matrix-row {
-  display: grid;
-  grid-template-columns: 1.25fr 0.8fr 1.5fr 1.5fr 7rem;
-}
-
-.matrix-head > *,
-.matrix-row > * {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  min-height: 3.25rem;
+.automation-matrix th,
+.automation-matrix td {
+  height: 3.25rem;
   padding: var(--sp-2) var(--sp-3);
-  border-right: 1px solid var(--edge);
-  border-bottom: 1px solid var(--edge);
+  border: 1px solid var(--edge);
+  font-size: 0.72rem;
+  text-align: left;
+  vertical-align: middle;
 }
 
-.matrix-head strong {
-  min-height: 2rem;
+.automation-matrix thead th {
+  height: 2rem;
   color: var(--muted);
   font-size: 0.65rem;
   letter-spacing: 0.07em;
   text-transform: uppercase;
 }
 
-.matrix-row {
-  font-size: 0.72rem;
+.automation-matrix th:nth-child(1) {
+  width: 18%;
 }
 
-.matrix-row > span {
+.automation-matrix th:nth-child(2) {
+  width: 12%;
+}
+
+.automation-matrix th:nth-child(3),
+.automation-matrix th:nth-child(4) {
+  width: 24%;
+}
+
+.automation-matrix th:nth-child(5) {
+  width: 22%;
+}
+
+.automation-matrix td {
   color: var(--muted);
 }
 
-.matrix-row .matrix-node {
+.automation-matrix td:last-child {
   padding: 0;
 }
 
-@keyframes angular-effect-pulse {
+@keyframes hud-tag-pulse {
   50% {
     opacity: 0.45;
   }
 }
 
-@keyframes angular-field-pulse {
-  50% {
-    fill-opacity: 0.25;
-  }
-}
-
 @media (prefers-color-scheme: dark) {
-  .angular-node {
-    --classification: #ad8cff;
-    --wayfinder: #43c7d2;
+  .data-diamond.stage-classification {
+    --tag-color: #ad8cff;
+  }
+
+  .data-diamond.stage-wayfinder {
+    --tag-color: #43c7d2;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .node-field.is-active path,
-  .status-diamond.is-active .status-face {
+  .data-diamond.tone-active .tag-outer,
+  .data-diamond.tone-active .tag-inner {
     animation: none;
   }
 }
