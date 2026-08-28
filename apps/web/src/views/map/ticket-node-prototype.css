@@ -126,7 +126,7 @@
 .main-diamond .diamond-face {
   fill: color-mix(in srgb, var(--node-state) 13%, var(--bg));
   stroke: var(--node-state);
-  stroke-width: 2px;
+  stroke-width: 2.5px;
   stroke-linejoin: miter;
 }
 
@@ -163,8 +163,8 @@
   fill: var(--node-type);
   paint-order: stroke;
   stroke: var(--bg);
-  stroke-width: 2.75px;
-  font-size: 7px;
+  stroke-width: 3.5px;
+  font-size: 9.25px;
   font-weight: 900;
 }
 
@@ -177,7 +177,7 @@
 .main-diamond .type-corners path {
   fill: none;
   stroke: var(--node-type);
-  stroke-width: 1.4px;
+  stroke-width: 1.8px;
   stroke-linecap: square;
 }
 
@@ -190,45 +190,21 @@
   --tag-color: #7656c9;
 }
 
-.data-diamond.stage-wayfinder {
-  --tag-color: #087f8c;
-}
-
+.data-diamond.stage-wayfinder,
 .data-diamond.stage-report {
-  --tag-color: var(--fg);
-}
-
-.data-diamond.tone-human {
-  --tag-color: var(--type-grilling);
-}
-
-.data-diamond.tone-warning {
-  --tag-color: var(--type-prototype);
-}
-
-.data-diamond.tone-failure {
-  --tag-color: var(--state-blocked);
-}
-
-.data-diamond.tone-unknown {
-  --tag-color: var(--muted);
+  --tag-color: #087f8c;
 }
 
 .data-diamond .tag-face {
   fill: var(--tag-color);
   stroke: var(--bg);
-  stroke-width: 0.8px;
+  stroke-width: 1px;
   stroke-linejoin: miter;
-}
-
-.data-diamond.is-override .tag-face {
-  stroke: var(--goal);
-  stroke-width: 1.15px;
 }
 
 .data-diamond .tag-glyph {
   fill: var(--bg);
-  font-size: 5.5px;
+  font-size: 7.25px;
   font-weight: 900;
 }
 
@@ -246,12 +222,12 @@
 .node-tooltip rect {
   fill: var(--fg);
   stroke: var(--bg);
-  stroke-width: 0.75px;
+  stroke-width: 1px;
 }
 
 .node-tooltip text {
   fill: var(--bg);
-  font-size: 5px;
+  font-size: 6px;
   font-weight: 700;
   letter-spacing: 0.03em;
 }
@@ -330,7 +306,7 @@
 .type-state-matrix > * {
   display: grid;
   place-items: center;
-  min-height: 3.5rem;
+  min-height: 4.5rem;
   border-right: 1px solid var(--edge);
   border-bottom: 1px solid var(--edge);
 }
@@ -351,7 +327,7 @@
 .matrix-node svg {
   display: block;
   width: 100%;
-  height: 3rem;
+  height: 4rem;
   overflow: visible;
 }
 
@@ -363,7 +339,7 @@
 
 .automation-matrix th,
 .automation-matrix td {
-  height: 3.25rem;
+  height: 4.25rem;
   padding: var(--sp-2) var(--sp-3);
   border: 1px solid var(--edge);
   font-size: 0.72rem;
@@ -409,7 +385,8 @@
     --tag-color: #ad8cff;
   }
 
-  .data-diamond.stage-wayfinder {
+  .data-diamond.stage-wayfinder,
+  .data-diamond.stage-report {
     --tag-color: #43c7d2;
   }
 }

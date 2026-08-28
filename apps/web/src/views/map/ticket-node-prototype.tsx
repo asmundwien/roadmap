@@ -58,6 +58,11 @@ const VARIANTS: readonly { key: PrototypeVariant; name: string }[] = [
   { key: 'packed', name: 'Packed lattice' },
 ]
 
+const NODE_SCALE = 4 / 3
+const PRIMARY_RADIUS = 11 * NODE_SCALE
+const FRONTIER_RADIUS = 17 * NODE_SCALE
+const MINOR_RADIUS = 6.5 * NODE_SCALE
+
 export function TicketNodePrototypeProvider({
   evidence,
   children,
@@ -186,32 +191,34 @@ function MainDiamond({ spec, x, y }: { spec: NodeSpec; x: number; y: number }) {
   return (
     <g className="main-diamond">
       <g className="node-shape">
-        {spec.state === 'frontier' && <path className="frontier-field" d={diamondPath(x, y, 17)} />}
-        <path className="diamond-face" d={diamondPath(x, y, 11)} />
+        {spec.state === 'frontier' && (
+          <path className="frontier-field" d={diamondPath(x, y, FRONTIER_RADIUS)} />
+        )}
+        <path className="diamond-face" d={diamondPath(x, y, PRIMARY_RADIUS)} />
         {spec.state === 'claimed' && (
           <path
             className="claimed-half"
-            d={`M ${x} ${y - 11} L ${x} ${y + 11} L ${x - 11} ${y} Z`}
+            d={`M ${x} ${y - PRIMARY_RADIUS} L ${x} ${y + PRIMARY_RADIUS} L ${x - PRIMARY_RADIUS} ${y} Z`}
           />
         )}
         {spec.isBlocked && spec.state !== 'blocked' && (
           <path
             className="blocked-corner"
-            d={`M ${x - 11} ${y} L ${x} ${y + 11} L ${x - 4} ${y + 7} Z`}
+            d={`M ${x - PRIMARY_RADIUS} ${y} L ${x} ${y + PRIMARY_RADIUS} L ${x - 4 * NODE_SCALE} ${y + 7 * NODE_SCALE} Z`}
           />
         )}
         {spec.isClaimed && spec.state !== 'claimed' && (
           <path
             className="claimed-corner"
-            d={`M ${x} ${y - 11} L ${x + 11} ${y} L ${x + 5} ${y - 6} Z`}
+            d={`M ${x} ${y - PRIMARY_RADIUS} L ${x + PRIMARY_RADIUS} ${y} L ${x + 5 * NODE_SCALE} ${y - 6 * NODE_SCALE} Z`}
           />
         )}
-        <text className="type-rune" x={x} y={y + 3.3} textAnchor="middle">
+        <text className="type-rune" x={x} y={y + 3.3 * NODE_SCALE} textAnchor="middle">
           {spec.state === 'closed' ? '✓' : typeGlyph(spec.type)}
         </text>
         <TypeCorners type={spec.type} x={x} y={y} />
       </g>
-      <NodeTooltip x={x} y={y - 20} word={stateWord(spec.state)} />
+      <NodeTooltip x={x} y={y - 20 * NODE_SCALE} word={stateWord(spec.state)} />
     </g>
   )
 }
@@ -220,10 +227,10 @@ function TypeCorners({ type, x, y }: { type: TicketType; x: number; y: number })
   const count = typeRank(type)
   if (count === 0) return null
   const corners = [
-    `M ${x - 7} ${y - 4} L ${x} ${y - 11}`,
-    `M ${x + 4} ${y - 7} L ${x + 11} ${y}`,
-    `M ${x + 7} ${y + 4} L ${x} ${y + 11}`,
-    `M ${x - 4} ${y + 7} L ${x - 11} ${y}`,
+    `M ${x - 7 * NODE_SCALE} ${y - 4 * NODE_SCALE} L ${x} ${y - PRIMARY_RADIUS}`,
+    `M ${x + 4 * NODE_SCALE} ${y - 7 * NODE_SCALE} L ${x + PRIMARY_RADIUS} ${y}`,
+    `M ${x + 7 * NODE_SCALE} ${y + 4 * NODE_SCALE} L ${x} ${y + PRIMARY_RADIUS}`,
+    `M ${x - 4 * NODE_SCALE} ${y + 7 * NODE_SCALE} L ${x - PRIMARY_RADIUS} ${y}`,
   ]
   return (
     <g className="type-corners">
@@ -236,26 +243,24 @@ function TypeCorners({ type, x, y }: { type: TicketType; x: number; y: number })
 
 function DataDiamond({ tag, x, y }: { tag: DataTag; x: number; y: number }) {
   return (
-    <g
-      className={`data-diamond slot-${tag.slot} stage-${tag.stage} tone-${tag.tone}${tag.admission === 'override' ? ' is-override' : ''}`}
-    >
+    <g className={`data-diamond slot-${tag.slot} stage-${tag.stage} tone-${tag.tone}`}>
       <g className="tag-shape">
-        <path className="tag-face" d={diamondPath(x, y, 6.5)} />
-        <text className="tag-glyph" x={x} y={y + 2.5} textAnchor="middle">
+        <path className="tag-face" d={diamondPath(x, y, MINOR_RADIUS)} />
+        <text className="tag-glyph" x={x} y={y + 2.5 * NODE_SCALE} textAnchor="middle">
           {tag.glyph}
         </text>
       </g>
-      <NodeTooltip x={x} y={y - 13} word={tag.word} />
+      <NodeTooltip x={x} y={y - 13 * NODE_SCALE} word={tag.word} />
     </g>
   )
 }
 
 function NodeTooltip({ x, y, word }: { x: number; y: number; word: string }) {
-  const width = Math.max(26, word.length * 4.4 + 8)
+  const width = Math.max(32, word.length * 5.2 + 10)
   return (
     <g className="node-tooltip" transform={`translate(${x - width / 2} ${y})`}>
-      <rect width={width} height="11" />
-      <text x={width / 2} y="7.5" textAnchor="middle">
+      <rect width={width} height="13" />
+      <text x={width / 2} y="9" textAnchor="middle">
         {word}
       </text>
     </g>
@@ -267,17 +272,25 @@ function tagPositions(
   tags: DataTag[],
 ): { tag: DataTag; dx: number; dy: number }[] {
   if (variant === 'ribbon') {
-    return tags.map((tag, index) => ({ tag, dx: 19 + index * 14, dy: 0 }))
+    return tags.map((tag, index) => ({
+      tag,
+      dx: (19 + index * 14) * NODE_SCALE,
+      dy: 0,
+    }))
   }
   if (variant === 'packed') {
-    return packedPositions(tags).map(({ tag, dx, dy }) => ({ tag, dx: dx + 18, dy }))
+    return packedPositions(tags).map(({ tag, dx, dy }) => ({
+      tag,
+      dx: (dx + 18) * NODE_SCALE,
+      dy: dy * NODE_SCALE,
+    }))
   }
   const fixed: Record<TagSlot, { dx: number; dy: number }> = {
-    classification: { dx: 22, dy: -7 },
-    'classification-process': { dx: 36, dy: -7 },
-    wayfinder: { dx: 15, dy: 7 },
-    'wayfinder-process': { dx: 29, dy: 7 },
-    report: { dx: 43, dy: 7 },
+    classification: { dx: 22 * NODE_SCALE, dy: -7 * NODE_SCALE },
+    'classification-process': { dx: 36 * NODE_SCALE, dy: -7 * NODE_SCALE },
+    wayfinder: { dx: 15 * NODE_SCALE, dy: 7 * NODE_SCALE },
+    'wayfinder-process': { dx: 29 * NODE_SCALE, dy: 7 * NODE_SCALE },
+    report: { dx: 43 * NODE_SCALE, dy: 7 * NODE_SCALE },
   }
   return tags.map((tag) => ({ tag, ...fixed[tag.slot] }))
 }
@@ -364,8 +377,9 @@ function StateMatrix({ variant, onClose }: { variant: PrototypeVariant; onClose:
         <h3>Independent Automation evidence</h3>
         <p>
           Five fixed facts can coexist: Classification, its process result, Wayfinder, its process
-          result, and the Session report. Every fact uses the same solid minor-node shape; color and
-          one central icon provide its variant.
+          result, and the Session report. Every fact uses the same solid minor-node shape. Violet
+          always means Classification; cyan always means Wayfinder or Session evidence; the central
+          icon names the state.
         </p>
         <table className="automation-matrix">
           <thead>
@@ -407,8 +421,8 @@ function MatrixNode({
 }) {
   return (
     <div className="matrix-node" role="img" aria-label={label}>
-      <svg viewBox="0 0 112 50" aria-hidden="true">
-        <HudNode variant={variant} spec={spec} x={24} y={25} />
+      <svg viewBox="0 0 150 70" aria-hidden="true">
+        <HudNode variant={variant} spec={spec} x={32} y={35} />
       </svg>
     </div>
   )
