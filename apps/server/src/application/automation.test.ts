@@ -21,6 +21,7 @@ import {
   type ClassificationProcessResult,
   createAutomationDocument,
   createAutomationLauncher,
+  type WayfinderProcessResult,
 } from './automation.ts'
 import { classificationResultSchemaJson } from './classification-contract.ts'
 import type {
@@ -30,6 +31,7 @@ import type {
   HarnessCommand,
   RoadmapConfiguration,
 } from './configuration.ts'
+import { sessionReportSchemaJson } from './session-report-contract.ts'
 
 const TASK: TicketTypeEvidence = { kind: 'recognized', value: 'task', labels: ['task'] }
 const COMMAND: HarnessCommand = {
@@ -216,6 +218,22 @@ function processResult(
     ...overrides,
   }
 }
+function wayfinderResult(
+  overrides: Partial<Omit<WayfinderProcessResult, 'status'>> = {},
+): WayfinderProcessResult {
+  return {
+    status: 'finished',
+    code: 0,
+    signal: null,
+    stdout: JSON.stringify({
+      schemaVersion: 1,
+      outcome: 'completed',
+      reason: 'Ticket resolved.',
+    }),
+    stdoutOversized: false,
+    ...overrides,
+  }
+}
 
 function deferredLauncher(
   options: {
@@ -231,6 +249,10 @@ function deferredLauncher(
     stopped: boolean
   }> = []
   const dispatches: AutomationLaunch[] = []
+  const sessions: Array<{
+    resolve(result: WayfinderProcessResult): void
+    reject(error: Error): void
+  }> = []
   let running = 0
   let maximumRunning = 0
   const launcher: AutomationLauncher = {
@@ -265,9 +287,18 @@ function deferredLauncher(
       options.beforeDispatch?.(request)
       dispatches.push(request)
       if (options.dispatchError) throw options.dispatchError
+      const { promise, resolve, reject } = Promise.withResolvers<WayfinderProcessResult>()
+      sessions.push({ resolve, reject })
+      return { completed: promise }
     },
   }
-  return { launcher, classifications, dispatches, maximumRunning: () => maximumRunning }
+  return {
+    launcher,
+    classifications,
+    dispatches,
+    sessions,
+    maximumRunning: () => maximumRunning,
+  }
 }
 
 async function harness(options: {
@@ -421,7 +452,8 @@ describe('RoadmapApplication Automation', () => {
         },
         wayfinderCommand: {
           ...COMMAND,
-          promptTemplate: 'Run {{roadmap.map}} ticket {{roadmap.ticket}}.',
+          promptTemplate:
+            'Run {{roadmap.map}} ticket {{roadmap.ticket}}. Contract: {{roadmap.sessionReportSchema}}',
         },
       }),
     })
@@ -430,7 +462,9 @@ describe('RoadmapApplication Automation', () => {
     )
     launches.classifications[0]?.resolve(processResult())
     await vi.waitFor(() => expect(launches.dispatches).toHaveLength(1))
-    expect(launches.dispatches[0]?.prompt).toBe(`Run ${mapUrl} ticket ${ticketUrl}.`)
+    expect(launches.dispatches[0]?.prompt).toBe(
+      `Run ${mapUrl} ticket ${ticketUrl}. Contract: ${sessionReportSchemaJson}`,
+    )
     await current.application.stop()
   })
 
@@ -626,6 +660,102 @@ describe('RoadmapApplication Automation', () => {
     await current.application.stop()
   })
 
+  it('persists independent Process result and Session report facts on completion', async () => {
+    const sourceProject = project('one', [ticket('1')])
+    const ledger = memoryAutomationDocument()
+    const launches = deferredLauncher()
+    const current = await harness({
+      projects: [sourceProject],
+      launcher: launches.launcher,
+      document: ledger,
+    })
+    launches.classifications[0]?.resolve(processResult())
+    await vi.waitFor(() => expect(launches.sessions).toHaveLength(1))
+    await vi.waitFor(() => expect(ledger.records()[0]?.wayfinder?.status).toBe('running'))
+
+    launches.sessions[0]?.resolve(wayfinderResult({ code: 7 }))
+
+    await vi.waitFor(() =>
+      expect(ledger.records()[0]?.wayfinder).toEqual({
+        status: 'finished',
+        admission: 'automatic',
+        processResult: { status: 'exited', code: 7 },
+        report: {
+          status: 'received',
+          report: { outcome: 'completed', reason: 'Ticket resolved.' },
+        },
+      }),
+    )
+    await current.application.stop()
+  })
+
+  it.each([
+    [
+      'missing',
+      'missing',
+      wayfinderResult({ stdout: '' }),
+      'The Wayfinder Session produced no Session report.',
+    ],
+    [
+      'invalid',
+      'invalid',
+      wayfinderResult({ stdout: '{bad-json' }),
+      'Wayfinder Session stdout did not match the current report contract.',
+    ],
+    [
+      'oversized',
+      'invalid',
+      wayfinderResult({ stdout: '{}', stdoutOversized: true }),
+      'Wayfinder Session stdout exceeded 16384 bytes.',
+    ],
+  ])('records %s Session report evidence', async (_name, status, result, reason) => {
+    const sourceProject = project(`report-${_name}`, [ticket('1')])
+    const ledger = memoryAutomationDocument()
+    const launches = deferredLauncher()
+    const current = await harness({
+      projects: [sourceProject],
+      launcher: launches.launcher,
+      document: ledger,
+    })
+    launches.classifications[0]?.resolve(processResult())
+    await vi.waitFor(() => expect(launches.sessions).toHaveLength(1))
+
+    launches.sessions[0]?.resolve(result)
+
+    await vi.waitFor(() =>
+      expect(ledger.records()[0]?.wayfinder).toMatchObject({
+        status: 'finished',
+        processResult: { status: 'exited', code: 0 },
+        report: { status, reason },
+      }),
+    )
+    await current.application.stop()
+  })
+
+  it('records a lost Wayfinder process as outcome unknown', async () => {
+    const sourceProject = project('lost-session', [ticket('1')])
+    const ledger = memoryAutomationDocument()
+    const launches = deferredLauncher()
+    const current = await harness({
+      projects: [sourceProject],
+      launcher: launches.launcher,
+      document: ledger,
+    })
+    launches.classifications[0]?.resolve(processResult())
+    await vi.waitFor(() => expect(launches.sessions).toHaveLength(1))
+    await vi.waitFor(() => expect(ledger.records()[0]?.wayfinder?.status).toBe('running'))
+
+    launches.sessions[0]?.reject(new Error('lost'))
+
+    await vi.waitFor(() =>
+      expect(ledger.records()[0]?.wayfinder).toMatchObject({
+        status: 'outcome-unknown',
+        reason: expect.stringContaining('process result was lost'),
+      }),
+    )
+    await current.application.stop()
+  })
+
   it('allows only one global classifier at a time', async () => {
     const projects = [project('one', [ticket('1')]), project('two', [ticket('2')])]
     const launches = deferredLauncher()
@@ -662,11 +792,12 @@ describe('RoadmapApplication Automation', () => {
       command: process.execPath,
       args: [
         '-e',
-        `let input=''; process.stdin.setEncoding('utf8'); process.stdin.on('data', value => input += value); process.stdin.on('end', () => require('node:fs').writeFileSync(process.argv[1], JSON.stringify({cwd:process.cwd(), input, kind:process.env.ROADMAP_RUN_KIND, map:process.env.ROADMAP_MAP_ID, ticket:process.env.ROADMAP_TICKET_ID})))`,
+        `let input=''; process.stdin.setEncoding('utf8'); process.stdin.on('data', value => input += value); process.stdin.on('end', () => { require('node:fs').writeFileSync(process.argv[1], JSON.stringify({cwd:process.cwd(), input, kind:process.env.ROADMAP_RUN_KIND, map:process.env.ROADMAP_MAP_ID, ticket:process.env.ROADMAP_TICKET_ID})); process.stdout.write(JSON.stringify({schemaVersion:1, outcome:'completed', reason:'Ticket resolved.'})) })`,
         outputPath,
       ],
       promptDelivery: 'stdin',
-      promptTemplate: 'Configured map={{roadmap.map}} ticket={{roadmap.ticket}}',
+      promptTemplate:
+        'Configured map={{roadmap.map}} ticket={{roadmap.ticket}} report={{roadmap.sessionReportSchema}}',
     }
     const sourceProject = project('real', [ticket('9')])
     sourceProject.openMaps[0] = map(sourceProject.key, sourceProject.openMaps[0]?.tickets ?? [], {
@@ -696,7 +827,18 @@ describe('RoadmapApplication Automation', () => {
     const session: unknown = JSON.parse(observed)
     expect(session).toMatchObject({ cwd: root, kind: 'wayfinder', map: 'map', ticket: '9' })
     expect(isRecord(session) && session.input).toBe(
-      `Configured map=${join(root, '.wayfinder/map.md')} ticket=/tmp/project-9/.wayfinder/tickets/9.md`,
+      `Configured map=${join(root, '.wayfinder/map.md')} ticket=/tmp/project-9/.wayfinder/tickets/9.md report=${sessionReportSchemaJson}`,
+    )
+    await vi.waitFor(() =>
+      expect(current.ledger.records()[0]?.wayfinder).toEqual({
+        status: 'finished',
+        admission: 'automatic',
+        processResult: { status: 'exited', code: 0 },
+        report: {
+          status: 'received',
+          report: { outcome: 'completed', reason: 'Ticket resolved.' },
+        },
+      }),
     )
     await current.application.stop()
   })

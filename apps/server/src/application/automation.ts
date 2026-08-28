@@ -22,6 +22,11 @@ import {
   decodeClassificationResult,
 } from './classification-contract.ts'
 import type { HarnessCommand, RoadmapConfiguration } from './configuration.ts'
+import {
+  decodeSessionReport,
+  SESSION_REPORT_SCHEMA_MARKER,
+  sessionReportSchemaJson,
+} from './session-report-contract.ts'
 
 const PROMPT_MARKER = '{{roadmap.prompt}}'
 const STDOUT_LIMIT = 16 * 1024
@@ -53,20 +58,27 @@ export interface AutomationDocument {
   write(records: readonly AutomationEvidence[]): Promise<void>
 }
 
+interface FinishedProcessResult {
+  status: 'finished'
+  code: number | null
+  signal: NodeJS.Signals | null
+  stdout: string
+  stdoutOversized: boolean
+}
+
 export type ClassificationProcessResult =
-  | {
-      status: 'finished'
-      code: number | null
-      signal: NodeJS.Signals | null
-      stdout: string
-      stdoutOversized: boolean
-    }
+  | FinishedProcessResult
   | { status: 'launch-failed'; reason: string }
   | { status: 'outcome-unknown'; reason: string }
+
+export type WayfinderProcessResult = FinishedProcessResult
 
 export interface ClassificationProcess {
   completed: Promise<ClassificationProcessResult>
   stop(): Promise<void>
+}
+export interface WayfinderProcess {
+  completed: Promise<WayfinderProcessResult>
 }
 
 export interface AutomationLaunch {
@@ -78,7 +90,7 @@ export interface AutomationLaunch {
 
 export interface AutomationLauncher {
   classify(request: AutomationLaunch): ClassificationProcess
-  dispatch(request: AutomationLaunch): Promise<void>
+  dispatch(request: AutomationLaunch): Promise<WayfinderProcess>
 }
 
 interface AutomationSource {
@@ -261,9 +273,9 @@ export function createAutomationLoop(options: {
     }
     if (!(await replace(marker)) || !accepting) return
 
+    let process: WayfinderProcess
     try {
-      await options.launcher.dispatch(launchRequest(candidate, command, 'wayfinder'))
-      await replace({ ...marker, wayfinder: { status: 'running', admission } })
+      process = await options.launcher.dispatch(launchRequest(candidate, command, 'wayfinder'))
     } catch {
       await replace({
         ...marker,
@@ -273,7 +285,59 @@ export function createAutomationLoop(options: {
           reason: 'The Wayfinder Session Command could not be launched.',
         },
       })
+      return
     }
+
+    void process.completed.then(
+      (result) => enqueue(() => finishWayfinder(candidate.target, admission, result)),
+      () =>
+        enqueue(() =>
+          finishWayfinderUnknown(
+            candidate.target,
+            admission,
+            'The Wayfinder Session process result was lost.',
+          ),
+        ),
+    )
+    await replace({ ...marker, wayfinder: { status: 'running', admission } })
+  }
+
+  async function finishWayfinder(
+    target: AutomationTarget,
+    admission: AutomationAdmission,
+    result: WayfinderProcessResult,
+  ): Promise<void> {
+    if (!accepting) return
+    const current = records.get(targetKey(target))
+    if (!current) return
+    if (current.wayfinder?.status !== 'launching' && current.wayfinder?.status !== 'running') return
+    await replace({
+      ...current,
+      wayfinder: {
+        status: 'finished',
+        admission,
+        processResult: observedProcessResult(
+          result,
+          'The Wayfinder Session process result was lost.',
+        ),
+        report: sessionReportEvidence(result),
+      },
+    })
+  }
+
+  async function finishWayfinderUnknown(
+    target: AutomationTarget,
+    admission: AutomationAdmission,
+    reason: string,
+  ): Promise<void> {
+    if (!accepting) return
+    const current = records.get(targetKey(target))
+    if (!current) return
+    if (current.wayfinder?.status !== 'launching' && current.wayfinder?.status !== 'running') return
+    await replace({
+      ...current,
+      wayfinder: { status: 'outcome-unknown', admission, reason },
+    })
   }
 
   return {
@@ -375,6 +439,7 @@ function renderPrompt(promptTemplate: string, candidate: Candidate): string {
     .replaceAll('{{roadmap.map}}', () => candidate.mapPointer)
     .replaceAll('{{roadmap.ticket}}', () => candidate.ticketPointer)
     .replaceAll(CLASSIFICATION_RESULT_SCHEMA_MARKER, () => classificationResultSchemaJson)
+    .replaceAll(SESSION_REPORT_SCHEMA_MARKER, () => sessionReportSchemaJson)
 }
 
 function classificationResult(
@@ -387,7 +452,7 @@ function classificationResult(
   if (result.status === 'outcome-unknown') {
     return { status: 'outcome-unknown', admission, reason: result.reason }
   }
-  const processResult = observedProcessResult(result)
+  const processResult = observedProcessResult(result, 'The Classification process result was lost.')
   if (result.signal || result.code !== 0) {
     const detail = result.signal
       ? `signal ${result.signal}`
@@ -424,11 +489,34 @@ function classificationResult(
 }
 
 function observedProcessResult(
-  result: Extract<ClassificationProcessResult, { status: 'finished' }>,
+  result: FinishedProcessResult,
+  unavailableReason: string,
 ): AutomationProcessResult {
   if (result.signal) return { status: 'signaled', signal: result.signal }
   if (result.code !== null) return { status: 'exited', code: result.code }
-  return { status: 'unavailable', reason: 'The Classification process result was lost.' }
+  return { status: 'unavailable', reason: unavailableReason }
+}
+
+function sessionReportEvidence(result: WayfinderProcessResult): SessionReportEvidence {
+  if (result.stdoutOversized) {
+    return {
+      status: 'invalid',
+      reason: `Wayfinder Session stdout exceeded ${STDOUT_LIMIT} bytes.`,
+    }
+  }
+  if (result.stdout.trim().length === 0) {
+    return { status: 'missing', reason: 'The Wayfinder Session produced no Session report.' }
+  }
+  const decoded = decodeSessionReport(result.stdout)
+  return decoded
+    ? {
+        status: 'received',
+        report: { outcome: decoded.outcome, reason: decoded.reason },
+      }
+    : {
+        status: 'invalid',
+        reason: 'Wayfinder Session stdout did not match the current report contract.',
+      }
 }
 
 export function createAutomationDocument(path: string): AutomationDocument {
@@ -823,17 +911,36 @@ export function createAutomationLauncher(
       }
     },
     dispatch(request) {
-      const { promise, resolve, reject } = Promise.withResolvers<void>()
-      const child = spawnCommand(request, ['ignore', 'ignore'])
-      child.once('error', (error) =>
-        reject(new Error(processError(error, 'Wayfinder Session Command'))),
-      )
+      const child = spawnCommand(request, ['pipe', 'pipe'])
+      const stdout = boundedCapture(child.stdout, STDOUT_LIMIT, false)
+      boundedCapture(child.stderr, STDERR_LIMIT, true)
+      const {
+        promise: launched,
+        resolve: resolveLaunched,
+        reject: rejectLaunched,
+      } = Promise.withResolvers<WayfinderProcess>()
+      const { promise: completed, resolve: resolveCompleted } =
+        Promise.withResolvers<WayfinderProcessResult>()
+      child.once('error', (error) => {
+        rejectLaunched(new Error(processError(error, 'Wayfinder Session Command')))
+      })
       child.once('spawn', () => {
         child.unref()
-        resolve()
+        unrefReadable(child.stdout)
+        unrefReadable(child.stderr)
+        resolveLaunched({ completed })
+      })
+      child.once('close', (code, signal) => {
+        resolveCompleted({
+          status: 'finished',
+          code,
+          signal,
+          stdout: stdout.text(),
+          stdoutOversized: stdout.truncated(),
+        })
       })
       deliverStdin(child, request)
-      return promise
+      return launched
     },
   }
 }
@@ -858,6 +965,9 @@ function deliverStdin(child: ChildProcess, request: AutomationLaunch): void {
   if (request.command.promptDelivery !== 'stdin') return
   child.stdin?.on('error', () => undefined)
   child.stdin?.end(request.prompt, 'utf8')
+}
+function unrefReadable(stream: NodeJS.ReadableStream | null): void {
+  if (stream && 'unref' in stream && typeof stream.unref === 'function') stream.unref()
 }
 
 function boundedCapture(

@@ -9,6 +9,7 @@ import type {
   LegacyRoadmapConfigurationV4,
   RoadmapConfiguration,
 } from './configuration.ts'
+import { SESSION_REPORT_SCHEMA_MARKER } from './session-report-contract.ts'
 
 export interface LegacyRoadmapConfiguration {
   schemaVersion: 1 | 2
@@ -43,6 +44,8 @@ Map pointer: {{roadmap.map}}
 Ticket pointer: {{roadmap.ticket}}
 
 Reload both from the tracker. Confirm that the ticket is an open, unblocked, unassigned child of the map. If it is no longer on the frontier, stop without assigning it or making any other mutation. If it is still on the frontier, claim it before any work, then resolve exactly this ticket through the normal Wayfinder workflow. Do not choose or resolve another ticket.
+Write only one JSON object to stdout matching this schema:
+${SESSION_REPORT_SCHEMA_MARKER}
 `
 
 /** Migrates the one reachable v1 input and reads the legacy Registry only on that path. */

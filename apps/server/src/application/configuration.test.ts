@@ -228,7 +228,7 @@ describe('roadmap configuration', () => {
             command: '/usr/bin/agent',
             args: [],
             promptDelivery: 'stdin',
-            promptTemplate: '/skill:wayfinder {{roadmap.ticket}}',
+            promptTemplate: '/skill:wayfinder {{roadmap.ticket}} {{roadmap.sessionReportSchema}}',
           },
           enabledProjects: [project.key],
         },
@@ -405,7 +405,7 @@ describe('roadmap configuration', () => {
           },
           wayfinderCommand: {
             ...wayfinderCommand,
-            promptTemplate: expect.stringContaining('{{roadmap.ticket}}'),
+            promptTemplate: expect.stringContaining('{{roadmap.sessionReportSchema}}'),
           },
           enabledProjects: [project.key],
         },
