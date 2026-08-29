@@ -1,8 +1,9 @@
-import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import type {
+  AutomationEvidence,
   Project,
   ProjectKey,
   Ticket,
@@ -14,15 +15,19 @@ import type { AdapterHost, WayfinderAdapter } from '../store.ts'
 import { isRecord } from '../type-guards.ts'
 import { createRoadmapApplication } from './application.ts'
 import {
-  type AutomationDocument,
   type AutomationLaunch,
   type AutomationLauncher,
-  type AutomationLedgerRecord,
   type ClassificationProcessResult,
-  createAutomationDocument,
   createAutomationLauncher,
   type WayfinderProcessResult,
 } from './automation.ts'
+import {
+  type AutomationDatabase,
+  type AutomationDatabaseDocument,
+  type AutomationEvent,
+  appendAutomationDatabase,
+  replayAutomationDatabase,
+} from './automation-database.ts'
 import { classificationResultSchemaJson } from './classification-contract.ts'
 import type {
   ConfigurationDocument,
@@ -138,27 +143,34 @@ function memoryConfiguration(initial: RoadmapConfiguration) {
   }
 }
 
-interface MemoryAutomationDocument {
-  document: AutomationDocument
-  records(): AutomationLedgerRecord[]
-  writes: AutomationLedgerRecord[][]
+interface MemoryAutomationDatabase {
+  database: AutomationDatabaseDocument
+  records(): AutomationEvidence[]
+  events(): readonly AutomationEvent[]
+  writes: AutomationDatabase[]
 }
 
-function memoryAutomationDocument(
-  initial: AutomationLedgerRecord[] = [],
-): MemoryAutomationDocument {
-  let records = [...initial]
-  const writes: AutomationLedgerRecord[][] = []
-  const document: AutomationDocument = {
+function memoryAutomationDatabase(
+  initial: AutomationDatabase = { schemaVersion: 3, opportunities: [], events: [] },
+): MemoryAutomationDatabase {
+  let current = initial
+  const writes: AutomationDatabase[] = []
+  const database: AutomationDatabaseDocument = {
     async load() {
-      return records
+      return current
     },
-    async write(next) {
-      records = [...next]
-      writes.push(records)
+    async append(batch) {
+      current = appendAutomationDatabase(current, batch)
+      writes.push(current)
+      return current
     },
   }
-  return { document, records: () => records, writes }
+  return {
+    database,
+    records: () => [...replayAutomationDatabase(current).evidence],
+    events: () => current.events,
+    writes,
+  }
 }
 
 function adapter(initial: Project[]) {
@@ -304,133 +316,66 @@ function deferredLauncher(
 async function harness(options: {
   projects: Project[]
   launcher: AutomationLauncher
-  document?: MemoryAutomationDocument
+  database?: MemoryAutomationDatabase
   configuration?: RoadmapConfiguration
 }) {
   const source = adapter(options.projects)
-  const ledger = options.document ?? memoryAutomationDocument()
+  const database = options.database ?? memoryAutomationDatabase()
   const configured = memoryConfiguration(options.configuration ?? configuration(options.projects))
   const application = createRoadmapApplication({
     configuration: configured.document,
-    automation: { document: ledger.document, launcher: options.launcher },
+    automation: { database: database.database, launcher: options.launcher },
     createAdapters: () => [source.value],
     serverEpoch: 'automation-test',
   })
   await application.start()
-  return { application, source, ledger, configured }
+  return { application, source, database, configured }
+}
+const RECORDED_AT = '2026-08-29T00:00:00.000Z'
+
+function storedEvent(id: string, opportunityId = 'opportunity') {
+  return { id, opportunityId, recordedAt: RECORDED_AT }
 }
 
 describe('RoadmapApplication Automation', () => {
-  it('migrates the launch-only ledger to durable observable evidence', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'roadmap-automation-ledger-'))
-    roots.push(root)
-    const path = join(root, 'automation.json')
-    await writeFile(
-      path,
-      `${JSON.stringify({
-        schemaVersion: 1,
-        records: [
-          {
-            target: {
-              project: { integration: 'local', id: 'legacy' },
-              mapId: 'map',
-              ticketId: '1',
-            },
-            classification: { status: 'afk', reason: 'Ready.' },
-            wayfinder: { status: 'started' },
-          },
-        ],
-      })}\n`,
-      'utf8',
-    )
-
-    const records = await createAutomationDocument(path).load()
-
-    expect(records).toEqual([
-      {
-        target: {
-          project: { integration: 'local', id: 'legacy' },
-          mapId: 'map',
-          ticketId: '1',
-        },
-        classification: {
-          status: 'completed',
-          admission: 'automatic',
-          processResult: { status: 'exited', code: 0 },
-          verdict: { value: 'afk', reason: 'Ready.' },
-        },
-        wayfinder: {
-          status: 'outcome-unknown',
-          admission: 'automatic',
-          reason: expect.stringContaining('restarted'),
-        },
-      },
-    ])
-    expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject({
-      schemaVersion: 2,
-      records,
-    })
-  })
-
-  it('strictly rejects impossible durable Automation evidence', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'roadmap-automation-ledger-'))
-    roots.push(root)
-    const path = join(root, 'automation.json')
-    await writeFile(
-      path,
-      `${JSON.stringify({
-        schemaVersion: 2,
-        records: [
-          {
-            target: {
-              project: { integration: 'local', id: 'invalid' },
-              mapId: 'map',
-              ticketId: '1',
-            },
-            classification: {
-              status: 'completed',
-              admission: 'automatic',
-              processResult: { status: 'exited', code: 0 },
-              verdict: { value: 'hitl', reason: 'Human needed.' },
-            },
-            wayfinder: { status: 'running', admission: 'automatic' },
-          },
-        ],
-      })}\n`,
-      'utf8',
-    )
-
-    await expect(createAutomationDocument(path).load()).rejects.toThrow(
-      'requires an AFK Classification Verdict',
-    )
-  })
-
   it('converts unfinished current-schema attempts to outcome unknown on startup', async () => {
     const sourceProject = project('restart', [ticket('1')])
-    const ledger = memoryAutomationDocument([
-      {
-        target: { project: sourceProject.key, mapId: 'map', ticketId: '1' },
-        classification: {
-          status: 'completed',
+    const target = { project: sourceProject.key, mapId: 'map', ticketId: '1' }
+    const database = memoryAutomationDatabase({
+      schemaVersion: 3,
+      opportunities: [{ id: 'opportunity', target }],
+      events: [
+        {
+          ...storedEvent('classification-started'),
+          type: 'classification-started',
           admission: 'override',
+        },
+        {
+          ...storedEvent('classification-completed'),
+          type: 'classification-completed',
           processResult: { status: 'exited', code: 0 },
           verdict: { value: 'afk', reason: 'Ready.' },
         },
-        wayfinder: { status: 'running', admission: 'override' },
-      },
-    ])
+        {
+          ...storedEvent('wayfinder-launching'),
+          type: 'wayfinder-launching',
+          admission: 'override',
+        },
+        { ...storedEvent('wayfinder-running'), type: 'wayfinder-running' },
+      ],
+    })
     const current = await harness({
       projects: [sourceProject],
       launcher: deferredLauncher().launcher,
-      document: ledger,
+      database: database,
     })
 
-    expect(ledger.records()[0]?.wayfinder).toMatchObject({
+    expect(database.records()[0]?.wayfinder).toMatchObject({
       status: 'outcome-unknown',
       admission: 'override',
       reason: expect.stringContaining('restarted'),
     })
-    expect(current.application.current().automation.evidence).toEqual(ledger.records())
+    expect(current.application.current().automation.evidence).toEqual(database.records())
     await current.application.stop()
   })
 
@@ -470,37 +415,49 @@ describe('RoadmapApplication Automation', () => {
 
   it('persists each attempt before launch and never repeats the same ticket identity', async () => {
     const sourceProject = project('one', [ticket('1')])
-    const ledger = memoryAutomationDocument()
+    const database = memoryAutomationDatabase()
     const launches = deferredLauncher({
       beforeClassify() {
-        expect(ledger.records()).toEqual([
+        expect(database.records()).toEqual([
           expect.objectContaining({
             classification: { status: 'running', admission: 'automatic' },
           }),
         ])
+        expect(database.events().map((event) => event.type)).toEqual(['classification-started'])
       },
       beforeDispatch() {
-        expect(ledger.records()[0]?.wayfinder).toEqual({
+        expect(database.records()[0]?.wayfinder).toEqual({
           status: 'launching',
           admission: 'automatic',
         })
+        expect(database.events().map((event) => event.type)).toEqual([
+          'classification-started',
+          'classification-completed',
+          'wayfinder-launching',
+        ])
       },
     })
     const first = await harness({
       projects: [sourceProject],
       launcher: launches.launcher,
-      document: ledger,
+      database: database,
     })
 
     expect(launches.classifications).toHaveLength(1)
     launches.classifications[0]?.resolve(processResult())
     await vi.waitFor(() => expect(launches.dispatches).toHaveLength(1))
     await vi.waitFor(() =>
-      expect(ledger.records()[0]?.wayfinder).toEqual({
+      expect(database.records()[0]?.wayfinder).toEqual({
         status: 'running',
         admission: 'automatic',
       }),
     )
+    expect(database.events().map((event) => event.type)).toEqual([
+      'classification-started',
+      'classification-completed',
+      'wayfinder-launching',
+      'wayfinder-running',
+    ])
 
     first.source.push([project('one', [ticket('1', TASK, { body: 'Edited body.' })])])
     first.source.push([project('one', [])])
@@ -522,10 +479,17 @@ describe('RoadmapApplication Automation', () => {
     const restarted = await harness({
       projects: [sourceProject],
       launcher: restartedLaunches.launcher,
-      document: ledger,
+      database: database,
     })
     expect(restartedLaunches.classifications).toHaveLength(0)
     expect(restartedLaunches.dispatches).toHaveLength(0)
+    expect(database.events().map((event) => event.type)).toEqual([
+      'classification-started',
+      'classification-completed',
+      'wayfinder-launching',
+      'wayfinder-running',
+      'wayfinder-outcome-unknown',
+    ])
     await restarted.application.stop()
   })
 
@@ -576,7 +540,7 @@ describe('RoadmapApplication Automation', () => {
       state: { automation: { enabled: false, enabledProjects: [] } },
     })
     expect(launches.classifications).toHaveLength(1)
-    expect(current.ledger.records()[0]?.classification).toEqual({
+    expect(current.database.records()[0]?.classification).toEqual({
       status: 'running',
       admission: 'override',
     })
@@ -609,7 +573,7 @@ describe('RoadmapApplication Automation', () => {
       result: { type: 'automation-override-started', target, stage: 'wayfinder' },
     })
     await vi.waitFor(() =>
-      expect(current.ledger.records()[0]?.wayfinder).toEqual({
+      expect(current.database.records()[0]?.wayfinder).toEqual({
         status: 'running',
         admission: 'override',
       }),
@@ -650,7 +614,7 @@ describe('RoadmapApplication Automation', () => {
 
     await vi.waitFor(() => expect(launches.dispatches).toHaveLength(1))
     await vi.waitFor(() =>
-      expect(current.ledger.records()[0]?.wayfinder).toEqual({
+      expect(current.database.records()[0]?.wayfinder).toEqual({
         status: 'running',
         admission: 'automatic',
       }),
@@ -661,22 +625,28 @@ describe('RoadmapApplication Automation', () => {
   it('requires an AFK Verdict before a Wayfinder override', async () => {
     const sourceProject = project('override-hitl', [ticket('1')])
     const target = { project: sourceProject.key, mapId: 'map', ticketId: '1' }
-    const ledger = memoryAutomationDocument([
-      {
-        target,
-        classification: {
-          status: 'completed',
+    const database = memoryAutomationDatabase({
+      schemaVersion: 3,
+      opportunities: [{ id: 'opportunity', target }],
+      events: [
+        {
+          ...storedEvent('classification-started'),
+          type: 'classification-started',
           admission: 'override',
+        },
+        {
+          ...storedEvent('classification-completed'),
+          type: 'classification-completed',
           processResult: { status: 'exited', code: 0 },
           verdict: { value: 'hitl', reason: 'Human judgment is required.' },
         },
-      },
-    ])
+      ],
+    })
     const launches = deferredLauncher()
     const current = await harness({
       projects: [sourceProject],
       launcher: launches.launcher,
-      document: ledger,
+      database: database,
       configuration: configuration([sourceProject], { enabled: false, enabledProjects: [] }),
     })
 
@@ -808,16 +778,16 @@ describe('RoadmapApplication Automation', () => {
     ],
   ])('records %s as terminal without dispatch or retry', async (_name, result) => {
     const sourceProject = project('one', [ticket('1')])
-    const ledger = memoryAutomationDocument()
+    const database = memoryAutomationDatabase()
     const launches = deferredLauncher()
     const current = await harness({
       projects: [sourceProject],
       launcher: launches.launcher,
-      document: ledger,
+      database: database,
     })
     launches.classifications[0]?.resolve(result)
 
-    await vi.waitFor(() => expect(ledger.records()[0]?.classification.status).not.toBe('running'))
+    await vi.waitFor(() => expect(database.records()[0]?.classification.status).not.toBe('running'))
     expect(launches.dispatches).toHaveLength(0)
     current.source.push([sourceProject])
     await delay(10)
@@ -827,17 +797,17 @@ describe('RoadmapApplication Automation', () => {
 
   it('treats a lost Classification process as terminal', async () => {
     const sourceProject = project('one', [ticket('1')])
-    const ledger = memoryAutomationDocument()
+    const database = memoryAutomationDatabase()
     const launches = deferredLauncher()
     const current = await harness({
       projects: [sourceProject],
       launcher: launches.launcher,
-      document: ledger,
+      database: database,
     })
     launches.classifications[0]?.reject(new Error('lost'))
 
     await vi.waitFor(() =>
-      expect(ledger.records()[0]?.classification.status).toBe('outcome-unknown'),
+      expect(database.records()[0]?.classification.status).toBe('outcome-unknown'),
     )
     expect(launches.dispatches).toHaveLength(0)
     await current.application.stop()
@@ -845,13 +815,13 @@ describe('RoadmapApplication Automation', () => {
 
   it('records a failed session launch before moving to the next classifier', async () => {
     const projects = [project('one', [ticket('1')]), project('two', [ticket('2')])]
-    const ledger = memoryAutomationDocument()
+    const database = memoryAutomationDatabase()
     const launches = deferredLauncher({ dispatchError: new Error('missing') })
-    const current = await harness({ projects, launcher: launches.launcher, document: ledger })
+    const current = await harness({ projects, launcher: launches.launcher, database })
     launches.classifications[0]?.resolve(processResult())
 
     await vi.waitFor(() =>
-      expect(ledger.records()[0]?.wayfinder).toMatchObject({
+      expect(database.records()[0]?.wayfinder).toMatchObject({
         status: 'launch-failed',
         admission: 'automatic',
       }),
@@ -863,21 +833,21 @@ describe('RoadmapApplication Automation', () => {
 
   it('persists independent Process result and Session report facts on completion', async () => {
     const sourceProject = project('one', [ticket('1')])
-    const ledger = memoryAutomationDocument()
+    const database = memoryAutomationDatabase()
     const launches = deferredLauncher()
     const current = await harness({
       projects: [sourceProject],
       launcher: launches.launcher,
-      document: ledger,
+      database: database,
     })
     launches.classifications[0]?.resolve(processResult())
     await vi.waitFor(() => expect(launches.sessions).toHaveLength(1))
-    await vi.waitFor(() => expect(ledger.records()[0]?.wayfinder?.status).toBe('running'))
+    await vi.waitFor(() => expect(database.records()[0]?.wayfinder?.status).toBe('running'))
 
     launches.sessions[0]?.resolve(wayfinderResult({ code: 7 }))
 
     await vi.waitFor(() =>
-      expect(ledger.records()[0]?.wayfinder).toEqual({
+      expect(database.records()[0]?.wayfinder).toEqual({
         status: 'finished',
         admission: 'automatic',
         processResult: { status: 'exited', code: 7 },
@@ -911,12 +881,12 @@ describe('RoadmapApplication Automation', () => {
     ],
   ])('records %s Session report evidence', async (_name, status, result, reason) => {
     const sourceProject = project(`report-${_name}`, [ticket('1')])
-    const ledger = memoryAutomationDocument()
+    const database = memoryAutomationDatabase()
     const launches = deferredLauncher()
     const current = await harness({
       projects: [sourceProject],
       launcher: launches.launcher,
-      document: ledger,
+      database: database,
     })
     launches.classifications[0]?.resolve(processResult())
     await vi.waitFor(() => expect(launches.sessions).toHaveLength(1))
@@ -924,7 +894,7 @@ describe('RoadmapApplication Automation', () => {
     launches.sessions[0]?.resolve(result)
 
     await vi.waitFor(() =>
-      expect(ledger.records()[0]?.wayfinder).toMatchObject({
+      expect(database.records()[0]?.wayfinder).toMatchObject({
         status: 'finished',
         processResult: { status: 'exited', code: 0 },
         report: { status, reason },
@@ -935,21 +905,21 @@ describe('RoadmapApplication Automation', () => {
 
   it('records a lost Wayfinder process as outcome unknown', async () => {
     const sourceProject = project('lost-session', [ticket('1')])
-    const ledger = memoryAutomationDocument()
+    const database = memoryAutomationDatabase()
     const launches = deferredLauncher()
     const current = await harness({
       projects: [sourceProject],
       launcher: launches.launcher,
-      document: ledger,
+      database: database,
     })
     launches.classifications[0]?.resolve(processResult())
     await vi.waitFor(() => expect(launches.sessions).toHaveLength(1))
-    await vi.waitFor(() => expect(ledger.records()[0]?.wayfinder?.status).toBe('running'))
+    await vi.waitFor(() => expect(database.records()[0]?.wayfinder?.status).toBe('running'))
 
     launches.sessions[0]?.reject(new Error('lost'))
 
     await vi.waitFor(() =>
-      expect(ledger.records()[0]?.wayfinder).toMatchObject({
+      expect(database.records()[0]?.wayfinder).toMatchObject({
         status: 'outcome-unknown',
         reason: expect.stringContaining('process result was lost'),
       }),
@@ -1031,7 +1001,7 @@ describe('RoadmapApplication Automation', () => {
       `Configured map=${join(root, '.wayfinder/map.md')} ticket=/tmp/project-9/.wayfinder/tickets/9.md report=${sessionReportSchemaJson}`,
     )
     await vi.waitFor(() =>
-      expect(current.ledger.records()[0]?.wayfinder).toEqual({
+      expect(current.database.records()[0]?.wayfinder).toEqual({
         status: 'finished',
         admission: 'automatic',
         processResult: { status: 'exited', code: 0 },

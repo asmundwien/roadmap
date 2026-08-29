@@ -102,10 +102,12 @@ A compact, durable mark added to a ticket node when Automation evidence exists. 
 ticket type chip and tracker-state marker intact; ordinary human work has no status effect.
 _Avoid_: Automation icon, agent state
 
-**One-shot ledger**:
-Roadmap's durable record of Classification and Wayfinder attempts, keyed by Automation opportunity.
-It prevents retries and stores the structured facts needed to explain each attempt.
-_Avoid_: Run history, queue, tracker state
+**Automation database**:
+Roadmap's server-owned durable record of immutable Automation opportunities and ordered,
+append-only Automation events. Replaying the events derives current Automation evidence; event
+sequence is authoritative, while recorded timestamps are descriptive. Events are retained
+permanently.
+_Avoid_: one-shot ledger, Run history, queue, tracker state
 
 **Harness Command**:
 A globally configured literal executable, argument list, and prompt-delivery method launched

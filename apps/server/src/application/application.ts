@@ -25,12 +25,8 @@ import {
   type GitHubConnectionPort,
 } from '../github/connections.ts'
 import { createSnapshotStore, type SnapshotStore, type WayfinderAdapter } from '../store.ts'
-import {
-  type AutomationDocument,
-  type AutomationLauncher,
-  type AutomationLoop,
-  createAutomationLoop,
-} from './automation.ts'
+import { type AutomationLauncher, type AutomationLoop, createAutomationLoop } from './automation.ts'
+import type { AutomationDatabaseDocument } from './automation-database.ts'
 import { type CredentialVault, CredentialVaultError } from './credential-vault.ts'
 
 export type { CredentialVault } from './credential-vault.ts'
@@ -120,7 +116,7 @@ export interface RoadmapApplicationOptions {
   serverEpoch?: string
   now?: () => number
   automation?: {
-    document: AutomationDocument
+    database: AutomationDatabaseDocument
     launcher: AutomationLauncher
   }
 }
@@ -187,7 +183,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
   const authorizationOperations = new Map<string, ActiveAuthorization>()
   const automationLoop: AutomationLoop | null = options.automation
     ? createAutomationLoop({
-        document: options.automation.document,
+        database: options.automation.database,
         launcher: options.automation.launcher,
         source: () => ({ configuration, projects: registeredProjects() }),
         onEvidenceChange: publish,

@@ -2,7 +2,8 @@ import { createServer } from 'node:http'
 import { fileURLToPath } from 'node:url'
 import { createProjectAdmission } from './application/admission.ts'
 import { type AdapterRuntime, createRoadmapApplication } from './application/application.ts'
-import { createAutomationDocument, createAutomationLauncher } from './application/automation.ts'
+import { createAutomationLauncher } from './application/automation.ts'
+import { createAutomationDatabaseDocument } from './application/automation-database.ts'
 import { createConfigurationDocument } from './application/configuration.ts'
 import { createMacOsCredentialVault } from './application/credential-vault.ts'
 import { createApplicationOperations } from './application/operations.ts'
@@ -49,7 +50,7 @@ async function main(): Promise<void> {
       fileURLToPath(new URL('../../../roadmap.config.json', import.meta.url)),
     ),
     automation: {
-      document: createAutomationDocument(
+      database: createAutomationDatabaseDocument(
         fileURLToPath(new URL('../../../roadmap.automation.json', import.meta.url)),
       ),
       launcher: createAutomationLauncher(),

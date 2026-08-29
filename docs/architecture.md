@@ -28,6 +28,11 @@ WebSocket carries full state replacements. HTTP carries `query` and `execute` re
 
 Integration-specific code lives in `github` and `local`; `wayfinder` parses data tolerantly. `store.ts` waits for one complete Slice from every Adapter before publishing a snapshot and keeps partial generations private. `change-feed.ts` derives source-blind events from consecutive complete snapshots.
 
+`application/automation-database.ts` owns the strict schema version 3 Automation database. It
+persists immutable opportunities and append-only events atomically, rejects invalid histories, and
+replays valid history into current evidence. `application/automation.ts` owns reconciliation and
+process launch behavior; it appends durable facts before triggering their side effects.
+
 `transport.ts` is the network boundary. It provides a full-state WebSocket with strict origin checks and HTTP handlers for queries and commands. Request bodies cannot exceed 64 KiB. `main.ts` composes modules and binds loopback.
 
 ## Configuration and credentials
