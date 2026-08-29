@@ -42,6 +42,7 @@ const PROMPT_MARKER = '{{roadmap.prompt}}'
 const STDOUT_LIMIT = 16 * 1024
 const STDERR_LIMIT = 64 * 1024
 const RESTART_UNKNOWN_REASON = 'Roadmap restarted before this attempt recorded a terminal result.'
+const STOP_UNKNOWN_REASON = 'Roadmap stopped before this Session recorded a terminal result.'
 
 interface FinishedProcessResult {
   status: 'finished'
@@ -87,6 +88,10 @@ export interface AutomationLoop {
   start(): Promise<void>
   evidence(): AutomationEvidence[]
   overrides(): AutomationOverrideControl[]
+  interruptedProjects(): ProjectKey[]
+  acknowledgeProjectInterruption(
+    project: ProjectKey,
+  ): Promise<{ ok: true } | { ok: false; error: SafeError }>
   startOverride(
     target: AutomationTarget,
     stage: AutomationOverrideStage,
@@ -167,9 +172,23 @@ export function createAutomationLoop(options: {
     await reconcileClassification()
   }
 
+  function projectHasUnacknowledgedInterruption(project: ProjectKey): boolean {
+    for (const record of records.values()) {
+      if (
+        sameProject(record.opportunity.target.project, project) &&
+        record.wayfinder?.status === 'outcome-unknown' &&
+        !record.wayfinder.acknowledged
+      ) {
+        return true
+      }
+    }
+    return false
+  }
+
   async function reconcileWayfinders(): Promise<void> {
     for (const record of records.values()) {
       if (record.wayfinder?.status !== 'queued') continue
+      if (projectHasUnacknowledgedInterruption(record.opportunity.target.project)) continue
       await beginDispatch(record.opportunity.target, 'automatic')
       if (!accepting || faulted) return
     }
@@ -178,6 +197,7 @@ export function createAutomationLoop(options: {
   async function reconcileClassification(): Promise<void> {
     const source = options.source()
     for (const candidate of selectCandidates(source)) {
+      if (projectHasUnacknowledgedInterruption(candidate.target.project)) continue
       if (records.has(automationTargetKey(candidate.target))) continue
       const launched = await beginClassification(
         candidate,
@@ -262,6 +282,7 @@ export function createAutomationLoop(options: {
     target: AutomationTarget,
     admission: AutomationAdmission,
   ): Promise<boolean> {
+    if (projectHasUnacknowledgedInterruption(target.project)) return false
     const source = options.source()
     if (admission === 'automatic' && !isEffectivelyEnabled(source.configuration, target.project)) {
       return false
@@ -293,23 +314,27 @@ export function createAutomationLoop(options: {
       return false
     }
 
-    let process: WayfinderProcess
+    let dispatch: Promise<WayfinderProcess>
     try {
-      process = await options.launcher.dispatch(
-        launchRequest(resolved.candidate, command, 'wayfinder'),
-      )
+      dispatch = options.launcher.dispatch(launchRequest(resolved.candidate, command, 'wayfinder'))
     } catch {
-      return append({
-        events: [
-          {
-            ...eventIdentity(record.opportunity.id),
-            type: 'wayfinder-launch-failed',
-            reason: 'The Wayfinder Session Command could not be launched.',
-          },
-        ],
-      })
+      await finishWayfinderLaunchFailure(target)
+      return true
     }
+    void dispatch.then(
+      (process) => enqueue(() => markWayfinderRunning(target, process)),
+      () => enqueue(() => finishWayfinderLaunchFailure(target)),
+    )
+    return true
+  }
 
+  async function markWayfinderRunning(
+    target: AutomationTarget,
+    process: WayfinderProcess,
+  ): Promise<void> {
+    if (!accepting) return
+    const current = records.get(automationTargetKey(target))
+    if (current?.wayfinder?.status !== 'launching') return
     const launched = { target, process }
     activeWayfinders.set(projectKey(target.project), launched)
     void process.completed.then(
@@ -319,9 +344,25 @@ export function createAutomationLoop(options: {
           finishWayfinderUnknown(launched, 'The Wayfinder Session process result was lost.'),
         ),
     )
-    return append({
-      events: [{ ...eventIdentity(record.opportunity.id), type: 'wayfinder-running' }],
+    await append({
+      events: [{ ...eventIdentity(current.opportunity.id), type: 'wayfinder-running' }],
     })
+  }
+
+  async function finishWayfinderLaunchFailure(target: AutomationTarget): Promise<void> {
+    if (!accepting) return
+    const current = records.get(automationTargetKey(target))
+    if (current?.wayfinder?.status !== 'launching') return
+    const persisted = await append({
+      events: [
+        {
+          ...eventIdentity(current.opportunity.id),
+          type: 'wayfinder-launch-failed',
+          reason: 'The Wayfinder Session Command could not be launched.',
+        },
+      ],
+    })
+    if (persisted) await reconcileNow()
   }
 
   async function finishWayfinder(
@@ -382,11 +423,15 @@ export function createAutomationLoop(options: {
   }
 
   function projectHasActiveWayfinder(project: ProjectKey): boolean {
-    return [...records.values()].some(
-      (record) =>
+    for (const record of records.values()) {
+      if (
         sameProject(record.opportunity.target.project, project) &&
-        (record.wayfinder?.status === 'launching' || record.wayfinder?.status === 'running'),
-    )
+        (record.wayfinder?.status === 'launching' || record.wayfinder?.status === 'running')
+      ) {
+        return true
+      }
+    }
+    return false
   }
 
   function overrideControls(): AutomationOverrideControl[] {
@@ -412,6 +457,9 @@ export function createAutomationLoop(options: {
   ): AutomationOverrideAvailability {
     const unavailable = commonOverrideIneligibility(resolved)
     if (unavailable) return unavailable
+    if (projectHasUnacknowledgedInterruption(resolved.target.project)) {
+      return ineligible('A Wayfinder Session interruption must be acknowledged for this Project.')
+    }
     if (!resolved.ok) return ineligible(resolved.reason)
     const record = records.get(automationTargetKey(resolved.target))
     return stage === 'classification'
@@ -470,6 +518,49 @@ export function createAutomationLoop(options: {
     return { status: 'eligible' }
   }
 
+  function acknowledgeProjectInterruption(
+    project: ProjectKey,
+  ): Promise<{ ok: true } | { ok: false; error: SafeError }> {
+    return enqueue(async () => {
+      if (!accepting) {
+        return { ok: false, error: overrideError('Roadmap is stopping.', 'not-supported') }
+      }
+      if (faulted) {
+        return {
+          ok: false,
+          error: overrideError('Automation evidence could not be persisted.', 'persistence-failed'),
+        }
+      }
+      const interruptions = [...records.values()].flatMap((record) => {
+        const wayfinder = record.wayfinder
+        if (
+          !sameProject(record.opportunity.target.project, project) ||
+          wayfinder?.status !== 'outcome-unknown' ||
+          wayfinder.acknowledged
+        ) {
+          return []
+        }
+        return [
+          {
+            ...eventIdentity(record.opportunity.id),
+            type: 'wayfinder-outcome-unknown-acknowledged',
+            unknownEventId: wayfinder.eventId,
+          } satisfies AutomationEvent,
+        ]
+      })
+      if (interruptions.length === 0) return { ok: true }
+      return (await append({ events: interruptions }))
+        ? { ok: true }
+        : {
+            ok: false,
+            error: overrideError(
+              'Automation evidence could not be persisted.',
+              'persistence-failed',
+            ),
+          }
+    })
+  }
+
   function startOverride(
     target: AutomationTarget,
     stage: AutomationOverrideStage,
@@ -521,13 +612,31 @@ export function createAutomationLoop(options: {
     async start() {
       if (started) return
       install(await options.database.load())
-      const recovery = restartRecoveryEvents(records.values())
+      const recovery = interruptionEvents(records.values(), RESTART_UNKNOWN_REASON)
       if (recovery.length > 0 && !(await append({ events: recovery }))) return
       started = true
       await enqueue(reconcileNow)
     },
     evidence: () => [...currentEvidence],
     overrides: overrideControls,
+    interruptedProjects() {
+      const projects = new Map<string, ProjectKey>()
+      for (const record of records.values()) {
+        const wayfinder = record.wayfinder
+        const interrupted =
+          (wayfinder?.status === 'outcome-unknown' && !wayfinder.acknowledged) ||
+          ((faulted || !accepting) &&
+            (wayfinder?.status === 'launching' || wayfinder?.status === 'running'))
+        if (interrupted) {
+          projects.set(
+            projectKey(record.opportunity.target.project),
+            record.opportunity.target.project,
+          )
+        }
+      }
+      return [...projects.values()]
+    },
+    acknowledgeProjectInterruption,
     startOverride,
     reconcile() {
       if (!started || !accepting) return
@@ -539,6 +648,9 @@ export function createAutomationLoop(options: {
       const live = activeClassification
       if (live) await live.process.stop()
       await lane
+      const interruptions = interruptionEvents(records.values(), STOP_UNKNOWN_REASON)
+      if (interruptions.length > 0) await append({ events: interruptions })
+      activeWayfinders.clear()
     },
   }
 }
@@ -779,21 +891,24 @@ function classificationEvent(
   }
 }
 
-function restartRecoveryEvents(records: Iterable<AutomationRecord>): AutomationEvent[] {
+function interruptionEvents(
+  records: Iterable<AutomationRecord>,
+  reason: string,
+): AutomationEvent[] {
   const events: AutomationEvent[] = []
   for (const record of records) {
-    if (record.classification.status === 'running') {
+    if (record.classification.status === 'running' && reason === RESTART_UNKNOWN_REASON) {
       events.push({
         ...eventIdentity(record.opportunity.id),
         type: 'classification-outcome-unknown',
-        reason: RESTART_UNKNOWN_REASON,
+        reason,
       })
     }
     if (record.wayfinder?.status === 'launching' || record.wayfinder?.status === 'running') {
       events.push({
         ...eventIdentity(record.opportunity.id),
         type: 'wayfinder-outcome-unknown',
-        reason: RESTART_UNKNOWN_REASON,
+        reason,
       })
     }
   }

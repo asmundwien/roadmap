@@ -23,6 +23,7 @@ import {
   type WayfinderProcessResult,
 } from './automation.ts'
 import {
+  type AutomationAppend,
   type AutomationDatabase,
   type AutomationDatabaseDocument,
   type AutomationEvent,
@@ -119,9 +120,13 @@ function project(id: string, tickets: Ticket[], overrides: Partial<Project> = {}
   }
 }
 
-function memoryConfiguration(initial: RoadmapConfiguration) {
+function memoryConfiguration(
+  initial: RoadmapConfiguration,
+  writeResult: ConfigurationWrite = { ok: true },
+) {
   let current = initial
   const listeners = new Set<(result: ConfigurationRead) => void>()
+  const writes: RoadmapConfiguration[] = []
   const document: ConfigurationDocument = {
     async load() {
       return { ok: true, document: current }
@@ -130,13 +135,17 @@ function memoryConfiguration(initial: RoadmapConfiguration) {
       listeners.add(listener)
       return () => listeners.delete(listener)
     },
-    async write(): Promise<ConfigurationWrite> {
-      return { ok: true }
+    async write(next): Promise<ConfigurationWrite> {
+      writes.push(next)
+      if (!writeResult.ok) return writeResult
+      current = next
+      return writeResult
     },
     async stop() {},
   }
   return {
     document,
+    writes,
     emit(next: RoadmapConfiguration) {
       current = next
       for (const listener of listeners) listener({ ok: true, document: next })
@@ -153,6 +162,7 @@ interface MemoryAutomationDatabase {
 
 function memoryAutomationDatabase(
   initial: AutomationDatabase = { schemaVersion: 3, opportunities: [], events: [] },
+  options: { failAppend?: (batch: AutomationAppend) => boolean } = {},
 ): MemoryAutomationDatabase {
   let current = initial
   const writes: AutomationDatabase[] = []
@@ -161,6 +171,7 @@ function memoryAutomationDatabase(
       return current
     },
     async append(batch) {
+      if (options.failAppend?.(batch)) throw new Error('Automation database is read-only.')
       current = appendAutomationDatabase(current, batch)
       writes.push(current)
       return current
@@ -255,6 +266,7 @@ function deferredLauncher(
     beforeClassify?: (request: AutomationLaunch) => void
     beforeDispatch?: (request: AutomationLaunch) => void
     dispatchError?: Error
+    dispatchGate?: Promise<void>
   } = {},
 ) {
   const classifications: Array<{
@@ -302,6 +314,7 @@ function deferredLauncher(
       options.beforeDispatch?.(request)
       dispatches.push(request)
       if (options.dispatchError) throw options.dispatchError
+      await options.dispatchGate
       const { promise, resolve, reject } = Promise.withResolvers<WayfinderProcessResult>()
       sessions.push({ resolve, reject })
       return { completed: promise }
@@ -321,10 +334,14 @@ async function harness(options: {
   launcher: AutomationLauncher
   database?: MemoryAutomationDatabase
   configuration?: RoadmapConfiguration
+  configurationWriteResult?: ConfigurationWrite
 }) {
   const source = adapter(options.projects)
   const database = options.database ?? memoryAutomationDatabase()
-  const configured = memoryConfiguration(options.configuration ?? configuration(options.projects))
+  const configured = memoryConfiguration(
+    options.configuration ?? configuration(options.projects),
+    options.configurationWriteResult,
+  )
   const application = createRoadmapApplication({
     configuration: configured.document,
     automation: { database: database.database, launcher: options.launcher },
@@ -361,36 +378,32 @@ function queuedDatabase(targets: readonly AutomationTarget[]): AutomationDatabas
 }
 
 describe('RoadmapApplication Automation', () => {
-  it('converts unfinished current-schema attempts to outcome unknown on startup', async () => {
-    const sourceProject = project('restart', [ticket('1')])
-    const target = { project: sourceProject.key, mapId: 'map', ticketId: '1' }
-    const database = memoryAutomationDatabase({
-      schemaVersion: 3,
-      opportunities: [{ id: 'opportunity', target }],
+  it('recovers interrupted Sessions before leaving other Projects running on startup', async () => {
+    const interrupted = project('restart', [ticket('1')])
+    const unaffected = project('unaffected', [ticket('2')])
+    const targets = [
+      { project: interrupted.key, mapId: 'map', ticketId: '1' },
+      { project: unaffected.key, mapId: 'map', ticketId: '2' },
+    ]
+    const active = appendAutomationDatabase(queuedDatabase(targets), {
       events: [
         {
-          ...storedEvent('classification-started'),
-          type: 'classification-started',
-          admission: 'override',
-        },
-        {
-          ...storedEvent('classification-completed'),
-          type: 'classification-completed',
-          processResult: { status: 'exited', code: 0 },
-          verdict: { value: 'afk', reason: 'Ready.' },
-        },
-        {
-          ...storedEvent('wayfinder-launching'),
+          ...storedEvent('wayfinder-launching', 'opportunity-0'),
           type: 'wayfinder-launching',
           admission: 'override',
         },
-        { ...storedEvent('wayfinder-running'), type: 'wayfinder-running' },
+        {
+          ...storedEvent('wayfinder-running', 'opportunity-0'),
+          type: 'wayfinder-running',
+        },
       ],
     })
+    const database = memoryAutomationDatabase(active)
+    const launches = deferredLauncher()
     const current = await harness({
-      projects: [sourceProject],
-      launcher: deferredLauncher().launcher,
-      database: database,
+      projects: [interrupted, unaffected],
+      launcher: launches.launcher,
+      database,
     })
 
     expect(database.records()[0]?.wayfinder).toMatchObject({
@@ -398,7 +411,203 @@ describe('RoadmapApplication Automation', () => {
       admission: 'override',
       reason: expect.stringContaining('restarted'),
     })
-    expect(current.application.current().automation.evidence).toEqual(database.records())
+    expect(current.configured.writes[0]?.automation.enabledProjects).toEqual([unaffected.key])
+    expect(launches.dispatches).toHaveLength(1)
+    expect(launches.dispatches[0]?.environment.ROADMAP_TICKET_ID).toBe('2')
+    await current.application.stop()
+  })
+
+  it('records a running Session as interrupted and disables its Project on graceful stop', async () => {
+    const sourceProject = project('stopping', [ticket('1')])
+    const database = memoryAutomationDatabase(
+      queuedDatabase([{ project: sourceProject.key, mapId: 'map', ticketId: '1' }]),
+    )
+    const launches = deferredLauncher()
+    const current = await harness({
+      projects: [sourceProject],
+      launcher: launches.launcher,
+      database,
+    })
+    await vi.waitFor(() => expect(database.records()[0]?.wayfinder?.status).toBe('running'))
+
+    await current.application.stop()
+
+    expect(database.records()[0]?.wayfinder).toMatchObject({
+      status: 'outcome-unknown',
+      reason: expect.stringContaining('stopped'),
+    })
+    expect(current.configured.writes.at(-1)?.automation.enabledProjects).toEqual([])
+  })
+
+  it('records a still-launching Session as interrupted without waiting for launch', async () => {
+    const sourceProject = project('launching-stop', [ticket('1')])
+    const target = { project: sourceProject.key, mapId: 'map', ticketId: '1' }
+    const database = memoryAutomationDatabase(queuedDatabase([target]))
+    const gate = Promise.withResolvers<void>()
+    const launches = deferredLauncher({ dispatchGate: gate.promise })
+    const current = await harness({
+      projects: [sourceProject],
+      launcher: launches.launcher,
+      database,
+    })
+    expect(database.records()[0]?.wayfinder?.status).toBe('launching')
+
+    await current.application.stop()
+
+    expect(database.records()[0]?.wayfinder).toMatchObject({
+      status: 'outcome-unknown',
+      reason: expect.stringContaining('stopped'),
+    })
+    expect(current.configured.writes.at(-1)?.automation.enabledProjects).toEqual([])
+    gate.resolve()
+  })
+
+  it('acknowledges the exact interruption before re-enabling and resuming queued work', async () => {
+    const sourceProject = project('resume', [ticket('1'), ticket('2')])
+    const targets = ['1', '2'].map((ticketId) => ({
+      project: sourceProject.key,
+      mapId: 'map',
+      ticketId,
+    }))
+    const unknown = {
+      ...storedEvent('unknown', 'opportunity-0'),
+      type: 'wayfinder-outcome-unknown',
+      reason: 'Roadmap stopped.',
+    } satisfies AutomationEvent
+    const interrupted = appendAutomationDatabase(queuedDatabase(targets), {
+      events: [
+        {
+          ...storedEvent('wayfinder-launching', 'opportunity-0'),
+          type: 'wayfinder-launching',
+          admission: 'automatic',
+        },
+        unknown,
+      ],
+    })
+    const database = memoryAutomationDatabase(interrupted)
+    const launches = deferredLauncher()
+    const current = await harness({
+      projects: [sourceProject],
+      launcher: launches.launcher,
+      database,
+      configuration: configuration([sourceProject], { enabledProjects: [] }),
+    })
+
+    const blocked = await current.application.execute({
+      type: 'start-automation-override',
+      expectedConfigurationVersion: 1,
+      target: { project: sourceProject.key, mapId: 'map', ticketId: '2' },
+      stage: 'wayfinder',
+    })
+    expect(blocked).toMatchObject({
+      ok: false,
+      error: { message: expect.stringContaining('must be acknowledged') },
+    })
+
+    const enabled = await current.application.execute({
+      type: 'set-project-automation-enabled',
+      expectedConfigurationVersion: 1,
+      project: sourceProject.key,
+      enabled: true,
+    })
+
+    expect(enabled).toMatchObject({ ok: true, result: { configurationVersion: 2 } })
+    expect(
+      database.events().find((event) => event.type === 'wayfinder-outcome-unknown-acknowledged'),
+    ).toMatchObject({ opportunityId: 'opportunity-0', unknownEventId: unknown.id })
+    await vi.waitFor(() => expect(launches.dispatches).toHaveLength(1))
+    expect(launches.dispatches[0]?.environment.ROADMAP_TICKET_ID).toBe('2')
+    await current.application.stop()
+  })
+
+  it('does not re-enable when the interruption acknowledgement cannot persist', async () => {
+    const sourceProject = project('ack-failure', [ticket('1')])
+    const target = { project: sourceProject.key, mapId: 'map', ticketId: '1' }
+    const unknown = {
+      ...storedEvent('unknown', 'opportunity-0'),
+      type: 'wayfinder-outcome-unknown',
+      reason: 'Roadmap stopped.',
+    } satisfies AutomationEvent
+    const interrupted = appendAutomationDatabase(queuedDatabase([target]), {
+      events: [
+        {
+          ...storedEvent('wayfinder-launching', 'opportunity-0'),
+          type: 'wayfinder-launching',
+          admission: 'automatic',
+        },
+        unknown,
+      ],
+    })
+    const database = memoryAutomationDatabase(interrupted, {
+      failAppend: (batch) =>
+        batch.events.some((event) => event.type === 'wayfinder-outcome-unknown-acknowledged'),
+    })
+    const current = await harness({
+      projects: [sourceProject],
+      launcher: deferredLauncher().launcher,
+      database,
+      configuration: configuration([sourceProject], { enabledProjects: [] }),
+    })
+
+    const enabled = await current.application.execute({
+      type: 'set-project-automation-enabled',
+      expectedConfigurationVersion: 1,
+      project: sourceProject.key,
+      enabled: true,
+    })
+
+    expect(enabled).toMatchObject({ ok: false, error: { code: 'persistence-failed' } })
+    expect(current.configured.writes).toEqual([])
+    expect(current.application.current().automation.enabledProjects).toEqual([])
+    await current.application.stop()
+  })
+
+  it('keeps queued work stopped when Project re-enable persistence fails after acknowledgement', async () => {
+    const sourceProject = project('config-failure', [ticket('1'), ticket('2')])
+    const targets = ['1', '2'].map((ticketId) => ({
+      project: sourceProject.key,
+      mapId: 'map',
+      ticketId,
+    }))
+    const unknown = {
+      ...storedEvent('unknown', 'opportunity-0'),
+      type: 'wayfinder-outcome-unknown',
+      reason: 'Roadmap stopped.',
+    } satisfies AutomationEvent
+    const database = memoryAutomationDatabase(
+      appendAutomationDatabase(queuedDatabase(targets), {
+        events: [
+          {
+            ...storedEvent('wayfinder-launching', 'opportunity-0'),
+            type: 'wayfinder-launching',
+            admission: 'automatic',
+          },
+          unknown,
+        ],
+      }),
+    )
+    const launches = deferredLauncher()
+    const current = await harness({
+      projects: [sourceProject],
+      launcher: launches.launcher,
+      database,
+      configuration: configuration([sourceProject], { enabledProjects: [] }),
+      configurationWriteResult: { ok: false, kind: 'persistence', message: 'Disk is read-only.' },
+    })
+
+    const enabled = await current.application.execute({
+      type: 'set-project-automation-enabled',
+      expectedConfigurationVersion: 1,
+      project: sourceProject.key,
+      enabled: true,
+    })
+
+    expect(enabled).toMatchObject({ ok: false, error: { code: 'persistence-failed' } })
+    expect(
+      database.events().find((event) => event.type === 'wayfinder-outcome-unknown-acknowledged'),
+    ).toMatchObject({ unknownEventId: unknown.id })
+    expect(launches.dispatches).toEqual([])
+    expect(current.application.current().automation.enabledProjects).toEqual([])
     await current.application.stop()
   })
 
@@ -461,12 +670,14 @@ describe('RoadmapApplication Automation', () => {
     })
 
     expect(launches.sessions).toHaveLength(2)
-    expect(
-      current.application.current().automation.evidence.map((evidence) => evidence.wayfinder),
-    ).toEqual([
-      expect.objectContaining({ status: 'running' }),
-      expect.objectContaining({ status: 'running' }),
-    ])
+    await vi.waitFor(() =>
+      expect(
+        current.application.current().automation.evidence.map((evidence) => evidence.wayfinder),
+      ).toEqual([
+        expect.objectContaining({ status: 'running' }),
+        expect.objectContaining({ status: 'running' }),
+      ]),
+    )
 
     for (const session of launches.sessions) session.resolve(wayfinderResult())
     await current.application.stop()
@@ -1056,6 +1267,9 @@ describe('RoadmapApplication Automation', () => {
         status: 'outcome-unknown',
         reason: expect.stringContaining('process result was lost'),
       }),
+    )
+    await vi.waitFor(() =>
+      expect(current.application.current().automation.enabledProjects).toEqual([]),
     )
     await current.application.stop()
   })

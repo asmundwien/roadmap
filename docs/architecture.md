@@ -34,6 +34,9 @@ replays valid history into current evidence. `application/automation.ts` owns ev
 reconciliation and process launch behavior. Classification stays in one global lane; Wayfinder
 Sessions use one lane per Project so separate Projects can run concurrently. Every transition is
 appended before its process side effect.
+An unacknowledged interrupted Session blocks only its Project. Roadmap removes that Project from
+Automation enablement, and a Project re-enable appends the interruption acknowledgement before
+persisting enablement so either persistence failure remains fail-closed.
 
 `transport.ts` is the network boundary. It provides a full-state WebSocket with strict origin checks and HTTP handlers for queries and commands. Request bodies cannot exceed 64 KiB. `main.ts` composes modules and binds loopback.
 

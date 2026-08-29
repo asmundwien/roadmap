@@ -186,7 +186,10 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
         database: options.automation.database,
         launcher: options.automation.launcher,
         source: () => ({ configuration, projects: registeredProjects() }),
-        onEvidenceChange: publish,
+        onEvidenceChange() {
+          publish()
+          void enqueue(disableInterruptedProjects).catch(() => undefined)
+        },
       })
     : null
   let stateSequence = 0
@@ -196,6 +199,8 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
   let nextGeneration = 0
   let started = false
   let stopped = false
+  let stopping = false
+  let stopPromise: Promise<void> | null = null
   let startPromise: Promise<void> | null = null
   let unsubscribeConfiguration: (() => void) | null = null
   let mutationLane: Promise<void> = Promise.resolve()
@@ -351,6 +356,20 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       () => undefined,
     )
     return run
+  }
+
+  async function disableInterruptedProjects(): Promise<void> {
+    if (!automationLoop || !configurationStatus.valid) return
+    const interrupted = automationLoop.interruptedProjects()
+    if (interrupted.length === 0) return
+    const enabledProjects = configuration.automation.enabledProjects.filter(
+      (project) => !interrupted.some((candidate) => sameProject(candidate, project)),
+    )
+    if (enabledProjects.length === configuration.automation.enabledProjects.length) return
+    await persistConfiguration({
+      ...configuration,
+      automation: { ...configuration.automation, enabledProjects },
+    })
   }
 
   function setAvailability(connectionId: string, availability: ConnectionAvailability): void {
@@ -850,6 +869,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     configurationStatus = { valid: true, issues: [], notices: result.notices ?? [] }
     await synchronizeCredentials(result.document)
     await installGeneration(result.document)
+    await disableInterruptedProjects()
     await cleanupOrphanCredentials(result.document)
   }
 
@@ -881,6 +901,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       await synchronizeCredentials(configuration)
       await installGeneration(configuration)
       await automationLoop?.start()
+      await mutationLane
       started = true
     })()
     return startPromise
@@ -897,7 +918,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
   }
 
   async function executeCommand(command: Command): Promise<CommandOutcome> {
-    if (!started || stopped) return failure('not-supported', 'Roadmap is not running.')
+    if (!started || stopping || stopped) return failure('not-supported', 'Roadmap is not running.')
     if (!configurationStatus.valid) {
       return failure(
         'configuration-invalid',
@@ -1189,11 +1210,15 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     }
   }
 
-  function setProjectAutomationEnabled(
+  async function setProjectAutomationEnabled(
     command: Extract<Command, { type: 'set-project-automation-enabled' }>,
-  ): CommandResolution {
+  ): Promise<CommandResolution> {
     if (!hasProject(configuration, command.project)) {
       return invalid('project', 'Project does not exist.')
+    }
+    if (command.enabled && automationLoop) {
+      const acknowledged = await automationLoop.acknowledgeProjectInterruption(command.project)
+      if (!acknowledged.ok) return acknowledged
     }
     const retained = configuration.automation.enabledProjects.filter(
       (project) => !sameProject(project, command.project),
@@ -1224,22 +1249,24 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     },
     query,
     execute,
-    async stop() {
-      if (stopped) return
-      stopped = true
-      nextGeneration += 1
-      for (const operation of authorizationOperations.values()) {
-        if (operation.timer) clearTimeout(operation.timer)
-        operation.timer = null
-      }
-      unsubscribeConfiguration?.()
-      await automationLoop?.stop()
-      active?.unsubscribe()
-      await active?.store.stop()
-      await options.configuration.stop()
-      await mutationLane
-      changeFeed.stop()
-      listeners.clear()
+    stop() {
+      if (stopPromise) return stopPromise
+      stopping = true
+      stopPromise = (async () => {
+        nextGeneration += 1
+        for (const operation of authorizationOperations.values()) {
+          if (operation.timer) clearTimeout(operation.timer)
+          operation.timer = null
+        }
+        unsubscribeConfiguration?.()
+        await automationLoop?.stop()
+        await mutationLane
+        stopped = true
+        active?.unsubscribe()
+        await active?.store.stop()
+        await options.configuration.stop()
+      })()
+      return stopPromise
     },
   }
 }
