@@ -10,13 +10,9 @@
   },
   "scripts": {
     "dev": "pnpm --parallel --filter @roadmap/web --filter @roadmap/server dev",
-    "dev:web": "pnpm --filter @roadmap/web dev",
-    "dev:server": "pnpm --filter @roadmap/server dev",
-    "build": "pnpm --filter @roadmap/web build",
-    "preview": "pnpm --filter @roadmap/web preview",
+    "build:web": "pnpm --filter @roadmap/web build",
     "typecheck": "tsc -b --noEmit",
     "test": "pnpm -r test",
-    "test:watch": "pnpm --filter @roadmap/web test:watch",
     "check": "biome check .",
     "fix": "biome check --write ."
   },

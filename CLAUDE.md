@@ -15,19 +15,19 @@ HTTP requests carry queries and commands.
 
 ## Commands
 
-Run everything from the repo root; pnpm comes from corepack. The root scripts delegate into the
-workspaces, so the names below are unchanged from the single-package days.
+Run everything from the repo root; pnpm comes from corepack. Root scripts cover repository-wide
+workflows; target package-specific scripts on demand with `pnpm --filter <package> <script>`.
 
 | Command          | What it does                              |
 | ---------------- | ----------------------------------------- |
 | `pnpm dev`       | Server (:8790) + Vite (:5173), together   |
-| `pnpm build`     | Typecheck (`tsc -b`) then production build |
-| `pnpm preview`   | Serve the production build                |
+| `pnpm build:web` | Typecheck then build the web application  |
 | `pnpm typecheck` | Types only                                |
 | `pnpm test`      | Vitest, once                              |
-| `pnpm test:watch`| Vitest in watch mode                      |
 | `pnpm check`     | Biome lint + format check                 |
 | `pnpm fix`       | Biome autofix + format                    |
+
+Examples: `pnpm --filter @roadmap/web preview` and `pnpm --filter @roadmap/server test:watch`.
 
 `pnpm check`, `pnpm typecheck`, and `pnpm test` all pass before anything is called done.
 
