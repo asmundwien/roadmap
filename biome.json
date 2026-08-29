@@ -41,6 +41,7 @@
       },
       "style": {
         "noNonNullAssertion": "error",
+        "noDefaultExport": "error",
         "useConst": "error"
       },
       "complexity": {
@@ -55,5 +56,17 @@
         "organizeImports": "on"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["apps/web/vite.config.ts", "apps/server/vitest.config.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noDefaultExport": "off"
+          }
+        }
+      }
+    }
+  ]
 }
