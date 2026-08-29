@@ -12,7 +12,7 @@ WebSocket carries full state replacements. HTTP carries `query` and `execute` re
 
 ## Web application
 
-`apps/web/src/store` is the SPA data layer. It replaces local state with complete WebSocket snapshots and sends HTTP queries and commands. It also handles epoch and sequence ordering, connection health, stale-state retention, command status, errors, and reconnect delays.
+`apps/web/src/store` is the SPA data layer. It replaces local state with complete WebSocket snapshots and sends HTTP queries and commands. It also handles epoch and sequence ordering, transport liveness, stale-state retention, command status and errors, and capped reconnect backoff.
 
 `RoadmapProvider` and `useRoadmap` expose the current roadmap to views. Views never fetch directly.
 
@@ -22,11 +22,11 @@ WebSocket carries full state replacements. HTTP carries `query` and `execute` re
 
 ## Server
 
-`apps/server/src/application/application.ts` composes the transport-agnostic `RoadmapApplication`. It owns a consistent `ApplicationState`, adapter generations, serialized configuration changes, and the current roadmap without integration-specific details. Its public interface is `start/current/subscribe/query/execute/stop`; callers and tests use only that interface.
+`apps/server/src/application/application.ts` composes the transport-agnostic `RoadmapApplication`. It owns a consistent `ApplicationState`, adapter generations, serialized configuration changes, and the current roadmap without exposing adapter mechanics. Its public interface is `start/current/subscribe/query/execute/stop`; callers and tests use only that interface.
 
 `application/configuration.ts` owns the strict `roadmap.config.json` codec and live validation. It writes through a temporary file in the same directory, flushes it, and atomically renames it. An invalid manual save leaves the last valid runtime active and blocks writes until the configuration is repaired.
 
-Integration-specific code lives in `github` and `local`; `wayfinder` parses data tolerantly. `store.ts` waits for one complete baseline from each integration before publishing a snapshot. It never publishes a snapshot assembled from only some integrations. `change-feed.ts` derives events from consecutive complete snapshots without exposing which integration observed each change.
+Integration-specific code lives in `github` and `local`; `wayfinder` parses data tolerantly. `store.ts` waits for one complete Slice from every Adapter before publishing a snapshot and keeps partial generations private. `change-feed.ts` derives source-blind events from consecutive complete snapshots.
 
 `transport.ts` is the network boundary. It provides a full-state WebSocket with strict origin checks and HTTP handlers for queries and commands. Request bodies cannot exceed 64 KiB. `main.ts` composes modules and binds loopback.
 

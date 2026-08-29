@@ -1,6 +1,6 @@
 # Roadmap
 
-Roadmap is a local, read-only view of projects organized with [Wayfinder](https://github.com/mattpocock). It displays registered GitHub repositories and local workspaces as dependency maps, including completed and unresolved work.
+Roadmap is a local, read-only view of projects organized with [wayfinder](https://github.com/mattpocock). It maps registered GitHub repositories and local workspaces, showing ground covered and fog together.
 
 ## Architecture
 
@@ -33,6 +33,8 @@ pnpm check
 pnpm typecheck
 pnpm test
 ```
+
+Vitest runs in Node. DOM tests need jsdom and Testing Library.
 
 ## Stack
 
