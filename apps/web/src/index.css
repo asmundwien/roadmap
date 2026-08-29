@@ -34,6 +34,10 @@
   --type-grilling: #c92e0e;
   --type-task: #2563c0;
 
+  /* Independent Automation evidence: one hue per stage family, never a combined outcome. */
+  --automation-classification: #7656c9;
+  --automation-wayfinder: #087f8c;
+
   /*
    * The style vocabulary the stride prototype settled: every gap draws from --sp-*, every rounded
    * hover from the one radius. --wash and --trunk are pre-mixed opaque against the surface so
@@ -75,6 +79,8 @@
     --type-prototype: #d1a730;
     --type-grilling: #f0653a;
     --type-task: #74a5ea;
+    --automation-classification: #ad8cff;
+    --automation-wayfinder: #43c7d2;
   }
 }
 

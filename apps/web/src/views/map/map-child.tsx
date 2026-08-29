@@ -1,4 +1,4 @@
-import type { WayfinderMap } from '@roadmap/contracts'
+import type { AutomationEvidence, WayfinderMap } from '@roadmap/contracts'
 import { type ReactNode, useMemo } from 'react'
 import type { ResolvedSelection } from '../../router.ts'
 import { stripInlineMarkdown } from '../gist.ts'
@@ -16,6 +16,7 @@ import type { LedgerSelection } from './sequence.ts'
  */
 export function MapChild({
   map,
+  automationEvidence,
   open,
   solo,
   last,
@@ -27,6 +28,7 @@ export function MapChild({
   kbNav,
 }: {
   map: WayfinderMap
+  automationEvidence: readonly AutomationEvidence[]
   open: boolean
   /** A single-map project has nothing to open or close against — no accordion, content only. */
   solo: boolean
@@ -67,6 +69,7 @@ export function MapChild({
   const child = (
     <div className="fl-child">
       <CroppedLedger
+        automationEvidence={automationEvidence}
         map={map}
         trunkToEdge={!last}
         onSelect={onSelect}
@@ -117,12 +120,14 @@ export function sameSelection(a: ResolvedSelection, b: ResolvedSelection): boole
 
 function CroppedLedger({
   map,
+  automationEvidence,
   trunkToEdge,
   onSelect,
   selected,
   kbNav,
 }: {
   map: WayfinderMap
+  automationEvidence: readonly AutomationEvidence[]
   trunkToEdge: boolean
   onSelect: (selection: LedgerSelection) => void
   selected: LedgerSelection | null
@@ -134,6 +139,7 @@ function CroppedLedger({
       <div style={{ marginTop: -cropPx }}>
         <MapLedger
           map={map}
+          automationEvidence={automationEvidence}
           trunkToEdge={trunkToEdge}
           onSelect={onSelect}
           selected={selected}

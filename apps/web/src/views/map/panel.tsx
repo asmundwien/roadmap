@@ -1,19 +1,25 @@
 import type {
+  AutomationEvidence,
   AutomationOverrideControl,
   AutomationOverrideStage,
+  AutomationProcessResult,
   AutomationState,
   Blocker,
+  ClassificationAttempt,
   Command,
   CommandOutcome,
   ProjectKey,
+  SessionReportEvidence,
   Ticket,
   WayfinderMap,
+  WayfinderSession,
 } from '@roadmap/contracts'
 import { ticketTypeOf } from '@roadmap/contracts'
 import { useState } from 'react'
 import type { ResolvedSelection } from '../../router.ts'
 import { stripInlineMarkdown } from '../gist.ts'
 import './map.css'
+import { automationEvidenceFor } from './automation-presentation.ts'
 import { type ProseLinkTarget, resolveProseLink } from './link-targets.ts'
 import { Prose } from './prose.tsx'
 import { STATE_META } from './state-meta.ts'
@@ -241,6 +247,7 @@ function TicketContent({
       control.target.mapId === map.id &&
       control.target.ticketId === ticket.id,
   )
+  const evidence = automationEvidenceFor(map, ticket, automation.state.evidence)
 
   return (
     <div className="cartouche">
@@ -263,10 +270,11 @@ function TicketContent({
         </>
       )}
       <BlockerList map={map} ticket={ticket} onSelect={onSelect} />
-      <AutomationOverrides
+      <AutomationSection
         key={`${map.project.integration}:${map.project.id}:${map.id}:${ticket.id}`}
         automation={automation}
         control={overrideControl}
+        evidence={evidence}
         map={map}
         ticket={ticket}
       />
@@ -277,14 +285,16 @@ function TicketContent({
   )
 }
 
-function AutomationOverrides({
+function AutomationSection({
   automation,
   control,
+  evidence,
   map,
   ticket,
 }: {
   automation: PanelAutomation
   control: AutomationOverrideControl | undefined
+  evidence: AutomationEvidence | undefined
   map: WayfinderMap
   ticket: Ticket
 }) {
@@ -326,7 +336,8 @@ function AutomationOverrides({
   return (
     <>
       <hr className="panel-rule" />
-      <p className="cart-head">Automation override</p>
+      <p className="cart-head">Automation</p>
+      {evidence !== undefined && <AutomationEvidenceDetails evidence={evidence} ticket={ticket} />}
       <p className="automation-override-intro">
         Start one eligible stage without changing global or Project Automation enablement.
       </p>
@@ -360,6 +371,172 @@ function AutomationOverrides({
       )}
     </>
   )
+}
+
+function AutomationEvidenceDetails({
+  evidence,
+  ticket,
+}: {
+  evidence: AutomationEvidence
+  ticket: Ticket
+}) {
+  return (
+    <section className="automation-evidence" aria-label="Recorded Automation evidence">
+      <dl className="automation-tracker-fact">
+        <EvidenceFact term="Tracker state" value={trackerStateLabel(ticket)} />
+      </dl>
+      <ClassificationEvidence attempt={evidence.classification} />
+      {evidence.wayfinder !== undefined && <WayfinderEvidence session={evidence.wayfinder} />}
+    </section>
+  )
+}
+
+function ClassificationEvidence({ attempt }: { attempt: ClassificationAttempt }) {
+  return (
+    <section className="automation-stage is-classification">
+      <h3>Classification</h3>
+      <dl>
+        <EvidenceFact term="State" value={classificationStateLabel(attempt)} />
+        <EvidenceFact term="Admission" value={admissionLabel(attempt.admission)} />
+        {(attempt.status === 'completed' || attempt.status === 'failed') && (
+          <ProcessEvidence result={attempt.processResult} />
+        )}
+        {attempt.status === 'completed' && (
+          <EvidenceFact
+            term="Verdict"
+            value={attempt.verdict.value.toUpperCase()}
+            detail={attempt.verdict.reason}
+          />
+        )}
+        {(attempt.status === 'failed' ||
+          attempt.status === 'launch-failed' ||
+          attempt.status === 'outcome-unknown') && (
+          <EvidenceFact term="Reason" value={attempt.reason} />
+        )}
+      </dl>
+    </section>
+  )
+}
+
+function WayfinderEvidence({ session }: { session: WayfinderSession }) {
+  return (
+    <section className="automation-stage is-wayfinder">
+      <h3>Wayfinder Session</h3>
+      <dl>
+        <EvidenceFact term="State" value={wayfinderStateLabel(session)} />
+        <EvidenceFact term="Admission" value={admissionLabel(session.admission)} />
+        {session.status === 'finished' && (
+          <>
+            <ProcessEvidence result={session.processResult} />
+            <ReportEvidence report={session.report} />
+          </>
+        )}
+        {(session.status === 'launch-failed' || session.status === 'outcome-unknown') && (
+          <EvidenceFact term="Reason" value={session.reason} />
+        )}
+      </dl>
+    </section>
+  )
+}
+
+function ProcessEvidence({ result }: { result: AutomationProcessResult }) {
+  switch (result.status) {
+    case 'exited':
+      return <EvidenceFact term="Process result" value={`Exited ${result.code}`} />
+    case 'signaled':
+      return <EvidenceFact term="Process result" value={`Ended by ${result.signal}`} />
+    case 'unavailable':
+      return <EvidenceFact term="Process result" value="Unavailable" detail={result.reason} />
+    default: {
+      const _exhaustive: never = result
+      return _exhaustive
+    }
+  }
+}
+
+function ReportEvidence({ report }: { report: SessionReportEvidence }) {
+  switch (report.status) {
+    case 'received':
+      return (
+        <EvidenceFact
+          term="Session report"
+          value={sentenceCase(report.report.outcome)}
+          detail={report.report.reason}
+        />
+      )
+    case 'missing':
+      return <EvidenceFact term="Session report" value="Missing" detail={report.reason} />
+    case 'invalid':
+      return <EvidenceFact term="Session report" value="Invalid" detail={report.reason} />
+    default: {
+      const _exhaustive: never = report
+      return _exhaustive
+    }
+  }
+}
+
+function EvidenceFact({ term, value, detail }: { term: string; value: string; detail?: string }) {
+  return (
+    <div>
+      <dt>{term}</dt>
+      <dd>
+        <strong>{value}</strong>
+        {detail !== undefined && <span className="automation-evidence-detail">{detail}</span>}
+      </dd>
+    </div>
+  )
+}
+
+function classificationStateLabel(attempt: ClassificationAttempt): string {
+  switch (attempt.status) {
+    case 'running':
+      return 'Running'
+    case 'completed':
+      return 'Completed'
+    case 'failed':
+      return 'Failed'
+    case 'launch-failed':
+      return 'Launch failed'
+    case 'outcome-unknown':
+      return 'Outcome unknown'
+    default: {
+      const _exhaustive: never = attempt
+      return _exhaustive
+    }
+  }
+}
+
+function wayfinderStateLabel(session: WayfinderSession): string {
+  switch (session.status) {
+    case 'launching':
+      return 'Launching'
+    case 'running':
+      return 'Running'
+    case 'finished':
+      return 'Finished'
+    case 'launch-failed':
+      return 'Launch failed'
+    case 'outcome-unknown':
+      return 'Outcome unknown'
+    default: {
+      const _exhaustive: never = session
+      return _exhaustive
+    }
+  }
+}
+
+function trackerStateLabel(ticket: Ticket): string {
+  if (ticket.state === 'closed') return sentenceCase(STATE_META.closed.word)
+  if (ticket.isBlocked && ticket.isClaimed) return 'Blocked + claimed'
+  return sentenceCase(STATE_META[ticket.state].word)
+}
+
+function admissionLabel(admission: 'automatic' | 'override'): string {
+  return admission === 'automatic' ? 'Automatic' : 'Override'
+}
+
+function sentenceCase(value: string): string {
+  return `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`
 }
 
 function OverrideButton({

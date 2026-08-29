@@ -1,4 +1,5 @@
 import {
+  type AutomationEvidence,
   type Ticket,
   type TicketState,
   type TicketType,
@@ -6,10 +7,16 @@ import {
   type WayfinderMap,
 } from '@roadmap/contracts'
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  type AutomationTag,
+  automationEvidenceFor,
+  automationTags,
+} from './automation-presentation.ts'
 import { buildLedger, type Ledger, type LedgerEdge } from './geometry.ts'
 import './map.css'
 import { type LedgerSelection, scopePlan } from './sequence.ts'
 import { STATE_META } from './state-meta.ts'
+import { TicketNode, ticketNodeTextX } from './ticket-node.tsx'
 
 const EXT = 800
 
@@ -38,12 +45,14 @@ function pressProps(
 
 export function MapLedger({
   map,
+  automationEvidence,
   trunkToEdge = false,
   onSelect,
   selected,
   kbNav,
 }: {
   map: WayfinderMap
+  automationEvidence: readonly AutomationEvidence[]
   trunkToEdge?: boolean
   onSelect: (selection: LedgerSelection) => void
   selected: LedgerSelection | null
@@ -167,14 +176,17 @@ export function MapLedger({
         {[...ledger.rows].reverse().map(({ ticket, x, y }) => {
           const meta = STATE_META[ticket.state]
           const title = ticketTitle(ticket)
+          const type = ticketTypeOf(ticket.typeEvidence)
+          const tags = automationTags(automationEvidenceFor(map, ticket, automationEvidence))
+          const titleX = ticketNodeTextX(x, ledger.textX, tags.length)
           const assignee = ticket.assignees[0]?.name
-          const waits = ticket.blockedBy.filter((blocker) => blocker.state !== 'closed')
           const isHot = related?.tickets.has(ticket.id) ?? false
           const isSelected = selected?.kind === 'ticket' && selected.id === ticket.id
           return (
             <g
               key={ticket.id}
               className={`row${isHot ? ' is-hot' : ''}${fresh.has(ticket.id) ? ' is-fresh' : ''}${isSelected ? ' is-selected' : ''}`}
+              aria-label={ticketAriaLabel(ticket, type, tags)}
               onPointerEnter={() => setHover(ticket.id)}
               onPointerLeave={() => setHover(null)}
               {...pressProps(
@@ -183,12 +195,6 @@ export function MapLedger({
                 (focused) => setFocusRow(focused ? ticket.id : null),
               )}
             >
-              <title>
-                {title}
-                {waits.length > 0
-                  ? ` — waits on: ${waits.map((blocker) => blocker.title ?? blocker.displayId ?? blocker.ticketId).join(' · ')}`
-                  : ''}
-              </title>
               <rect
                 className="row-hit"
                 x="0"
@@ -197,25 +203,22 @@ export function MapLedger({
                 height={52}
                 fill="transparent"
               />
-              {fresh.has(ticket.id) && (
-                <circle className="fresh-ping" cx={x} cy={y} r="10" stroke={meta.color} />
-              )}
-              <StateMarker ticket={ticket} x={x} y={y} />
+              <TicketNode ticket={ticket} type={type} tags={tags} x={x} y={y} />
               <text
-                x={ledger.textX}
+                x={titleX}
                 y={y - 4}
                 className={`row-title${ticket.state === 'blocked' ? ' is-dim' : ''}`}
               >
                 {truncate(title, 46)}
               </text>
               <TypeChip
-                type={ticketTypeOf(ticket.typeEvidence)}
+                type={type}
                 title={truncate(title, 46)}
                 titleWeight={600}
-                x={ledger.textX}
+                x={titleX}
                 baselineY={y - 4}
               />
-              <text x={ledger.textX} y={y + 11} className="row-word" fill={meta.color}>
+              <text x={titleX} y={y + 11} className="row-word" fill={meta.color}>
                 {meta.glyph} {meta.word}
                 {assignee !== undefined ? ` · ${assignee}` : ''}
               </text>
@@ -225,12 +228,16 @@ export function MapLedger({
 
         {ledger.closedRows.map(({ ticket, x, y }) => {
           const title = ticketTitle(ticket)
+          const type = ticketTypeOf(ticket.typeEvidence)
+          const tags = automationTags(automationEvidenceFor(map, ticket, automationEvidence))
+          const titleX = ticketNodeTextX(x, ledger.textX, tags.length)
           const isHot = related?.tickets.has(ticket.id) ?? false
           const isSelected = selected?.kind === 'ticket' && selected.id === ticket.id
           return (
             <g
               key={ticket.id}
               className={`row${isHot ? ' is-hot' : ''}${fresh.has(ticket.id) ? ' is-fresh' : ''}${isSelected ? ' is-selected' : ''}`}
+              aria-label={ticketAriaLabel(ticket, type, tags)}
               onPointerEnter={() => setHover(ticket.id)}
               onPointerLeave={() => setHover(null)}
               {...pressProps(
@@ -239,7 +246,6 @@ export function MapLedger({
                 (focused) => setFocusRow(focused ? ticket.id : null),
               )}
             >
-              <title>{title}</title>
               <rect
                 className="row-hit"
                 x="0"
@@ -248,21 +254,15 @@ export function MapLedger({
                 height={40}
                 fill="transparent"
               />
-              {fresh.has(ticket.id) && (
-                <circle className="fresh-ping" cx={x} cy={y} r="10" stroke="var(--state-closed)" />
-              )}
-              <circle cx={x} cy={y} r="10" fill="var(--fg)" />
-              <text x={x} y={y + 3.5} textAnchor="middle" className="check">
-                ✓
-              </text>
-              <text x={ledger.textX} y={y + 4} className="behind-title">
+              <TicketNode ticket={ticket} type={type} tags={tags} x={x} y={y} />
+              <text x={titleX} y={y + 4} className="behind-title">
                 {truncate(title, 46)}
               </text>
               <TypeChip
-                type={ticketTypeOf(ticket.typeEvidence)}
+                type={type}
                 title={truncate(title, 46)}
                 titleWeight={500}
-                x={ledger.textX}
+                x={titleX}
                 baselineY={y + 4}
               />
             </g>
@@ -447,35 +447,27 @@ function textWidth(text: string, font: string): number {
   return measureCtx.measureText(text).width
 }
 
-function StateMarker({ ticket, x, y }: { ticket: Ticket; x: number; y: number }) {
-  const meta = STATE_META[ticket.state]
-  if (ticket.state === 'frontier') {
-    return (
-      <>
-        <circle cx={x} cy={y} r="18" fill={meta.color} fillOpacity="0.16" />
-        <rect
-          x={x - 8}
-          y={y - 8}
-          width="16"
-          height="16"
-          transform={`rotate(45 ${x} ${y})`}
-          fill={meta.color}
-        />
-      </>
-    )
-  }
-  if (ticket.state === 'claimed') {
-    return (
-      <>
-        <circle cx={x} cy={y} r="9" fill="var(--bg)" stroke={meta.color} strokeWidth="2.25" />
-        <path d={`M ${x} ${y - 9} A 9 9 0 0 0 ${x} ${y + 9} Z`} fill={meta.color} />
-      </>
-    )
-  }
-  if (ticket.state === 'blocked') {
-    return <circle cx={x} cy={y} r="9" fill="var(--bg)" stroke={meta.color} strokeWidth="2.25" />
-  }
-  return null
+function ticketAriaLabel(ticket: Ticket, type: TicketType, tags: readonly AutomationTag[]): string {
+  const trackerState =
+    ticket.state === 'closed'
+      ? STATE_META.closed.word
+      : ticket.isBlocked && ticket.isClaimed
+        ? 'blocked and claimed'
+        : ticket.isBlocked
+          ? 'blocked'
+          : ticket.isClaimed
+            ? 'claimed'
+            : STATE_META[ticket.state].word
+  const waits = ticket.blockedBy
+    .filter((blocker) => blocker.state !== 'closed')
+    .map((blocker) => blocker.title ?? blocker.displayId ?? blocker.ticketId)
+  return [
+    ticketTitle(ticket),
+    type === 'untyped' ? 'untyped ticket' : `${type} ticket`,
+    trackerState,
+    ...tags.map((tag) => tag.label),
+    ...(waits.length === 0 ? [] : [`waits on ${waits.join(', ')}`]),
+  ].join('. ')
 }
 
 function truncate(text: string, max: number): string {

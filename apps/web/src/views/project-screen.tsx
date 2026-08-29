@@ -1,4 +1,4 @@
-import type { Project, ProjectKey, WayfinderMap } from '@roadmap/contracts'
+import type { AutomationEvidence, Project, ProjectKey, WayfinderMap } from '@roadmap/contracts'
 import { useEffect, useRef, useState } from 'react'
 import {
   encodeSelection,
@@ -266,8 +266,9 @@ function PanelScreen({
           hasMaps={trace.length > 0}
         />
 
-        <ProjectHead project={project} />
+        <ProjectHead project={project} automationEvidence={automation.state.evidence} />
         <MapTrace
+          automationEvidence={automation.state.evidence}
           project={project}
           selected={selected}
           onPickItem={select}
@@ -329,11 +330,22 @@ function ProjectStateNotices({
   )
 }
 
-function ProjectHead({ project }: { project: Project }) {
+function ProjectHead({
+  project,
+  automationEvidence,
+}: {
+  project: Project
+  automationEvidence: readonly AutomationEvidence[]
+}) {
   const open = project.openMaps.length
   const closed = project.closedMaps.length
   const tickets = [...project.openMaps, ...project.closedMaps].flatMap((map) => map.tickets)
   const title = githubRepoName(project) ?? project.name
+  const hasAutomationEvidence = automationEvidence.some(
+    (evidence) =>
+      evidence.target.project.integration === project.key.integration &&
+      evidence.target.project.id === project.key.id,
+  )
   const subtitle = githubOwnerName(project)
 
   return (
@@ -361,6 +373,18 @@ function ProjectHead({ project }: { project: Project }) {
           </span>
         ))}
       </p>
+      <p className="project-node-legend muted small">
+        <span>R + 1 corner research</span>
+        <span>P + 2 corners prototype</span>
+        <span>G + 3 corners grilling</span>
+        <span>T + 4 corners task</span>
+        {hasAutomationEvidence && (
+          <>
+            <span className="automation-legend is-classification">◆ Classification</span>
+            <span className="automation-legend is-wayfinder">◆ Wayfinder and Session</span>
+          </>
+        )}
+      </p>
     </header>
   )
 }
@@ -373,12 +397,14 @@ function ProjectHead({ project }: { project: Project }) {
  */
 function MapTrace({
   project,
+  automationEvidence,
   selected,
   onPickItem,
   pick,
   kbNav,
 }: {
   project: Project
+  automationEvidence: readonly AutomationEvidence[]
   selected: string | null
   onPickItem: (map: WayfinderMap, item: ResolvedSelection) => void
   pick: { mapId: string; item: ResolvedSelection } | null
@@ -400,6 +426,7 @@ function MapTrace({
       {trace.map((map, i) => (
         <MapChild
           key={map.id}
+          automationEvidence={automationEvidence}
           map={map}
           open={openId === map.id}
           solo={trace.length === 1}

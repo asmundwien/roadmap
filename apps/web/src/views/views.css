@@ -163,6 +163,24 @@
   gap: var(--sp-1) var(--sp-4);
 }
 
+.project-node-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-3);
+}
+
+.automation-legend {
+  font-weight: 600;
+}
+
+.automation-legend.is-classification {
+  color: var(--automation-classification);
+}
+
+.automation-legend.is-wayfinder {
+  color: var(--automation-wayfinder);
+}
+
 .badge {
   margin-left: 0.5rem;
   padding: 0.1rem 0.4rem;

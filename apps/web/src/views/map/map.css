@@ -101,16 +101,173 @@
   fill: var(--chip);
 }
 
+/* The accepted ticket-node language: one angular tracker-state mark with ticket-type runes and
+ * corners, followed by independent Classification and Wayfinder evidence tags. */
+.ticket-node {
+  --node-type: var(--muted);
+  --node-state: var(--state-closed);
+  pointer-events: none;
+}
+
+.ticket-node.type-research {
+  --node-type: var(--type-research);
+}
+
+.ticket-node.type-prototype {
+  --node-type: var(--type-prototype);
+}
+
+.ticket-node.type-grilling {
+  --node-type: var(--type-grilling);
+}
+
+.ticket-node.type-task {
+  --node-type: var(--type-task);
+}
+
+.ticket-node.state-frontier {
+  --node-state: var(--state-frontier);
+}
+
+.ticket-node.state-claimed {
+  --node-state: var(--state-claimed);
+}
+
+.ticket-node.state-blocked {
+  --node-state: var(--state-blocked);
+}
+
+.ticket-node.state-closed {
+  --node-state: var(--fg);
+}
+
+.main-diamond,
+.data-diamond {
+  pointer-events: all;
+  cursor: help;
+}
+
+.main-diamond .node-shape,
+.data-diamond .tag-shape {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 0.12s ease-out;
+}
+
+.main-diamond:hover .node-shape,
+.data-diamond:hover .tag-shape {
+  transform: scale(1.14);
+}
+
+.main-diamond .diamond-face {
+  fill: color-mix(in srgb, var(--node-state) 13%, var(--bg));
+  stroke: var(--node-state);
+  stroke-width: 2.5px;
+  stroke-linejoin: miter;
+}
+
+.ticket-node.state-frontier .diamond-face {
+  fill: var(--node-state);
+}
+
+.ticket-node.state-claimed .diamond-face {
+  fill: var(--bg);
+}
+
+.ticket-node.state-closed .diamond-face {
+  fill: var(--fg);
+  stroke: var(--fg);
+}
+
+.main-diamond .frontier-field {
+  fill: color-mix(in srgb, var(--state-frontier) 12%, transparent);
+}
+
+.main-diamond .claimed-half,
+.main-diamond .claimed-corner {
+  fill: var(--state-claimed);
+}
+
+.main-diamond .blocked-corner {
+  fill: var(--state-blocked);
+}
+
+.main-diamond .type-rune {
+  fill: var(--node-type);
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 3.5px;
+  font-size: 9.25px;
+  font-weight: 900;
+}
+
+.ticket-node.state-frontier .type-rune,
+.ticket-node.state-closed .type-rune {
+  fill: var(--bg);
+  stroke: color-mix(in srgb, var(--node-state) 82%, var(--fg));
+}
+
+.main-diamond .type-corners path {
+  fill: none;
+  stroke: var(--node-type);
+  stroke-width: 1.8px;
+  stroke-linecap: square;
+}
+
+.ticket-node.state-frontier .type-corners path,
+.ticket-node.state-closed .type-corners path {
+  stroke: var(--bg);
+}
+
+.data-diamond.stage-classification {
+  --tag-color: var(--automation-classification);
+}
+
+.data-diamond.stage-wayfinder {
+  --tag-color: var(--automation-wayfinder);
+}
+
+.data-diamond .tag-face {
+  fill: var(--tag-color);
+  stroke: var(--bg);
+  stroke-width: 1px;
+  stroke-linejoin: miter;
+}
+
+.data-diamond .tag-glyph {
+  fill: var(--bg);
+  font-size: 7.25px;
+  font-weight: 900;
+}
+
+.node-tooltip {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.08s linear;
+}
+
+.main-diamond:hover .node-tooltip,
+.data-diamond:hover .node-tooltip {
+  opacity: 1;
+}
+
+.node-tooltip rect {
+  fill: var(--fg);
+  stroke: var(--bg);
+  stroke-width: 1px;
+}
+
+.node-tooltip text {
+  fill: var(--bg);
+  font-size: 6px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
 .behind-title {
   font-size: 12px;
   font-weight: 500;
   fill: color-mix(in oklab, var(--fg) 80%, var(--bg));
-}
-
-.check {
-  font-size: 10px;
-  font-weight: 700;
-  fill: var(--bg);
 }
 
 .fog-title,
@@ -693,10 +850,93 @@
   margin: var(--sp-1) 0 var(--sp-3);
   font-size: 0.8rem;
 }
+.automation-evidence {
+  margin: var(--sp-2) 0 var(--sp-4);
+}
+
+.automation-tracker-fact,
+.automation-stage dl {
+  margin: 0;
+}
+
+.automation-tracker-fact {
+  padding-bottom: var(--sp-2);
+}
+
+.automation-stage {
+  margin-top: var(--sp-2);
+  padding: var(--sp-2) 0 var(--sp-2) var(--sp-3);
+  border-left: 3px solid var(--muted);
+}
+
+.automation-stage.is-classification {
+  border-left-color: var(--automation-classification);
+}
+
+.automation-stage.is-wayfinder {
+  border-left-color: var(--automation-wayfinder);
+}
+
+.automation-stage h3 {
+  margin: 0 0 var(--sp-2);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+}
+
+.automation-stage.is-classification h3 {
+  color: var(--automation-classification);
+}
+
+.automation-stage.is-wayfinder h3 {
+  color: var(--automation-wayfinder);
+}
+
+.automation-tracker-fact > div,
+.automation-stage dl > div {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 1fr);
+  gap: var(--sp-2);
+  padding: 0.15rem 0;
+}
+
+.automation-evidence dt,
+.automation-evidence dd {
+  margin: 0;
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+
+.automation-evidence dt {
+  color: var(--muted);
+}
+
+.automation-evidence dd {
+  min-width: 0;
+  color: var(--fg);
+}
+
+.automation-evidence dd strong,
+.automation-evidence-detail {
+  display: block;
+}
+
+.automation-evidence dd strong {
+  font-weight: 600;
+}
+
+.automation-evidence-detail {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
 .automation-override-intro {
   margin: 0 0 var(--sp-2);
   font-size: 0.8rem;
   color: var(--muted);
+}
+
+.automation-evidence + .automation-override-intro {
+  margin-top: var(--sp-3);
 }
 
 .automation-override-actions {
@@ -997,7 +1237,10 @@
 @media (prefers-reduced-motion: reduce) {
   .fold,
   .panel-rail,
-  .panel-rail-inner {
+  .panel-rail-inner,
+  .main-diamond .node-shape,
+  .data-diamond .tag-shape,
+  .node-tooltip {
     transition: none;
   }
 }
