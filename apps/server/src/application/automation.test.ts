@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import type {
   AutomationEvidence,
+  AutomationTarget,
   Project,
   ProjectKey,
   Ticket,
@@ -175,17 +176,19 @@ function memoryAutomationDatabase(
 
 function adapter(initial: Project[]) {
   let host: AdapterHost | null = null
+  let projects = initial
   const value: WayfinderAdapter = {
     type: 'local',
     start(nextHost) {
       host = nextHost
-      host.update({ projects: initial, unreachable: [] })
+      host.update({ projects, unreachable: [] })
     },
     stop() {},
   }
   return {
     value,
-    push(projects: Project[]) {
+    push(next: Project[]) {
+      projects = next
       if (!host) throw new Error('Adapter has not started.')
       host.update({ projects, unreachable: [] })
     },
@@ -337,6 +340,26 @@ function storedEvent(id: string, opportunityId = 'opportunity') {
   return { id, opportunityId, recordedAt: RECORDED_AT }
 }
 
+function queuedDatabase(targets: readonly AutomationTarget[]): AutomationDatabase {
+  return {
+    schemaVersion: 3,
+    opportunities: targets.map((target, index) => ({ id: `opportunity-${index}`, target })),
+    events: targets.flatMap((_, index): AutomationEvent[] => [
+      {
+        ...storedEvent(`classification-started-${index}`, `opportunity-${index}`),
+        type: 'classification-started',
+        admission: 'automatic',
+      },
+      {
+        ...storedEvent(`classification-completed-${index}`, `opportunity-${index}`),
+        type: 'classification-completed',
+        processResult: { status: 'exited', code: 0 },
+        verdict: { value: 'afk', reason: 'Agent-ready.' },
+      },
+    ]),
+  }
+}
+
 describe('RoadmapApplication Automation', () => {
   it('converts unfinished current-schema attempts to outcome unknown on startup', async () => {
     const sourceProject = project('restart', [ticket('1')])
@@ -376,6 +399,116 @@ describe('RoadmapApplication Automation', () => {
       reason: expect.stringContaining('restarted'),
     })
     expect(current.application.current().automation.evidence).toEqual(database.records())
+    await current.application.stop()
+  })
+
+  it('runs one Wayfinder Session per Project and releases the lane on completion', async () => {
+    const sourceProject = project('serialized', [ticket('1'), ticket('2')])
+    const targets = ['1', '2'].map((ticketId) => ({
+      project: sourceProject.key,
+      mapId: 'map',
+      ticketId,
+    }))
+    const launches = deferredLauncher()
+    const current = await harness({
+      projects: [sourceProject],
+      launcher: launches.launcher,
+      database: memoryAutomationDatabase(queuedDatabase(targets)),
+    })
+
+    expect(launches.sessions).toHaveLength(1)
+    expect(
+      current.application
+        .current()
+        .automation.overrides.find((control) => control.target.ticketId === '2')?.wayfinder,
+    ).toEqual({
+      status: 'ineligible',
+      reason: 'Another Wayfinder Session is in progress for this Project.',
+    })
+
+    launches.sessions[0]?.resolve(wayfinderResult())
+    await vi.waitFor(() => expect(launches.sessions).toHaveLength(2))
+    expect(
+      current.application
+        .current()
+        .automation.evidence.find((evidence) => evidence.target.ticketId === '2')?.wayfinder,
+    ).toMatchObject({ status: 'running' })
+
+    launches.sessions[1]?.resolve(wayfinderResult())
+    await vi.waitFor(() =>
+      expect(
+        current.application.current().automation.evidence.map((evidence) => evidence.wayfinder),
+      ).toEqual([
+        expect.objectContaining({ status: 'finished' }),
+        expect.objectContaining({ status: 'finished' }),
+      ]),
+    )
+    await current.application.stop()
+  })
+
+  it('runs Wayfinder Sessions for different Projects concurrently', async () => {
+    const projects = [project('one', [ticket('1')]), project('two', [ticket('2')])]
+    const targets = projects.map((entry, index) => ({
+      project: entry.key,
+      mapId: 'map',
+      ticketId: String(index + 1),
+    }))
+    const launches = deferredLauncher()
+    const current = await harness({
+      projects,
+      launcher: launches.launcher,
+      database: memoryAutomationDatabase(queuedDatabase(targets)),
+    })
+
+    expect(launches.sessions).toHaveLength(2)
+    expect(
+      current.application.current().automation.evidence.map((evidence) => evidence.wayfinder),
+    ).toEqual([
+      expect.objectContaining({ status: 'running' }),
+      expect.objectContaining({ status: 'running' }),
+    ])
+
+    for (const session of launches.sessions) session.resolve(wayfinderResult())
+    await current.application.stop()
+  })
+
+  it('retains a disabled queued Session and revalidates it on configuration and snapshots', async () => {
+    const sourceProject = project('gated', [ticket('1')])
+    const target = { project: sourceProject.key, mapId: 'map', ticketId: '1' }
+    const launches = deferredLauncher()
+    const disabled = configuration([sourceProject], { enabledProjects: [] })
+    const current = await harness({
+      projects: [sourceProject],
+      launcher: launches.launcher,
+      database: memoryAutomationDatabase(queuedDatabase([target])),
+      configuration: disabled,
+    })
+
+    expect(launches.sessions).toHaveLength(0)
+    expect(current.database.events().map((event) => event.type)).toEqual([
+      'classification-started',
+      'classification-completed',
+    ])
+
+    current.source.push([
+      project('gated', [ticket('1', TASK, { state: 'claimed', isClaimed: true })]),
+    ])
+    current.configured.emit({
+      ...disabled,
+      configurationVersion: 2,
+      automation: { ...disabled.automation, enabledProjects: [sourceProject.key] },
+    })
+    await vi.waitFor(() => expect(current.application.current().configurationVersion).toBe(2))
+    await delay(10)
+    expect(launches.sessions).toHaveLength(0)
+    expect(current.database.events().map((event) => event.type)).toEqual([
+      'classification-started',
+      'classification-completed',
+    ])
+
+    current.source.push([sourceProject])
+    await vi.waitFor(() => expect(launches.sessions).toHaveLength(1))
+    launches.sessions[0]?.resolve(wayfinderResult())
     await current.application.stop()
   })
 

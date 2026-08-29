@@ -81,8 +81,10 @@ _Avoid_: tracker status, Verdict label, human override
 
 **Wayfinder Session**:
 The agent process Roadmap may launch once for an AFK Automation opportunity from the registered
-Workspace. A recorded session marks autonomous handling or an attempt at it, whether Automation or
-an Automation override admitted it; ordinary human Wayfinder work remains the unmarked default.
+Workspace. A Project has at most one active Automation-owned Wayfinder Session; different Projects
+may have active Sessions concurrently. A recorded Session marks autonomous handling or an attempt
+at it, whether Automation or an Automation override admitted it; ordinary human Wayfinder work
+remains the unmarked default.
 _Avoid_: Execution Run, worker, managed agent
 
 **Session report**:

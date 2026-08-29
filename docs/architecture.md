@@ -30,8 +30,10 @@ Integration-specific code lives in `github` and `local`; `wayfinder` parses data
 
 `application/automation-database.ts` owns the strict schema version 3 Automation database. It
 persists immutable opportunities and append-only events atomically, rejects invalid histories, and
-replays valid history into current evidence. `application/automation.ts` owns reconciliation and
-process launch behavior; it appends durable facts before triggering their side effects.
+replays valid history into current evidence. `application/automation.ts` owns event-driven
+reconciliation and process launch behavior. Classification stays in one global lane; Wayfinder
+Sessions use one lane per Project so separate Projects can run concurrently. Every transition is
+appended before its process side effect.
 
 `transport.ts` is the network boundary. It provides a full-state WebSocket with strict origin checks and HTTP handlers for queries and commands. Request bodies cannot exceed 64 KiB. `main.ts` composes modules and binds loopback.
 

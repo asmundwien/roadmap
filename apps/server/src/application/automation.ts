@@ -112,6 +112,10 @@ interface ActiveClassification {
   process: ClassificationProcess
   admission: AutomationAdmission
 }
+interface ActiveWayfinder {
+  target: AutomationTarget
+  process: WayfinderProcess
+}
 export function createAutomationLoop(options: {
   database: AutomationDatabaseDocument
   launcher: AutomationLauncher
@@ -120,7 +124,8 @@ export function createAutomationLoop(options: {
 }): AutomationLoop {
   let records = new Map<string, AutomationRecord>()
   let currentEvidence: readonly AutomationEvidence[] = []
-  let active: ActiveClassification | null = null
+  let activeClassification: ActiveClassification | null = null
+  const activeWayfinders = new Map<string, ActiveWayfinder>()
   let started = false
   let accepting = true
   let faulted = false
@@ -156,35 +161,31 @@ export function createAutomationLoop(options: {
   }
 
   async function reconcileNow(): Promise<void> {
-    if (!started || !accepting || faulted || active) return
-    const source = options.source()
-    for (const candidate of selectCandidates(source)) {
-      if (!(await advanceCandidate(candidate, source.configuration))) return
+    if (!started || !accepting || faulted) return
+    await reconcileWayfinders()
+    if (!accepting || faulted || activeClassification) return
+    await reconcileClassification()
+  }
+
+  async function reconcileWayfinders(): Promise<void> {
+    for (const record of records.values()) {
+      if (record.wayfinder?.status !== 'queued') continue
+      await beginDispatch(record.opportunity.target, 'automatic')
+      if (!accepting || faulted) return
     }
   }
 
-  async function advanceCandidate(
-    candidate: Candidate,
-    configuration: RoadmapConfiguration,
-  ): Promise<boolean> {
-    const record = records.get(automationTargetKey(candidate.target))
-    if (!record) {
-      await beginClassification(
+  async function reconcileClassification(): Promise<void> {
+    const source = options.source()
+    for (const candidate of selectCandidates(source)) {
+      if (records.has(automationTargetKey(candidate.target))) continue
+      const launched = await beginClassification(
         candidate,
-        configuration.automation.classificationCommand,
+        source.configuration.automation.classificationCommand,
         'automatic',
       )
-      return false
+      if (launched || !accepting || faulted) return
     }
-    if (
-      record.classification.status !== 'completed' ||
-      record.classification.verdict.value !== 'afk' ||
-      record.wayfinder?.status !== 'queued'
-    ) {
-      return true
-    }
-    await beginDispatch(candidate, record, configuration.automation.wayfinderCommand, 'automatic')
-    return !faulted
   }
 
   async function beginClassification(
@@ -216,7 +217,7 @@ export function createAutomationLoop(options: {
           },
         ],
       })
-      await reconcileNow()
+      if (replaced) await reconcileNow()
       return replaced
     }
 
@@ -226,7 +227,7 @@ export function createAutomationLoop(options: {
       process,
       admission,
     }
-    active = launched
+    activeClassification = launched
     void process.completed.then(
       (result) => enqueue(() => finishClassification(launched, result)),
       () =>
@@ -244,8 +245,8 @@ export function createAutomationLoop(options: {
     launched: ActiveClassification,
     result: ClassificationProcessResult,
   ): Promise<void> {
-    if (active !== launched) return
-    active = null
+    if (activeClassification !== launched) return
+    activeClassification = null
     if (!accepting) return
 
     const classification = classificationResult(result, launched.admission)
@@ -254,32 +255,29 @@ export function createAutomationLoop(options: {
     ) {
       return
     }
-
-    const source = options.source()
-    const record = records.get(automationTargetKey(launched.candidate.target))
-    if (
-      record &&
-      classification.status === 'completed' &&
-      classification.verdict.value === 'afk' &&
-      isEffectivelyEnabled(source.configuration, launched.candidate.target.project)
-    ) {
-      await beginDispatch(
-        launched.candidate,
-        record,
-        source.configuration.automation.wayfinderCommand,
-        'automatic',
-      )
-    }
     await reconcileNow()
   }
 
   async function beginDispatch(
-    candidate: Candidate,
-    record: AutomationRecord,
-    command: HarnessCommand | undefined,
+    target: AutomationTarget,
     admission: AutomationAdmission,
   ): Promise<boolean> {
-    if (!command || record.wayfinder?.status !== 'queued') return false
+    const source = options.source()
+    if (admission === 'automatic' && !isEffectivelyEnabled(source.configuration, target.project)) {
+      return false
+    }
+    const resolved = resolveTarget(source, target)
+    if (!resolved.ok) return false
+    const key = automationTargetKey(target)
+    const record = records.get(key)
+    const command = source.configuration.automation.wayfinderCommand
+    if (
+      !command ||
+      record?.wayfinder?.status !== 'queued' ||
+      projectHasActiveWayfinder(target.project)
+    ) {
+      return false
+    }
     if (
       !(await append({
         events: [
@@ -297,7 +295,9 @@ export function createAutomationLoop(options: {
 
     let process: WayfinderProcess
     try {
-      process = await options.launcher.dispatch(launchRequest(candidate, command, 'wayfinder'))
+      process = await options.launcher.dispatch(
+        launchRequest(resolved.candidate, command, 'wayfinder'),
+      )
     } catch {
       return append({
         events: [
@@ -310,14 +310,13 @@ export function createAutomationLoop(options: {
       })
     }
 
+    const launched = { target, process }
+    activeWayfinders.set(projectKey(target.project), launched)
     void process.completed.then(
-      (result) => enqueue(() => finishWayfinder(candidate.target, result)),
+      (result) => enqueue(() => finishWayfinder(launched, result)),
       () =>
         enqueue(() =>
-          finishWayfinderUnknown(
-            candidate.target,
-            'The Wayfinder Session process result was lost.',
-          ),
+          finishWayfinderUnknown(launched, 'The Wayfinder Session process result was lost.'),
         ),
     )
     return append({
@@ -326,18 +325,18 @@ export function createAutomationLoop(options: {
   }
 
   async function finishWayfinder(
-    target: AutomationTarget,
+    launched: ActiveWayfinder,
     result: WayfinderProcessResult,
   ): Promise<void> {
-    if (!accepting) return
-    const current = records.get(automationTargetKey(target))
+    if (!accepting || !isActiveWayfinder(launched)) return
+    const current = records.get(automationTargetKey(launched.target))
     if (
       !current ||
       (current.wayfinder?.status !== 'launching' && current.wayfinder?.status !== 'running')
     ) {
       return
     }
-    await append({
+    const persisted = await append({
       events: [
         {
           ...eventIdentity(current.opportunity.id),
@@ -350,18 +349,21 @@ export function createAutomationLoop(options: {
         },
       ],
     })
+    if (!persisted) return
+    activeWayfinders.delete(projectKey(launched.target.project))
+    await reconcileNow()
   }
 
-  async function finishWayfinderUnknown(target: AutomationTarget, reason: string): Promise<void> {
-    if (!accepting) return
-    const current = records.get(automationTargetKey(target))
+  async function finishWayfinderUnknown(launched: ActiveWayfinder, reason: string): Promise<void> {
+    if (!accepting || !isActiveWayfinder(launched)) return
+    const current = records.get(automationTargetKey(launched.target))
     if (
       !current ||
       (current.wayfinder?.status !== 'launching' && current.wayfinder?.status !== 'running')
     ) {
       return
     }
-    await append({
+    const persisted = await append({
       events: [
         {
           ...eventIdentity(current.opportunity.id),
@@ -370,6 +372,21 @@ export function createAutomationLoop(options: {
         },
       ],
     })
+    if (!persisted) return
+    activeWayfinders.delete(projectKey(launched.target.project))
+    await reconcileNow()
+  }
+
+  function isActiveWayfinder(launched: ActiveWayfinder): boolean {
+    return activeWayfinders.get(projectKey(launched.target.project)) === launched
+  }
+
+  function projectHasActiveWayfinder(project: ProjectKey): boolean {
+    return [...records.values()].some(
+      (record) =>
+        sameProject(record.opportunity.target.project, project) &&
+        (record.wayfinder?.status === 'launching' || record.wayfinder?.status === 'running'),
+    )
   }
 
   function overrideControls(): AutomationOverrideControl[] {
@@ -419,7 +436,7 @@ export function createAutomationLoop(options: {
     }
     if (record) return ineligible('This Automation opportunity has already been classified.')
     if (
-      active ||
+      activeClassification ||
       [...records.values()].some((entry) => entry.classification.status === 'running')
     ) {
       return ineligible('Another Classification Run is in progress.')
@@ -447,6 +464,9 @@ export function createAutomationLoop(options: {
     if (record.wayfinder?.status !== 'queued') {
       return ineligible('A Wayfinder Session is already recorded for this opportunity.')
     }
+    if (projectHasActiveWayfinder(record.opportunity.target.project)) {
+      return ineligible('Another Wayfinder Session is in progress for this Project.')
+    }
     return { status: 'eligible' }
   }
 
@@ -470,7 +490,10 @@ export function createAutomationLoop(options: {
     if (!resolved.ok) return { ok: false, error: overrideError(resolved.reason) }
 
     const launched = await launchOverride(resolved.candidate, stage, source.configuration)
-    if (launched) return { ok: true }
+    if (launched) {
+      await reconcileNow()
+      return { ok: true }
+    }
     return {
       ok: false,
       error: faulted
@@ -491,10 +514,7 @@ export function createAutomationLoop(options: {
         'override',
       )
     }
-    const record = records.get(automationTargetKey(candidate.target))
-    return record
-      ? beginDispatch(candidate, record, configuration.automation.wayfinderCommand, 'override')
-      : false
+    return beginDispatch(candidate.target, 'override')
   }
 
   return {
@@ -516,7 +536,7 @@ export function createAutomationLoop(options: {
     async stop() {
       if (!accepting) return lane
       accepting = false
-      const live = active
+      const live = activeClassification
       if (live) await live.process.stop()
       await lane
     },
