@@ -480,12 +480,25 @@ const automationEvidence = object({
   classification: required(classificationAttempt),
   wayfinder: optional(wayfinderSession),
 })
+const automationOverrideAvailability = discriminated('Automation override availability', 'status', {
+  eligible: object({ status: required(literal('eligible')) }),
+  ineligible: object({
+    status: required(literal('ineligible')),
+    reason: required(stringValue),
+  }),
+})
+const automationOverrideControl = object({
+  target: required(automationTarget),
+  classification: required(automationOverrideAvailability),
+  wayfinder: required(automationOverrideAvailability),
+})
 
 const automationState = object({
   enabled: required(booleanValue),
   enabledProjects: required(arrayOf(projectKey)),
   availability: required(automationAvailability),
   evidence: required(arrayOf(automationEvidence)),
+  overrides: required(arrayOf(automationOverrideControl)),
 })
 const safeError = object({
   code: required(
@@ -594,6 +607,12 @@ const command = discriminated('command', 'type', {
     project: required(projectKey),
     enabled: required(booleanValue),
   }),
+  'start-automation-override': object({
+    type: required(literal('start-automation-override')),
+    ...version,
+    target: required(automationTarget),
+    stage: required(literal('classification', 'wayfinder')),
+  }),
   'refresh-project': object({
     type: required(literal('refresh-project')),
     ...version,
@@ -626,6 +645,11 @@ const commandResult = discriminated('command result', 'type', {
   'action-launched': object({
     type: required(literal('action-launched')),
     actionId: required(stringValue),
+  }),
+  'automation-override-started': object({
+    type: required(literal('automation-override-started')),
+    target: required(automationTarget),
+    stage: required(literal('classification', 'wayfinder')),
   }),
 })
 const commandOutcome = oneOf(

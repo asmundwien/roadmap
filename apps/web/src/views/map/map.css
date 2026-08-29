@@ -693,6 +693,77 @@
   margin: var(--sp-1) 0 var(--sp-3);
   font-size: 0.8rem;
 }
+.automation-override-intro {
+  margin: 0 0 var(--sp-2);
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.automation-override-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.automation-override-action {
+  display: grid;
+  grid-template-columns: minmax(8.5rem, 0.8fr) 1fr;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.automation-override-action button {
+  min-height: 2.2rem;
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.automation-override-action button:hover:not(:disabled) {
+  background: var(--wash);
+  border-color: var(--muted);
+}
+
+.panel-screen .automation-override-action button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.automation-override-action button:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.automation-override-action span,
+.automation-override-notice,
+.automation-override-error {
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.automation-override-action span {
+  color: var(--muted);
+}
+
+.automation-override-notice,
+.automation-override-error {
+  margin: var(--sp-2) 0 0;
+}
+
+.automation-override-notice {
+  color: var(--state-frontier);
+}
+
+.automation-override-error {
+  color: var(--goal);
+}
 
 /* THE one presentation of a referenced item: the title over its state word, row-shaped like the
  * ledger's own rows. On-map references are buttons that select; off-map ones link to their source. */

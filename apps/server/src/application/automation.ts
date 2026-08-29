@@ -5,14 +5,19 @@ import { basename, dirname, join } from 'node:path'
 import type {
   AutomationAdmission,
   AutomationEvidence,
+  AutomationOverrideAvailability,
+  AutomationOverrideControl,
+  AutomationOverrideStage,
   AutomationProcessResult,
   AutomationTarget,
   ClassificationAttempt,
   ClassificationVerdict,
   ProjectKey,
   RegisteredProject,
+  SafeError,
   SessionReportEvidence,
   Ticket,
+  WayfinderMap,
   WayfinderSession,
 } from '@roadmap/contracts'
 import { isRecord } from '../type-guards.ts'
@@ -101,6 +106,11 @@ interface AutomationSource {
 export interface AutomationLoop {
   start(): Promise<void>
   evidence(): AutomationEvidence[]
+  overrides(): AutomationOverrideControl[]
+  startOverride(
+    target: AutomationTarget,
+    stage: AutomationOverrideStage,
+  ): Promise<{ ok: true } | { ok: false; error: SafeError }>
   reconcile(): void
   stop(): Promise<void>
 }
@@ -112,6 +122,9 @@ interface Candidate {
   project: RegisteredProject
   ticket: Ticket
 }
+type CandidateResolution =
+  | { ok: true; target: AutomationTarget; candidate: Candidate }
+  | { ok: false; target: AutomationTarget; reason: string }
 
 interface ActiveClassification {
   candidate: Candidate
@@ -131,9 +144,12 @@ export function createAutomationLoop(options: {
   let faulted = false
   let lane: Promise<void> = Promise.resolve()
 
-  function enqueue(operation: () => Promise<void>): Promise<void> {
+  function enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const next = lane.then(operation, operation)
-    lane = next.catch(() => undefined)
+    lane = next.then(
+      () => undefined,
+      () => undefined,
+    )
     return next
   }
 
@@ -145,6 +161,7 @@ export function createAutomationLoop(options: {
       return true
     } catch {
       faulted = true
+      options.onEvidenceChange?.()
       return false
     }
   }
@@ -191,19 +208,19 @@ export function createAutomationLoop(options: {
     candidate: Candidate,
     command: HarnessCommand | undefined,
     admission: AutomationAdmission,
-  ): Promise<void> {
-    if (!command) return
+  ): Promise<boolean> {
+    if (!command) return false
     const marker: AutomationEvidence = {
       target: candidate.target,
       classification: { status: 'running', admission },
     }
-    if (!(await replace(marker)) || !accepting) return
+    if (!(await replace(marker)) || !accepting) return false
 
     let process: ClassificationProcess
     try {
       process = options.launcher.classify(launchRequest(candidate, command, 'classification'))
     } catch {
-      await replace({
+      const replaced = await replace({
         ...marker,
         classification: {
           status: 'launch-failed',
@@ -212,7 +229,7 @@ export function createAutomationLoop(options: {
         },
       })
       await reconcileNow()
-      return
+      return replaced
     }
 
     const launched: ActiveClassification = { candidate, process, admission }
@@ -227,6 +244,7 @@ export function createAutomationLoop(options: {
           }),
         ),
     )
+    return true
   }
 
   async function finishClassification(
@@ -265,19 +283,19 @@ export function createAutomationLoop(options: {
     record: AutomationEvidence,
     command: HarnessCommand | undefined,
     admission: AutomationAdmission,
-  ): Promise<void> {
-    if (!command || record.wayfinder) return
+  ): Promise<boolean> {
+    if (!command || record.wayfinder) return false
     const marker: AutomationEvidence = {
       ...record,
       wayfinder: { status: 'launching', admission },
     }
-    if (!(await replace(marker)) || !accepting) return
+    if (!(await replace(marker)) || !accepting) return false
 
     let process: WayfinderProcess
     try {
       process = await options.launcher.dispatch(launchRequest(candidate, command, 'wayfinder'))
     } catch {
-      await replace({
+      return replace({
         ...marker,
         wayfinder: {
           status: 'launch-failed',
@@ -285,7 +303,6 @@ export function createAutomationLoop(options: {
           reason: 'The Wayfinder Session Command could not be launched.',
         },
       })
-      return
     }
 
     void process.completed.then(
@@ -299,7 +316,7 @@ export function createAutomationLoop(options: {
           ),
         ),
     )
-    await replace({ ...marker, wayfinder: { status: 'running', admission } })
+    return replace({ ...marker, wayfinder: { status: 'running', admission } })
   }
 
   async function finishWayfinder(
@@ -339,6 +356,130 @@ export function createAutomationLoop(options: {
       wayfinder: { status: 'outcome-unknown', admission, reason },
     })
   }
+  function overrideControls(): AutomationOverrideControl[] {
+    const source = options.source()
+    return source.projects.flatMap((project) =>
+      [...project.openMaps, ...project.closedMaps].flatMap((map) =>
+        map.tickets.map((ticket) => {
+          const resolved = resolveCandidate(project, map, ticket)
+          return {
+            target: resolved.target,
+            classification: overrideAvailability('classification', resolved, source.configuration),
+            wayfinder: overrideAvailability('wayfinder', resolved, source.configuration),
+          }
+        }),
+      ),
+    )
+  }
+
+  function overrideAvailability(
+    stage: AutomationOverrideStage,
+    resolved: CandidateResolution,
+    configuration: RoadmapConfiguration,
+  ): AutomationOverrideAvailability {
+    const unavailable = commonOverrideIneligibility(resolved)
+    if (unavailable) return unavailable
+    if (!resolved.ok) return ineligible(resolved.reason)
+    const record = records.get(targetKey(resolved.target))
+    return stage === 'classification'
+      ? classificationOverrideAvailability(configuration, record)
+      : wayfinderOverrideAvailability(configuration, record)
+  }
+
+  function commonOverrideIneligibility(
+    resolved: CandidateResolution,
+  ): AutomationOverrideAvailability | null {
+    if (!accepting) return ineligible('Roadmap is stopping.')
+    if (faulted) return ineligible('Automation evidence could not be persisted; restart Roadmap.')
+    return resolved.ok ? null : ineligible(resolved.reason)
+  }
+
+  function classificationOverrideAvailability(
+    configuration: RoadmapConfiguration,
+    record: AutomationEvidence | undefined,
+  ): AutomationOverrideAvailability {
+    if (!configuration.automation.classificationCommand) {
+      return ineligible('Configure the Classification Harness Command in roadmap.config.json.')
+    }
+    if (record) return ineligible('This Automation opportunity has already been classified.')
+    if (
+      active ||
+      [...records.values()].some((entry) => entry.classification.status === 'running')
+    ) {
+      return ineligible('Another Classification Run is in progress.')
+    }
+    return { status: 'eligible' }
+  }
+
+  function wayfinderOverrideAvailability(
+    configuration: RoadmapConfiguration,
+    record: AutomationEvidence | undefined,
+  ): AutomationOverrideAvailability {
+    if (!configuration.automation.wayfinderCommand) {
+      return ineligible('Configure the Wayfinder Session Command in roadmap.config.json.')
+    }
+    if (!record) return ineligible('Run Classification first.')
+    if (record.classification.status === 'running') {
+      return ineligible('Classification is still running.')
+    }
+    if (
+      record.classification.status !== 'completed' ||
+      record.classification.verdict.value !== 'afk'
+    ) {
+      return ineligible('Classification did not produce an AFK Verdict.')
+    }
+    if (record.wayfinder) {
+      return ineligible('A Wayfinder Session is already recorded for this opportunity.')
+    }
+    return { status: 'eligible' }
+  }
+
+  function startOverride(
+    target: AutomationTarget,
+    stage: AutomationOverrideStage,
+  ): Promise<{ ok: true } | { ok: false; error: SafeError }> {
+    return enqueue(() => startOverrideNow(target, stage))
+  }
+
+  async function startOverrideNow(
+    target: AutomationTarget,
+    stage: AutomationOverrideStage,
+  ): Promise<{ ok: true } | { ok: false; error: SafeError }> {
+    const source = options.source()
+    const resolved = resolveTarget(source, target)
+    const availability = overrideAvailability(stage, resolved, source.configuration)
+    if (availability.status === 'ineligible') {
+      return { ok: false, error: overrideError(availability.reason) }
+    }
+    if (!resolved.ok) return { ok: false, error: overrideError(resolved.reason) }
+
+    const launched = await launchOverride(resolved.candidate, stage, source.configuration)
+    if (launched) return { ok: true }
+    return {
+      ok: false,
+      error: faulted
+        ? overrideError('Automation evidence could not be persisted.', 'persistence-failed')
+        : overrideError('Automation is no longer accepting overrides.', 'not-supported'),
+    }
+  }
+
+  async function launchOverride(
+    candidate: Candidate,
+    stage: AutomationOverrideStage,
+    configuration: RoadmapConfiguration,
+  ): Promise<boolean> {
+    if (stage === 'classification') {
+      return beginClassification(
+        candidate,
+        configuration.automation.classificationCommand,
+        'override',
+      )
+    }
+    const record = records.get(targetKey(candidate.target))
+    return record
+      ? beginDispatch(candidate, record, configuration.automation.wayfinderCommand, 'override')
+      : false
+  }
 
   return {
     async start() {
@@ -357,6 +498,8 @@ export function createAutomationLoop(options: {
       await enqueue(reconcileNow)
     },
     evidence: () => [...records.values()],
+    overrides: overrideControls,
+    startOverride,
     reconcile() {
       if (!started || !accepting) return
       void enqueue(reconcileNow)
@@ -384,27 +527,74 @@ function selectCandidates(source: AutomationSource): Candidate[] {
 }
 
 function selectCandidate(project: RegisteredProject | undefined): Candidate | null {
-  if (project?.availability.status !== 'available') return null
-  const map = project.openMaps[0]
-  if (!map?.ticketsComplete) return null
-  const ticket = map.frontier[0]
-  if (
-    !ticket?.blockersComplete ||
-    ticket.typeEvidence.kind !== 'recognized' ||
-    ticket.typeEvidence.value !== 'task'
-  ) {
-    return null
+  const map = project?.openMaps[0]
+  const ticket = map?.frontier[0]
+  if (!project || !map || !ticket) return null
+  const resolved = resolveCandidate(project, map, ticket)
+  return resolved.ok ? resolved.candidate : null
+}
+
+function resolveTarget(source: AutomationSource, target: AutomationTarget): CandidateResolution {
+  const project = source.projects.find((candidate) => sameProject(candidate.key, target.project))
+  if (!project) return { ok: false, target, reason: 'Project does not exist.' }
+  const map = [...project.openMaps, ...project.closedMaps].find(
+    (candidate) => candidate.id === target.mapId,
+  )
+  if (!map) return { ok: false, target, reason: 'Map does not exist.' }
+  const ticket = map.tickets.find((candidate) => candidate.id === target.ticketId)
+  if (!ticket) return { ok: false, target, reason: 'Ticket does not exist.' }
+  return resolveCandidate(project, map, ticket)
+}
+
+function resolveCandidate(
+  project: RegisteredProject,
+  map: WayfinderMap,
+  ticket: Ticket,
+): CandidateResolution {
+  const target = { project: project.key, mapId: map.id, ticketId: ticket.id }
+  if (project.availability.status !== 'available') {
+    return { ok: false, target, reason: 'Project is unavailable.' }
   }
+  if (project.openMaps[0]?.id !== map.id) {
+    return { ok: false, target, reason: 'Ticket is not on the Project’s active map.' }
+  }
+  if (!map.ticketsComplete) {
+    return { ok: false, target, reason: 'The active map’s ticket list is incomplete.' }
+  }
+  const ineligibility = ticketIneligibility(map, ticket)
+  if (ineligibility) return { ok: false, target, reason: ineligibility }
   const mapPointer = map.url ?? map.sourcePath
   const ticketPointer = ticket.url ?? ticket.sourcePath
-  if (!mapPointer || !ticketPointer) return null
-  return {
-    target: { project: project.key, mapId: map.id, ticketId: ticket.id },
-    mapPointer,
-    ticketPointer,
-    project,
-    ticket,
+  if (!mapPointer || !ticketPointer) {
+    return { ok: false, target, reason: 'The Integration cannot provide map and ticket pointers.' }
   }
+  return {
+    ok: true,
+    target,
+    candidate: { target, mapPointer, ticketPointer, project, ticket },
+  }
+}
+function ticketIneligibility(map: WayfinderMap, ticket: Ticket): string | null {
+  if (!ticket.blockersComplete) return 'Ticket blocker data is incomplete.'
+  if (ticket.typeEvidence.kind !== 'recognized' || ticket.typeEvidence.value !== 'task') {
+    return 'Only task tickets can use Automation.'
+  }
+  if (ticket.state === 'closed') return 'Ticket is already decided.'
+  if (ticket.isBlocked && ticket.isClaimed) return 'Ticket is blocked and claimed.'
+  if (ticket.isBlocked) return 'Ticket is blocked.'
+  if (ticket.isClaimed) return 'Ticket is already claimed.'
+  if (!map.frontier.some((candidate) => candidate.id === ticket.id)) {
+    return 'Ticket is not on the frontier.'
+  }
+  return null
+}
+
+function ineligible(reason: string): AutomationOverrideAvailability {
+  return { status: 'ineligible', reason }
+}
+
+function overrideError(message: string, code: SafeError['code'] = 'validation'): SafeError {
+  return { code, message, field: 'target' }
 }
 
 function isEffectivelyEnabled(configuration: RoadmapConfiguration, project: ProjectKey): boolean {

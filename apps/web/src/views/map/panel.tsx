@@ -1,10 +1,16 @@
-import {
-  type Blocker,
-  type ProjectKey,
-  type Ticket,
-  ticketTypeOf,
-  type WayfinderMap,
+import type {
+  AutomationOverrideControl,
+  AutomationOverrideStage,
+  AutomationState,
+  Blocker,
+  Command,
+  CommandOutcome,
+  ProjectKey,
+  Ticket,
+  WayfinderMap,
 } from '@roadmap/contracts'
+import { ticketTypeOf } from '@roadmap/contracts'
+import { useState } from 'react'
 import type { ResolvedSelection } from '../../router.ts'
 import { stripInlineMarkdown } from '../gist.ts'
 import './map.css'
@@ -18,6 +24,13 @@ import { STATE_META } from './state-meta.ts'
  * anything in between. One Panel per screen, fed by every map; what it shows is the hash's
  * selection, resolved by the router (`ResolvedSelection`).
  */
+export interface PanelAutomation {
+  state: AutomationState
+  configurationVersion: number
+  commandInFlight: boolean
+  execute(command: Command): Promise<CommandOutcome>
+}
+
 export function Panel({
   map,
   item,
@@ -26,6 +39,7 @@ export function Panel({
   onSelect,
   hasPrev,
   hasNext,
+  automation,
 }: {
   map: WayfinderMap
   item: ResolvedSelection
@@ -34,6 +48,7 @@ export function Panel({
   onSelect: (item: ResolvedSelection) => void
   hasPrev: boolean
   hasNext: boolean
+  automation: PanelAutomation
 }) {
   return (
     <>
@@ -70,7 +85,7 @@ export function Panel({
         </button>
       </div>
       <div className="panel-body">
-        <PanelBody map={map} selection={item} onSelect={onSelect} />
+        <PanelBody map={map} selection={item} onSelect={onSelect} automation={automation} />
       </div>
     </>
   )
@@ -110,16 +125,20 @@ function PanelBody({
   map,
   selection,
   onSelect,
+  automation,
 }: {
   map: WayfinderMap
   selection: ResolvedSelection
   onSelect: (item: ResolvedSelection) => void
+  automation: PanelAutomation
 }) {
   switch (selection.kind) {
     case 'map':
       return <MapContent map={map} onSelect={onSelect} />
     case 'ticket':
-      return <TicketContent map={map} id={selection.id} onSelect={onSelect} />
+      return (
+        <TicketContent map={map} id={selection.id} onSelect={onSelect} automation={automation} />
+      )
     case 'fog':
       return (
         <ListItemContent
@@ -200,10 +219,12 @@ function TicketContent({
   map,
   id,
   onSelect,
+  automation,
 }: {
   map: WayfinderMap
   id: string
   onSelect: (item: ResolvedSelection) => void
+  automation: PanelAutomation
 }) {
   const ticket = map.tickets.find((t) => t.id === id)
   if (!ticket) return null
@@ -213,6 +234,13 @@ function TicketContent({
   const body = ticket.body.trim()
   const type = ticketTypeOf(ticket.typeEvidence)
   const resolveLink = proseLinkResolver(map, ticket.sourcePath)
+  const overrideControl = automation.state.overrides.find(
+    (control) =>
+      control.target.project.integration === map.project.integration &&
+      control.target.project.id === map.project.id &&
+      control.target.mapId === map.id &&
+      control.target.ticketId === ticket.id,
+  )
 
   return (
     <div className="cartouche">
@@ -235,9 +263,134 @@ function TicketContent({
         </>
       )}
       <BlockerList map={map} ticket={ticket} onSelect={onSelect} />
+      <AutomationOverrides
+        key={`${map.project.integration}:${map.project.id}:${map.id}:${ticket.id}`}
+        automation={automation}
+        control={overrideControl}
+        map={map}
+        ticket={ticket}
+      />
       {!ticket.blockersComplete && (
         <p className="cart-warn">Some blockers could not be resolved.</p>
       )}
+    </div>
+  )
+}
+
+function AutomationOverrides({
+  automation,
+  control,
+  map,
+  ticket,
+}: {
+  automation: PanelAutomation
+  control: AutomationOverrideControl | undefined
+  map: WayfinderMap
+  ticket: Ticket
+}) {
+  const [feedback, setFeedback] = useState<{ kind: 'notice' | 'error'; text: string } | null>(null)
+  const fallbackReason =
+    automation.state.availability.status === 'unavailable'
+      ? automation.state.availability.cause
+      : 'Automation overrides are unavailable for this ticket.'
+  const target = { project: map.project, mapId: map.id, ticketId: ticket.id }
+
+  const run = async (stage: AutomationOverrideStage) => {
+    setFeedback(null)
+    try {
+      const outcome = await automation.execute({
+        type: 'start-automation-override',
+        expectedConfigurationVersion: automation.configurationVersion,
+        target,
+        stage,
+      })
+      setFeedback(
+        outcome.ok
+          ? {
+              kind: 'notice',
+              text:
+                stage === 'classification'
+                  ? 'Classification Run started.'
+                  : 'Wayfinder Session started.',
+            }
+          : { kind: 'error', text: outcome.error.message },
+      )
+    } catch {
+      setFeedback({
+        kind: 'error',
+        text: 'The server did not confirm the Automation override. Wait for live state before retrying.',
+      })
+    }
+  }
+
+  return (
+    <>
+      <hr className="panel-rule" />
+      <p className="cart-head">Automation override</p>
+      <p className="automation-override-intro">
+        Start one eligible stage without changing global or Project Automation enablement.
+      </p>
+      <div className="automation-override-actions">
+        <OverrideButton
+          label="Run Classification"
+          available={control?.classification}
+          fallbackReason={fallbackReason}
+          commandInFlight={automation.commandInFlight}
+          eligibleHint="Classify this ticket once."
+          onClick={() => void run('classification')}
+        />
+        <OverrideButton
+          label="Start Wayfinder Session"
+          available={control?.wayfinder}
+          fallbackReason={fallbackReason}
+          commandInFlight={automation.commandInFlight}
+          eligibleHint="Start the AFK-approved ticket once."
+          onClick={() => void run('wayfinder')}
+        />
+      </div>
+      {feedback !== null && (
+        <p
+          className={
+            feedback.kind === 'error' ? 'automation-override-error' : 'automation-override-notice'
+          }
+          role={feedback.kind === 'error' ? 'alert' : 'status'}
+        >
+          {feedback.text}
+        </p>
+      )}
+    </>
+  )
+}
+
+function OverrideButton({
+  label,
+  available,
+  fallbackReason,
+  commandInFlight,
+  eligibleHint,
+  onClick,
+}: {
+  label: string
+  available: AutomationOverrideControl['classification'] | undefined
+  fallbackReason: string
+  commandInFlight: boolean
+  eligibleHint: string
+  onClick: () => void
+}) {
+  const reason = commandInFlight
+    ? 'Another operation is in progress.'
+    : available?.status === 'ineligible'
+      ? available.reason
+      : available === undefined
+        ? fallbackReason
+        : eligibleHint
+  const disabled = commandInFlight || available?.status !== 'eligible'
+  return (
+    <div className="automation-override-action">
+      <button type="button" disabled={disabled} title={reason} onClick={onClick}>
+        {label}
+      </button>
+      <span>{reason}</span>
     </div>
   )
 }

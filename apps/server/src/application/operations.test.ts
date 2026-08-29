@@ -25,6 +25,7 @@ function state(): ApplicationState {
       enabledProjects: [],
       availability: { status: 'ready' },
       evidence: [],
+      overrides: [],
     },
     roadmap: { capturedAt: 1, projects: [], unreachable: [] },
   }

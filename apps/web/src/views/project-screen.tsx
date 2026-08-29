@@ -13,7 +13,7 @@ import {
 import { useRoadmap } from '../store/roadmap-provider.tsx'
 import { activeMapOf } from './active-map.ts'
 import { MapChild, sameSelection } from './map/map-child.tsx'
-import { Panel } from './map/panel.tsx'
+import { Panel, type PanelAutomation } from './map/panel.tsx'
 import { ledgerSequence } from './map/sequence.ts'
 import { LEGEND_ORDER, STATE_META } from './map/state-meta.ts'
 import { integrationLabel } from './project-meta.ts'
@@ -26,7 +26,16 @@ import './views.css'
  * layer every map feeds.
  */
 export function ProjectScreen({ route }: { route: Extract<Route, { screen: 'project' }> }) {
-  const { transport, projects, roadmapProjects, capturedAt } = useRoadmap()
+  const {
+    transport,
+    projects,
+    roadmapProjects,
+    capturedAt,
+    automation,
+    configurationVersion,
+    command,
+    execute,
+  } = useRoadmap()
 
   const registration = projects.find((candidate) => sameProject(candidate.key, route.project))
   const source = roadmapProjects.find((candidate) => sameProject(candidate.key, route.project))
@@ -66,6 +75,12 @@ export function ProjectScreen({ route }: { route: Extract<Route, { screen: 'proj
       unavailable={
         registration?.availability.status === 'unavailable' ? registration.availability.cause : null
       }
+      automation={{
+        state: automation,
+        configurationVersion,
+        commandInFlight: command.inFlight,
+        execute,
+      }}
     />
   )
 }
@@ -87,12 +102,14 @@ function PanelScreen({
   selection,
   disconnected,
   unavailable,
+  automation,
 }: {
   project: Project
   selected: string | null
   selection: PanelSelection | null
   disconnected: boolean
   unavailable: string | null
+  automation: PanelAutomation
 }) {
   const trace = [...project.openMaps, ...project.closedMaps]
   const pinnedMap = selected !== null ? trace.find((m) => m.id === selected) : undefined
@@ -276,6 +293,7 @@ function PanelScreen({
                 onSelect={(item) => select(shown.map, item)}
                 hasPrev={at > 0}
                 hasNext={at !== -1 && at < flat.length - 1}
+                automation={automation}
               />
             </div>
           )}

@@ -37,6 +37,7 @@ function state(stateSequence: number, serverEpoch = 'epoch-a'): ApplicationState
       enabledProjects: [],
       availability: { status: 'ready' },
       evidence: [],
+      overrides: [],
     },
     roadmap: { capturedAt: stateSequence * 1000, projects: [], unreachable: [] },
   }
@@ -183,6 +184,36 @@ describe('transport codecs', () => {
         outcome: { ok: true, result: { type: 'action-launched', actionId: 'open' } },
       }).ok,
     ).toBe(false)
+  })
+})
+describe('Automation override transport', () => {
+  it('accepts strict stage commands and echoed start results', () => {
+    const target = {
+      project: { integration: 'github' as const, id: 'example/project' },
+      mapId: '1',
+      ticketId: '2',
+    }
+    expect(
+      commandEnvelopeCodec.decode({
+        type: 'command',
+        command: {
+          type: 'start-automation-override',
+          expectedConfigurationVersion: 1,
+          target,
+          stage: 'classification',
+        },
+      }),
+    ).toMatchObject({ ok: true })
+    expect(
+      commandResultEnvelopeCodec.decode({
+        type: 'command-result',
+        outcome: {
+          ok: true,
+          result: { type: 'automation-override-started', target, stage: 'classification' },
+          state: state(1),
+        },
+      }),
+    ).toMatchObject({ ok: true })
   })
 })
 

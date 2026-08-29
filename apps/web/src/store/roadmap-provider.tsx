@@ -63,6 +63,7 @@ export function useRoadmap(): RoadmapViewState {
       enabledProjects: [],
       availability: { status: 'unavailable', cause: 'Waiting for Roadmap state.' },
       evidence: [],
+      overrides: [],
     },
     configuration: state?.configuration ?? { valid: true, issues: [], notices: [] },
     unreachable: roadmap.unreachable,

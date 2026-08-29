@@ -296,6 +296,17 @@ export interface AutomationTarget {
   mapId: string
   ticketId: string
 }
+export type AutomationOverrideStage = 'classification' | 'wayfinder'
+
+export type AutomationOverrideAvailability =
+  | { status: 'eligible' }
+  | { status: 'ineligible'; reason: string }
+
+export interface AutomationOverrideControl {
+  target: AutomationTarget
+  classification: AutomationOverrideAvailability
+  wayfinder: AutomationOverrideAvailability
+}
 
 export type AutomationProcessResult =
   | { status: 'exited'; code: number }
@@ -360,6 +371,7 @@ export interface AutomationState {
   enabledProjects: ProjectKey[]
   availability: AutomationAvailability
   evidence: AutomationEvidence[]
+  overrides: AutomationOverrideControl[]
 }
 
 /** The sole authoritative read model owned by the server application Module. */
@@ -430,6 +442,11 @@ export type Command =
       project: ProjectKey
       enabled: boolean
     })
+  | (VersionedCommand & {
+      type: 'start-automation-override'
+      target: AutomationTarget
+      stage: AutomationOverrideStage
+    })
   | (VersionedCommand & { type: 'refresh-project'; project: ProjectKey })
   | (VersionedCommand & { type: 'launch-action'; actionId: string; project?: ProjectKey })
 
@@ -439,6 +456,11 @@ export type CommandResult =
   | { type: 'authorization-cancelled'; operationId: string }
   | { type: 'project-refreshed'; project: ProjectKey }
   | { type: 'action-launched'; actionId: string }
+  | {
+      type: 'automation-override-started'
+      target: AutomationTarget
+      stage: AutomationOverrideStage
+    }
 
 export type CommandOutcome =
   | { ok: true; result: CommandResult; state: ApplicationState }

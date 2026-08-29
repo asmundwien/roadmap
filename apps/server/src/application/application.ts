@@ -99,6 +99,7 @@ export interface ApplicationOperations {
       | { type: 'rename-project' }
       | { type: 'repair-project-workspace' }
       | { type: 'remove-project' }
+      | { type: 'start-automation-override' }
     >,
     state: ApplicationState,
   ): Promise<{ ok: true; result: CommandResult } | { ok: false; error: SafeError }>
@@ -234,6 +235,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       enabledProjects: [...configuration.automation.enabledProjects],
       availability: automationAvailability(),
       evidence: automationLoop?.evidence() ?? [],
+      overrides: automationLoop?.overrides() ?? [],
     }
   }
 
@@ -1009,9 +1011,27 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
         return setAutomationEnabled(command)
       case 'set-project-automation-enabled':
         return setProjectAutomationEnabled(command)
+      case 'start-automation-override':
+        return startAutomationOverride(command)
       default:
         if (!options.operations) return unsupported('This operation is not available yet.')
         return options.operations.execute(command, state)
+    }
+  }
+
+  async function startAutomationOverride(
+    command: Extract<Command, { type: 'start-automation-override' }>,
+  ): Promise<CommandResolution> {
+    if (!automationLoop) return unsupported('Automation is not available.')
+    const outcome = await automationLoop.startOverride(command.target, command.stage)
+    if (!outcome.ok) return outcome
+    return {
+      ok: true,
+      result: {
+        type: 'automation-override-started',
+        target: command.target,
+        stage: command.stage,
+      },
     }
   }
 

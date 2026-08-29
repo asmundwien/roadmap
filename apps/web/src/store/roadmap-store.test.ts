@@ -56,6 +56,7 @@ function state(
       enabledProjects: [],
       availability: { status: 'ready' },
       evidence: [],
+      overrides: [],
     },
     roadmap: { capturedAt: stateSequence * 1000, projects, unreachable: [] },
   }

@@ -549,6 +549,207 @@ describe('RoadmapApplication Automation', () => {
     await vi.waitFor(() => expect(launches.classifications).toHaveLength(1))
     await current.application.stop()
   })
+  it('runs each eligible stage once without changing Automation enablement', async () => {
+    const sourceProject = project('override', [ticket('1'), ticket('2')])
+    const launches = deferredLauncher()
+    const current = await harness({
+      projects: [sourceProject],
+      launcher: launches.launcher,
+      configuration: configuration([sourceProject], { enabled: false, enabledProjects: [] }),
+    })
+    const target = { project: sourceProject.key, mapId: 'map', ticketId: '1' }
+
+    expect(current.application.current().automation.overrides).toContainEqual({
+      target,
+      classification: { status: 'eligible' },
+      wayfinder: { status: 'ineligible', reason: 'Run Classification first.' },
+    })
+    const classification = await current.application.execute({
+      type: 'start-automation-override',
+      expectedConfigurationVersion: 1,
+      target,
+      stage: 'classification',
+    })
+    expect(classification).toMatchObject({
+      ok: true,
+      result: { type: 'automation-override-started', target, stage: 'classification' },
+      state: { automation: { enabled: false, enabledProjects: [] } },
+    })
+    expect(launches.classifications).toHaveLength(1)
+    expect(current.ledger.records()[0]?.classification).toEqual({
+      status: 'running',
+      admission: 'override',
+    })
+    expect(
+      current.application
+        .current()
+        .automation.overrides.find((control) => control.target.ticketId === '2')?.classification,
+    ).toEqual({ status: 'ineligible', reason: 'Another Classification Run is in progress.' })
+
+    launches.classifications[0]?.resolve(processResult())
+    await vi.waitFor(() =>
+      expect(current.application.current().automation.overrides[0]?.wayfinder).toEqual({
+        status: 'eligible',
+      }),
+    )
+    expect(launches.dispatches).toHaveLength(0)
+    expect(current.application.current().automation.overrides[0]?.classification).toEqual({
+      status: 'ineligible',
+      reason: 'This Automation opportunity has already been classified.',
+    })
+
+    const wayfinder = await current.application.execute({
+      type: 'start-automation-override',
+      expectedConfigurationVersion: 1,
+      target,
+      stage: 'wayfinder',
+    })
+    expect(wayfinder).toMatchObject({
+      ok: true,
+      result: { type: 'automation-override-started', target, stage: 'wayfinder' },
+    })
+    await vi.waitFor(() =>
+      expect(current.ledger.records()[0]?.wayfinder).toEqual({
+        status: 'running',
+        admission: 'override',
+      }),
+    )
+    expect(launches.dispatches).toHaveLength(1)
+    expect(current.application.current().automation.overrides[0]?.wayfinder).toEqual({
+      status: 'ineligible',
+      reason: 'A Wayfinder Session is already recorded for this opportunity.',
+    })
+
+    launches.sessions[0]?.resolve(wayfinderResult())
+    await current.application.stop()
+  })
+
+  it('keeps automatic handoff gated by effective enablement after an override Classification', async () => {
+    const sourceProject = project('override-handoff', [ticket('1')])
+    const launches = deferredLauncher()
+    const disabled = configuration([sourceProject], { enabled: false, enabledProjects: [] })
+    const current = await harness({
+      projects: [sourceProject],
+      launcher: launches.launcher,
+      configuration: disabled,
+    })
+    const target = { project: sourceProject.key, mapId: 'map', ticketId: '1' }
+
+    await current.application.execute({
+      type: 'start-automation-override',
+      expectedConfigurationVersion: 1,
+      target,
+      stage: 'classification',
+    })
+    current.configured.emit({
+      ...disabled,
+      configurationVersion: 2,
+      automation: { ...disabled.automation, enabled: true, enabledProjects: [sourceProject.key] },
+    })
+    launches.classifications[0]?.resolve(processResult())
+
+    await vi.waitFor(() => expect(launches.dispatches).toHaveLength(1))
+    await vi.waitFor(() =>
+      expect(current.ledger.records()[0]?.wayfinder).toEqual({
+        status: 'running',
+        admission: 'automatic',
+      }),
+    )
+    launches.sessions[0]?.resolve(wayfinderResult())
+    await current.application.stop()
+  })
+  it('requires an AFK Verdict before a Wayfinder override', async () => {
+    const sourceProject = project('override-hitl', [ticket('1')])
+    const target = { project: sourceProject.key, mapId: 'map', ticketId: '1' }
+    const ledger = memoryAutomationDocument([
+      {
+        target,
+        classification: {
+          status: 'completed',
+          admission: 'override',
+          processResult: { status: 'exited', code: 0 },
+          verdict: { value: 'hitl', reason: 'Human judgment is required.' },
+        },
+      },
+    ])
+    const launches = deferredLauncher()
+    const current = await harness({
+      projects: [sourceProject],
+      launcher: launches.launcher,
+      document: ledger,
+      configuration: configuration([sourceProject], { enabled: false, enabledProjects: [] }),
+    })
+
+    expect(current.application.current().automation.overrides[0]?.wayfinder).toEqual({
+      status: 'ineligible',
+      reason: 'Classification did not produce an AFK Verdict.',
+    })
+    const rejected = await current.application.execute({
+      type: 'start-automation-override',
+      expectedConfigurationVersion: 1,
+      target,
+      stage: 'wayfinder',
+    })
+    expect(rejected).toMatchObject({
+      ok: false,
+      error: { code: 'validation', message: 'Classification did not produce an AFK Verdict.' },
+    })
+    expect(launches.dispatches).toHaveLength(0)
+    await current.application.stop()
+  })
+
+  it('explains and enforces task, source, blocker, claim, and one-shot eligibility', async () => {
+    const sourceProject = project('override-eligibility', [
+      ticket('research', { kind: 'recognized', value: 'research', labels: ['research'] }),
+      ticket('incomplete', TASK, { blockersComplete: false }),
+      ticket('blocked', TASK, { state: 'blocked', isBlocked: true }),
+      ticket('claimed', TASK, { state: 'claimed', isClaimed: true }),
+      ticket('closed', TASK, { state: 'closed' }),
+    ])
+    const incompleteMapProject = project('override-map-incomplete', [ticket('map-incomplete')])
+    const incompleteMap = incompleteMapProject.openMaps[0]
+    if (incompleteMap) incompleteMap.ticketsComplete = false
+    const launches = deferredLauncher()
+    const current = await harness({
+      projects: [sourceProject, incompleteMapProject],
+      launcher: launches.launcher,
+      configuration: configuration([sourceProject, incompleteMapProject], {
+        enabled: false,
+        enabledProjects: [],
+      }),
+    })
+    const controls = new Map(
+      current.application
+        .current()
+        .automation.overrides.map((control) => [control.target.ticketId, control.classification]),
+    )
+
+    expect(controls).toEqual(
+      new Map([
+        ['research', { status: 'ineligible', reason: 'Only task tickets can use Automation.' }],
+        ['incomplete', { status: 'ineligible', reason: 'Ticket blocker data is incomplete.' }],
+        ['blocked', { status: 'ineligible', reason: 'Ticket is blocked.' }],
+        ['claimed', { status: 'ineligible', reason: 'Ticket is already claimed.' }],
+        ['closed', { status: 'ineligible', reason: 'Ticket is already decided.' }],
+        [
+          'map-incomplete',
+          { status: 'ineligible', reason: 'The active map’s ticket list is incomplete.' },
+        ],
+      ]),
+    )
+    const rejected = await current.application.execute({
+      type: 'start-automation-override',
+      expectedConfigurationVersion: 1,
+      target: { project: sourceProject.key, mapId: 'map', ticketId: 'claimed' },
+      stage: 'classification',
+    })
+    expect(rejected).toMatchObject({
+      ok: false,
+      error: { code: 'validation', message: 'Ticket is already claimed.' },
+    })
+    expect(launches.classifications).toHaveLength(0)
+    await current.application.stop()
+  })
 
   it('fails closed for missing commands, non-task types, and incomplete source facts', async () => {
     const research = project('research', [
