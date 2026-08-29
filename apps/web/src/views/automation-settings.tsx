@@ -1,10 +1,28 @@
 import type { Command, ProjectKey, RegisteredProject, SafeError } from '@roadmap/contracts'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import { selectionHash } from '../router.ts'
 import { useRoadmap } from '../store/roadmap-provider.tsx'
+import {
+  type AutomationPresentation,
+  type AutomationSummary,
+  type AutomationTicketPresentation,
+  presentAutomation,
+} from './project-presentation.ts'
 import { ErrorText, projectIdentity, SettingsAlert, sameProject } from './settings-shared.tsx'
 import './settings.css'
 
 type AutomationSelection = { kind: 'global' } | { kind: 'project'; project: ProjectKey }
+
+function summaryForSelection(
+  selection: AutomationSelection,
+  presentation: AutomationPresentation,
+): AutomationSummary {
+  if (selection.kind === 'global') return presentation.global
+  return (
+    presentation.projects.find((entry) => sameProject(entry.project.key, selection.project))
+      ?.summary ?? presentation.global
+  )
+}
 
 export function AutomationSettings() {
   const { automation, command, configuration, configurationVersion, execute, projects } =
@@ -18,6 +36,11 @@ export function AutomationSettings() {
       : undefined
   const blocked = command.inFlight || !configuration.valid
   const ready = automation.availability.status === 'ready'
+  const evidencePresentation = useMemo(
+    () => presentAutomation({ projects, automation }),
+    [automation, projects],
+  )
+  const selectedEvidence = summaryForSelection(selection, evidencePresentation)
 
   const run = async (next: Command, success: string) => {
     setNotice(null)
@@ -86,6 +109,7 @@ export function AutomationSettings() {
                 <span>
                   {ready ? 'Harness Commands configured' : 'Harness Commands unavailable'}
                 </span>
+                <AutomationRowSummary summary={evidencePresentation.global} />
               </span>
               <StateLabel enabled={automation.enabled && ready} />
             </button>
@@ -106,12 +130,13 @@ export function AutomationSettings() {
             />
           </div>
 
-          {projects.map((project) => {
+          {projects.map((project, index) => {
             const preferred = automation.enabledProjects.some((key) =>
               sameProject(key, project.key),
             )
             const effective = ready && automation.enabled && preferred
             const selected = selectedProject && sameProject(selectedProject.key, project.key)
+            const projectEvidence = evidencePresentation.projects[index]?.summary
             return (
               <div className="automation-row" key={projectIdentity(project)}>
                 <button
@@ -128,6 +153,7 @@ export function AutomationSettings() {
                   <span className="settings-copy">
                     <strong>{project.name}</strong>
                     <span>{preferred ? 'Project preference on' : 'Project preference off'}</span>
+                    {projectEvidence && <AutomationRowSummary summary={projectEvidence} />}
                   </span>
                   <StateLabel enabled={effective} />
                 </button>
@@ -162,6 +188,7 @@ export function AutomationSettings() {
         </section>
 
         <AutomationDetail
+          summary={selectedEvidence ?? evidencePresentation.global}
           automation={automation}
           project={selectedProject}
           preferred={
@@ -214,15 +241,22 @@ function AutomationDetail({
   automation,
   preferred,
   project,
+  summary,
 }: {
   automation: ReturnType<typeof useRoadmap>['automation']
   preferred: boolean
   project: RegisteredProject | undefined
+  summary: AutomationSummary
 }) {
   return project ? (
-    <ProjectAutomationDetail automation={automation} preferred={preferred} project={project} />
+    <ProjectAutomationDetail
+      automation={automation}
+      preferred={preferred}
+      project={project}
+      summary={summary}
+    />
   ) : (
-    <GlobalAutomationDetail automation={automation} />
+    <GlobalAutomationDetail automation={automation} summary={summary} />
   )
 }
 
@@ -230,10 +264,12 @@ function ProjectAutomationDetail({
   automation,
   preferred,
   project,
+  summary,
 }: {
   automation: ReturnType<typeof useRoadmap>['automation']
   preferred: boolean
   project: RegisteredProject
+  summary: AutomationSummary
 }) {
   const ready = automation.availability.status === 'ready'
   const effective = ready && automation.enabled && preferred
@@ -257,6 +293,7 @@ function ProjectAutomationDetail({
         <dt>Workspace</dt>
         <dd>{project.workspace.path}</dd>
       </dl>
+      <AutomationEvidenceSummary summary={summary} />
       <p className="automation-explanation">
         Both switches and valid Harness Commands are required. Turning global Automation off keeps
         this Project preference.
@@ -267,8 +304,10 @@ function ProjectAutomationDetail({
 
 function GlobalAutomationDetail({
   automation,
+  summary,
 }: {
   automation: ReturnType<typeof useRoadmap>['automation']
+  summary: AutomationSummary
 }) {
   const ready = automation.availability.status === 'ready'
   const effective = automation.enabled && ready
@@ -290,10 +329,89 @@ function GlobalAutomationDetail({
         <dt>Project preferences</dt>
         <dd>{automation.enabledProjects.length} on</dd>
       </dl>
+      <AutomationEvidenceSummary summary={summary} />
       <p className="automation-explanation">
         Roadmap classifies each eligible frontier task once. An AFK result starts one detached
         Wayfinder session; Roadmap does not supervise it.
       </p>
     </aside>
+  )
+}
+
+function AutomationRowSummary({ summary }: { summary: AutomationSummary }) {
+  if (summary.tickets.length === 0) return null
+  return (
+    <span className="automation-row-summary">
+      Classification {summary.classification.active} active / {summary.classification.terminal}{' '}
+      terminal · Wayfinder {summary.wayfinder.active} active / {summary.wayfinder.terminal} terminal
+    </span>
+  )
+}
+
+function AutomationEvidenceSummary({ summary }: { summary: AutomationSummary }) {
+  const ticketCount = summary.tickets.length
+  return (
+    <section className="automation-evidence" aria-label="Recorded Automation evidence">
+      <div className="automation-evidence-head">
+        <h3>Recorded evidence</h3>
+        <span>{ticketCount === 1 ? '1 ticket' : `${ticketCount} tickets`}</span>
+      </div>
+      <div className="automation-stage-totals">
+        <AutomationStageTotal label="Classification" summary={summary.classification} />
+        <AutomationStageTotal label="Wayfinder" summary={summary.wayfinder} />
+      </div>
+      <p>
+        Active means Classification is running or Wayfinder is launching or running. Every other
+        recorded stage is terminal. These counts do not interpret tracker state.
+      </p>
+      {ticketCount > 0 && (
+        <details className="automation-evidence-tickets">
+          <summary>Affected map tickets</summary>
+          <div>
+            {summary.tickets.map((entry) => (
+              <AutomationEvidenceTicket
+                entry={entry}
+                key={`${entry.evidence.target.project.integration}:${entry.evidence.target.project.id}:${entry.evidence.target.mapId}:${entry.evidence.target.ticketId}`}
+              />
+            ))}
+          </div>
+        </details>
+      )}
+    </section>
+  )
+}
+
+function AutomationStageTotal({
+  label,
+  summary,
+}: {
+  label: string
+  summary: AutomationSummary['classification']
+}) {
+  return (
+    <div className="automation-stage-total">
+      <span>{label}</span>
+      <strong className="is-active">{summary.active} active</strong>
+      <strong>{summary.terminal} terminal</strong>
+    </div>
+  )
+}
+
+function AutomationEvidenceTicket({ entry }: { entry: AutomationTicketPresentation }) {
+  const title =
+    entry.ticket?.title ?? entry.ticket?.displayId ?? `Ticket ${entry.evidence.target.ticketId}`
+  const project = entry.project?.name ?? entry.evidence.target.project.id
+  const detail = `${project} · Classification ${entry.classification}${entry.wayfinder ? ` · Wayfinder ${entry.wayfinder}` : ''}`
+  const content = (
+    <>
+      <strong>{title}</strong>
+      <small>{detail}</small>
+    </>
+  )
+
+  return entry.map && entry.ticket ? (
+    <a href={selectionHash(entry.map, { kind: 'ticket', id: entry.ticket.id })}>{content}</a>
+  ) : (
+    <span className="is-unlinked">{content}</span>
   )
 }

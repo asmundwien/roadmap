@@ -896,6 +896,116 @@
   margin-left: 4.8rem;
 }
 
+.settings-copy > .automation-row-summary {
+  margin-top: 0.15rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.64rem;
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.automation-evidence {
+  margin: var(--sp-6) 0 0;
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--edge);
+}
+
+.automation-evidence-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+
+.automation-evidence-head h3 {
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.automation-evidence-head > span {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.68rem;
+}
+
+.automation-stage-totals {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+}
+
+.automation-stage-total {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  padding-left: var(--sp-3);
+  border-left: 2px solid var(--state-closed);
+  font-size: 0.72rem;
+}
+
+.automation-stage-total > span {
+  overflow: hidden;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+}
+
+.automation-stage-total strong {
+  font-weight: 600;
+}
+
+.automation-stage-total strong.is-active {
+  color: var(--state-frontier);
+}
+
+.automation-evidence > p {
+  margin: var(--sp-4) 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.automation-evidence-tickets {
+  border-top: 1px solid var(--edge);
+  border-bottom: 1px solid var(--edge);
+  font-size: 0.76rem;
+}
+
+.automation-evidence-tickets summary {
+  padding: var(--sp-2) 0;
+  cursor: pointer;
+}
+
+.automation-evidence-tickets a,
+.automation-evidence-tickets .is-unlinked {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: var(--sp-2);
+  border-top: 1px solid var(--edge);
+  color: inherit;
+  text-decoration: none;
+}
+
+.automation-evidence-tickets a:hover,
+.automation-evidence-tickets a:focus-visible {
+  background: var(--wash);
+  outline: 1px solid var(--edge);
+  outline-offset: 0;
+}
+
+.automation-evidence-tickets small {
+  color: var(--muted);
+}
+
+.automation-evidence-tickets .is-unlinked {
+  color: var(--muted);
+}
+
 @media (max-width: 900px) {
   .settings-layout {
     grid-template-columns: 1fr;

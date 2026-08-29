@@ -1,11 +1,13 @@
 import type {
   ApplicationState,
+  AutomationEvidence,
   Connection,
   RegisteredProject,
+  Ticket,
   WayfinderMap,
 } from '@roadmap/contracts'
 import { describe, expect, it } from 'vitest'
-import { presentProjects } from './project-presentation.ts'
+import { presentAutomation, presentProjects } from './project-presentation.ts'
 
 const AVAILABLE_CONNECTION: Connection = {
   id: 'local',
@@ -156,3 +158,122 @@ describe('presentProjects', () => {
     ])
   })
 })
+
+describe('presentAutomation', () => {
+  it('counts active and terminal stages independently for each Project and globally', () => {
+    const tickets = [
+      automationTicket('running'),
+      automationTicket('session'),
+      automationTicket('unknown'),
+    ]
+    const alphaMap = { ...map('map', true, 3_000), tickets }
+    const alpha = project('alpha', { openMaps: [alphaMap] })
+    const beta = project('beta')
+    const evidence: AutomationEvidence[] = [
+      {
+        target: automationTarget('alpha', 'running'),
+        classification: { status: 'running', admission: 'automatic' },
+      },
+      {
+        target: automationTarget('alpha', 'session'),
+        classification: {
+          status: 'completed',
+          admission: 'override',
+          processResult: { status: 'exited', code: 0 },
+          verdict: { value: 'afk', reason: 'Safe to run.' },
+        },
+        wayfinder: { status: 'running', admission: 'override' },
+      },
+      {
+        target: automationTarget('alpha', 'unknown'),
+        classification: {
+          status: 'outcome-unknown',
+          admission: 'automatic',
+          reason: 'Roadmap restarted.',
+        },
+        wayfinder: {
+          status: 'outcome-unknown',
+          admission: 'automatic',
+          reason: 'Roadmap restarted.',
+        },
+      },
+      {
+        target: automationTarget('removed', 'launch'),
+        classification: {
+          status: 'launch-failed',
+          admission: 'automatic',
+          reason: 'Command missing.',
+        },
+      },
+    ]
+
+    const presentation = presentAutomation({ projects: [alpha, beta], automation: { evidence } })
+
+    expect(presentation.global.classification).toEqual({ active: 1, terminal: 3 })
+    expect(presentation.global.wayfinder).toEqual({ active: 1, terminal: 1 })
+    expect(presentation.global.tickets).toHaveLength(4)
+    expect(presentation.projects[0]?.summary).toMatchObject({
+      classification: { active: 1, terminal: 2 },
+      wayfinder: { active: 1, terminal: 1 },
+    })
+    expect(presentation.projects[0]?.summary.tickets).toHaveLength(3)
+    expect(presentation.projects[1]?.summary.tickets).toHaveLength(0)
+  })
+
+  it('resolves affected tickets while retaining evidence whose Project is no longer registered', () => {
+    const knownTicket = automationTicket('known')
+    const knownMap = { ...map('map', false, 2_000), tickets: [knownTicket] }
+    const knownProject = project('known-project', { closedMaps: [knownMap] })
+    const evidence: AutomationEvidence[] = [
+      {
+        target: automationTarget('known-project', 'known'),
+        classification: { status: 'running', admission: 'automatic' },
+      },
+      {
+        target: automationTarget('removed-project', 'missing'),
+        classification: { status: 'running', admission: 'automatic' },
+      },
+    ]
+
+    const presentation = presentAutomation({
+      projects: [knownProject],
+      automation: { evidence },
+    })
+
+    expect(presentation.global.tickets[0]).toMatchObject({
+      project: knownProject,
+      map: knownMap,
+      ticket: knownTicket,
+    })
+    expect(presentation.global.tickets[1]).toMatchObject({
+      project: null,
+      map: null,
+      ticket: null,
+    })
+  })
+})
+
+function automationTarget(projectId: string, ticketId: string) {
+  return {
+    project: { integration: 'local' as const, id: projectId },
+    mapId: 'map',
+    ticketId,
+  }
+}
+
+function automationTicket(id: string): Ticket {
+  return {
+    id,
+    displayId: id,
+    title: `Ticket ${id}`,
+    body: '',
+    typeEvidence: { kind: 'recognized', value: 'task', labels: ['wayfinder:task'] },
+    state: 'closed',
+    isClaimed: false,
+    isBlocked: false,
+    assignees: [],
+    blockedBy: [],
+    blockersComplete: true,
+    warnings: [],
+  }
+}

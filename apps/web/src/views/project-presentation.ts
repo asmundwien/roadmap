@@ -1,9 +1,12 @@
 import type {
   ApplicationState,
+  AutomationEvidence,
   Connection,
   ProjectKey,
   RegisteredProject,
+  Ticket,
   WayfinderMap,
+  WayfinderSession,
 } from '@roadmap/contracts'
 import { stripInlineMarkdown } from './gist.ts'
 
@@ -185,4 +188,107 @@ function projectAttention(projects: readonly ProjectPresentation[]): AttentionIt
     }
     return items
   })
+}
+
+export type AutomationLifecycle = 'active' | 'terminal'
+
+export interface AutomationStageSummary {
+  active: number
+  terminal: number
+}
+
+export interface AutomationTicketPresentation {
+  evidence: AutomationEvidence
+  project: RegisteredProject | null
+  map: WayfinderMap | null
+  ticket: Ticket | null
+  classification: AutomationLifecycle
+  wayfinder: AutomationLifecycle | null
+}
+
+export interface AutomationSummary {
+  classification: AutomationStageSummary
+  wayfinder: AutomationStageSummary
+  tickets: AutomationTicketPresentation[]
+}
+
+export interface ProjectAutomationPresentation {
+  project: RegisteredProject
+  summary: AutomationSummary
+}
+
+export interface AutomationPresentation {
+  global: AutomationSummary
+  projects: ProjectAutomationPresentation[]
+}
+
+type AutomationPresentationState = {
+  projects: readonly RegisteredProject[]
+  automation: { evidence: readonly AutomationEvidence[] }
+}
+
+/**
+ * Summarizes durable Automation evidence without interpreting tracker state. A stage is active only
+ * while its process is live; every other recorded outcome is terminal, including unknown outcomes.
+ */
+export function presentAutomation(state: AutomationPresentationState): AutomationPresentation {
+  const projects = state.projects.map((project) => ({ project, summary: emptyAutomationSummary() }))
+  const byProject = new Map(
+    projects.map((presentation) => [projectKey(presentation.project.key), presentation]),
+  )
+  const global = emptyAutomationSummary()
+
+  for (const evidence of state.automation.evidence) {
+    const projectPresentation = byProject.get(projectKey(evidence.target.project))
+    const project = projectPresentation?.project ?? null
+    const map = project ? findMap(project, evidence.target.mapId) : null
+    const ticket =
+      map?.tickets.find((candidate) => candidate.id === evidence.target.ticketId) ?? null
+    const entry: AutomationTicketPresentation = {
+      evidence,
+      project,
+      map,
+      ticket,
+      classification: evidence.classification.status === 'running' ? 'active' : 'terminal',
+      wayfinder: evidence.wayfinder ? wayfinderLifecycle(evidence.wayfinder.status) : null,
+    }
+
+    addAutomationEvidence(global, entry)
+    if (projectPresentation) addAutomationEvidence(projectPresentation.summary, entry)
+  }
+
+  return { global, projects }
+}
+
+function emptyAutomationSummary(): AutomationSummary {
+  return {
+    classification: { active: 0, terminal: 0 },
+    wayfinder: { active: 0, terminal: 0 },
+    tickets: [],
+  }
+}
+
+function addAutomationEvidence(
+  summary: AutomationSummary,
+  entry: AutomationTicketPresentation,
+): void {
+  summary.classification[entry.classification] += 1
+  if (entry.wayfinder) summary.wayfinder[entry.wayfinder] += 1
+  summary.tickets.push(entry)
+}
+
+function wayfinderLifecycle(status: WayfinderSession['status']): AutomationLifecycle {
+  return status === 'launching' || status === 'running' ? 'active' : 'terminal'
+}
+
+function findMap(project: RegisteredProject, mapId: string): WayfinderMap | null {
+  return (
+    project.openMaps.find((candidate) => candidate.id === mapId) ??
+    project.closedMaps.find((candidate) => candidate.id === mapId) ??
+    null
+  )
+}
+
+function projectKey(project: ProjectKey): string {
+  return `${project.integration}:${project.id}`
 }
