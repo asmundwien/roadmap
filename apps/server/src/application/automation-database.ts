@@ -383,12 +383,13 @@ function evidenceOf(record: AutomationRecord): AutomationEvidence {
 function publicWayfinder(
   wayfinder: ProjectedWayfinderSession | undefined,
 ): WayfinderSession | undefined {
-  if (!wayfinder || wayfinder.status === 'queued') return undefined
+  if (!wayfinder) return undefined
   if (wayfinder.status === 'outcome-unknown') {
     return {
       status: 'outcome-unknown',
       admission: wayfinder.admission,
       reason: wayfinder.reason,
+      acknowledged: wayfinder.acknowledged,
     }
   }
   return wayfinder

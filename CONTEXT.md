@@ -48,9 +48,11 @@ _Avoid_: integration event stream, event log, activity feed
 
 **Automation**:
 The opt-in path that may classify and hand one eligible frontier task to Wayfinder. Global and
-Project enablement admit automatic triggers; an Automation override admits one run without them.
-It is one-shot dispatch, not managed execution.
-_Avoid_: scheduler, queue, autonomous mode
+Project enablement admit automatic triggers; an Automation override admits one stage without them.
+An AFK Classification Verdict queues its Wayfinder Session; launching it remains a separate
+admission. Automation records one-shot evidence rather than promising queue order or managed
+execution.
+_Avoid_: scheduler, autonomous mode, ordered queue
 
 **Automation override**:
 A human-triggered Classification Run or Wayfinder Session for one eligible opportunity. It admits
@@ -81,23 +83,36 @@ _Avoid_: tracker status, Verdict label, human override
 
 **Wayfinder Session**:
 The agent process Roadmap may launch once for an AFK Automation opportunity from the registered
-Workspace. A Project has at most one active Automation-owned Wayfinder Session; different Projects
-may have active Sessions concurrently. A recorded Session marks autonomous handling or an attempt
-at it, whether Automation or an Automation override admitted it; ordinary human Wayfinder work
-remains the unmarked default.
+Workspace. An AFK verdict first queues the Session without admitting it. A Project has at most one
+launching or running Automation-owned Session; different Projects may have active Sessions
+concurrently. A recorded Session marks autonomous handling or an attempt at it, whether automatic
+Automation or an Automation override admitted its launch; ordinary human Wayfinder work remains
+the unmarked default.
 _Avoid_: Execution Run, worker, managed agent
+
+**Queued Wayfinder Session**:
+The durable pre-admission state derived from an AFK Classification Verdict. It has no queue position
+or ordering promise, survives disabled Project Automation, and records no Automation admission
+until reconciliation or an override admits its launch.
+_Avoid_: queue item, next Session, priority
+
+**Interrupted Wayfinder Session**:
+A Session that was launching or running when Roadmap stopped or restarted before recording terminal
+evidence. Its outcome remains unknown. The interruption disables Automation for that Project until
+the existing Project enable control records acknowledgement; acknowledged evidence remains unknown.
+_Avoid_: failed Session, recovered Session, retryable Session
 
 **Session report**:
 The Wayfinder Session's structured terminal claim: completed, stopped, or failed, with a reason.
 Process exit and tracker state remain independent facts; Roadmap derives no combined outcome from
 them.
 _Avoid_: exit status, tracker result, mismatch
+
 **Process result**:
 The durable observation that an Automation-owned process exited with a code or ended by signal.
 Legacy evidence that never recorded this fact says unavailable rather than inventing one. It does
 not interpret the Session report or tracker state.
 _Avoid_: outcome, success, Session status
-
 
 **Automation status effect**:
 A compact, durable mark added to a ticket node when Automation evidence exists. It leaves the
@@ -106,10 +121,10 @@ _Avoid_: Automation icon, agent state
 
 **Automation database**:
 Roadmap's server-owned durable record of immutable Automation opportunities and ordered,
-append-only Automation events. Replaying the events derives current Automation evidence; event
-sequence is authoritative, while recorded timestamps are descriptive. Events are retained
-permanently.
-_Avoid_: one-shot ledger, Run history, queue, tracker state
+append-only Automation events. Replaying the events derives current Automation evidence, including
+queued Sessions and whether an unknown Session outcome was acknowledged. Event sequence is
+authoritative, while recorded timestamps are descriptive. Events are retained permanently.
+_Avoid_: one-shot ledger, Run history, ordered queue, tracker state
 
 **Harness Command**:
 A globally configured literal executable, argument list, and prompt-delivery method launched

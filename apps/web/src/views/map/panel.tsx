@@ -424,7 +424,10 @@ function WayfinderEvidence({ session }: { session: WayfinderSession }) {
       <h3>Wayfinder Session</h3>
       <dl>
         <EvidenceFact term="State" value={wayfinderStateLabel(session)} />
-        <EvidenceFact term="Admission" value={admissionLabel(session.admission)} />
+        <EvidenceFact
+          term="Admission"
+          value={session.status === 'queued' ? 'Pending' : admissionLabel(session.admission)}
+        />
         {session.status === 'finished' && (
           <>
             <ProcessEvidence result={session.processResult} />
@@ -433,6 +436,12 @@ function WayfinderEvidence({ session }: { session: WayfinderSession }) {
         )}
         {(session.status === 'launch-failed' || session.status === 'outcome-unknown') && (
           <EvidenceFact term="Reason" value={session.reason} />
+        )}
+        {session.status === 'outcome-unknown' && (
+          <EvidenceFact
+            term="Acknowledgement"
+            value={session.acknowledged ? 'Acknowledged' : 'Required'}
+          />
         )}
       </dl>
     </section>
@@ -508,6 +517,8 @@ function classificationStateLabel(attempt: ClassificationAttempt): string {
 
 function wayfinderStateLabel(session: WayfinderSession): string {
   switch (session.status) {
+    case 'queued':
+      return 'Queued'
     case 'launching':
       return 'Launching'
     case 'running':

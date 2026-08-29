@@ -445,6 +445,7 @@ const sessionReportEvidence = discriminated('Session report evidence', 'status',
   }),
 })
 const wayfinderSession = discriminated('Wayfinder Session', 'status', {
+  queued: object({ status: required(literal('queued')) }),
   launching: object({
     status: required(literal('launching')),
     admission: required(automationAdmission),
@@ -468,6 +469,7 @@ const wayfinderSession = discriminated('Wayfinder Session', 'status', {
     status: required(literal('outcome-unknown')),
     admission: required(automationAdmission),
     reason: required(stringValue),
+    acknowledged: required(booleanValue),
   }),
 })
 const automationTarget = object({

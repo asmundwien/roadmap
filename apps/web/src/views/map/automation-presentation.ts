@@ -60,26 +60,61 @@ export function automationTags(evidence: AutomationEvidence | undefined): Automa
 function classificationTag(attempt: ClassificationAttempt): AutomationTag {
   switch (attempt.status) {
     case 'running':
-      return tag('classification', 'classification', '…', 'Classification running')
+      return tag(
+        'classification',
+        'classification',
+        '…',
+        admitted('Classification running', attempt.admission),
+      )
     case 'completed':
       switch (attempt.verdict.value) {
         case 'afk':
-          return tag('classification', 'classification', 'A', 'Classification verdict: AFK')
+          return tag(
+            'classification',
+            'classification',
+            'A',
+            admitted('Classification verdict: AFK', attempt.admission),
+          )
         case 'hitl':
-          return tag('classification', 'classification', 'H', 'Classification verdict: HITL')
+          return tag(
+            'classification',
+            'classification',
+            'H',
+            admitted('Classification verdict: HITL', attempt.admission),
+          )
         case 'unable':
-          return tag('classification', 'classification', '×', 'Classification verdict: unable')
+          return tag(
+            'classification',
+            'classification',
+            '×',
+            admitted('Classification verdict: unable', attempt.admission),
+          )
         default: {
           const _exhaustive: never = attempt.verdict.value
           return _exhaustive
         }
       }
     case 'failed':
-      return tag('classification', 'classification', '!', 'Classification failed')
+      return tag(
+        'classification',
+        'classification',
+        '!',
+        admitted('Classification failed', attempt.admission),
+      )
     case 'launch-failed':
-      return tag('classification', 'classification', '!', 'Classification launch failed')
+      return tag(
+        'classification',
+        'classification',
+        '!',
+        admitted('Classification launch failed', attempt.admission),
+      )
     case 'outcome-unknown':
-      return tag('classification', 'classification', '?', 'Classification outcome unknown')
+      return tag(
+        'classification',
+        'classification',
+        '?',
+        admitted('Classification outcome unknown', attempt.admission),
+      )
     default: {
       const _exhaustive: never = attempt
       return _exhaustive
@@ -97,16 +132,30 @@ function classificationProcessOf(
 
 function wayfinderTag(session: WayfinderSession): AutomationTag {
   switch (session.status) {
+    case 'queued':
+      return tag('wayfinder', 'wayfinder', '·', 'Wayfinder queued · admission pending')
     case 'launching':
-      return tag('wayfinder', 'wayfinder', '↗', 'Wayfinder launching')
+      return tag('wayfinder', 'wayfinder', '↗', admitted('Wayfinder launching', session.admission))
     case 'running':
-      return tag('wayfinder', 'wayfinder', '▶', 'Wayfinder running')
+      return tag('wayfinder', 'wayfinder', '▶', admitted('Wayfinder running', session.admission))
     case 'finished':
-      return tag('wayfinder', 'wayfinder', '◆', 'Wayfinder finished')
+      return tag('wayfinder', 'wayfinder', '◆', admitted('Wayfinder finished', session.admission))
     case 'launch-failed':
-      return tag('wayfinder', 'wayfinder', '!', 'Wayfinder launch failed')
+      return tag(
+        'wayfinder',
+        'wayfinder',
+        '!',
+        admitted('Wayfinder launch failed', session.admission),
+      )
     case 'outcome-unknown':
-      return tag('wayfinder', 'wayfinder', '?', 'Wayfinder outcome unknown')
+      return tag(
+        'wayfinder',
+        'wayfinder',
+        '?',
+        `${admitted('Wayfinder outcome unknown', session.admission)} · ${
+          session.acknowledged ? 'acknowledged' : 'acknowledgement required'
+        }`,
+      )
     default: {
       const _exhaustive: never = session
       return _exhaustive
@@ -162,6 +211,10 @@ function reportTag(report: SessionReportEvidence): AutomationTag {
   }
 }
 
+function admitted(label: string, admission: 'automatic' | 'override'): string {
+  return `${label} · ${admission} admission`
+}
+
 function tag(
   slot: AutomationTagSlot,
   stage: AutomationTag['stage'],
@@ -171,21 +224,28 @@ function tag(
   return { slot, stage, glyph, label, word: hoverWord(label) }
 }
 
+const HOVER_WORDS = [
+  ['AFK', 'AFK'],
+  ['HITL', 'HITL'],
+  ['queued', 'queued'],
+  ['running', 'running'],
+  ['launching', 'launching'],
+  ['unable', 'unable'],
+  ['unknown', 'unknown'],
+  ['unavailable', 'unavailable'],
+  ['invalid', 'invalid'],
+  ['missing', 'missing'],
+  ['completed', 'completed'],
+  ['stopped', 'stopped'],
+  ['failed', 'failed'],
+  ['ended by', 'signaled'],
+  ['exited', 'exited'],
+  ['finished', 'finished'],
+] as const
+
 function hoverWord(label: string): string {
-  if (label.includes('AFK')) return 'AFK'
-  if (label.includes('HITL')) return 'HITL'
-  if (label.includes('running')) return 'running'
-  if (label.includes('launching')) return 'launching'
-  if (label.includes('unable')) return 'unable'
-  if (label.includes('unknown')) return 'unknown'
-  if (label.includes('unavailable')) return 'unavailable'
-  if (label.includes('invalid')) return 'invalid'
-  if (label.includes('missing')) return 'missing'
-  if (label.includes('completed')) return 'completed'
-  if (label.includes('stopped')) return 'stopped'
-  if (label.includes('failed')) return 'failed'
-  if (label.includes('ended by')) return 'signaled'
-  if (label.includes('exited')) return 'exited'
-  if (label.includes('finished')) return 'finished'
+  for (const [needle, word] of HOVER_WORDS) {
+    if (label.includes(needle)) return word
+  }
   return 'evidence'
 }

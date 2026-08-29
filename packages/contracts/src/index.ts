@@ -346,6 +346,7 @@ export type SessionReportEvidence =
   | { status: 'invalid'; reason: string }
 
 export type WayfinderSession =
+  | { status: 'queued' }
   | { status: 'launching'; admission: AutomationAdmission }
   | { status: 'running'; admission: AutomationAdmission }
   | {
@@ -355,7 +356,12 @@ export type WayfinderSession =
       report: SessionReportEvidence
     }
   | { status: 'launch-failed'; admission: AutomationAdmission; reason: string }
-  | { status: 'outcome-unknown'; admission: AutomationAdmission; reason: string }
+  | {
+      status: 'outcome-unknown'
+      admission: AutomationAdmission
+      reason: string
+      acknowledged: boolean
+    }
 
 export interface AutomationEvidence {
   target: AutomationTarget

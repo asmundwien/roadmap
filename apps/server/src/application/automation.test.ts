@@ -492,6 +492,16 @@ describe('RoadmapApplication Automation', () => {
       database,
       configuration: configuration([sourceProject], { enabledProjects: [] }),
     })
+    expect(current.application.current().automation.enabledProjects).toEqual([])
+    expect(
+      current.application
+        .current()
+        .automation.evidence.find((entry) => entry.target.ticketId === '1')?.wayfinder,
+    ).toMatchObject({
+      status: 'outcome-unknown',
+      admission: 'automatic',
+      acknowledged: false,
+    })
 
     const blocked = await current.application.execute({
       type: 'start-automation-override',
@@ -515,6 +525,11 @@ describe('RoadmapApplication Automation', () => {
     expect(
       database.events().find((event) => event.type === 'wayfinder-outcome-unknown-acknowledged'),
     ).toMatchObject({ opportunityId: 'opportunity-0', unknownEventId: unknown.id })
+    expect(
+      current.application
+        .current()
+        .automation.evidence.find((entry) => entry.target.ticketId === '1')?.wayfinder,
+    ).toMatchObject({ status: 'outcome-unknown', acknowledged: true })
     await vi.waitFor(() => expect(launches.dispatches).toHaveLength(1))
     expect(launches.dispatches[0]?.environment.ROADMAP_TICKET_ID).toBe('2')
     await current.application.stop()

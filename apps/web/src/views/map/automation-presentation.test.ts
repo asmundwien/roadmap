@@ -34,7 +34,7 @@ describe('automationTags', () => {
         slot: 'classification',
         stage: 'classification',
         glyph: 'A',
-        label: 'Classification verdict: AFK',
+        label: 'Classification verdict: AFK · override admission',
         word: 'AFK',
       },
       {
@@ -48,7 +48,7 @@ describe('automationTags', () => {
         slot: 'wayfinder',
         stage: 'wayfinder',
         glyph: '◆',
-        label: 'Wayfinder finished',
+        label: 'Wayfinder finished · automatic admission',
         word: 'finished',
       },
       {
@@ -79,10 +79,42 @@ describe('automationTags', () => {
         slot: 'classification',
         stage: 'classification',
         glyph: '…',
-        label: 'Classification running',
+        label: 'Classification running · automatic admission',
         word: 'running',
       },
     ])
+  })
+
+  it('shows queued admission and acknowledged interruption evidence', () => {
+    const classification: AutomationEvidence['classification'] = {
+      status: 'completed',
+      admission: 'automatic',
+      processResult: { status: 'exited', code: 0 },
+      verdict: { value: 'afk', reason: 'Safe for autonomous work.' },
+    }
+
+    expect(
+      automationTags({ target, classification, wayfinder: { status: 'queued' } }).map(
+        (tag) => tag.label,
+      ),
+    ).toEqual([
+      'Classification verdict: AFK · automatic admission',
+      'Classification process exited 0',
+      'Wayfinder queued · admission pending',
+    ])
+
+    expect(
+      automationTags({
+        target,
+        classification,
+        wayfinder: {
+          status: 'outcome-unknown',
+          admission: 'override',
+          reason: 'Roadmap restarted.',
+          acknowledged: true,
+        },
+      })[2]?.label,
+    ).toBe('Wayfinder outcome unknown · override admission · acknowledged')
   })
 
   it('keeps an invalid Session report independent from a successful process exit', () => {

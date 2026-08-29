@@ -160,9 +160,10 @@ describe('presentProjects', () => {
 })
 
 describe('presentAutomation', () => {
-  it('counts active and terminal stages independently for each Project and globally', () => {
+  it('counts queued, active, and terminal stages independently by scope', () => {
     const tickets = [
       automationTicket('running'),
+      automationTicket('queued'),
       automationTicket('session'),
       automationTicket('unknown'),
     ]
@@ -173,6 +174,16 @@ describe('presentAutomation', () => {
       {
         target: automationTarget('alpha', 'running'),
         classification: { status: 'running', admission: 'automatic' },
+      },
+      {
+        target: automationTarget('alpha', 'queued'),
+        classification: {
+          status: 'completed',
+          admission: 'automatic',
+          processResult: { status: 'exited', code: 0 },
+          verdict: { value: 'afk', reason: 'Safe to queue.' },
+        },
+        wayfinder: { status: 'queued' },
       },
       {
         target: automationTarget('alpha', 'session'),
@@ -195,6 +206,7 @@ describe('presentAutomation', () => {
           status: 'outcome-unknown',
           admission: 'automatic',
           reason: 'Roadmap restarted.',
+          acknowledged: false,
         },
       },
       {
@@ -209,14 +221,14 @@ describe('presentAutomation', () => {
 
     const presentation = presentAutomation({ projects: [alpha, beta], automation: { evidence } })
 
-    expect(presentation.global.classification).toEqual({ active: 1, terminal: 3 })
-    expect(presentation.global.wayfinder).toEqual({ active: 1, terminal: 1 })
-    expect(presentation.global.tickets).toHaveLength(4)
+    expect(presentation.global.classification).toEqual({ active: 1, terminal: 4 })
+    expect(presentation.global.wayfinder).toEqual({ queued: 1, active: 1, terminal: 1 })
+    expect(presentation.global.tickets).toHaveLength(5)
     expect(presentation.projects[0]?.summary).toMatchObject({
-      classification: { active: 1, terminal: 2 },
-      wayfinder: { active: 1, terminal: 1 },
+      classification: { active: 1, terminal: 3 },
+      wayfinder: { queued: 1, active: 1, terminal: 1 },
     })
-    expect(presentation.projects[0]?.summary.tickets).toHaveLength(3)
+    expect(presentation.projects[0]?.summary.tickets).toHaveLength(4)
     expect(presentation.projects[1]?.summary.tickets).toHaveLength(0)
   })
 

@@ -190,11 +190,16 @@ function projectAttention(projects: readonly ProjectPresentation[]): AttentionIt
   })
 }
 
-export type AutomationLifecycle = 'active' | 'terminal'
+export type ClassificationLifecycle = 'active' | 'terminal'
+export type WayfinderLifecycle = 'queued' | 'active' | 'terminal'
 
 export interface AutomationStageSummary {
   active: number
   terminal: number
+}
+
+export interface WayfinderStageSummary extends AutomationStageSummary {
+  queued: number
 }
 
 export interface AutomationTicketPresentation {
@@ -202,13 +207,13 @@ export interface AutomationTicketPresentation {
   project: RegisteredProject | null
   map: WayfinderMap | null
   ticket: Ticket | null
-  classification: AutomationLifecycle
-  wayfinder: AutomationLifecycle | null
+  classification: ClassificationLifecycle
+  wayfinder: WayfinderLifecycle | null
 }
 
 export interface AutomationSummary {
   classification: AutomationStageSummary
-  wayfinder: AutomationStageSummary
+  wayfinder: WayfinderStageSummary
   tickets: AutomationTicketPresentation[]
 }
 
@@ -228,8 +233,9 @@ type AutomationPresentationState = {
 }
 
 /**
- * Summarizes durable Automation evidence without interpreting tracker state. A stage is active only
- * while its process is live; every other recorded outcome is terminal, including unknown outcomes.
+ * Summarizes durable Automation evidence without interpreting tracker state. Classification is
+ * active only while its process is live. A Wayfinder stage is queued before admission, active while
+ * launching or running, and terminal after any recorded outcome.
  */
 export function presentAutomation(state: AutomationPresentationState): AutomationPresentation {
   const projects = state.projects.map((project) => ({ project, summary: emptyAutomationSummary() }))
@@ -263,7 +269,7 @@ export function presentAutomation(state: AutomationPresentationState): Automatio
 function emptyAutomationSummary(): AutomationSummary {
   return {
     classification: { active: 0, terminal: 0 },
-    wayfinder: { active: 0, terminal: 0 },
+    wayfinder: { queued: 0, active: 0, terminal: 0 },
     tickets: [],
   }
 }
@@ -277,7 +283,8 @@ function addAutomationEvidence(
   summary.tickets.push(entry)
 }
 
-function wayfinderLifecycle(status: WayfinderSession['status']): AutomationLifecycle {
+function wayfinderLifecycle(status: WayfinderSession['status']): WayfinderLifecycle {
+  if (status === 'queued') return 'queued'
   return status === 'launching' || status === 'running' ? 'active' : 'terminal'
 }
 

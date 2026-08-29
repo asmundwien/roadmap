@@ -104,14 +104,15 @@ describe('Automation event database', () => {
       status: 'outcome-unknown',
       admission: 'override',
       reason: 'Roadmap restarted.',
+      acknowledged: true,
     })
   })
 
-  it('derives a queued Session from an AFK verdict without inventing public evidence', () => {
+  it('publishes a queued Session after an AFK verdict', () => {
     const projection = replayAutomationDatabase(database([started(), completed()]))
 
     expect(projection.records[0]?.wayfinder).toEqual({ status: 'queued' })
-    expect(projection.evidence[0]).not.toHaveProperty('wayfinder')
+    expect(projection.evidence[0]?.wayfinder).toEqual({ status: 'queued' })
   })
 
   it.each([

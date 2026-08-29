@@ -30,13 +30,20 @@ Integration-specific code lives in `github` and `local`; `wayfinder` parses data
 
 `application/automation-database.ts` owns the strict schema version 3 Automation database. It
 persists immutable opportunities and append-only events atomically, rejects invalid histories, and
-replays valid history into current evidence. `application/automation.ts` owns event-driven
-reconciliation and process launch behavior. Classification stays in one global lane; Wayfinder
-Sessions use one lane per Project so separate Projects can run concurrently. Every transition is
-appended before its process side effect.
+replays valid history into current public evidence. An AFK Classification Verdict projects a queued
+Wayfinder Session before launch admission; interruption acknowledgement remains evidence without
+changing the unknown outcome. `application/automation.ts` owns event-driven reconciliation and
+process launch behavior. Classification stays in one global lane; Wayfinder Sessions use one lane
+per Project so separate Projects can run concurrently. Queued Sessions survive disabled Project
+Automation. Reconciliation chooses a currently eligible Session without exposing a position or
+ordering promise. Every transition is appended before its process side effect.
+
 An unacknowledged interrupted Session blocks only its Project. Roadmap removes that Project from
-Automation enablement, and a Project re-enable appends the interruption acknowledgement before
-persisting enablement so either persistence failure remains fail-closed.
+Automation enablement. The web switch therefore renders off; turning it on appends acknowledgement
+of each specific unknown event before persisting enablement, so either persistence failure remains
+fail-closed. Public Automation evidence distinguishes queued, launching, running, terminal, and
+outcome-unknown states, preserves each admitted stage's `automatic` or `override` reason, and marks
+whether an unknown Session outcome has been acknowledged.
 
 `transport.ts` is the network boundary. It provides a full-state WebSocket with strict origin checks and HTTP handlers for queries and commands. Request bodies cannot exceed 64 KiB. `main.ts` composes modules and binds loopback.
 

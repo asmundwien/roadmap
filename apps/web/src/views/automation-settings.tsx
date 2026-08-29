@@ -1,4 +1,12 @@
-import type { Command, ProjectKey, RegisteredProject, SafeError } from '@roadmap/contracts'
+import type {
+  AutomationEvidence,
+  ClassificationAttempt,
+  Command,
+  ProjectKey,
+  RegisteredProject,
+  SafeError,
+  WayfinderSession,
+} from '@roadmap/contracts'
 import { useMemo, useState } from 'react'
 import { selectionHash } from '../router.ts'
 import { useRoadmap } from '../store/roadmap-provider.tsx'
@@ -22,6 +30,35 @@ function summaryForSelection(
     presentation.projects.find((entry) => sameProject(entry.project.key, selection.project))
       ?.summary ?? presentation.global
   )
+}
+
+function hasUnacknowledgedInterruption(
+  project: ProjectKey,
+  evidence: readonly AutomationEvidence[],
+): boolean {
+  return evidence.some(
+    (entry) =>
+      sameProject(entry.target.project, project) &&
+      entry.wayfinder?.status === 'outcome-unknown' &&
+      !entry.wayfinder.acknowledged,
+  )
+}
+
+function projectPreferenceSummary(enabled: boolean, interrupted: boolean): string {
+  if (interrupted) return 'Interrupted · acknowledgement required'
+  return enabled ? 'Project preference on' : 'Project preference off'
+}
+
+function projectSwitchLabel(name: string, interrupted: boolean): string {
+  return interrupted
+    ? `Acknowledge interruption and enable Automation for ${name}`
+    : `Enable Automation for ${name}`
+}
+
+function projectAutomationNotice(name: string, enabled: boolean, interrupted: boolean): string {
+  if (!enabled) return `${name} disabled for Automation.`
+  if (interrupted) return `${name} interruption acknowledged and Automation enabled.`
+  return `${name} enabled for Automation.`
 }
 
 export function AutomationSettings() {
@@ -134,7 +171,9 @@ export function AutomationSettings() {
             const preferred = automation.enabledProjects.some((key) =>
               sameProject(key, project.key),
             )
-            const effective = ready && automation.enabled && preferred
+            const interrupted = hasUnacknowledgedInterruption(project.key, automation.evidence)
+            const projectEnabled = preferred && !interrupted
+            const effective = ready && automation.enabled && projectEnabled
             const selected = selectedProject && sameProject(selectedProject.key, project.key)
             const projectEvidence = evidencePresentation.projects[index]?.summary
             return (
@@ -152,14 +191,14 @@ export function AutomationSettings() {
                   </span>
                   <span className="settings-copy">
                     <strong>{project.name}</strong>
-                    <span>{preferred ? 'Project preference on' : 'Project preference off'}</span>
+                    <span>{projectPreferenceSummary(projectEnabled, interrupted)}</span>
                     {projectEvidence && <AutomationRowSummary summary={projectEvidence} />}
                   </span>
                   <StateLabel enabled={effective} />
                 </button>
                 <SwitchControl
-                  label={`Enable Automation for ${project.name}`}
-                  checked={preferred}
+                  label={projectSwitchLabel(project.name, interrupted)}
+                  checked={projectEnabled}
                   disabled={blocked}
                   onChange={(enabled) =>
                     run(
@@ -169,9 +208,7 @@ export function AutomationSettings() {
                         enabled,
                         expectedConfigurationVersion: configurationVersion,
                       },
-                      enabled
-                        ? `${project.name} enabled for Automation.`
-                        : `${project.name} disabled for Automation.`,
+                      projectAutomationNotice(project.name, enabled, interrupted),
                     )
                   }
                 />
@@ -272,7 +309,8 @@ function ProjectAutomationDetail({
   summary: AutomationSummary
 }) {
   const ready = automation.availability.status === 'ready'
-  const effective = ready && automation.enabled && preferred
+  const interrupted = hasUnacknowledgedInterruption(project.key, automation.evidence)
+  const effective = ready && automation.enabled && preferred && !interrupted
   return (
     <aside className="settings-detail automation-detail">
       <p className="settings-eyebrow">Project enablement</p>
@@ -285,7 +323,13 @@ function ProjectAutomationDetail({
       </p>
       <dl className="settings-facts">
         <dt>Project preference</dt>
-        <dd>{preferred ? 'On' : 'Off'}</dd>
+        <dd>{preferred && !interrupted ? 'On' : 'Off'}</dd>
+        {interrupted && (
+          <>
+            <dt>Session interruption</dt>
+            <dd>Acknowledgement required</dd>
+          </>
+        )}
         <dt>Global Automation</dt>
         <dd>{automation.enabled ? 'On' : 'Off'}</dd>
         <dt>Harness Commands</dt>
@@ -295,8 +339,9 @@ function ProjectAutomationDetail({
       </dl>
       <AutomationEvidenceSummary summary={summary} />
       <p className="automation-explanation">
-        Both switches and valid Harness Commands are required. Turning global Automation off keeps
-        this Project preference.
+        {interrupted
+          ? 'Turning this Project on acknowledges its interrupted Session before enabling queued work.'
+          : 'Both switches and valid Harness Commands are required. Turning global Automation off keeps this Project preference.'}
       </p>
     </aside>
   )
@@ -331,8 +376,8 @@ function GlobalAutomationDetail({
       </dl>
       <AutomationEvidenceSummary summary={summary} />
       <p className="automation-explanation">
-        Roadmap classifies each eligible frontier task once. An AFK result starts one detached
-        Wayfinder session; Roadmap does not supervise it.
+        Roadmap classifies each eligible frontier task once. An AFK result queues one Wayfinder
+        Session; Roadmap launches at most one per Project without exposing queue position or order.
       </p>
     </aside>
   )
@@ -343,7 +388,8 @@ function AutomationRowSummary({ summary }: { summary: AutomationSummary }) {
   return (
     <span className="automation-row-summary">
       Classification {summary.classification.active} active / {summary.classification.terminal}{' '}
-      terminal · Wayfinder {summary.wayfinder.active} active / {summary.wayfinder.terminal} terminal
+      terminal · Wayfinder {summary.wayfinder.queued} queued / {summary.wayfinder.active} active /{' '}
+      {summary.wayfinder.terminal} terminal
     </span>
   )
 }
@@ -361,8 +407,9 @@ function AutomationEvidenceSummary({ summary }: { summary: AutomationSummary }) 
         <AutomationStageTotal label="Wayfinder" summary={summary.wayfinder} />
       </div>
       <p>
-        Active means Classification is running or Wayfinder is launching or running. Every other
-        recorded stage is terminal. These counts do not interpret tracker state.
+        Queued Wayfinder Sessions await admission. Active means Classification is running or
+        Wayfinder is launching or running. Every other recorded stage is terminal. These counts do
+        not interpret tracker state.
       </p>
       {ticketCount > 0 && (
         <details className="automation-evidence-tickets">
@@ -386,11 +433,12 @@ function AutomationStageTotal({
   summary,
 }: {
   label: string
-  summary: AutomationSummary['classification']
+  summary: AutomationSummary['classification'] | AutomationSummary['wayfinder']
 }) {
   return (
     <div className="automation-stage-total">
       <span>{label}</span>
+      {'queued' in summary && <strong>{summary.queued} queued</strong>}
       <strong className="is-active">{summary.active} active</strong>
       <strong>{summary.terminal} terminal</strong>
     </div>
@@ -401,7 +449,9 @@ function AutomationEvidenceTicket({ entry }: { entry: AutomationTicketPresentati
   const title =
     entry.ticket?.title ?? entry.ticket?.displayId ?? `Ticket ${entry.evidence.target.ticketId}`
   const project = entry.project?.name ?? entry.evidence.target.project.id
-  const detail = `${project} · Classification ${entry.classification}${entry.wayfinder ? ` · Wayfinder ${entry.wayfinder}` : ''}`
+  const detail = `${project} · ${classificationEvidenceSummary(entry.evidence.classification)}${
+    entry.evidence.wayfinder ? ` · ${wayfinderEvidenceSummary(entry.evidence.wayfinder)}` : ''
+  }`
   const content = (
     <>
       <strong>{title}</strong>
@@ -414,4 +464,25 @@ function AutomationEvidenceTicket({ entry }: { entry: AutomationTicketPresentati
   ) : (
     <span className="is-unlinked">{content}</span>
   )
+}
+
+function classificationEvidenceSummary(attempt: ClassificationAttempt): string {
+  const state =
+    attempt.status === 'completed'
+      ? `${readableStatus(attempt.status)} (${attempt.verdict.value.toUpperCase()})`
+      : readableStatus(attempt.status)
+  return `Classification ${state} · ${attempt.admission} admission`
+}
+
+function wayfinderEvidenceSummary(session: WayfinderSession): string {
+  if (session.status === 'queued') return 'Wayfinder queued · admission pending'
+  const acknowledgement =
+    session.status === 'outcome-unknown'
+      ? ` · ${session.acknowledged ? 'acknowledged' : 'acknowledgement required'}`
+      : ''
+  return `Wayfinder ${readableStatus(session.status)} · ${session.admission} admission${acknowledgement}`
+}
+
+function readableStatus(status: string): string {
+  return status.replaceAll('-', ' ')
 }
