@@ -359,7 +359,7 @@ function GlobalAutomationDetail({
   return (
     <aside className="settings-detail automation-detail">
       <p className="settings-eyebrow">Global admission</p>
-      <h2>One-shot dispatch</h2>
+      <h2>Queued dispatch</h2>
       <p className="automation-verdict">
         <span className={`automation-node${effective ? ' is-enabled' : ''}`} aria-hidden="true">
           {effective ? '✓' : '–'}

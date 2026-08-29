@@ -55,7 +55,6 @@ describe('Automation event database', () => {
     expect(decodeAutomationDatabase(valid)).toEqual(valid)
 
     for (const invalid of [
-      { schemaVersion: 2, records: [] },
       { ...valid, extra: true },
       { ...valid, events: [{ ...started(), extra: true }] },
       { ...valid, events: [{ ...started(), recordedAt: 'yesterday' }] },

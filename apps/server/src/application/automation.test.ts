@@ -28,6 +28,7 @@ import {
   type AutomationDatabaseDocument,
   type AutomationEvent,
   appendAutomationDatabase,
+  createAutomationDatabaseDocument,
   replayAutomationDatabase,
 } from './automation-database.ts'
 import { classificationResultSchemaJson } from './classification-contract.ts'
@@ -155,7 +156,7 @@ function memoryConfiguration(
 
 interface MemoryAutomationDatabase {
   database: AutomationDatabaseDocument
-  records(): AutomationEvidence[]
+  evidence(): AutomationEvidence[]
   events(): readonly AutomationEvent[]
   writes: AutomationDatabase[]
 }
@@ -179,7 +180,7 @@ function memoryAutomationDatabase(
   }
   return {
     database,
-    records: () => [...replayAutomationDatabase(current).evidence],
+    evidence: () => [...replayAutomationDatabase(current).evidence],
     events: () => current.events,
     writes,
   }
@@ -406,7 +407,7 @@ describe('RoadmapApplication Automation', () => {
       database,
     })
 
-    expect(database.records()[0]?.wayfinder).toMatchObject({
+    expect(database.evidence()[0]?.wayfinder).toMatchObject({
       status: 'outcome-unknown',
       admission: 'override',
       reason: expect.stringContaining('restarted'),
@@ -428,11 +429,11 @@ describe('RoadmapApplication Automation', () => {
       launcher: launches.launcher,
       database,
     })
-    await vi.waitFor(() => expect(database.records()[0]?.wayfinder?.status).toBe('running'))
+    await vi.waitFor(() => expect(database.evidence()[0]?.wayfinder?.status).toBe('running'))
 
     await current.application.stop()
 
-    expect(database.records()[0]?.wayfinder).toMatchObject({
+    expect(database.evidence()[0]?.wayfinder).toMatchObject({
       status: 'outcome-unknown',
       reason: expect.stringContaining('stopped'),
     })
@@ -450,11 +451,11 @@ describe('RoadmapApplication Automation', () => {
       launcher: launches.launcher,
       database,
     })
-    expect(database.records()[0]?.wayfinder?.status).toBe('launching')
+    expect(database.evidence()[0]?.wayfinder?.status).toBe('launching')
 
     await current.application.stop()
 
-    expect(database.records()[0]?.wayfinder).toMatchObject({
+    expect(database.evidence()[0]?.wayfinder).toMatchObject({
       status: 'outcome-unknown',
       reason: expect.stringContaining('stopped'),
     })
@@ -777,7 +778,7 @@ describe('RoadmapApplication Automation', () => {
     const database = memoryAutomationDatabase()
     const launches = deferredLauncher({
       beforeClassify() {
-        expect(database.records()).toEqual([
+        expect(database.evidence()).toEqual([
           expect.objectContaining({
             classification: { status: 'running', admission: 'automatic' },
           }),
@@ -785,7 +786,7 @@ describe('RoadmapApplication Automation', () => {
         expect(database.events().map((event) => event.type)).toEqual(['classification-started'])
       },
       beforeDispatch() {
-        expect(database.records()[0]?.wayfinder).toEqual({
+        expect(database.evidence()[0]?.wayfinder).toEqual({
           status: 'launching',
           admission: 'automatic',
         })
@@ -806,7 +807,7 @@ describe('RoadmapApplication Automation', () => {
     launches.classifications[0]?.resolve(processResult())
     await vi.waitFor(() => expect(launches.dispatches).toHaveLength(1))
     await vi.waitFor(() =>
-      expect(database.records()[0]?.wayfinder).toEqual({
+      expect(database.evidence()[0]?.wayfinder).toEqual({
         status: 'running',
         admission: 'automatic',
       }),
@@ -899,7 +900,7 @@ describe('RoadmapApplication Automation', () => {
       state: { automation: { enabled: false, enabledProjects: [] } },
     })
     expect(launches.classifications).toHaveLength(1)
-    expect(current.database.records()[0]?.classification).toEqual({
+    expect(current.database.evidence()[0]?.classification).toEqual({
       status: 'running',
       admission: 'override',
     })
@@ -932,7 +933,7 @@ describe('RoadmapApplication Automation', () => {
       result: { type: 'automation-override-started', target, stage: 'wayfinder' },
     })
     await vi.waitFor(() =>
-      expect(current.database.records()[0]?.wayfinder).toEqual({
+      expect(current.database.evidence()[0]?.wayfinder).toEqual({
         status: 'running',
         admission: 'override',
       }),
@@ -973,7 +974,7 @@ describe('RoadmapApplication Automation', () => {
 
     await vi.waitFor(() => expect(launches.dispatches).toHaveLength(1))
     await vi.waitFor(() =>
-      expect(current.database.records()[0]?.wayfinder).toEqual({
+      expect(current.database.evidence()[0]?.wayfinder).toEqual({
         status: 'running',
         admission: 'automatic',
       }),
@@ -1027,7 +1028,7 @@ describe('RoadmapApplication Automation', () => {
     await current.application.stop()
   })
 
-  it('explains and enforces task, source, blocker, claim, and one-shot eligibility', async () => {
+  it('explains and enforces task, source, blocker, claim, and opportunity uniqueness', async () => {
     const sourceProject = project('override-eligibility', [
       ticket('research', { kind: 'recognized', value: 'research', labels: ['research'] }),
       ticket('incomplete', TASK, { blockersComplete: false }),
@@ -1146,7 +1147,9 @@ describe('RoadmapApplication Automation', () => {
     })
     launches.classifications[0]?.resolve(result)
 
-    await vi.waitFor(() => expect(database.records()[0]?.classification.status).not.toBe('running'))
+    await vi.waitFor(() =>
+      expect(database.evidence()[0]?.classification.status).not.toBe('running'),
+    )
     expect(launches.dispatches).toHaveLength(0)
     current.source.push([sourceProject])
     await delay(10)
@@ -1166,7 +1169,7 @@ describe('RoadmapApplication Automation', () => {
     launches.classifications[0]?.reject(new Error('lost'))
 
     await vi.waitFor(() =>
-      expect(database.records()[0]?.classification.status).toBe('outcome-unknown'),
+      expect(database.evidence()[0]?.classification.status).toBe('outcome-unknown'),
     )
     expect(launches.dispatches).toHaveLength(0)
     await current.application.stop()
@@ -1180,7 +1183,7 @@ describe('RoadmapApplication Automation', () => {
     launches.classifications[0]?.resolve(processResult())
 
     await vi.waitFor(() =>
-      expect(database.records()[0]?.wayfinder).toMatchObject({
+      expect(database.evidence()[0]?.wayfinder).toMatchObject({
         status: 'launch-failed',
         admission: 'automatic',
       }),
@@ -1201,12 +1204,12 @@ describe('RoadmapApplication Automation', () => {
     })
     launches.classifications[0]?.resolve(processResult())
     await vi.waitFor(() => expect(launches.sessions).toHaveLength(1))
-    await vi.waitFor(() => expect(database.records()[0]?.wayfinder?.status).toBe('running'))
+    await vi.waitFor(() => expect(database.evidence()[0]?.wayfinder?.status).toBe('running'))
 
     launches.sessions[0]?.resolve(wayfinderResult({ code: 7 }))
 
     await vi.waitFor(() =>
-      expect(database.records()[0]?.wayfinder).toEqual({
+      expect(database.evidence()[0]?.wayfinder).toEqual({
         status: 'finished',
         admission: 'automatic',
         processResult: { status: 'exited', code: 7 },
@@ -1253,7 +1256,7 @@ describe('RoadmapApplication Automation', () => {
     launches.sessions[0]?.resolve(result)
 
     await vi.waitFor(() =>
-      expect(database.records()[0]?.wayfinder).toMatchObject({
+      expect(database.evidence()[0]?.wayfinder).toMatchObject({
         status: 'finished',
         processResult: { status: 'exited', code: 0 },
         report: { status, reason },
@@ -1273,12 +1276,12 @@ describe('RoadmapApplication Automation', () => {
     })
     launches.classifications[0]?.resolve(processResult())
     await vi.waitFor(() => expect(launches.sessions).toHaveLength(1))
-    await vi.waitFor(() => expect(database.records()[0]?.wayfinder?.status).toBe('running'))
+    await vi.waitFor(() => expect(database.evidence()[0]?.wayfinder?.status).toBe('running'))
 
     launches.sessions[0]?.reject(new Error('lost'))
 
     await vi.waitFor(() =>
-      expect(database.records()[0]?.wayfinder).toMatchObject({
+      expect(database.evidence()[0]?.wayfinder).toMatchObject({
         status: 'outcome-unknown',
         reason: expect.stringContaining('process result was lost'),
       }),
@@ -1363,7 +1366,7 @@ describe('RoadmapApplication Automation', () => {
       `Configured map=${join(root, '.wayfinder/map.md')} ticket=/tmp/project-9/.wayfinder/tickets/9.md report=${sessionReportSchemaJson}`,
     )
     await vi.waitFor(() =>
-      expect(current.database.records()[0]?.wayfinder).toEqual({
+      expect(current.database.evidence()[0]?.wayfinder).toEqual({
         status: 'finished',
         admission: 'automatic',
         processResult: { status: 'exited', code: 0 },
@@ -1374,5 +1377,87 @@ describe('RoadmapApplication Automation', () => {
       }),
     )
     await current.application.stop()
+  })
+
+  it('advances two queued Sessions for one Project in series with the configured launcher', async () => {
+    const temporaryRoot = await mkdtemp(join(tmpdir(), 'roadmap-automation-series-'))
+    roots.push(temporaryRoot)
+    const root = await realpath(temporaryRoot)
+    const lifecyclePath = join(root, 'sessions.log')
+    const lockPath = join(root, 'session.lock')
+    const wayfinder: HarnessCommand = {
+      command: process.execPath,
+      args: [
+        '-e',
+        `const fs=require('node:fs'); const ticket=process.env.ROADMAP_TICKET_ID; let lock; try { lock=fs.openSync(process.argv[2], 'wx'); } catch { fs.appendFileSync(process.argv[1], 'overlap:'+ticket+'\\n'); } fs.appendFileSync(process.argv[1], 'started:'+ticket+'\\n'); setTimeout(() => { fs.appendFileSync(process.argv[1], 'finished:'+ticket+'\\n'); if (lock !== undefined) { fs.closeSync(lock); fs.unlinkSync(process.argv[2]); } process.stdout.write(JSON.stringify({schemaVersion:1, outcome:'completed', reason:'Ticket '+ticket+' resolved.'})); }, 100);`,
+        lifecyclePath,
+        lockPath,
+      ],
+      promptDelivery: 'stdin',
+      promptTemplate: 'Run {{roadmap.ticket}} under {{roadmap.map}}.',
+    }
+    const sourceProject = project('series', [ticket('1'), ticket('2')])
+    sourceProject.openMaps[0] = map(sourceProject.key, sourceProject.openMaps[0]?.tickets ?? [], {
+      sourcePath: join(root, '.wayfinder/map.md'),
+    })
+    const configured = configuration([sourceProject], { wayfinderCommand: wayfinder })
+    configured.projects[0] = {
+      key: sourceProject.key,
+      connectionId: 'local',
+      locator: { integration: 'local', path: root },
+      workspace: { path: root },
+    }
+    const targets = ['1', '2'].map((ticketId) => ({
+      project: sourceProject.key,
+      mapId: 'map',
+      ticketId,
+    }))
+    const queued = queuedDatabase(targets)
+    const databasePath = join(root, 'automation.json')
+    const database = createAutomationDatabaseDocument(databasePath)
+    await database.load()
+    await database.append({ opportunities: queued.opportunities, events: queued.events })
+    const source = adapter([sourceProject])
+    const configuredDocument = memoryConfiguration(configured)
+    const application = createRoadmapApplication({
+      configuration: configuredDocument.document,
+      automation: {
+        database,
+        launcher: createAutomationLauncher({ stopGraceMs: 10 }),
+      },
+      createAdapters: () => [source.value],
+      serverEpoch: 'automation-series-test',
+    })
+
+    await application.start()
+
+    await vi.waitFor(
+      async () =>
+        expect(await readFile(lifecyclePath, 'utf8')).toBe(
+          'started:1\nfinished:1\nstarted:2\nfinished:2\n',
+        ),
+      { timeout: 5_000 },
+    )
+    await vi.waitFor(() =>
+      expect(application.current().automation.evidence.map((entry) => entry.wayfinder)).toEqual([
+        expect.objectContaining({ status: 'finished' }),
+        expect.objectContaining({ status: 'finished' }),
+      ]),
+    )
+    await application.stop()
+
+    const stored = await createAutomationDatabaseDocument(databasePath).load()
+    expect(stored.events.map((event) => event.type)).toEqual([
+      'classification-started',
+      'classification-completed',
+      'classification-started',
+      'classification-completed',
+      'wayfinder-launching',
+      'wayfinder-running',
+      'wayfinder-finished',
+      'wayfinder-launching',
+      'wayfinder-running',
+      'wayfinder-finished',
+    ])
   })
 })

@@ -50,14 +50,13 @@ _Avoid_: integration event stream, event log, activity feed
 The opt-in path that may classify and hand one eligible frontier task to Wayfinder. Global and
 Project enablement admit automatic triggers; an Automation override admits one stage without them.
 An AFK Classification Verdict queues its Wayfinder Session; launching it remains a separate
-admission. Automation records one-shot evidence rather than promising queue order or managed
-execution.
+admission. Automation records durable evidence without promising queue order or managed execution.
 _Avoid_: scheduler, autonomous mode, ordered queue
 
 **Automation override**:
 A human-triggered Classification Run or Wayfinder Session for one eligible opportunity. It admits
 that stage without global or Project enablement, but later automatic stages still require both.
-Eligibility, verdict, and one-shot rules remain unchanged.
+Eligibility, verdict, and per-opportunity attempt limits remain unchanged.
 _Avoid_: manual flow, forced run
 
 **Automation admission**:
@@ -124,7 +123,7 @@ Roadmap's server-owned durable record of immutable Automation opportunities and 
 append-only Automation events. Replaying the events derives current Automation evidence, including
 queued Sessions and whether an unknown Session outcome was acknowledged. Event sequence is
 authoritative, while recorded timestamps are descriptive. Events are retained permanently.
-_Avoid_: one-shot ledger, Run history, ordered queue, tracker state
+_Avoid_: Run history, ordered queue, tracker state
 
 **Harness Command**:
 A globally configured literal executable, argument list, and prompt-delivery method launched
