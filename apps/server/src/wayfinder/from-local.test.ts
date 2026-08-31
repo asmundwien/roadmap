@@ -49,7 +49,7 @@ describe('readLocalProject', () => {
     const ticket15 = byId(map, '15')
     expect(ticket15.state).toBe('closed')
     expect(ticket15.createdAt).toBeUndefined()
-    expect(ticket15.closedAt).toBeUndefined()
+    expect(ticket15.closedAt).toBe(Date.parse('2026-08-19T10:11:18.000Z'))
   })
 
   it('parses the standardized pipelines fixture without compatibility warnings', async () => {
@@ -72,6 +72,7 @@ describe('readLocalProject', () => {
       sourcePath: join(PIPELINES_FIXTURE, '.wayfinder', PIPELINES_MAP, 'map.md'),
     })
     expect(byId(map, '1').state).toBe('closed')
+    expect(byId(map, '1').closedAt).toBe(Date.parse('2026-08-31T10:36:58.000Z'))
   })
 
   it('discovers multiple map directories and separates closed maps from live maps', async () => {
@@ -142,6 +143,7 @@ Prove tolerant local parsing.
 id: 1
 title: Keep me
 labels: wayfinder:task
+mode: AFK
 status: open
 assignee: research-subagent
 blocked-by: [2, 99]
@@ -158,7 +160,9 @@ Body with a [relative note](../notes.md).
 id: 2
 title: Done
 labels: [wayfinder:task]
+mode: AFK
 status: closed
+closed-at: 2026-08-17T08:42:36.000Z
 assignee:
 blocked-by: []
 ---
@@ -172,11 +176,59 @@ blocked-by: []
 id: 3
 title: Unsafe
 labels: [wayfinder:task]
+mode: AFK
 assignee:
 blocked-by: []
 ---
 
 # Unsafe
+`,
+      )
+      await writeFile(
+        join(ticketsPath, '04-missing-closed-at.md'),
+        `---
+id: 4
+title: Missing closure time
+labels: [wayfinder:task]
+mode: AFK
+status: closed
+assignee:
+blocked-by: []
+---
+
+# Missing closure time
+`,
+      )
+      await writeFile(
+        join(ticketsPath, '05-open-with-closed-at.md'),
+        `---
+id: 5
+title: Premature closure time
+labels: [wayfinder:task]
+mode: AFK
+status: open
+closed-at: 2026-08-17T08:42:36.000Z
+assignee:
+blocked-by: []
+---
+
+# Premature closure time
+`,
+      )
+      await writeFile(
+        join(ticketsPath, '06-invalid-closed-at.md'),
+        `---
+id: 6
+title: Invalid closure time
+labels: [wayfinder:task]
+mode: AFK
+status: closed
+closed-at: 2026-08-17
+assignee:
+blocked-by: []
+---
+
+# Invalid closure time
 `,
       )
 
@@ -191,6 +243,17 @@ blocked-by: []
       expect(map.warnings).toContain(
         'Omitted .wayfinder/synthetic-map/tickets/03-unsafe.md: missing or unparseable frontmatter status.',
       )
+      expect(map.warnings).toContain(
+        'Omitted .wayfinder/synthetic-map/tickets/04-missing-closed-at.md: missing frontmatter closed-at.',
+      )
+      expect(map.warnings).toContain(
+        'Omitted .wayfinder/synthetic-map/tickets/05-open-with-closed-at.md: frontmatter closed-at is forbidden while status is open.',
+      )
+      expect(map.warnings).toContain(
+        'Omitted .wayfinder/synthetic-map/tickets/06-invalid-closed-at.md: unparseable frontmatter closed-at.',
+      )
+
+      expect(byId(map, '2').closedAt).toBe(Date.parse('2026-08-17T08:42:36.000Z'))
 
       const ticket1 = byId(map, '1')
       expect(ticket1.assignees).toEqual([{ name: 'research-subagent' }])

@@ -22,6 +22,8 @@ interface ParsedMarkdownFile {
   frontmatter: Record<string, string>
 }
 
+type ParsedTimestamp = { kind: 'missing' } | { kind: 'invalid' } | { kind: 'value'; value: number }
+
 interface ParsedLocalTicket {
   path: string
   displayPath: string
@@ -30,6 +32,7 @@ interface ParsedLocalTicket {
   id: string | null
   title?: string
   status: 'open' | 'closed' | null
+  closedAt: ParsedTimestamp
   labels: string[]
   assignees: Assignee[]
   blockedByIds: string[]
@@ -140,9 +143,7 @@ async function readLocalMap(
 
   const kept = new Map<string, ParsedLocalTicket>()
   for (const ticket of parsedTickets) {
-    const reasons: string[] = []
-    if (ticket.id === null) reasons.push('missing or unparseable frontmatter id')
-    if (!ticket.status) reasons.push('missing or unparseable frontmatter status')
+    const reasons = invalidTicketReasons(ticket)
 
     if (reasons.length > 0 || ticket.id === null) {
       ticketsComplete = false
@@ -201,6 +202,23 @@ function readMapHeading(parsedMap: ParsedMarkdownFile): {
   return { title, warnings }
 }
 
+function invalidTicketReasons(ticket: ParsedLocalTicket): string[] {
+  const reasons: string[] = []
+  if (ticket.id === null) reasons.push('missing or unparseable frontmatter id')
+  if (!ticket.status) reasons.push('missing or unparseable frontmatter status')
+  if (ticket.status === 'closed' && ticket.closedAt.kind !== 'value') {
+    reasons.push(
+      ticket.closedAt.kind === 'missing'
+        ? 'missing frontmatter closed-at'
+        : 'unparseable frontmatter closed-at',
+    )
+  }
+  if (ticket.status === 'open' && ticket.closedAt.kind !== 'missing') {
+    reasons.push('frontmatter closed-at is forbidden while status is open')
+  }
+  return reasons
+}
+
 function materializeTickets(
   project: ProjectKey,
   parsedTickets: Map<string, ParsedLocalTicket>,
@@ -217,6 +235,7 @@ function materializeTickets(
       title: ticket.title,
       body: ticket.body,
       typeEvidence: ticketTypeEvidenceFromLabels(ticket.labels),
+      ...(ticket.closedAt.kind === 'value' ? { closedAt: ticket.closedAt.value } : {}),
       state: 'frontier',
       isClaimed: ticket.assignees.length > 0,
       isBlocked: false,
@@ -289,6 +308,7 @@ async function readLocalTicket(rootPath: string, path: string): Promise<ParsedLo
   const labels = readListField(parsed.frontmatter.labels, 'labels', warnings)
   const blockedByIds = readListField(parsed.frontmatter['blocked-by'], 'blocked-by', warnings)
   const status = readStatus(parsed.frontmatter.status)
+  const closedAt = readTimestamp(parsed.frontmatter['closed-at'])
   const assignee = readScalar(parsed.frontmatter.assignee)
 
   return {
@@ -299,6 +319,7 @@ async function readLocalTicket(rootPath: string, path: string): Promise<ParsedLo
     id: readId(parsed.frontmatter.id),
     title,
     status,
+    closedAt,
     labels,
     assignees: assignee ? [{ name: assignee }] : [],
     blockedByIds,
@@ -341,6 +362,17 @@ function readId(raw: string | undefined): string | null {
 function readStatus(raw: string | undefined): 'open' | 'closed' | null {
   const value = readScalar(raw)?.toLowerCase()
   return value === 'open' || value === 'closed' ? value : null
+}
+
+function readTimestamp(raw: string | undefined): ParsedTimestamp {
+  const value = readScalar(raw)
+  if (!value) return { kind: 'missing' }
+
+  const timestamp = Date.parse(value)
+  if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString() !== value) {
+    return { kind: 'invalid' }
+  }
+  return { kind: 'value', value: timestamp }
 }
 
 function readListField(raw: string | undefined, field: string, warnings: string[]): string[] {

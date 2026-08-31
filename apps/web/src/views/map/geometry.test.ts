@@ -99,7 +99,7 @@ describe('buildLedger', () => {
 
   it('is deterministic: the same snapshot builds the same ledger', () => {
     const map = makeMap([
-      ticket(2, 'closed'),
+      ticket(2, 'closed', [], 100),
       ticket(3, 'frontier'),
       ticket(4, 'claimed'),
       ticket(5, 'blocked', [blocker(3), blocker(4)]),
@@ -114,12 +114,18 @@ describe('buildLedger', () => {
     expect(second.dependentsOf).toEqual(first.dependentsOf)
   })
 
-  it('keeps later local completions nearest the active work when closure times are unavailable', () => {
+  it('orders completed work from the recorded closure timestamps', () => {
     const ledger = buildLedger(
-      makeMap([ticket(1, 'closed'), ticket(2, 'closed'), ticket(3, 'frontier')]),
+      makeMap([ticket(1, 'closed', [], 100), ticket(2, 'closed', [], 200), ticket(3, 'frontier')]),
     )
 
     expect(ledger.closedRows.map((row) => row.ticket.id)).toEqual([id(2), id(1)])
+  })
+
+  it('does not invent ordering when a closed ticket lacks a closure timestamp', () => {
+    expect(() => buildLedger(makeMap([ticket(1, 'closed'), ticket(2, 'closed', [], 100)]))).toThrow(
+      'Closed ticket 1 has no closure timestamp.',
+    )
   })
 
   it('weaves ground covered: the last dependent inherits the rail, earlier ones branch out', () => {
