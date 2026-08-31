@@ -26,7 +26,7 @@ WebSocket carries full state replacements. HTTP carries `query` and `execute` re
 
 `application/configuration.ts` owns the strict `roadmap.config.json` codec and live validation. It writes through a temporary file in the same directory, flushes it, and atomically renames it. An invalid manual save leaves the last valid runtime active and blocks writes until the configuration is repaired.
 
-Integration-specific code lives in `github` and `local`; `wayfinder` parses data tolerantly. `store.ts` waits for one complete Slice from every Adapter before publishing a snapshot and keeps partial generations private. `change-feed.ts` derives source-blind events from consecutive complete snapshots.
+Integration-specific code lives in `github` and `local`; `wayfinder` parses data tolerantly. The Local adapter discovers every `.wayfinder/<map-id>/map.md`, reads its sibling `tickets/` directory, and uses map frontmatter `status` to separate live maps from history. `store.ts` waits for one complete Slice from every Adapter before publishing a snapshot and keeps partial generations private. `change-feed.ts` derives source-blind events from consecutive complete snapshots.
 
 `application/automation-database.ts` owns the strict schema version 3 Automation database. It
 persists immutable opportunities and append-only events atomically, rejects invalid histories, and

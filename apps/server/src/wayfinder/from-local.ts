@@ -1,5 +1,5 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
-import { basename, join, relative } from 'node:path'
+import { basename, dirname, join, relative } from 'node:path'
 import type {
   Assignee,
   Blocker,
@@ -37,11 +37,12 @@ interface ParsedLocalTicket {
   warnings: string[]
 }
 
-/** Reads the canonical `.wayfinder/` tree off disk and turns it into one local project. */
+type LocalMapReadResult = { kind: 'map'; map: WayfinderMap } | { kind: 'warning'; warning: string }
+
+/** Reads every canonical `.wayfinder/<map-id>/` tree off disk and turns it into one local project. */
 export async function readLocalProject(input: LocalProjectInput): Promise<Project> {
   const name = input.name ?? basename(input.rootPath)
   const wayfinderPath = join(input.rootPath, '.wayfinder')
-  const mapPath = join(wayfinderPath, 'map.md')
   const project: Project = {
     key: input.key,
     name,
@@ -51,22 +52,70 @@ export async function readLocalProject(input: LocalProjectInput): Promise<Projec
     sourcePath: input.rootPath,
   }
 
-  let mapText = ''
-  let mapMtimeMs = 0
+  let mapPaths: string[]
+  try {
+    const entries = await readdir(wayfinderPath, { withFileTypes: true })
+    mapPaths = entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => join(wayfinderPath, entry.name, 'map.md'))
+      .sort((a, b) => a.localeCompare(b))
+  } catch (error) {
+    project.warnings.push('Missing local maps directory: .wayfinder/.')
+    void error
+    return project
+  }
+
+  if (mapPaths.length === 0) {
+    project.warnings.push('No local maps found under .wayfinder/.')
+    return project
+  }
+
+  const results = await Promise.all(mapPaths.map((mapPath) => readLocalMap(input, mapPath)))
+  for (const result of results) {
+    if (result.kind === 'warning') {
+      project.warnings.push(result.warning)
+      continue
+    }
+    if (result.map.isOpen) project.openMaps.push(result.map)
+    else project.closedMaps.push(result.map)
+  }
+
+  project.openMaps.sort((a, b) => b.updatedAt - a.updatedAt)
+  project.closedMaps.sort((a, b) => (b.closedAt ?? b.updatedAt) - (a.closedAt ?? a.updatedAt))
+  return project
+}
+
+async function readLocalMap(
+  input: LocalProjectInput,
+  mapPath: string,
+): Promise<LocalMapReadResult> {
+  let mapText: string
+  let mapMtimeMs: number
   try {
     const [raw, fileStat] = await Promise.all([readFile(mapPath, 'utf8'), stat(mapPath)])
     mapText = raw
     mapMtimeMs = fileStat.mtimeMs
   } catch (error) {
-    project.warnings.push(`Missing local map: ${displayPath(input.rootPath, mapPath)}.`)
     void error
-    return project
+    return {
+      kind: 'warning',
+      warning: `Missing local map: ${displayPath(input.rootPath, mapPath)}.`,
+    }
   }
 
   const parsedMap = parseMarkdownFile(mapText)
   const { title: mapTitle, warnings: mapWarnings } = readMapHeading(parsedMap)
+  const mapLabels = readListField(parsedMap.frontmatter.labels, 'labels', mapWarnings)
+  if (!mapLabels.includes('wayfinder:map')) {
+    mapWarnings.push('Map frontmatter is missing the wayfinder:map label.')
+  }
+  const mapStatus = readStatus(parsedMap.frontmatter.status)
+  if (!mapStatus) {
+    mapWarnings.push('Map frontmatter status is missing or unparseable; treated it as open.')
+  }
 
-  const ticketsDir = join(wayfinderPath, 'tickets')
+  const mapDirectory = dirname(mapPath)
+  const ticketsDir = join(mapDirectory, 'tickets')
   let ticketPaths: string[] = []
   let ticketsComplete = true
   try {
@@ -112,26 +161,27 @@ export async function readLocalProject(input: LocalProjectInput): Promise<Projec
   }
 
   const tickets = materializeTickets(input.key, kept)
-  const map: WayfinderMap = {
-    project: input.key,
-    id: '.wayfinder/map.md',
-    title: mapTitle,
-    isOpen: true,
-    updatedAt: Math.max(mapMtimeMs, latestTicketMtime),
-    body: parseMapBody(parsedMap.body),
-    tickets,
-    frontier: frontierOf(tickets),
-    progress: {
-      total: tickets.length,
-      completed: tickets.filter((ticket) => ticket.state === 'closed').length,
+  const isOpen = mapStatus !== 'closed'
+  return {
+    kind: 'map',
+    map: {
+      project: input.key,
+      id: displayPath(input.rootPath, mapPath),
+      title: mapTitle,
+      isOpen,
+      updatedAt: Math.max(mapMtimeMs, latestTicketMtime),
+      body: parseMapBody(parsedMap.body),
+      tickets,
+      frontier: frontierOf(tickets),
+      progress: {
+        total: tickets.length,
+        completed: tickets.filter((ticket) => ticket.state === 'closed').length,
+      },
+      ticketsComplete,
+      warnings: mapWarnings,
+      sourcePath: mapPath,
     },
-    ticketsComplete,
-    warnings: mapWarnings,
-    sourcePath: mapPath,
   }
-
-  project.openMaps.push(map)
-  return project
 }
 
 function readMapHeading(parsedMap: ParsedMarkdownFile): {

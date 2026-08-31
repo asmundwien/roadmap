@@ -48,7 +48,7 @@ describe('parseHash', () => {
     ['#/projects/github/me%2Frepo/maps/11/fog/0', { kind: 'fog', index: 0 }],
     ['#/projects/github/me%2Frepo/maps/11/scope/3', { kind: 'scope', index: 3 }],
     [
-      '#/projects/local/microsoft-risiko/maps/.wayfinder%2Fmap.md/ticket/T-17',
+      '#/projects/local/microsoft-risiko/maps/.wayfinder%2Fazure-strategy-leadership-deck%2Fmap.md/ticket/T-17',
       { kind: 'ticket', id: 'T-17' },
     ],
   ])('reads the panel selection segment %s', (hash, selection) => {
@@ -58,7 +58,8 @@ describe('parseHash', () => {
         hash.indexOf('/local/') === -1
           ? { integration: 'github', id: 'me/repo' }
           : { integration: 'local', id: 'microsoft-risiko' },
-      selected: hash.indexOf('/local/') === -1 ? '11' : '.wayfinder/map.md',
+      selected:
+        hash.indexOf('/local/') === -1 ? '11' : '.wayfinder/azure-strategy-leadership-deck/map.md',
       selection,
     })
   })

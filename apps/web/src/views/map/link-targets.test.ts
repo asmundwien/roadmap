@@ -7,7 +7,7 @@ const ROOT = '/Users/asmund.wien/source/hdir/platform/microsoft-risiko'
 function makeMap(): WayfinderMap {
   return {
     project: { integration: 'local', id: 'microsoft-risiko' },
-    id: '.wayfinder/map.md',
+    id: '.wayfinder/azure-strategy-leadership-deck/map.md',
     title: 'Microsoft Risiko',
     isOpen: true,
     updatedAt: 0,
@@ -36,7 +36,7 @@ function makeMap(): WayfinderMap {
         blockedBy: [],
         blockersComplete: true,
         warnings: [],
-        sourcePath: `${ROOT}/.wayfinder/tickets/02-re-story-for-scroll.md`,
+        sourcePath: `${ROOT}/.wayfinder/azure-strategy-leadership-deck/tickets/02-re-story-for-scroll.md`,
       },
       {
         id: '16',
@@ -51,21 +51,25 @@ function makeMap(): WayfinderMap {
         blockedBy: [],
         blockersComplete: true,
         warnings: [],
-        sourcePath: `${ROOT}/.wayfinder/tickets/16-landing-orientation.md`,
+        sourcePath: `${ROOT}/.wayfinder/azure-strategy-leadership-deck/tickets/16-landing-orientation.md`,
       },
     ],
     frontier: [],
     progress: { total: 2, completed: 1 },
     ticketsComplete: true,
     warnings: [],
-    sourcePath: `${ROOT}/.wayfinder/map.md`,
+    sourcePath: `${ROOT}/.wayfinder/azure-strategy-leadership-deck/map.md`,
   }
 }
 
 describe('resolveProseLink', () => {
   it('turns a map decision link into an on-map ticket selection', () => {
     expect(
-      resolveProseLink(makeMap(), `${ROOT}/.wayfinder/map.md`, 'tickets/02-re-story-for-scroll.md'),
+      resolveProseLink(
+        makeMap(),
+        `${ROOT}/.wayfinder/azure-strategy-leadership-deck/map.md`,
+        'tickets/02-re-story-for-scroll.md',
+      ),
     ).toEqual({
       kind: 'selection',
       selection: { kind: 'ticket', id: '2' },
@@ -76,7 +80,7 @@ describe('resolveProseLink', () => {
     expect(
       resolveProseLink(
         makeMap(),
-        `${ROOT}/.wayfinder/tickets/16-landing-orientation.md`,
+        `${ROOT}/.wayfinder/azure-strategy-leadership-deck/tickets/16-landing-orientation.md`,
         '02-re-story-for-scroll.md',
       ),
     ).toEqual({ kind: 'selection', selection: { kind: 'ticket', id: '2' } })
@@ -86,7 +90,7 @@ describe('resolveProseLink', () => {
     expect(
       resolveProseLink(
         makeMap(),
-        `${ROOT}/.wayfinder/tickets/16-landing-orientation.md`,
+        `${ROOT}/.wayfinder/azure-strategy-leadership-deck/tickets/16-landing-orientation.md`,
         '../map.md',
       ),
     ).toEqual({
@@ -99,8 +103,8 @@ describe('resolveProseLink', () => {
     expect(
       resolveProseLink(
         makeMap(),
-        `${ROOT}/.wayfinder/tickets/02-re-story-for-scroll.md`,
-        '../../docs/page-list.md',
+        `${ROOT}/.wayfinder/azure-strategy-leadership-deck/tickets/02-re-story-for-scroll.md`,
+        '../../../docs/page-list.md',
       ),
     ).toEqual({
       kind: 'disabled',
@@ -110,11 +114,15 @@ describe('resolveProseLink', () => {
   })
 
   it('leaves absolute web links alone', () => {
-    expect(resolveProseLink(makeMap(), `${ROOT}/.wayfinder/map.md`, 'https://example.com')).toEqual(
-      {
-        kind: 'href',
-        href: 'https://example.com',
-      },
-    )
+    expect(
+      resolveProseLink(
+        makeMap(),
+        `${ROOT}/.wayfinder/azure-strategy-leadership-deck/map.md`,
+        'https://example.com',
+      ),
+    ).toEqual({
+      kind: 'href',
+      href: 'https://example.com',
+    })
   })
 })

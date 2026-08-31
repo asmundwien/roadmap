@@ -2,20 +2,27 @@ import type { MapBody, Project, ProjectRegistration, WayfinderMap } from '@roadm
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createLocalAdapter } from './adapter.ts'
 
-const REAL_FIXTURE = '/Users/asmund.wien/source/hdir/platform/microsoft-risiko'
-const REAL_WATCH_PATH = `${REAL_FIXTURE}/.wayfinder`
+const RISIKO_FIXTURE = '/Users/asmund.wien/source/hdir/platform/microsoft-risiko'
+const PIPELINES_FIXTURE = '/Users/asmund.wien/source/hdir/felleskomponenter/frontend-pipelines'
+const REAL_WATCH_PATHS = new Set([
+  `${RISIKO_FIXTURE}/.wayfinder`,
+  `${PIPELINES_FIXTURE}/.wayfinder`,
+])
 
 afterEach(() => {
   vi.useRealTimers()
 })
 
 describe('createLocalAdapter', () => {
-  it('composes registrations and parser into one baseline local slice for the real fixture', async () => {
+  it('composes both standardized local projects into one baseline slice', async () => {
     const updates: { projects: Project[]; unreachable: unknown[] }[] = []
     const adapter = createLocalAdapter({
-      registrations: [localRegistration('microsoft-risiko', REAL_FIXTURE, 'Microsoft Risiko')],
+      registrations: [
+        localRegistration('microsoft-risiko', RISIKO_FIXTURE, 'Microsoft Risiko'),
+        localRegistration('frontend-pipelines', PIPELINES_FIXTURE, 'Frontend pipelines'),
+      ],
       inspectRoot: async () => ({ ok: true }),
-      pathExists: async (path) => path === REAL_WATCH_PATH,
+      pathExists: async (path) => REAL_WATCH_PATHS.has(path),
       watchDirectory: () => ({ close() {} }),
       logger: silentLogger(),
     })
@@ -24,27 +31,43 @@ describe('createLocalAdapter', () => {
 
     expect(updates).toHaveLength(1)
     expect(updates[0]?.unreachable).toEqual([])
-    const project = updates[0]?.projects[0]
-    expect(project).toMatchObject({
-      key: { integration: 'local', id: 'microsoft-risiko' },
+    expect(updates[0]?.projects).toHaveLength(2)
+
+    const risiko = updates[0]?.projects.find(
+      (project) => project.key.integration === 'local' && project.key.id === 'microsoft-risiko',
+    )
+    expect(risiko).toMatchObject({
       name: 'Microsoft Risiko',
       warnings: [],
-      sourcePath: REAL_FIXTURE,
+      sourcePath: RISIKO_FIXTURE,
     })
-    expect(project?.openMaps).toHaveLength(1)
-    const map = project?.openMaps[0]
-    expect(map).toMatchObject({
-      id: '.wayfinder/map.md',
-      project: { integration: 'local', id: 'microsoft-risiko' },
+    expect(risiko?.openMaps[0]).toMatchObject({
+      id: '.wayfinder/azure-strategy-leadership-deck/map.md',
       progress: { total: 17, completed: 15 },
       ticketsComplete: true,
       warnings: [],
     })
-    expect(map?.frontier.map((ticket) => ticket.id)).toEqual(['16'])
-    expect(map?.tickets.find((ticket) => ticket.id === '17')).toMatchObject({
+    expect(risiko?.openMaps[0]?.frontier.map((ticket) => ticket.id)).toEqual(['16'])
+    expect(risiko?.openMaps[0]?.tickets.find((ticket) => ticket.id === '17')).toMatchObject({
       state: 'blocked',
       isBlocked: true,
     })
+
+    const pipelines = updates[0]?.projects.find(
+      (project) => project.key.integration === 'local' && project.key.id === 'frontend-pipelines',
+    )
+    expect(pipelines).toMatchObject({
+      name: 'Frontend pipelines',
+      warnings: [],
+      sourcePath: PIPELINES_FIXTURE,
+    })
+    expect(pipelines?.openMaps[0]).toMatchObject({
+      id: '.wayfinder/frontend-pipeline-versioning/map.md',
+      progress: { total: 11, completed: 0 },
+      ticketsComplete: true,
+      warnings: [],
+    })
+    expect(pipelines?.openMaps[0]?.frontier.map((ticket) => ticket.id)).toEqual(['1', '2', '4'])
 
     await adapter.stop()
   })
@@ -94,7 +117,7 @@ describe('createLocalAdapter', () => {
         name: 'Empty',
         openMaps: [],
         closedMaps: [],
-        warnings: ['Missing local map: .wayfinder/map.md.'],
+        warnings: ['No local maps found under .wayfinder/.'],
         sourcePath: '/tmp/empty',
       }),
       logger: silentLogger(),
