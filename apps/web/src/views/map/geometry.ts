@@ -169,11 +169,14 @@ interface Layered {
   ahead: Ticket[][]
 }
 
-function layerMap(map: WayfinderMap): Layered {
+function layerMap(map: WayfinderMap, ticketOrder: Map<string, number>): Layered {
   const byId = new Map(map.tickets.map((ticket) => [ticket.id, ticket]))
+  const byOrder = (ticket: Ticket): number => ticketOrder.get(ticket.id) ?? -1
+  // Local tickets have no closure timestamp. Later map order keeps newer completions nearest the
+  // active-work section; timestamped sources still sort by their recorded closure time.
   const closed = map.tickets
     .filter((ticket) => ticket.state === 'closed')
-    .sort((a, b) => (b.closedAt ?? 0) - (a.closedAt ?? 0))
+    .sort((a, b) => (b.closedAt ?? -1) - (a.closedAt ?? -1) || byOrder(b) - byOrder(a))
   const open = map.tickets.filter((ticket) => ticket.state !== 'closed')
 
   const maxDepth = open.reduce(
@@ -434,7 +437,7 @@ function buildTipEdges(
 
 export function buildLedger(map: WayfinderMap): Ledger {
   const ticketOrder = new Map(map.tickets.map((ticket, index) => [ticket.id, index]))
-  const { closed, ahead } = layerMap(map)
+  const { closed, ahead } = layerMap(map, ticketOrder)
   const openIds = new Set(ahead.flat().map((ticket) => ticket.id))
   const orderedOpen = orderLayers(ahead, map.project, openIds, ticketOrder).flat()
 

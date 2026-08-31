@@ -114,6 +114,14 @@ describe('buildLedger', () => {
     expect(second.dependentsOf).toEqual(first.dependentsOf)
   })
 
+  it('keeps later local completions nearest the active work when closure times are unavailable', () => {
+    const ledger = buildLedger(
+      makeMap([ticket(1, 'closed'), ticket(2, 'closed'), ticket(3, 'frontier')]),
+    )
+
+    expect(ledger.closedRows.map((row) => row.ticket.id)).toEqual([id(2), id(1)])
+  })
+
   it('weaves ground covered: the last dependent inherits the rail, earlier ones branch out', () => {
     const map = makeMap([
       ticket(2, 'closed', [], 100),
