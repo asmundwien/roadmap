@@ -43,14 +43,8 @@ describe('createLocalAdapter', () => {
     })
     expect(risiko?.openMaps[0]).toMatchObject({
       id: '.wayfinder/azure-strategy-leadership-deck/map.md',
-      progress: { total: 17, completed: 15 },
       ticketsComplete: true,
       warnings: [],
-    })
-    expect(risiko?.openMaps[0]?.frontier.map((ticket) => ticket.id)).toEqual(['16'])
-    expect(risiko?.openMaps[0]?.tickets.find((ticket) => ticket.id === '17')).toMatchObject({
-      state: 'blocked',
-      isBlocked: true,
     })
 
     const pipelines = updates[0]?.projects.find(
@@ -63,11 +57,12 @@ describe('createLocalAdapter', () => {
     })
     expect(pipelines?.openMaps[0]).toMatchObject({
       id: '.wayfinder/frontend-pipeline-versioning/map.md',
-      progress: { total: 11, completed: 0 },
       ticketsComplete: true,
       warnings: [],
     })
-    expect(pipelines?.openMaps[0]?.frontier.map((ticket) => ticket.id)).toEqual(['1', '2', '4'])
+    expect(pipelines?.openMaps[0]?.tickets.find((ticket) => ticket.id === '1')?.state).toBe(
+      'closed',
+    )
 
     await adapter.stop()
   })

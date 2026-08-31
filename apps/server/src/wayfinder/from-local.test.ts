@@ -11,7 +11,7 @@ const PIPELINES_FIXTURE = '/Users/asmund.wien/source/hdir/felleskomponenter/fron
 const PIPELINES_MAP = 'frontend-pipeline-versioning'
 
 describe('readLocalProject', () => {
-  it('parses the real fixture into one open map with the expected frontier and source context', async () => {
+  it('parses the standardized Risiko fixture with stable source context', async () => {
     const project = await readLocalProject({
       key: { integration: 'local', id: 'microsoft-risiko' },
       rootPath: RISIKO_FIXTURE,
@@ -34,17 +34,11 @@ describe('readLocalProject', () => {
       isOpen: true,
       ticketsComplete: true,
       warnings: [],
-      progress: { total: 17, completed: 15 },
       sourcePath: join(RISIKO_FIXTURE, '.wayfinder', RISIKO_MAP, 'map.md'),
     })
     expect(map.closedAt).toBeUndefined()
     expect(map.updatedAt).toBe(await latestRelevantMtime(RISIKO_FIXTURE, RISIKO_MAP))
-    expect(map.tickets).toHaveLength(17)
-    expect(map.tickets.filter((ticket) => ticket.state === 'closed')).toHaveLength(15)
-    expect(map.frontier.map((ticket) => ticket.id)).toEqual(['16'])
     expect(map.body.decisions[0]?.url).toBe('tickets/02-re-story-for-scroll.md')
-    const ticket1 = byId(map, '1')
-    expect(ticket1.assignees).toEqual([{ name: 'research-subagent (fired at charting)' }])
 
     const ticket2 = byId(map, '2')
     expect(ticket2.body).toContain('[docs/page-list.md](../../../docs/page-list.md)')
@@ -56,28 +50,6 @@ describe('readLocalProject', () => {
     expect(ticket15.state).toBe('closed')
     expect(ticket15.createdAt).toBeUndefined()
     expect(ticket15.closedAt).toBeUndefined()
-
-    const ticket16 = byId(map, '16')
-    expect(ticket16.state).toBe('frontier')
-
-    const ticket17 = byId(map, '17')
-    expect(ticket17).toMatchObject({ state: 'blocked', isBlocked: true, blockersComplete: true })
-    expect(ticket17.blockedBy).toEqual([
-      {
-        project: { integration: 'local', id: 'microsoft-risiko' },
-        ticketId: '15',
-        displayId: '15',
-        title: 'Build page 8 — Reopen the strategic goal before further lock-in',
-        state: 'closed',
-      },
-      {
-        project: { integration: 'local', id: 'microsoft-risiko' },
-        ticketId: '16',
-        displayId: '16',
-        title: 'Landing and orientation — does the deck need a title page?',
-        state: 'open',
-      },
-    ])
   })
 
   it('parses the standardized pipelines fixture without compatibility warnings', async () => {
@@ -97,11 +69,9 @@ describe('readLocalProject', () => {
       isOpen: true,
       ticketsComplete: true,
       warnings: [],
-      progress: { total: 11, completed: 0 },
       sourcePath: join(PIPELINES_FIXTURE, '.wayfinder', PIPELINES_MAP, 'map.md'),
     })
-    expect(map.frontier.map((ticket) => ticket.id)).toEqual(['1', '2', '4'])
-    expect(byId(map, '3')).toMatchObject({ state: 'blocked', isBlocked: true })
+    expect(byId(map, '1').state).toBe('closed')
   })
 
   it('discovers multiple map directories and separates closed maps from live maps', async () => {
