@@ -12,6 +12,7 @@ import {
 } from '../router.ts'
 import { useRoadmap } from '../store/roadmap-provider.tsx'
 import { activeMapOf } from './active-map.ts'
+import { InlineAutomationMark } from './map/atoms/automation-mark.tsx'
 import { MapChild, sameSelection } from './map/map-child.tsx'
 import { Panel, type PanelAutomation } from './map/panel.tsx'
 import { ledgerSequence } from './map/sequence.ts'
@@ -361,8 +362,14 @@ function ProjectHead({
       </p>
       {hasAutomationEvidence && (
         <p className="project-automation-legend muted small">
-          <span className="automation-legend is-classification">◆ Classification</span>
-          <span className="automation-legend is-wayfinder">◆ Wayfinder and Session</span>
+          <span className="automation-legend is-classification">
+            <InlineAutomationMark stage="classification" />
+            Classification
+          </span>
+          <span className="automation-legend is-wayfinder">
+            <InlineAutomationMark stage="wayfinder" />
+            Wayfinder and Session
+          </span>
         </p>
       )}
     </header>

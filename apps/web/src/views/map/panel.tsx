@@ -19,6 +19,7 @@ import { useState } from 'react'
 import type { ResolvedSelection } from '../../router.ts'
 import { stripInlineMarkdown } from '../gist.ts'
 import './map.css'
+import { InlineTicketMark } from './atoms/ticket-mark.tsx'
 import { automationEvidenceFor } from './automation-presentation.ts'
 import { type ProseLinkTarget, resolveProseLink } from './link-targets.ts'
 import { Prose } from './prose.tsx'
@@ -258,7 +259,8 @@ function TicketContent({
       <SourceButton url={ticket.url} label="View item in source" />
       <p className="panel-item-title">{ticket.title}</p>
       <p className="panel-item-state" style={{ color: meta.color }}>
-        {meta.glyph} {meta.word}
+        <InlineTicketMark ticket={ticket} type={type} />
+        {meta.word}
         {assignee !== undefined ? ` · ${assignee}` : ''}
         {ticket.closedAt !== undefined ? ` · ${shortDate(ticket.closedAt)}` : ''}
       </p>
@@ -695,6 +697,7 @@ export function ItemLink({
 
   if (local) {
     const meta = STATE_META[local.state]
+    const type = ticketTypeOf(local.typeEvidence)
     return (
       <button
         type="button"
@@ -703,7 +706,8 @@ export function ItemLink({
       >
         <span className="item-link-title">{local.title}</span>
         <span className="item-link-state" style={{ color: meta.color }}>
-          {meta.glyph} {meta.word}
+          <InlineTicketMark ticket={local} type={type} />
+          {meta.word}
         </span>
       </button>
     )

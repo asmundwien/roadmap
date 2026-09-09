@@ -7,6 +7,7 @@ import {
   type WayfinderMap,
 } from '@roadmap/contracts'
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { DestinationMark } from './atoms/destination-mark.tsx'
 import {
   type AutomationTag,
   automationEvidenceFor,
@@ -14,9 +15,10 @@ import {
 } from './automation-presentation.ts'
 import { buildLedger, type Ledger, type LedgerEdge } from './geometry.ts'
 import './map.css'
+import { TicketMark } from './atoms/ticket-mark.tsx'
 import { type LedgerSelection, scopePlan } from './sequence.ts'
 import { STATE_META } from './state-meta.ts'
-import { MinorTicketNode, TicketNode, ticketNodeTextX } from './ticket-node.tsx'
+import { TicketNode, ticketNodeTextX } from './ticket-node.tsx'
 
 const EXT = 800
 const STATUS_MARK_X_OFFSET = 5
@@ -221,9 +223,10 @@ export function MapLedger({
                 x={titleX}
                 baselineY={y - 4}
               />
-              <MinorTicketNode
+              <TicketMark
                 ticket={ticket}
                 type={type}
+                variant="minor"
                 x={titleX + STATUS_MARK_X_OFFSET}
                 y={y + STATUS_MARK_Y_OFFSET}
               />
@@ -289,16 +292,7 @@ export function MapLedger({
           </text>
         ))}
 
-        <circle
-          cx={ledger.gutterX}
-          cy={ledger.destY}
-          r="18"
-          fill="var(--goal)"
-          fillOpacity="0.18"
-        />
-        <text x={ledger.gutterX} y={ledger.destY + 7} textAnchor="middle" className="flag">
-          ⚑
-        </text>
+        <DestinationMark x={ledger.gutterX} y={ledger.destY} />
         <text x={ledger.textX} y={ledger.destTextTop - 14} className="goal-caption">
           the destination
         </text>

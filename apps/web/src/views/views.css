@@ -163,6 +163,9 @@
 }
 
 .automation-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25em;
   font-weight: 600;
 }
 

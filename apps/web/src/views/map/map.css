@@ -105,40 +105,43 @@
  * same tracker-state and ticket-type design beside the status word. Automation evidence stays
  * separate because it reports Roadmap activity rather than tracker state. */
 .ticket-node {
-  --node-type: var(--muted);
-  --node-state: var(--state-closed);
   pointer-events: none;
 }
 
-.ticket-node.type-research {
+.ticket-mark {
+  --node-type: var(--muted);
+  --node-state: var(--state-closed);
+}
+
+.ticket-mark.type-research {
   --node-type: var(--type-research);
 }
 
-.ticket-node.type-prototype {
+.ticket-mark.type-prototype {
   --node-type: var(--type-prototype);
 }
 
-.ticket-node.type-grilling {
+.ticket-mark.type-grilling {
   --node-type: var(--type-grilling);
 }
 
-.ticket-node.type-task {
+.ticket-mark.type-task {
   --node-type: var(--type-task);
 }
 
-.ticket-node.state-frontier {
+.ticket-mark.state-frontier {
   --node-state: var(--state-frontier);
 }
 
-.ticket-node.state-claimed {
+.ticket-mark.state-claimed {
   --node-state: var(--state-claimed);
 }
 
-.ticket-node.state-blocked {
+.ticket-mark.state-blocked {
   --node-state: var(--state-blocked);
 }
 
-.ticket-node.state-closed {
+.ticket-mark.state-closed {
   --node-state: var(--fg);
 }
 
@@ -149,14 +152,14 @@
 }
 
 .major-node .node-shape,
-.data-diamond .tag-shape {
+.data-diamond .automation-mark {
   transform-box: fill-box;
   transform-origin: center;
   transition: transform 0.12s ease-out;
 }
 
 .major-node:hover .node-shape,
-.data-diamond:hover .tag-shape {
+.data-diamond:hover .automation-mark {
   transform: scale(1.14);
 }
 
@@ -170,16 +173,24 @@
 .node-mark.is-minor .diamond-face {
   stroke-width: 0.8px;
 }
+.inline-ticket-mark {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-right: 0.25em;
+  overflow: visible;
+  vertical-align: -0.13em;
+}
 
-.ticket-node.state-frontier .diamond-face {
+.ticket-mark.state-frontier .diamond-face {
   fill: var(--node-state);
 }
 
-.ticket-node.state-claimed .diamond-face {
+.ticket-mark.state-claimed .diamond-face {
   fill: var(--bg);
 }
 
-.ticket-node.state-closed .diamond-face {
+.ticket-mark.state-closed .diamond-face {
   fill: var(--fg);
   stroke: var(--fg);
 }
@@ -206,8 +217,8 @@
   font-weight: 900;
 }
 
-.ticket-node.state-frontier .type-rune,
-.ticket-node.state-closed .type-rune {
+.ticket-mark.state-frontier .type-rune,
+.ticket-mark.state-closed .type-rune {
   fill: var(--bg);
   stroke: color-mix(in srgb, var(--node-state) 82%, var(--fg));
 }
@@ -223,30 +234,35 @@
   stroke-width: 0.6px;
 }
 
-.ticket-node.state-frontier .type-corners path,
-.ticket-node.state-closed .type-corners path {
+.ticket-mark.state-frontier .type-corners path,
+.ticket-mark.state-closed .type-corners path {
   stroke: var(--bg);
 }
 
-.data-diamond.stage-classification {
+.automation-mark.stage-classification {
   --tag-color: var(--automation-classification);
 }
 
-.data-diamond.stage-wayfinder {
+.automation-mark.stage-wayfinder {
   --tag-color: var(--automation-wayfinder);
 }
 
-.data-diamond .tag-face {
+.automation-mark .tag-face {
   fill: var(--tag-color);
   stroke: var(--bg);
   stroke-width: 1px;
   stroke-linejoin: miter;
 }
 
-.data-diamond .tag-glyph {
+.automation-mark .tag-glyph {
   fill: var(--bg);
   font-size: 7.25px;
   font-weight: 900;
+}
+.inline-automation-mark {
+  width: 0.8em;
+  height: 0.8em;
+  overflow: visible;
 }
 
 .node-tooltip {
@@ -292,7 +308,12 @@
   text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent);
 }
 
-.flag {
+.destination-halo {
+  fill: var(--goal);
+  fill-opacity: 0.18;
+}
+
+.destination-glyph {
   font-size: 20px;
   fill: var(--goal);
 }
@@ -570,26 +591,16 @@
   box-shadow: inset 0 0 0 2px var(--ring);
 }
 
-/*
- * The flag: the ledger's destination mark, recreated exactly at its rendered size — the 18-unit
- * halo (45px), goal fill at 0.18 flattened opaque onto the surface, the 20-unit ⚑ (25px) in
- * goal. Identical for every map, open or closed, reached or ahead.
- */
+/* The same destination atom marks the ledger endpoint and every map header. */
 .fl-flag {
   position: absolute;
   left: 55px;
   top: 50%;
-  transform: translate(-50%, -50%);
+  z-index: 1;
   width: 45px;
   height: 45px;
-  border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 25px;
-  color: var(--goal);
-  background: color-mix(in srgb, var(--goal) 18%, var(--bg));
-  z-index: 1;
+  overflow: visible;
+  transform: translate(-50%, -50%);
 }
 
 .fl-body {
@@ -1248,7 +1259,7 @@
   .panel-rail,
   .panel-rail-inner,
   .major-node .node-shape,
-  .data-diamond .tag-shape,
+  .data-diamond .automation-mark,
   .node-tooltip {
     transition: none;
   }
