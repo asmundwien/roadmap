@@ -21,7 +21,7 @@ function subIssue(overrides: Partial<RawSubIssue> & { number: number }): RawSubI
 function fetchedMap(children: RawSubIssue[], overrides: Partial<FetchedMap> = {}): FetchedMap {
   return {
     ref: { owner: 'a', repo: 'r', nameWithOwner: 'a/r', number: 1 },
-    repository: { nameWithOwner: 'a/r', isPrivate: true, issue: null },
+    repository: { nameWithOwner: 'a/r', issue: null },
     issue: {
       number: 1,
       title: 'A map',
@@ -214,7 +214,7 @@ describe('toProjects', () => {
     const elsewhere: FetchedMap = {
       ...open,
       ref: { owner: 'a', repo: 'other', nameWithOwner: 'a/other', number: 1 },
-      repository: { nameWithOwner: 'a/other', isPrivate: false, issue: null },
+      repository: { nameWithOwner: 'a/other', issue: null },
     }
 
     const projects = toProjects([closed, open, elsewhere])
@@ -224,7 +224,6 @@ describe('toProjects', () => {
     expect(repo?.key).toEqual({ integration: 'github', id: 'a/r' })
     expect(repo?.openMaps.map((map) => map.id)).toEqual(['1'])
     expect(repo?.closedMaps.map((map) => map.id)).toEqual(['7'])
-    expect(repo?.visibility).toBe('private')
   })
 
   it('orders open maps most recently updated first, so the head is the active map', () => {
@@ -273,7 +272,7 @@ describe('toProjects', () => {
     const history: FetchedMap = {
       ...live,
       ref: { owner: 'a', repo: 'aaa-archive', nameWithOwner: 'a/aaa-archive', number: 1 },
-      repository: { nameWithOwner: 'a/aaa-archive', isPrivate: false, issue: null },
+      repository: { nameWithOwner: 'a/aaa-archive', issue: null },
       issue: { ...live.issue, state: 'CLOSED' },
     }
 

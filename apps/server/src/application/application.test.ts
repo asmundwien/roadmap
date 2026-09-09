@@ -231,7 +231,6 @@ describe('RoadmapApplication', () => {
     const githubProject: Project = {
       key: { integration: 'github', id: 'stable/route' },
       name: 'acme/renamed',
-      visibility: 'private',
       sourceUrl: 'https://github.com/acme/renamed',
       openMaps: [],
       closedMaps: [],

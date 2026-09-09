@@ -340,14 +340,13 @@ export function createGitHubAdapter(options: GitHubAdapterOptions): GitHubAdapte
 
 function toRegisteredProject(
   registration: GitHubRegistration,
-  repository: { nameWithOwner: string; visibility: 'public' | 'private' },
+  repository: { nameWithOwner: string },
   fetched: readonly FetchedMap[],
   resolveProject: (nameWithOwner: string) => ProjectKey | undefined,
 ): Project {
   const project: Project = {
     key: registration.key,
     name: registration.displayName ?? repository.nameWithOwner,
-    visibility: repository.visibility,
     sourceUrl: `https://github.com/${repository.nameWithOwner}`,
     openMaps: [],
     closedMaps: [],

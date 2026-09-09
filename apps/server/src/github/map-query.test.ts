@@ -11,7 +11,6 @@ const REFS: MapRef[] = [
 function repository(nameWithOwner: string) {
   return {
     nameWithOwner,
-    isPrivate: true,
     issue: {
       number: 1,
       title: 'A map',
@@ -88,7 +87,7 @@ describe('readMapsResponse', () => {
 
   it('treats a repo whose issue vanished as missing', () => {
     const result = readMapsResponse([REFS[0] as MapRef], {
-      m0: { nameWithOwner: 'a/roadmap', isPrivate: true, issue: null },
+      m0: { nameWithOwner: 'a/roadmap', issue: null },
     })
 
     expect(result.maps).toEqual([])

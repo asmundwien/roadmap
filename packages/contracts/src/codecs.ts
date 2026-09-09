@@ -239,7 +239,6 @@ const wayfinderMap = object({
 const project = object({
   key: required(projectKey),
   name: required(stringValue),
-  visibility: optional(literal('public', 'private')),
   openMaps: required(arrayOf(wayfinderMap)),
   closedMaps: required(arrayOf(wayfinderMap)),
   warnings: required(arrayOf(stringValue)),

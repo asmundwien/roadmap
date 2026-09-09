@@ -41,7 +41,6 @@ export function ProjectScreen({ route }: { route: Extract<Route, { screen: 'proj
   const project = registration
     ? {
         ...registration,
-        ...(source?.visibility === undefined ? {} : { visibility: source.visibility }),
         ...(source?.sourcePath === undefined ? {} : { sourcePath: source.sourcePath }),
       }
     : source
@@ -351,7 +350,6 @@ function ProjectHead({
       <h1>
         {title}
         <span className="badge">{integrationLabel(project.key.integration)}</span>
-        {project.visibility === 'private' && <span className="badge">private</span>}
       </h1>
       <p className="muted small">
         {subtitle ? `${subtitle} · ` : ''}

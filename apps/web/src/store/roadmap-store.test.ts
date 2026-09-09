@@ -29,7 +29,6 @@ function project(name: string): Project {
   return {
     key: { integration: 'github', id: name },
     name,
-    visibility: 'public',
     openMaps: [],
     closedMaps: [],
     warnings: [],

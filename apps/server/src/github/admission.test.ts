@@ -16,12 +16,10 @@ const execFileAsync = promisify(execFile)
 const REPOSITORY: RepositoryIdentity = {
   id: '42',
   nameWithOwner: 'Acme/Roadmap',
-  visibility: 'private',
 }
 const UPSTREAM: RepositoryIdentity = {
   id: '99',
   nameWithOwner: 'Upstream/Roadmap',
-  visibility: 'public',
 }
 
 const CONFIGURATION: RoadmapConfiguration = {
@@ -99,7 +97,6 @@ function repositoryClient(repositories: RepositoryIdentity[] = [REPOSITORY]): Gi
       return {
         id: repository.id,
         full_name: repository.nameWithOwner,
-        private: repository.visibility === 'private',
       } as T
     },
   }

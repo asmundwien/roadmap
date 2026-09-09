@@ -10,7 +10,6 @@ import type { RawMapIssue, RawRepository } from './map-query.ts'
 interface FakeRepository {
   id: string
   nameWithOwner: string
-  private?: boolean
   maps: Map<number, RawMapIssue | null>
   unavailable?: boolean
   failure?: GitHubError
@@ -96,7 +95,6 @@ function fakeClient(repositories: FakeRepository[], remaining = 200) {
       response[`m${index}`] = repository
         ? {
             nameWithOwner,
-            isPrivate: repository.private ?? false,
             issue: repository.maps.get(number) ?? null,
           }
         : null
@@ -113,7 +111,6 @@ function fakeClient(repositories: FakeRepository[], remaining = 200) {
         return {
           id: repository.id,
           full_name: repository.nameWithOwner,
-          private: repository.private ?? false,
         } as T
       }
       const issues = /^\/repos\/([^/]+)\/([^/]+)\/issues\?/.exec(path)
@@ -148,7 +145,6 @@ describe('createGitHubAdapter', () => {
     const first = {
       id: '1',
       nameWithOwner: 'acme/renamed',
-      private: true,
       maps: new Map([[16, rawMap(16, 'Current map')]]),
     }
     const empty = { id: '2', nameWithOwner: 'acme/empty', maps: new Map<number, RawMapIssue>() }
@@ -190,9 +186,9 @@ describe('createGitHubAdapter', () => {
     const renamed = updates.at(-1)?.projects.find((project) => project.key.id === 'acme/original')
     expect(renamed).toMatchObject({
       name: 'acme/renamed',
-      visibility: 'private',
       sourceUrl: 'https://github.com/acme/renamed',
     })
+    expect(renamed).not.toHaveProperty('visibility')
     expect(renamed?.openMaps[0]).toMatchObject({
       project: { integration: 'github', id: 'acme/original' },
       title: 'Current map',

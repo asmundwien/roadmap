@@ -58,7 +58,6 @@ function snapshot(maps: WayfinderMap[]): Snapshot {
       {
         key: { integration: 'github', id: 'a/roadmap' },
         name: 'a/roadmap',
-        visibility: 'public',
         openMaps: maps,
         closedMaps: [],
         warnings: [],

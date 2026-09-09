@@ -69,7 +69,6 @@ export interface RawMapIssue {
 
 export interface RawRepository {
   nameWithOwner: string
-  isPrivate: boolean
   issue: RawMapIssue | null
 }
 
@@ -136,7 +135,6 @@ export function buildMapsQuery(refs: MapRef[]): {
     blocks.push(
       `  m${index}: repository(owner: $o${index}, name: $n${index}) {\n` +
         '    nameWithOwner\n' +
-        '    isPrivate\n' +
         `    issue(number: $i${index}) { ...MapFields }\n` +
         '  }',
     )

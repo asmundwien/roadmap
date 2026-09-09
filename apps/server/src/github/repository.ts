@@ -3,7 +3,6 @@ import type { GitHubClient } from './client.ts'
 export interface RepositoryIdentity {
   id: string
   nameWithOwner: string
-  visibility: 'public' | 'private'
 }
 
 export interface MapRef {
@@ -78,6 +77,5 @@ function decodeRepository(input: unknown): RepositoryIdentity {
   return {
     id: String(id),
     nameWithOwner,
-    visibility: input.private === true ? 'private' : 'public',
   }
 }

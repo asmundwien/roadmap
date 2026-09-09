@@ -22,7 +22,6 @@ describe('GitHub repositories', () => {
     await expect(readRepository(client(restGet), '42')).resolves.toEqual({
       id: '42',
       nameWithOwner: 'acme/renamed',
-      visibility: 'private',
     })
     expect(paths).toEqual(['/repositories/42'])
   })

@@ -150,7 +150,6 @@ export interface WayfinderMap {
 export interface Project {
   key: ProjectKey
   name: string
-  visibility?: 'public' | 'private'
   openMaps: WayfinderMap[]
   closedMaps: WayfinderMap[]
   /** Human drift signals for the project itself. */

@@ -91,7 +91,6 @@ export function toProjects(fetched: readonly FetchedMap[]): Project[] {
       project = {
         key: githubProjectKey(key),
         name: key,
-        visibility: entry.repository.isPrivate ? 'private' : 'public',
         openMaps: [],
         closedMaps: [],
         warnings: [],

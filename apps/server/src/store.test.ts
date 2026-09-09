@@ -26,7 +26,6 @@ function fakeAdapter(type: WayfinderAdapter['type'], ready: Promise<void> = Prom
 const githubProject = {
   key: { integration: 'github' as const, id: 'a/roadmap' },
   name: 'a/roadmap',
-  visibility: 'public' as const,
   openMaps: [],
   closedMaps: [],
   warnings: [],
