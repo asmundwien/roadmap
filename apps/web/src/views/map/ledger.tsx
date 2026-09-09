@@ -16,9 +16,12 @@ import { buildLedger, type Ledger, type LedgerEdge } from './geometry.ts'
 import './map.css'
 import { type LedgerSelection, scopePlan } from './sequence.ts'
 import { STATE_META } from './state-meta.ts'
-import { TicketNode, ticketNodeTextX } from './ticket-node.tsx'
+import { MinorTicketNode, TicketNode, ticketNodeTextX } from './ticket-node.tsx'
 
 const EXT = 800
+const STATUS_MARK_X_OFFSET = 5
+const STATUS_MARK_Y_OFFSET = 7.5
+const STATUS_TEXT_X_OFFSET = 13
 
 function pressProps(
   select: () => void,
@@ -218,8 +221,19 @@ export function MapLedger({
                 x={titleX}
                 baselineY={y - 4}
               />
-              <text x={titleX} y={y + 11} className="row-word" fill={meta.color}>
-                {meta.glyph} {meta.word}
+              <MinorTicketNode
+                ticket={ticket}
+                type={type}
+                x={titleX + STATUS_MARK_X_OFFSET}
+                y={y + STATUS_MARK_Y_OFFSET}
+              />
+              <text
+                x={titleX + STATUS_TEXT_X_OFFSET}
+                y={y + 11}
+                className="row-word"
+                fill={meta.color}
+              >
+                {meta.word}
                 {assignee !== undefined ? ` · ${assignee}` : ''}
               </text>
             </g>

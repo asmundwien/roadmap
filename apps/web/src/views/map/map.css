@@ -101,8 +101,9 @@
   fill: var(--chip);
 }
 
-/* The accepted ticket-node language: one angular tracker-state mark with ticket-type runes and
- * corners, followed by independent Classification and Wayfinder evidence tags. */
+/* Ticket marks share one renderer at two sizes. Major marks lead each row; minor marks repeat the
+ * same tracker-state and ticket-type design beside the status word. Automation evidence stays
+ * separate because it reports Roadmap activity rather than tracker state. */
 .ticket-node {
   --node-type: var(--muted);
   --node-state: var(--state-closed);
@@ -141,29 +142,33 @@
   --node-state: var(--fg);
 }
 
-.main-diamond,
+.major-node,
 .data-diamond {
   pointer-events: all;
   cursor: help;
 }
 
-.main-diamond .node-shape,
+.major-node .node-shape,
 .data-diamond .tag-shape {
   transform-box: fill-box;
   transform-origin: center;
   transition: transform 0.12s ease-out;
 }
 
-.main-diamond:hover .node-shape,
+.major-node:hover .node-shape,
 .data-diamond:hover .tag-shape {
   transform: scale(1.14);
 }
 
-.main-diamond .diamond-face {
+.node-mark .diamond-face {
   fill: color-mix(in srgb, var(--node-state) 13%, var(--bg));
   stroke: var(--node-state);
   stroke-width: 2.5px;
   stroke-linejoin: miter;
+}
+
+.node-mark.is-minor .diamond-face {
+  stroke-width: 0.8px;
 }
 
 .ticket-node.state-frontier .diamond-face {
@@ -179,20 +184,20 @@
   stroke: var(--fg);
 }
 
-.main-diamond .frontier-field {
+.node-mark .frontier-field {
   fill: color-mix(in srgb, var(--state-frontier) 12%, transparent);
 }
 
-.main-diamond .claimed-half,
-.main-diamond .claimed-corner {
+.node-mark .claimed-half,
+.node-mark .claimed-corner {
   fill: var(--state-claimed);
 }
 
-.main-diamond .blocked-corner {
+.node-mark .blocked-corner {
   fill: var(--state-blocked);
 }
 
-.main-diamond .type-rune {
+.node-mark .type-rune {
   fill: var(--node-type);
   paint-order: stroke;
   stroke: var(--bg);
@@ -207,11 +212,15 @@
   stroke: color-mix(in srgb, var(--node-state) 82%, var(--fg));
 }
 
-.main-diamond .type-corners path {
+.node-mark .type-corners path {
   fill: none;
   stroke: var(--node-type);
   stroke-width: 1.8px;
   stroke-linecap: square;
+}
+
+.node-mark.is-minor .type-corners path {
+  stroke-width: 0.6px;
 }
 
 .ticket-node.state-frontier .type-corners path,
@@ -246,7 +255,7 @@
   transition: opacity 0.08s linear;
 }
 
-.main-diamond:hover .node-tooltip,
+.major-node:hover .node-tooltip,
 .data-diamond:hover .node-tooltip {
   opacity: 1;
 }
@@ -1238,7 +1247,7 @@
   .fold,
   .panel-rail,
   .panel-rail-inner,
-  .main-diamond .node-shape,
+  .major-node .node-shape,
   .data-diamond .tag-shape,
   .node-tooltip {
     transition: none;
