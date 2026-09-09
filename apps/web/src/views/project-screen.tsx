@@ -15,7 +15,6 @@ import { activeMapOf } from './active-map.ts'
 import { MapChild, sameSelection } from './map/map-child.tsx'
 import { Panel, type PanelAutomation } from './map/panel.tsx'
 import { ledgerSequence } from './map/sequence.ts'
-import { LEGEND_ORDER, STATE_META } from './map/state-meta.ts'
 import { integrationLabel } from './project-meta.ts'
 import './views.css'
 
@@ -339,7 +338,6 @@ function ProjectHead({
 }) {
   const open = project.openMaps.length
   const closed = project.closedMaps.length
-  const tickets = [...project.openMaps, ...project.closedMaps].flatMap((map) => map.tickets)
   const title = githubRepoName(project) ?? project.name
   const hasAutomationEvidence = automationEvidence.some(
     (evidence) =>
@@ -363,28 +361,12 @@ function ProjectHead({
             ? `resting · all ${maps(closed)} closed`
             : 'registered · no Wayfinder maps yet'}
       </p>
-      <p className="project-legend muted small">
-        {LEGEND_ORDER.map((state) => (
-          <span key={state} className="legend-item">
-            <i aria-hidden="true" style={{ color: STATE_META[state].color }}>
-              {STATE_META[state].glyph}
-            </i>{' '}
-            {STATE_META[state].word} · {tickets.filter((t) => t.state === state).length}
-          </span>
-        ))}
-      </p>
-      <p className="project-node-legend muted small">
-        <span>R + 1 corner research</span>
-        <span>P + 2 corners prototype</span>
-        <span>G + 3 corners grilling</span>
-        <span>T + 4 corners task</span>
-        {hasAutomationEvidence && (
-          <>
-            <span className="automation-legend is-classification">◆ Classification</span>
-            <span className="automation-legend is-wayfinder">◆ Wayfinder and Session</span>
-          </>
-        )}
-      </p>
+      {hasAutomationEvidence && (
+        <p className="project-automation-legend muted small">
+          <span className="automation-legend is-classification">◆ Classification</span>
+          <span className="automation-legend is-wayfinder">◆ Wayfinder and Session</span>
+        </p>
+      )}
     </header>
   )
 }
