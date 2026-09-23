@@ -416,7 +416,6 @@ function MapTrace({
           automationEvidence={automationEvidence}
           map={map}
           open={openId === map.id}
-          solo={trace.length === 1}
           last={i === trace.length - 1}
           onSelect={(item) => onPickItem(map, item)}
           onUnfold={() => unfold(map.id)}

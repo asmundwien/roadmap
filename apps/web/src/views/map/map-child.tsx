@@ -19,7 +19,6 @@ export function MapChild({
   map,
   automationEvidence,
   open,
-  solo,
   last,
   onSelect,
   onUnfold,
@@ -31,8 +30,6 @@ export function MapChild({
   map: WayfinderMap
   automationEvidence: readonly AutomationEvidence[]
   open: boolean
-  /** A single-map project has nothing to open or close against — no accordion, content only. */
-  solo: boolean
   /** The earliest map is the journey's start: its trunk ends at the last decision, every other
    * map runs its trunk to the svg's edge, into the map below. */
   last: boolean
@@ -79,7 +76,7 @@ export function MapChild({
   )
 
   const charted = map.isOpen ? ' is-charted' : ''
-  const expanded = solo || open
+  const expanded = open
   const activate = () => {
     if (!expanded && !panelOpen) {
       onUnfold()
@@ -99,12 +96,12 @@ export function MapChild({
           tabIndex={isMapSelected || entry ? 0 : -1}
           aria-label={`${map.title} — the destination`}
           aria-current={isMapSelected ? 'true' : undefined}
-          aria-expanded={solo ? undefined : open}
+          aria-expanded={open}
           onClick={activate}
         />
         {header}
       </div>
-      {solo ? child : <Fold open={open}>{child}</Fold>}
+      <Fold open={open}>{child}</Fold>
     </article>
   )
 }
