@@ -1,5 +1,6 @@
 import {
   automationSettingsHash,
+  componentsHash,
   connectionSettingsHash,
   overviewHash,
   projectSettingsHash,
@@ -42,6 +43,9 @@ export function SiteHeader({ route }: { route: Route }) {
           href={automationSettingsHash}
         >
           Automation
+        </a>
+        <a className={route.screen === 'components' ? 'is-current' : ''} href={componentsHash}>
+          Components
         </a>
       </nav>
       <span className={`conn conn-${transport}`}>

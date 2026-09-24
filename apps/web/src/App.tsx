@@ -1,5 +1,6 @@
 import { useRoute } from './router.ts'
 import { AutomationSettings } from './views/automation-settings.tsx'
+import { ComponentCatalog } from './views/component-catalog.tsx'
 import { ConnectionSettings } from './views/connection-settings.tsx'
 import { ProjectList } from './views/project-list.tsx'
 import { ProjectScreen } from './views/project-screen.tsx'
@@ -18,6 +19,7 @@ export function App() {
       {route.screen === 'project-settings' && <ProjectSettings />}
       {route.screen === 'connection-settings' && <ConnectionSettings />}
       {route.screen === 'automation-settings' && <AutomationSettings />}
+      {route.screen === 'components' && <ComponentCatalog />}
     </>
   )
 }
