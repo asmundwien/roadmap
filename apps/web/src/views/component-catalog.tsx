@@ -1,26 +1,31 @@
-import type { TicketState, TicketType } from '@roadmap/contracts'
 import type { ReactNode } from 'react'
 import { Action, ActionGroup } from '../components/action/action.tsx'
 import { Alert } from '../components/alert/alert.tsx'
 import { AutomationMark } from '../components/automation-mark/automation-mark.tsx'
 import { Badge } from '../components/badge/badge.tsx'
 import { DestinationMark } from '../components/destination-mark/destination-mark.tsx'
-import { RoadmapTicketMark } from './map/roadmap-ticket-mark.tsx'
-import { STATE_META } from './map/state-meta.ts'
+import {
+  TicketMark,
+  type TicketMarkCornerCount,
+  type TicketMarkFill,
+} from '../components/ticket-mark/ticket-mark.tsx'
+import type { Variant } from '../components/variant.ts'
 import './component-catalog.css'
 
-const TICKET_TYPES = [
-  'research',
-  'prototype',
-  'grilling',
-  'task',
-] as const satisfies readonly TicketType[]
-const TICKET_STATES = [
-  'frontier',
-  'claimed',
-  'blocked',
-  'closed',
-] as const satisfies readonly TicketState[]
+const TICKET_MARK_FILLS = ['none', 'half', 'fill'] as const satisfies readonly TicketMarkFill[]
+const TICKET_MARK_CORNERS = [0, 1, 2, 3, 4] as const satisfies readonly TicketMarkCornerCount[]
+const TICKET_MARK_VARIANT_BY_FILL = {
+  none: 'neutral',
+  half: 'info',
+  fill: 'success',
+} as const satisfies Record<TicketMarkFill, Variant>
+const TINY_MARK_VARIANTS = [
+  'neutral',
+  'accent',
+  'warning',
+  'danger',
+  'success',
+] as const satisfies readonly Variant[]
 
 const PALETTE = [
   ['Background', '--bg'],
@@ -61,45 +66,42 @@ export function ComponentCatalog() {
       </CatalogSection>
 
       <CatalogSection
-        title="Ticket marks"
-        description="Rows are work types. Columns are tracker states."
+        title="Ticket mark"
+        description="A diamond mark with independent color, accent, fill, corner, content, and size controls. Rows show fill; columns show corner count."
       >
         <div className="catalog-mark-matrix">
           <span />
-          {TICKET_STATES.map((state) => (
-            <strong className="catalog-column-label" key={state}>
-              {state}
+          {TICKET_MARK_CORNERS.map((cornerCount) => (
+            <strong className="catalog-column-label" key={cornerCount}>
+              {cornerCount} {cornerCount === 1 ? 'corner' : 'corners'}
             </strong>
           ))}
-          {TICKET_TYPES.map((type) => (
-            <TicketMarkRow key={type} type={type} />
+          {TICKET_MARK_FILLS.map((fill) => (
+            <TicketMarkRow fill={fill} key={fill} />
           ))}
         </div>
       </CatalogSection>
 
       <CatalogSection
-        title="Tiny marks"
-        description="Tiny marks repeat tracker state and Automation evidence beside text."
+        title="Tiny ticket marks"
+        description="The tiny size fits inline text and omits content."
       >
         <div className="catalog-tiny-marks">
-          {TICKET_STATES.map((state) => {
-            const meta = STATE_META[state]
-            return (
-              <Badge variant={meta.variant} key={state}>
-                <RoadmapTicketMark state={state} type="task" size="tiny" />
-                {meta.word.slice(0, 1).toUpperCase()}
-                {meta.word.slice(1)}
-              </Badge>
-            )
-          })}
-          <Badge variant="violet">
-            <AutomationMark variant="inline" stage="classification" />
-            Classification
-          </Badge>
-          <Badge variant="teal">
-            <AutomationMark variant="inline" stage="wayfinder" />
-            Wayfinder
-          </Badge>
+          {TINY_MARK_VARIANTS.map((variant) => (
+            <Badge variant={variant} key={variant}>
+              <TicketMark
+                accent={variant}
+                cornerCount={0}
+                fill="fill"
+                size="tiny"
+                variant={variant}
+              >
+                {variant.slice(0, 1)}
+              </TicketMark>
+              {variant.slice(0, 1).toUpperCase()}
+              {variant.slice(1)}
+            </Badge>
+          ))}
         </div>
       </CatalogSection>
 
@@ -190,20 +192,32 @@ function CatalogSection({ title, description, children }: CatalogSectionProps) {
   )
 }
 
-type TicketMarkRowProps = { type: TicketType }
+type TicketMarkRowProps = { fill: TicketMarkFill }
 
-function TicketMarkRow({ type }: TicketMarkRowProps) {
+function TicketMarkRow({ fill }: TicketMarkRowProps) {
+  const variant = TICKET_MARK_VARIANT_BY_FILL[fill]
+
   return (
     <>
-      <strong className="catalog-row-label">{type}</strong>
-      {TICKET_STATES.map((state) => (
+      <strong className="catalog-row-label">{fill}</strong>
+      {TICKET_MARK_CORNERS.map((cornerCount) => (
         <svg
           className="catalog-ticket-mark"
           viewBox="-24 -24 48 48"
-          aria-label={`${type} ${state}`}
-          key={state}
+          aria-label={`${fill} fill with ${cornerCount} ${cornerCount === 1 ? 'corner' : 'corners'}`}
+          key={cornerCount}
         >
-          <RoadmapTicketMark state={state} type={type} size="major" x={0} y={0} />
+          <TicketMark
+            accent="warning"
+            cornerCount={cornerCount}
+            fill={fill}
+            size="major"
+            variant={variant}
+            x={0}
+            y={0}
+          >
+            {String(cornerCount)}
+          </TicketMark>
         </svg>
       ))}
     </>
