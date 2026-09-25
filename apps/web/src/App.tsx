@@ -1,10 +1,8 @@
 import { useRoute } from './router.ts'
-import { ComponentCatalog } from './views/catalog/component-catalog.tsx'
-import { ProjectScreen } from './views/map/project-screen.tsx'
-import { ProjectList } from './views/overview/project-list.tsx'
-import { AutomationSettings } from './views/settings/automation-settings.tsx'
-import { ConnectionSettings } from './views/settings/connection-settings.tsx'
-import { ProjectSettings } from './views/settings/project-settings.tsx'
+import { CatalogPage } from './views/catalog/page.tsx'
+import { MapPage } from './views/map/page.tsx'
+import { OverviewPage } from './views/overview/page.tsx'
+import { SettingsPage } from './views/settings/page.tsx'
 import { SiteHeader } from './views/shell/site-header.tsx'
 
 /** The persistent header frames Overview, settings, and existing Project/map routes. */
@@ -14,12 +12,12 @@ export function App() {
   return (
     <>
       <SiteHeader route={route} />
-      {route.screen === 'project' && <ProjectScreen route={route} />}
-      {route.screen === 'projects' && <ProjectList />}
-      {route.screen === 'project-settings' && <ProjectSettings />}
-      {route.screen === 'connection-settings' && <ConnectionSettings />}
-      {route.screen === 'automation-settings' && <AutomationSettings />}
-      {route.screen === 'components' && <ComponentCatalog />}
+      {route.screen === 'project' && <MapPage route={route} />}
+      {route.screen === 'projects' && <OverviewPage />}
+      {(route.screen === 'project-settings' ||
+        route.screen === 'connection-settings' ||
+        route.screen === 'automation-settings') && <SettingsPage route={route} />}
+      {route.screen === 'components' && <CatalogPage />}
     </>
   )
 }

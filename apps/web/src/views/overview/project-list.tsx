@@ -1,38 +1,45 @@
 import type { ReactNode } from 'react'
 import { Badge } from '../../components/badge/badge.tsx'
 import { connectionSettingsHash, projectHash } from '../../router.ts'
-import { useRoadmap } from '../../store/roadmap-provider.tsx'
 import { integrationLabel } from '../shared/project-meta.ts'
-import type { AttentionItem } from './project-presentation.ts'
-import { type ProjectPresentation, presentProjects } from './project-presentation.ts'
+import type {
+  AttentionItem,
+  ProjectPortfolio,
+  ProjectPresentation,
+} from './project-presentation.ts'
 import { formatMonth, formatRecency } from './recency.ts'
-import '../shared/views.css'
 
-/** The registration-led whole-product view: attention, active routes, ground covered, then fog. */
-export function ProjectList() {
-  const { transport, projects, connections, configuration, capturedAt } = useRoadmap()
-  const portfolio = presentProjects({ projects, connections, configuration })
+type OverviewHeaderProps = {
+  capturedAt: number | null
+  portfolio: ProjectPortfolio
+}
 
+export function OverviewHeader({ capturedAt, portfolio }: OverviewHeaderProps) {
   return (
-    <main className="shell overview-shell">
-      <header className="overview-head">
-        <h1>Roadmap</h1>
-        <p className="muted">
-          The whole of things
-          {capturedAt !== null && ` · updated ${formatClock(capturedAt)}`}
-        </p>
-        <div className="overview-legend">
-          <OverviewCount tone="decided" count={portfolio.projects.length} label="projects" />
-          <OverviewCount tone="active" count={portfolio.active.length} label="active" />
-          <OverviewCount tone="resting" count={portfolio.resting.length} label="at rest" />
-          <OverviewCount
-            tone="attention"
-            count={portfolio.attention.length}
-            label="need attention"
-          />
-        </div>
-      </header>
+    <header className="overview-head">
+      <h1>Roadmap</h1>
+      <p className="muted">
+        The whole of things
+        {capturedAt !== null && ` · updated ${formatClock(capturedAt)}`}
+      </p>
+      <div className="overview-legend">
+        <OverviewCount tone="decided" count={portfolio.projects.length} label="projects" />
+        <OverviewCount tone="active" count={portfolio.active.length} label="active" />
+        <OverviewCount tone="resting" count={portfolio.resting.length} label="at rest" />
+        <OverviewCount tone="attention" count={portfolio.attention.length} label="need attention" />
+      </div>
+    </header>
+  )
+}
 
+type OverviewConnectionStatusProps = {
+  capturedAt: number | null
+  transport: 'connecting' | 'live' | 'disconnected'
+}
+
+export function OverviewConnectionStatus({ capturedAt, transport }: OverviewConnectionStatusProps) {
+  return (
+    <>
       {transport === 'disconnected' && (
         <p className="banner" role="alert">
           Server unreachable — reconnecting.
@@ -43,48 +50,54 @@ export function ProjectList() {
       {transport === 'connecting' && capturedAt === null && (
         <p className="muted">Waiting for the server…</p>
       )}
+    </>
+  )
+}
 
-      <div className="overview-road">
-        {portfolio.attention.length > 0 && (
-          <OverviewSection label="Needs attention">
-            {portfolio.attention.map((item) => (
-              <AttentionRow key={item.key} item={item} />
-            ))}
-          </OverviewSection>
+type ProjectOverviewSectionsProps = { portfolio: ProjectPortfolio }
+
+export function ProjectOverviewSections({ portfolio }: ProjectOverviewSectionsProps) {
+  return (
+    <div className="overview-road">
+      {portfolio.attention.length > 0 && (
+        <OverviewSection label="Needs attention">
+          {portfolio.attention.map((item) => (
+            <AttentionRow key={item.key} item={item} />
+          ))}
+        </OverviewSection>
+      )}
+
+      <OverviewSection label="Active work · priority">
+        {portfolio.active.map((project) => (
+          <ActiveProjectRow key={projectKey(project)} presentation={project} />
+        ))}
+        {portfolio.active.length === 0 && (
+          <p className="overview-empty">No Projects have an open map.</p>
         )}
+      </OverviewSection>
 
-        <OverviewSection label="Active work · priority">
-          {portfolio.active.map((project) => (
-            <ActiveProjectRow key={projectKey(project)} presentation={project} />
-          ))}
-          {portfolio.active.length === 0 && (
-            <p className="overview-empty">No Projects have an open map.</p>
-          )}
-        </OverviewSection>
+      <OverviewSection label="Projects at rest">
+        {portfolio.resting.map((project) => (
+          <RestingProjectRow key={projectKey(project)} presentation={project} />
+        ))}
+        {portfolio.resting.length === 0 && (
+          <p className="overview-empty">No Projects are at rest.</p>
+        )}
+      </OverviewSection>
 
-        <OverviewSection label="Projects at rest">
-          {portfolio.resting.map((project) => (
-            <RestingProjectRow key={projectKey(project)} presentation={project} />
-          ))}
-          {portfolio.resting.length === 0 && (
-            <p className="overview-empty">No Projects are at rest.</p>
-          )}
-        </OverviewSection>
-
-        <OverviewSection label="Waiting for a first map">
-          {portfolio.waiting.map((project) => (
-            <WaitingProjectRow key={projectKey(project)} presentation={project} />
-          ))}
-          {portfolio.waiting.length === 0 && (
-            <p className="overview-empty">
-              {portfolio.projects.length === 0
-                ? 'No Projects registered yet.'
-                : 'Every Project has a Wayfinder map.'}
-            </p>
-          )}
-        </OverviewSection>
-      </div>
-    </main>
+      <OverviewSection label="Waiting for a first map">
+        {portfolio.waiting.map((project) => (
+          <WaitingProjectRow key={projectKey(project)} presentation={project} />
+        ))}
+        {portfolio.waiting.length === 0 && (
+          <p className="overview-empty">
+            {portfolio.projects.length === 0
+              ? 'No Projects registered yet.'
+              : 'Every Project has a Wayfinder map.'}
+          </p>
+        )}
+      </OverviewSection>
+    </div>
   )
 }
 

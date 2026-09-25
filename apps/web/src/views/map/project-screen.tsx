@@ -1,4 +1,4 @@
-import type { AutomationEvidence, Project, ProjectKey, WayfinderMap } from '@roadmap/contracts'
+import type { AutomationEvidence, Project, WayfinderMap } from '@roadmap/contracts'
 import { useEffect, useRef, useState } from 'react'
 import { AutomationMark } from '../../components/automation-mark/automation-mark.tsx'
 import { Badge } from '../../components/badge/badge.tsx'
@@ -7,87 +7,45 @@ import {
   mapHash,
   type PanelSelection,
   type ResolvedSelection,
-  type Route,
   replaceHash,
   resolveSelection,
   selectionHash,
 } from '../../router.ts'
-import { useRoadmap } from '../../store/roadmap-provider.tsx'
 import { integrationLabel } from '../shared/project-meta.ts'
 import { activeMapOf } from './active-map.ts'
 import { MapChild, sameSelection } from './map-child.tsx'
 import { Panel, type PanelAutomation } from './panel.tsx'
 import { ledgerSequence } from './sequence.ts'
-import '../shared/views.css'
 
-type ProjectScreenProps = { route: Extract<Route, { screen: 'project' }> }
+type MissingProjectSectionProps = {
+  capturedAt: number | null
+  disconnected: boolean
+  projectId: string
+}
 
-/**
- * The project screen: one single-open accordion of the project's maps with the ledger's rail
- * threaded through — the active map at the top, open by default, history descending to the
- * earliest map, nothing drawn past the head — and the docked Panel beside it, the one detail
- * layer every map feeds.
- */
-export function ProjectScreen({ route }: ProjectScreenProps) {
-  const {
-    transport,
-    projects,
-    roadmapProjects,
-    capturedAt,
-    automation,
-    configurationVersion,
-    command,
-    execute,
-  } = useRoadmap()
-
-  const registration = projects.find((candidate) => sameProject(candidate.key, route.project))
-  const source = roadmapProjects.find((candidate) => sameProject(candidate.key, route.project))
-  const project = registration
-    ? {
-        ...registration,
-        ...(source?.sourcePath === undefined ? {} : { sourcePath: source.sourcePath }),
-      }
-    : source
-
-  if (!project) {
-    return (
-      <main className="shell map-shell">
-        <p>
-          <a href="#/">← All projects</a>
-        </p>
-        {transport === 'disconnected' && (
-          <p className="banner" role="alert">
-            Server unreachable — reconnecting.
-          </p>
-        )}
-        <p className="muted">
-          {capturedAt !== null ? `No project at ${route.project.id}.` : 'Waiting for the server…'}
-        </p>
-      </main>
-    )
-  }
-
+export function MissingProjectSection({
+  capturedAt,
+  disconnected,
+  projectId,
+}: MissingProjectSectionProps) {
   return (
-    <PanelScreen
-      key={`${project.key.integration}:${project.key.id}`}
-      project={project}
-      selected={route.selected}
-      selection={route.selection}
-      disconnected={transport === 'disconnected'}
-      unavailable={
-        registration?.availability.status === 'unavailable' ? registration.availability.cause : null
-      }
-      automation={{
-        state: automation,
-        configurationVersion,
-        commandInFlight: command.inFlight,
-        execute,
-      }}
-    />
+    <main className="shell map-shell">
+      <p>
+        <a href="#/">← All projects</a>
+      </p>
+      {disconnected && (
+        <p className="banner" role="alert">
+          Server unreachable — reconnecting.
+        </p>
+      )}
+      <p className="muted">
+        {capturedAt !== null ? `No project at ${projectId}.` : 'Waiting for the server…'}
+      </p>
+    </main>
   )
 }
 
-type PanelScreenProps = {
+type ProjectMapSectionsProps = {
   project: Project
   selected: string | null
   selection: PanelSelection | null
@@ -107,14 +65,14 @@ type PanelScreenProps = {
  * spans the WHOLE trace in on-screen order, so stepping past a map's edge walks into the
  * neighbouring map: the pin follows the pick, and the accordion unfolds with it.
  */
-function PanelScreen({
+export function ProjectMapSections({
   project,
   selected,
   selection,
   disconnected,
   unavailable,
   automation,
-}: PanelScreenProps) {
+}: ProjectMapSectionsProps) {
   const trace = [...project.openMaps, ...project.closedMaps]
   const pinnedMap = selected !== null ? trace.find((m) => m.id === selected) : undefined
   const item = pinnedMap && selection ? resolveSelection(pinnedMap, selection) : null
@@ -435,10 +393,6 @@ function MapTrace({
 
 function maps(count: number): string {
   return count === 1 ? '1 map' : `${count} maps`
-}
-
-function sameProject(a: ProjectKey, b: ProjectKey): boolean {
-  return a.integration === b.integration && a.id === b.id
 }
 
 function githubRepoName(project: Project): string | null {

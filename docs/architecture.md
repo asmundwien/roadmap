@@ -20,6 +20,8 @@ WebSocket carries full state replacements. HTTP carries `query` and `execute` re
 
 `apps/web/src/views` groups screens by area. The map area lives in `map/`; `map/ledger.tsx` and `map/geometry.ts` draw titles. Descriptive text lives in the docked Panel rendered by `map/panel.tsx`, not in an overlay. `map/sequence.ts` owns traversal order and decides which out-of-scope items to display. `map/prose.tsx` renders Panel prose as Markdown. `map/project-screen.tsx` owns the map's roving-tabindex keyboard navigation.
 
+Each routable area under `apps/web/src/views` has a `page.tsx` entry point. Page modules select data and compose named sections; section implementation stays in sibling files. `shared/` and `shell/` are support areas, not pages.
+
 Reusable UI lives under `apps/web/src/components`, with each module's implementation, styles, and tests in its own folder. Components use the shared `Variant` color vocabulary. Views adapt domain state into generic component props, including `TicketMark` size, fill, accent, corners, and content.
 
 React functions use named `...Props` types instead of inline object annotations. Dynamic class composition uses `classnames` imported as `cn`; modules do not define class-name helper functions.
