@@ -1,0 +1,20 @@
+.destination-halo {
+  fill: var(--goal);
+  fill-opacity: 0.18;
+}
+
+.destination-glyph {
+  fill: var(--goal);
+  font-size: 20px;
+}
+
+.destination-mark-header {
+  position: absolute;
+  top: 50%;
+  left: 55px;
+  z-index: 1;
+  width: 45px;
+  height: 45px;
+  overflow: visible;
+  transform: translate(-50%, -50%);
+}

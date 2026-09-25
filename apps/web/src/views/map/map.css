@@ -108,47 +108,21 @@
   pointer-events: none;
 }
 
-.ticket-mark {
-  --node-type: var(--muted);
-  --node-state: var(--state-closed);
-}
-
-.ticket-mark.type-research {
-  --node-type: var(--type-research);
-}
-
-.ticket-mark.type-prototype {
-  --node-type: var(--type-prototype);
-}
-
-.ticket-mark.type-grilling {
-  --node-type: var(--type-grilling);
-}
-
-.ticket-mark.type-task {
-  --node-type: var(--type-task);
-}
-
-.ticket-mark.state-frontier {
-  --node-state: var(--state-frontier);
-}
-
-.ticket-mark.state-claimed {
-  --node-state: var(--state-claimed);
-}
-
-.ticket-mark.state-blocked {
-  --node-state: var(--state-blocked);
-}
-
-.ticket-mark.state-closed {
-  --node-state: var(--fg);
-}
-
 .major-node,
 .data-diamond {
   pointer-events: all;
   cursor: help;
+}
+
+.node-tooltip {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.08s linear;
+}
+
+.major-node:hover .node-tooltip,
+.data-diamond:hover .node-tooltip {
+  opacity: 1;
 }
 
 .major-node .node-shape,
@@ -161,119 +135,6 @@
 .major-node:hover .node-shape,
 .data-diamond:hover .automation-mark {
   transform: scale(1.14);
-}
-
-.node-mark .diamond-face {
-  fill: color-mix(in srgb, var(--node-state) 13%, var(--bg));
-  stroke: var(--node-state);
-  stroke-width: 2.5px;
-  stroke-linejoin: miter;
-}
-
-.node-mark.is-minor .diamond-face {
-  stroke-width: 0.8px;
-}
-.inline-ticket-mark {
-  display: inline-block;
-  width: 1em;
-  height: 1em;
-  margin-right: 0.25em;
-  overflow: visible;
-  vertical-align: -0.13em;
-}
-
-.ticket-mark.state-frontier .diamond-face {
-  fill: var(--node-state);
-}
-
-.ticket-mark.state-claimed .diamond-face {
-  fill: var(--bg);
-}
-
-.ticket-mark.state-closed .diamond-face {
-  fill: var(--fg);
-  stroke: var(--fg);
-}
-
-.node-mark .frontier-field {
-  fill: color-mix(in srgb, var(--state-frontier) 12%, transparent);
-}
-
-.node-mark .claimed-half,
-.node-mark .claimed-corner {
-  fill: var(--state-claimed);
-}
-
-.node-mark .blocked-corner {
-  fill: var(--state-blocked);
-}
-
-.node-mark .type-rune {
-  fill: var(--node-type);
-  paint-order: stroke;
-  stroke: var(--bg);
-  stroke-width: 3.5px;
-  font-size: 9.25px;
-  font-weight: 900;
-}
-
-.ticket-mark.state-frontier .type-rune,
-.ticket-mark.state-closed .type-rune {
-  fill: var(--bg);
-  stroke: color-mix(in srgb, var(--node-state) 82%, var(--fg));
-}
-
-.node-mark .type-corners path {
-  fill: none;
-  stroke: var(--node-type);
-  stroke-width: 1.8px;
-  stroke-linecap: square;
-}
-
-.node-mark.is-minor .type-corners path {
-  stroke-width: 0.6px;
-}
-
-.ticket-mark.state-frontier .type-corners path,
-.ticket-mark.state-closed .type-corners path {
-  stroke: var(--bg);
-}
-
-.automation-mark.stage-classification {
-  --tag-color: var(--automation-classification);
-}
-
-.automation-mark.stage-wayfinder {
-  --tag-color: var(--automation-wayfinder);
-}
-
-.automation-mark .tag-face {
-  fill: var(--tag-color);
-  stroke: var(--bg);
-  stroke-width: 1px;
-  stroke-linejoin: miter;
-}
-
-.automation-mark .tag-glyph {
-  fill: var(--bg);
-  font-size: 7.25px;
-  font-weight: 900;
-}
-.inline-automation-mark {
-  width: 0.8em;
-  height: 0.8em;
-  overflow: visible;
-}
-
-.node-tooltip {
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.08s linear;
-}
-
-.major-node:hover .node-tooltip,
-.data-diamond:hover .node-tooltip {
-  opacity: 1;
 }
 
 .node-tooltip rect {
@@ -306,16 +167,6 @@
 .scope-title {
   text-decoration: line-through;
   text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent);
-}
-
-.destination-halo {
-  fill: var(--goal);
-  fill-opacity: 0.18;
-}
-
-.destination-glyph {
-  font-size: 20px;
-  fill: var(--goal);
 }
 
 .goal-caption {
@@ -591,18 +442,6 @@
   box-shadow: inset 0 0 0 2px var(--ring);
 }
 
-/* The same destination atom marks the ledger endpoint and every map header. */
-.fl-flag {
-  position: absolute;
-  left: 55px;
-  top: 50%;
-  z-index: 1;
-  width: 45px;
-  height: 45px;
-  overflow: visible;
-  transform: translate(-50%, -50%);
-}
-
 .fl-body {
   display: flex;
   flex-direction: column;
@@ -867,7 +706,11 @@
 }
 
 .panel-item-state {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
   margin: var(--sp-1) 0 var(--sp-3);
+  color: var(--muted);
   font-size: 0.8rem;
 }
 .automation-evidence {
@@ -1059,8 +902,11 @@
 }
 
 .item-link-state {
-  font-size: 0.72rem;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
   color: var(--muted);
+  font-size: 0.72rem;
 }
 
 .item-link[aria-disabled="true"] {
@@ -1258,9 +1104,9 @@
   .fold,
   .panel-rail,
   .panel-rail-inner,
+  .node-tooltip,
   .major-node .node-shape,
-  .data-diamond .automation-mark,
-  .node-tooltip {
+  .data-diamond .automation-mark {
     transition: none;
   }
 }

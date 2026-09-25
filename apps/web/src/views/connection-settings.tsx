@@ -8,15 +8,16 @@ import type {
   SupportedIntegration,
 } from '@roadmap/contracts'
 import { type FormEvent, useState } from 'react'
+import { Action, ActionGroup } from '../components/action/action.tsx'
+import { Alert } from '../components/alert/alert.tsx'
+import { Badge, IntegrationBadge } from '../components/badge/badge.tsx'
 import { projectHash } from '../router.ts'
 import { useRoadmap } from '../store/roadmap-provider.tsx'
 import {
   ErrorText,
-  IntegrationBadge,
   locatorLabel,
   observedLabel,
   projectIdentity,
-  SettingsAlert,
   SettingsPane,
 } from './settings-shared.tsx'
 import './settings.css'
@@ -65,34 +66,34 @@ export function ConnectionSettings() {
           <h1>Connections</h1>
           <p className="muted">{connections.length} configured</p>
         </div>
-        <button
-          className="settings-action is-strong"
+        <Action
+          variant="strong"
           type="button"
           disabled={blocked || !github}
           onClick={() => setPane({ kind: 'add' })}
         >
           Add connection
-        </button>
+        </Action>
       </header>
 
       {!github && (
-        <SettingsAlert>
+        <Alert>
           <strong>GitHub Connections are unavailable.</strong>
           <span>Configure the Roadmap GitHub App to authorize GitHub accounts.</span>
-        </SettingsAlert>
+        </Alert>
       )}
       {!configuration.valid && (
-        <SettingsAlert>
+        <Alert>
           <strong>Configuration needs repair.</strong>
           <span>In-app changes stay blocked until roadmap.config.json is valid.</span>
-        </SettingsAlert>
+        </Alert>
       )}
       {configuration.notices.map((message) => (
-        <SettingsAlert tone="info" key={message}>
+        <Alert variant="info" key={message}>
           {message}
-        </SettingsAlert>
+        </Alert>
       ))}
-      {notice && <SettingsAlert tone="info">{notice}</SettingsAlert>}
+      {notice && <Alert variant="info">{notice}</Alert>}
       <ErrorText error={operationError} />
 
       {looseOperations.map((authorization) => (
@@ -263,32 +264,27 @@ function ConnectionStride({
             {dependents.length === 1 ? 'Project' : 'Projects'}
           </span>
         </span>
-        <span className="connection-actions">
+        <ActionGroup variant="connection">
           {connection.integration === 'github' && reauthenticationAvailable && (
-            <button
-              className="settings-action is-strong"
-              type="button"
-              disabled={blocked}
-              onClick={onAuthorize}
-            >
+            <Action variant="strong" type="button" disabled={blocked} onClick={onAuthorize}>
               {authorization?.status === 'waiting' ? 'Authorization progress' : 'Reauthenticate'}
-            </button>
+            </Action>
           )}
           {connection.builtIn ? (
-            <span className="settings-badge is-local">Built in</span>
+            <Badge variant="local">Built in</Badge>
           ) : (
-            <button className="settings-action" type="button" disabled={blocked} onClick={onEdit}>
+            <Action type="button" disabled={blocked} onClick={onEdit}>
               Manage
-            </button>
+            </Action>
           )}
-        </span>
+        </ActionGroup>
       </div>
 
       {connection.availability.status !== 'available' && (
-        <SettingsAlert>
+        <Alert>
           <strong>{connectionAvailability(connection)}</strong>
           <span>{connection.availability.cause}</span>
-        </SettingsAlert>
+        </Alert>
       )}
 
       {dependents.map((project) => (
@@ -376,19 +372,19 @@ function AddConnectionPane({
           Connection name
           <input name="name" placeholder="Personal GitHub" />
         </label>
-        <SettingsAlert tone="info">
+        <Alert variant="info">
           Credentials are saved in macOS Keychain. They never enter roadmap.config.json or the
           browser.
-        </SettingsAlert>
+        </Alert>
         <ErrorText error={error} />
-        <div className="settings-form-actions">
-          <button className="settings-action" type="button" onClick={onClose}>
+        <ActionGroup variant="form">
+          <Action type="button" onClick={onClose}>
             Cancel
-          </button>
-          <button className="settings-action is-strong" type="submit" disabled={busy}>
+          </Action>
+          <Action variant="strong" type="submit" disabled={busy}>
             {busy ? 'Starting…' : 'Start authorization'}
-          </button>
-        </div>
+          </Action>
+        </ActionGroup>
       </form>
     </SettingsPane>
   )
@@ -445,19 +441,19 @@ function AuthorizationPane({
                 : 'Waiting for GitHub'}
             </span>
           </div>
-          <div className="settings-action-band">
+          <ActionGroup>
             {authorization.verificationUri && (
-              <a
-                className="settings-action is-strong"
+              <Action
+                element="link"
+                variant="strong"
                 href={authorization.verificationUri}
                 target="_blank"
                 rel="noreferrer"
               >
                 Open GitHub
-              </a>
+              </Action>
             )}
-            <button
-              className="settings-action"
+            <Action
               type="button"
               disabled={!authorization.userCode}
               onClick={() => {
@@ -468,9 +464,9 @@ function AuthorizationPane({
               }}
             >
               {copied ? 'Code copied' : 'Copy code'}
-            </button>
-            <button
-              className="settings-action is-danger"
+            </Action>
+            <Action
+              variant="danger"
               type="button"
               disabled={busy}
               onClick={() =>
@@ -482,29 +478,28 @@ function AuthorizationPane({
               }
             >
               Cancel authorization
-            </button>
-          </div>
+            </Action>
+          </ActionGroup>
         </>
       )}
 
       {authorization.status === 'granted' && (
-        <SettingsAlert tone="info">
+        <Alert variant="info">
           <strong>GitHub authorized.</strong>
           <span>The Connection is saved and reconciliation has started.</span>
-        </SettingsAlert>
+        </Alert>
       )}
       {authorization.status !== 'waiting' && authorization.status !== 'granted' && (
-        <SettingsAlert>
+        <Alert>
           <strong>{authorizationStatus(authorization)}</strong>
           <span>{authorization.cause}</span>
-        </SettingsAlert>
+        </Alert>
       )}
       <ErrorText error={error} />
 
       {authorization.status !== 'waiting' && (
-        <div className="settings-form-actions">
-          <button
-            className="settings-action"
+        <ActionGroup variant="form">
+          <Action
             type="button"
             onClick={() =>
               onFinished(
@@ -515,10 +510,10 @@ function AuthorizationPane({
             }
           >
             Close
-          </button>
+          </Action>
           {authorization.status !== 'granted' && (
-            <button
-              className="settings-action is-strong"
+            <Action
+              variant="strong"
               type="button"
               disabled={busy}
               onClick={() =>
@@ -530,9 +525,9 @@ function AuthorizationPane({
               }
             >
               Retry authorization
-            </button>
+            </Action>
           )}
-        </div>
+        </ActionGroup>
       )}
     </SettingsPane>
   )
@@ -618,11 +613,11 @@ function EditConnectionPane({
           Connection name
           <input name="name" defaultValue={connection.name} />
         </label>
-        <div className="settings-form-actions">
-          <button className="settings-action is-strong" type="submit" disabled={busy}>
+        <ActionGroup variant="form">
+          <Action variant="strong" type="submit" disabled={busy}>
             Save name
-          </button>
-        </div>
+          </Action>
+        </ActionGroup>
       </form>
       <ErrorText error={error} />
 
@@ -645,23 +640,19 @@ function EditConnectionPane({
                 </a>
               ))}
             </div>
-            <button className="settings-action is-danger" type="button" disabled>
+            <Action variant="danger" type="button" disabled>
               Remove connection
-            </button>
+            </Action>
           </>
         ) : confirmingRemoval ? (
           <>
             <p>External GitHub authorization and repositories remain unchanged.</p>
-            <div className="settings-action-band">
-              <button
-                className="settings-action"
-                type="button"
-                onClick={() => setConfirmingRemoval(false)}
-              >
+            <ActionGroup>
+              <Action type="button" onClick={() => setConfirmingRemoval(false)}>
                 Keep connection
-              </button>
-              <button
-                className="settings-action is-danger"
+              </Action>
+              <Action
+                variant="danger"
                 type="button"
                 disabled={busy}
                 onClick={() =>
@@ -676,17 +667,13 @@ function EditConnectionPane({
                 }
               >
                 Confirm removal
-              </button>
-            </div>
+              </Action>
+            </ActionGroup>
           </>
         ) : (
-          <button
-            className="settings-action is-danger"
-            type="button"
-            onClick={() => setConfirmingRemoval(true)}
-          >
+          <Action variant="danger" type="button" onClick={() => setConfirmingRemoval(true)}>
             Remove connection
-          </button>
+          </Action>
         )}
       </section>
     </SettingsPane>

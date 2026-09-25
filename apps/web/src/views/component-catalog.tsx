@@ -1,10 +1,12 @@
 import type { Ticket, TicketType } from '@roadmap/contracts'
 import type { ReactNode } from 'react'
-import { AutomationMark } from './map/atoms/automation-mark.tsx'
-import { DestinationMark } from './map/atoms/destination-mark.tsx'
-import { TicketMark } from './map/atoms/ticket-mark.tsx'
-import './map/map.css'
-import './settings.css'
+import { Action, ActionGroup } from '../components/action/action.tsx'
+import { Alert } from '../components/alert/alert.tsx'
+import { AutomationMark } from '../components/automation-mark/automation-mark.tsx'
+import { Badge } from '../components/badge/badge.tsx'
+import { DestinationMark } from '../components/destination-mark/destination-mark.tsx'
+import { StatusTag } from '../components/status-tag/status-tag.tsx'
+import { TicketMark } from '../components/ticket-mark/ticket-mark.tsx'
 import './component-catalog.css'
 
 const TICKET_TYPES = [
@@ -76,18 +78,30 @@ export function ComponentCatalog() {
       </CatalogSection>
 
       <CatalogSection
+        title="Status tags"
+        description="Ticket state labels use one semantic variant in every HTML context."
+      >
+        <div className="catalog-tags">
+          <StatusTag variant="blocked" />
+          <StatusTag variant="takeable" />
+          <StatusTag variant="claimed" />
+          <StatusTag variant="decided" />
+        </div>
+      </CatalogSection>
+
+      <CatalogSection
         title="Roadmap signals"
         description="Product state and Automation evidence remain separate visual facts."
       >
         <div className="catalog-signals">
           <Signal label="Destination">
-            <DestinationMark x={24} y={24} />
+            <DestinationMark variant="plot" x={24} y={24} />
           </Signal>
           <Signal label="Classification">
-            <AutomationMark stage="classification" glyph="C" x={24} y={24} />
+            <AutomationMark variant="plot" stage="classification" glyph="C" x={24} y={24} />
           </Signal>
           <Signal label="Wayfinder">
-            <AutomationMark stage="wayfinder" glyph="W" x={24} y={24} />
+            <AutomationMark variant="plot" stage="wayfinder" glyph="W" x={24} y={24} />
           </Signal>
         </div>
       </CatalogSection>
@@ -99,39 +113,37 @@ export function ComponentCatalog() {
         <div className="catalog-control-groups">
           <div className="catalog-control-group">
             <span className="catalog-control-label">Actions</span>
-            <div className="settings-action-band">
-              <button className="settings-action" type="button">
-                Default
-              </button>
-              <button className="settings-action is-strong" type="button">
+            <ActionGroup>
+              <Action type="button">Default</Action>
+              <Action variant="strong" type="button">
                 Emphasized
-              </button>
-              <button className="settings-action is-danger" type="button">
+              </Action>
+              <Action variant="danger" type="button">
                 Destructive
-              </button>
-              <button className="settings-action" type="button" disabled>
+              </Action>
+              <Action type="button" disabled>
                 Unavailable
-              </button>
-            </div>
+              </Action>
+            </ActionGroup>
           </div>
           <div className="catalog-control-group">
             <span className="catalog-control-label">Badges</span>
             <div className="catalog-badges">
-              <span className="settings-badge">Unknown</span>
-              <span className="settings-badge is-github">GitHub</span>
-              <span className="settings-badge is-local">Local</span>
+              <Badge>Unknown</Badge>
+              <Badge variant="github">GitHub</Badge>
+              <Badge variant="local">Local</Badge>
             </div>
           </div>
           <div className="catalog-control-group">
             <span className="catalog-control-label">Messages</span>
-            <div className="settings-alert">
+            <Alert>
               <strong>Action required.</strong>
               <span>The operation stays blocked until the problem is fixed.</span>
-            </div>
-            <div className="settings-alert is-info">
+            </Alert>
+            <Alert variant="info">
               <strong>Change saved.</strong>
               <span>The new configuration is active.</span>
-            </div>
+            </Alert>
           </div>
         </div>
       </CatalogSection>

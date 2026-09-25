@@ -8,6 +8,7 @@ import type {
   WayfinderSession,
 } from '@roadmap/contracts'
 import { useMemo, useState } from 'react'
+import { Alert } from '../components/alert/alert.tsx'
 import { selectionHash } from '../router.ts'
 import { useRoadmap } from '../store/roadmap-provider.tsx'
 import {
@@ -16,7 +17,7 @@ import {
   type AutomationTicketPresentation,
   presentAutomation,
 } from './project-presentation.ts'
-import { ErrorText, projectIdentity, SettingsAlert, sameProject } from './settings-shared.tsx'
+import { ErrorText, projectIdentity, sameProject } from './settings-shared.tsx'
 import './settings.css'
 
 type AutomationSelection = { kind: 'global' } | { kind: 'project'; project: ProjectKey }
@@ -107,24 +108,24 @@ export function AutomationSettings() {
       </header>
 
       {!configuration.valid && (
-        <SettingsAlert>
+        <Alert>
           <strong>Configuration needs repair.</strong>
           <span>Automation changes stay blocked until roadmap.config.json is valid.</span>
-        </SettingsAlert>
+        </Alert>
       )}
       {configuration.issues.map((issue) => (
-        <SettingsAlert key={`${issue.path}:${issue.message}`}>
+        <Alert key={`${issue.path}:${issue.message}`}>
           <strong>{issue.path}</strong>
           <span>{issue.message}</span>
-        </SettingsAlert>
+        </Alert>
       ))}
       {automation.availability.status === 'unavailable' && (
-        <SettingsAlert>
+        <Alert>
           <strong>Automation unavailable.</strong>
           <span>{automation.availability.cause}</span>
-        </SettingsAlert>
+        </Alert>
       )}
-      {notice && <SettingsAlert tone="info">{notice}</SettingsAlert>}
+      {notice && <Alert variant="info">{notice}</Alert>}
       <ErrorText error={operationError} />
 
       <div className="settings-layout automation-layout">

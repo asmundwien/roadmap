@@ -10,17 +10,18 @@ import type {
   SafeError,
 } from '@roadmap/contracts'
 import { type FormEvent, useState } from 'react'
+import { Action, ActionGroup } from '../components/action/action.tsx'
+import { Alert } from '../components/alert/alert.tsx'
+import { IntegrationBadge } from '../components/badge/badge.tsx'
 import { projectHash } from '../router.ts'
 import { useRoadmap } from '../store/roadmap-provider.tsx'
 import {
   ErrorText,
-  IntegrationBadge,
   locatorLabel,
   mapState,
   markerFor,
   observedLabel,
   projectIdentity,
-  SettingsAlert,
   SettingsPane,
   sameProject,
 } from './settings-shared.tsx'
@@ -86,34 +87,34 @@ export function ProjectSettings() {
           <h1>Projects</h1>
           <p className="muted">{projects.length} registered</p>
         </div>
-        <button
-          className="settings-action is-strong"
+        <Action
+          variant="strong"
           type="button"
           disabled={blocked || connections.length === 0}
           onClick={() => setPane({ kind: 'add' })}
         >
           Add project
-        </button>
+        </Action>
       </header>
 
       {!configuration.valid && (
-        <SettingsAlert>
+        <Alert>
           <strong>Configuration needs repair.</strong>
           <span>In-app changes stay blocked until roadmap.config.json is valid.</span>
-        </SettingsAlert>
+        </Alert>
       )}
       {configuration.issues.map((issue) => (
-        <SettingsAlert key={`${issue.path}:${issue.message}`}>
+        <Alert key={`${issue.path}:${issue.message}`}>
           <strong>{issue.path}</strong>
           <span>{issue.message}</span>
-        </SettingsAlert>
+        </Alert>
       ))}
       {configuration.notices.map((message) => (
-        <SettingsAlert tone="info" key={message}>
+        <Alert variant="info" key={message}>
           {message}
-        </SettingsAlert>
+        </Alert>
       ))}
-      {notice && <SettingsAlert tone="info">{notice}</SettingsAlert>}
+      {notice && <Alert variant="info">{notice}</Alert>}
       <ErrorText error={operationError} />
 
       <div className="settings-layout">
@@ -235,29 +236,29 @@ function ProjectDetail({
       </div>
       <h2>{project.name}</h2>
       {connectionProblem && connection && (
-        <SettingsAlert>
+        <Alert>
           <strong>{connection.name} is not available.</strong>
           <span>
             {connection.availability.status === 'available' ? '' : connection.availability.cause}
           </span>
-        </SettingsAlert>
+        </Alert>
       )}
       {unavailableCause && (
-        <SettingsAlert>
+        <Alert>
           <strong>Project unavailable.</strong>
           <span>{unavailableCause}</span>
-        </SettingsAlert>
+        </Alert>
       )}
       {project.warnings.map((warning) => (
-        <SettingsAlert key={warning}>
+        <Alert key={warning}>
           <span>{warning}</span>
-        </SettingsAlert>
+        </Alert>
       ))}
       {mapCount === 0 && (
-        <SettingsAlert tone="info">
+        <Alert variant="info">
           <strong>No Wayfinder maps yet.</strong>
           <span>The Project remains registered and will appear when its first map is created.</span>
-        </SettingsAlert>
+        </Alert>
       )}
 
       <dl className="settings-facts">
@@ -327,17 +328,11 @@ function ProjectDetail({
         )}
       </div>
 
-      <div className="settings-action-band">
-        <button
-          className="settings-action is-strong"
-          type="button"
-          disabled={busy}
-          onClick={onEdit}
-        >
+      <ActionGroup>
+        <Action variant="strong" type="button" disabled={busy} onClick={onEdit}>
           Edit registration
-        </button>
-        <button
-          className="settings-action"
+        </Action>
+        <Action
           type="button"
           disabled={busy}
           onClick={() =>
@@ -352,8 +347,8 @@ function ProjectDetail({
           }
         >
           Refresh now
-        </button>
-      </div>
+        </Action>
+      </ActionGroup>
     </aside>
   )
 }
@@ -458,19 +453,19 @@ function AddProjectPane({
                 setErrors({})
               }}
             />
-            <SettingsAlert tone="info">
+            <Alert variant="info">
               <span>GitHub authorization and repository installation are separate grants.</span>
               {githubInstallationUrl && (
-                <a
-                  className="settings-action"
+                <Action
+                  element="link"
                   href={githubInstallationUrl}
                   target="_blank"
                   rel="noreferrer"
                 >
                   Configure repository access ↗
-                </a>
+                </Action>
               )}
-            </SettingsAlert>
+            </Alert>
           </>
         ) : (
           <WorkspaceFolderSelector
@@ -492,14 +487,14 @@ function AddProjectPane({
           <input name="displayName" placeholder="Optional" />
         </label>
         <ErrorText error={generalError} />
-        <div className="settings-form-actions">
-          <button className="settings-action" type="button" onClick={onClose}>
+        <ActionGroup variant="form">
+          <Action type="button" onClick={onClose}>
             Cancel
-          </button>
-          <button className="settings-action is-strong" type="submit" disabled={saving}>
+          </Action>
+          <Action variant="strong" type="submit" disabled={saving}>
             {saving ? 'Validating…' : 'Validate and save'}
-          </button>
-        </div>
+          </Action>
+        </ActionGroup>
       </form>
     </SettingsPane>
   )
@@ -605,11 +600,11 @@ function EditProjectPane({
           <input name="name" defaultValue={project.name} />
           <FieldError message={fieldError ?? undefined} />
         </label>
-        <div className="settings-form-actions">
-          <button className="settings-action is-strong" type="submit" disabled={busy}>
+        <ActionGroup variant="form">
+          <Action variant="strong" type="submit" disabled={busy}>
             Save name
-          </button>
-        </div>
+          </Action>
+        </ActionGroup>
       </form>
 
       {project.availability.status === 'unavailable' && (
@@ -630,11 +625,11 @@ function EditProjectPane({
               setFieldError(null)
             }}
           />
-          <div className="settings-form-actions">
-            <button className="settings-action is-strong" type="submit" disabled={busy}>
+          <ActionGroup variant="form">
+            <Action variant="strong" type="submit" disabled={busy}>
               Validate and repair
-            </button>
-          </div>
+            </Action>
+          </ActionGroup>
         </form>
       )}
 
@@ -643,16 +638,12 @@ function EditProjectPane({
         <p className="settings-eyebrow">Remove from Roadmap</p>
         <p>The source repository, Wayfinder state, and Workspace remain unchanged.</p>
         {confirmingRemoval ? (
-          <div className="settings-action-band">
-            <button
-              className="settings-action"
-              type="button"
-              onClick={() => setConfirmingRemoval(false)}
-            >
+          <ActionGroup>
+            <Action type="button" onClick={() => setConfirmingRemoval(false)}>
               Keep project
-            </button>
-            <button
-              className="settings-action is-danger"
+            </Action>
+            <Action
+              variant="danger"
               type="button"
               disabled={busy}
               onClick={() =>
@@ -667,16 +658,12 @@ function EditProjectPane({
               }
             >
               Confirm removal
-            </button>
-          </div>
+            </Action>
+          </ActionGroup>
         ) : (
-          <button
-            className="settings-action is-danger"
-            type="button"
-            onClick={() => setConfirmingRemoval(true)}
-          >
+          <Action variant="danger" type="button" onClick={() => setConfirmingRemoval(true)}>
             Remove project registration
-          </button>
+          </Action>
         )}
       </section>
     </SettingsPane>
@@ -723,14 +710,15 @@ function WorkspaceFolderSelector({
     <fieldset className="settings-folder-field">
       <legend>{label}</legend>
       <div className="settings-folder-control">
-        <button
-          className="settings-action is-strong"
+        <Action
+          variant="strong"
+          size="field"
           type="button"
           disabled={disabled || choosing}
           onClick={() => void choose()}
         >
           {choosing ? 'Choosing…' : path ? 'Choose another folder' : 'Choose folder'}
-        </button>
+        </Action>
         <output className={path ? '' : 'is-empty'} aria-live="polite">
           {path || 'No folder selected'}
         </output>

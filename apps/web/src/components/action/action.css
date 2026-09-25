@@ -1,0 +1,75 @@
+.action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--edge);
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.8rem;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.action + .action {
+  border-left: 0;
+}
+
+.action:hover:not(:disabled),
+.action:focus-visible {
+  background: var(--wash);
+  color: var(--fg);
+}
+
+.action-strong {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.action-danger {
+  color: var(--state-blocked);
+}
+
+.action-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--state-blocked) 9%, transparent);
+  color: var(--state-blocked);
+}
+
+.action:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.action-field {
+  min-height: 40px;
+}
+
+.action-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+}
+
+.action-group-form {
+  justify-content: flex-end;
+  margin-top: var(--sp-2);
+}
+
+@media (max-width: 640px) {
+  .action-group-connection {
+    grid-column: 2;
+    align-items: flex-start;
+    justify-content: flex-start;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .action {
+    transition:
+      color 120ms ease,
+      background 120ms ease;
+  }
+}

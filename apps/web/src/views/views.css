@@ -177,15 +177,10 @@
   color: var(--automation-wayfinder);
 }
 
-.badge {
+.overview-kicker .badge,
+.overview-copy > strong .badge,
+.project-head .badge {
   margin-left: 0.5rem;
-  padding: 0.1rem 0.4rem;
-  border: 1px solid var(--muted);
-  border-radius: 999px;
-  font-size: 0.7rem;
-  font-weight: normal;
-  color: var(--muted);
-  vertical-align: middle;
 }
 
 /* The whole-product road: registered Projects as one trace, never a dashboard of cards. */

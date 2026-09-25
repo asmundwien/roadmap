@@ -1,21 +1,42 @@
 import type { Ticket, TicketType } from '@roadmap/contracts'
-import { Diamond } from './diamond.tsx'
+import { Diamond } from '../diamond/diamond.tsx'
+import './ticket-mark.css'
 
 export const MAJOR_TICKET_MARK_SCALE = 4 / 3
 const MINOR_TICKET_MARK_SCALE = 0.42
 
 type TicketMarkState = Pick<Ticket, 'state' | 'isBlocked' | 'isClaimed'>
 
-type TicketMarkProps = {
-  ticket: TicketMarkState
-  type: TicketType
-  variant: 'major' | 'minor'
-  x: number
-  y: number
-}
+type TicketMarkProps =
+  | {
+      ticket: TicketMarkState
+      type: TicketType
+      variant: 'major' | 'minor'
+      x: number
+      y: number
+    }
+  | {
+      ticket: TicketMarkState
+      type: TicketType
+      variant: 'inline'
+    }
 
 /** The project page's one ticket-state mark, shared by ledger nodes and inline status text. */
-export function TicketMark({ ticket, type, variant, x, y }: TicketMarkProps) {
+export function TicketMark(props: TicketMarkProps) {
+  if (props.variant === 'inline') {
+    return (
+      <svg
+        className="ticket-mark-inline"
+        viewBox="-8 -8 16 16"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <TicketMark ticket={props.ticket} type={props.type} variant="minor" x={0} y={0} />
+      </svg>
+    )
+  }
+
+  const { ticket, type, variant, x, y } = props
   const scale = variant === 'major' ? MAJOR_TICKET_MARK_SCALE : MINOR_TICKET_MARK_SCALE
   const radius = 11 * scale
   const frontierRadius = 17 * scale
@@ -52,15 +73,6 @@ export function TicketMark({ ticket, type, variant, x, y }: TicketMarkProps) {
         <TypeCorners type={type} scale={scale} x={x} y={y} />
       </g>
     </g>
-  )
-}
-
-/** The same minor ticket mark in an HTML-sized SVG for Panel status lines and links. */
-export function InlineTicketMark({ ticket, type }: { ticket: TicketMarkState; type: TicketType }) {
-  return (
-    <svg className="inline-ticket-mark" viewBox="-8 -8 16 16" aria-hidden="true" focusable="false">
-      <TicketMark ticket={ticket} type={type} variant="minor" x={0} y={0} />
-    </svg>
   )
 }
 

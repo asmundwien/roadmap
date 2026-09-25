@@ -1,6 +1,9 @@
 import type { Ticket, TicketType } from '@roadmap/contracts'
-import { AUTOMATION_MARK_RADIUS, AutomationMark } from './atoms/automation-mark.tsx'
-import { MAJOR_TICKET_MARK_SCALE, TicketMark } from './atoms/ticket-mark.tsx'
+import {
+  AUTOMATION_MARK_RADIUS,
+  AutomationMark,
+} from '../../components/automation-mark/automation-mark.tsx'
+import { MAJOR_TICKET_MARK_SCALE, TicketMark } from '../../components/ticket-mark/ticket-mark.tsx'
 import type { AutomationTag } from './automation-presentation.ts'
 import { STATE_META } from './state-meta.ts'
 
@@ -60,7 +63,7 @@ function MajorTicketNode({
 function DataDiamond({ tag, x, y }: { tag: AutomationTag; x: number; y: number }) {
   return (
     <g className={`data-diamond slot-${tag.slot}`}>
-      <AutomationMark stage={tag.stage} glyph={tag.glyph} x={x} y={y} />
+      <AutomationMark variant="plot" stage={tag.stage} glyph={tag.glyph} x={x} y={y} />
       <NodeTooltip x={x} y={y - 13 * NODE_SCALE} word={tag.word} />
     </g>
   )

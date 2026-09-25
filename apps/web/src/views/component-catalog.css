@@ -148,17 +148,14 @@
   text-transform: uppercase;
 }
 
+.catalog-tags,
 .catalog-badges {
   display: flex;
   flex-wrap: wrap;
   gap: var(--sp-2);
 }
 
-.catalog-badges .settings-badge {
-  margin: 0;
-}
-
-.catalog-control-group .settings-alert {
+.catalog-control-group .alert {
   margin: 0;
 }
 

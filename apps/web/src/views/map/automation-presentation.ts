@@ -1,5 +1,6 @@
 import type {
   AutomationEvidence,
+  AutomationOverrideStage,
   AutomationProcessResult,
   ClassificationAttempt,
   SessionReportEvidence,
@@ -17,7 +18,7 @@ export type AutomationTagSlot =
 
 export interface AutomationTag {
   slot: AutomationTagSlot
-  stage: 'classification' | 'wayfinder'
+  stage: AutomationOverrideStage
   glyph: string
   label: string
   word: string

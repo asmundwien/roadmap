@@ -19,7 +19,8 @@ import { useState } from 'react'
 import type { ResolvedSelection } from '../../router.ts'
 import { stripInlineMarkdown } from '../gist.ts'
 import './map.css'
-import { InlineTicketMark } from './atoms/ticket-mark.tsx'
+import { StatusTag, statusTagForTicketState } from '../../components/status-tag/status-tag.tsx'
+import { TicketMark } from '../../components/ticket-mark/ticket-mark.tsx'
 import { automationEvidenceFor } from './automation-presentation.ts'
 import { type ProseLinkTarget, resolveProseLink } from './link-targets.ts'
 import { Prose } from './prose.tsx'
@@ -235,7 +236,6 @@ function TicketContent({
 }) {
   const ticket = map.tickets.find((t) => t.id === id)
   if (!ticket) return null
-  const meta = STATE_META[ticket.state]
   const gist = map.body.decisions.find((d) => d.title === ticket.title)
   const assignee = ticket.assignees[0]?.name
   const body = ticket.body.trim()
@@ -258,11 +258,21 @@ function TicketContent({
       </p>
       <SourceButton url={ticket.url} label="View item in source" />
       <p className="panel-item-title">{ticket.title}</p>
-      <p className="panel-item-state" style={{ color: meta.color }}>
-        <InlineTicketMark ticket={ticket} type={type} />
-        {meta.word}
-        {assignee !== undefined ? ` · ${assignee}` : ''}
-        {ticket.closedAt !== undefined ? ` · ${shortDate(ticket.closedAt)}` : ''}
+      <p className="panel-item-state">
+        <TicketMark ticket={ticket} type={type} variant="inline" />
+        <StatusTag variant={statusTagForTicketState(ticket.state)} />
+        {assignee !== undefined && (
+          <>
+            {' · '}
+            <span>{assignee}</span>
+          </>
+        )}
+        {ticket.closedAt !== undefined && (
+          <>
+            {' · '}
+            <span>{shortDate(ticket.closedAt)}</span>
+          </>
+        )}
       </p>
       {body !== '' && <Prose markdown={body} resolveLink={resolveLink} onSelect={onSelect} />}
       {gist !== undefined && (
@@ -696,7 +706,6 @@ export function ItemLink({
     : undefined
 
   if (local) {
-    const meta = STATE_META[local.state]
     const type = ticketTypeOf(local.typeEvidence)
     return (
       <button
@@ -705,9 +714,9 @@ export function ItemLink({
         onClick={() => onSelect({ kind: 'ticket', id: local.id })}
       >
         <span className="item-link-title">{local.title}</span>
-        <span className="item-link-state" style={{ color: meta.color }}>
-          <InlineTicketMark ticket={local} type={type} />
-          {meta.word}
+        <span className="item-link-state">
+          <TicketMark ticket={local} type={type} variant="inline" />
+          <StatusTag variant={statusTagForTicketState(local.state)} />
         </span>
       </button>
     )

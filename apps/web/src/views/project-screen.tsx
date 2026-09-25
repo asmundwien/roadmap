@@ -1,5 +1,7 @@
 import type { AutomationEvidence, Project, ProjectKey, WayfinderMap } from '@roadmap/contracts'
 import { useEffect, useRef, useState } from 'react'
+import { AutomationMark } from '../components/automation-mark/automation-mark.tsx'
+import { Badge } from '../components/badge/badge.tsx'
 import {
   encodeSelection,
   mapHash,
@@ -12,7 +14,6 @@ import {
 } from '../router.ts'
 import { useRoadmap } from '../store/roadmap-provider.tsx'
 import { activeMapOf } from './active-map.ts'
-import { InlineAutomationMark } from './map/atoms/automation-mark.tsx'
 import { MapChild, sameSelection } from './map/map-child.tsx'
 import { Panel, type PanelAutomation } from './map/panel.tsx'
 import { ledgerSequence } from './map/sequence.ts'
@@ -350,7 +351,7 @@ function ProjectHead({
     <header className="project-head">
       <h1>
         {title}
-        <span className="badge">{integrationLabel(project.key.integration)}</span>
+        <Badge>{integrationLabel(project.key.integration)}</Badge>
       </h1>
       <p className="muted small">
         {subtitle ? `${subtitle} · ` : ''}
@@ -363,11 +364,11 @@ function ProjectHead({
       {hasAutomationEvidence && (
         <p className="project-automation-legend muted small">
           <span className="automation-legend is-classification">
-            <InlineAutomationMark stage="classification" />
+            <AutomationMark variant="inline" stage="classification" />
             Classification
           </span>
           <span className="automation-legend is-wayfinder">
-            <InlineAutomationMark stage="wayfinder" />
+            <AutomationMark variant="inline" stage="wayfinder" />
             Wayfinder and Session
           </span>
         </p>

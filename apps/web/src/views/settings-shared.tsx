@@ -1,4 +1,4 @@
-import type { Connection, ProjectKey, RegisteredProject, SafeError } from '@roadmap/contracts'
+import type { ProjectKey, RegisteredProject, SafeError } from '@roadmap/contracts'
 import { type ReactNode, useEffect, useRef } from 'react'
 
 export function SettingsPane({
@@ -44,29 +44,6 @@ export function SettingsPane({
         </button>
         {children}
       </section>
-    </div>
-  )
-}
-
-export function IntegrationBadge({ connection }: { connection: Connection | undefined }) {
-  if (!connection) return <span className="settings-badge">Unknown</span>
-  return (
-    <span className={`settings-badge is-${connection.integration}`}>
-      {connection.integration === 'github' ? 'GitHub' : 'Local'}
-    </span>
-  )
-}
-
-export function SettingsAlert({
-  children,
-  tone = 'error',
-}: {
-  children: ReactNode
-  tone?: 'error' | 'info'
-}) {
-  return (
-    <div className={`settings-alert is-${tone}`} role={tone === 'error' ? 'alert' : undefined}>
-      {children}
     </div>
   )
 }

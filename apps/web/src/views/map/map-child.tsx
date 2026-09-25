@@ -1,8 +1,8 @@
 import type { AutomationEvidence, WayfinderMap } from '@roadmap/contracts'
 import { type ReactNode, useMemo } from 'react'
+import { DestinationMark } from '../../components/destination-mark/destination-mark.tsx'
 import type { ResolvedSelection } from '../../router.ts'
 import { stripInlineMarkdown } from '../gist.ts'
-import { InlineDestinationMark } from './atoms/destination-mark.tsx'
 import { buildLedger, LEDGER_SCALE } from './geometry.ts'
 import { MapLedger } from './ledger.tsx'
 import './map.css'
@@ -48,7 +48,7 @@ export function MapChild({
 
   const header = (
     <>
-      <InlineDestinationMark />
+      <DestinationMark variant="header" />
       <span className="fl-body" style={{ marginLeft: textLeft }}>
         <span className="fl-caption">the destination</span>
         <span className="fl-title">{map.title}</span>

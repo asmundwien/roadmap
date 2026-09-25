@@ -1,0 +1,26 @@
+.automation-mark.stage-classification {
+  --tag-color: var(--automation-classification);
+}
+
+.automation-mark.stage-wayfinder {
+  --tag-color: var(--automation-wayfinder);
+}
+
+.automation-mark .tag-face {
+  fill: var(--tag-color);
+  stroke: var(--bg);
+  stroke-width: 1px;
+  stroke-linejoin: miter;
+}
+
+.automation-mark .tag-glyph {
+  fill: var(--bg);
+  font-size: 7.25px;
+  font-weight: 900;
+}
+
+.automation-mark-inline {
+  width: 0.8em;
+  height: 0.8em;
+  overflow: visible;
+}

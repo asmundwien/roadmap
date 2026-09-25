@@ -7,7 +7,7 @@ import {
   type WayfinderMap,
 } from '@roadmap/contracts'
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
-import { DestinationMark } from './atoms/destination-mark.tsx'
+import { DestinationMark } from '../../components/destination-mark/destination-mark.tsx'
 import {
   type AutomationTag,
   automationEvidenceFor,
@@ -15,7 +15,7 @@ import {
 } from './automation-presentation.ts'
 import { buildLedger, type Ledger, type LedgerEdge } from './geometry.ts'
 import './map.css'
-import { TicketMark } from './atoms/ticket-mark.tsx'
+import { TicketMark } from '../../components/ticket-mark/ticket-mark.tsx'
 import { type LedgerSelection, scopePlan } from './sequence.ts'
 import { STATE_META } from './state-meta.ts'
 import { TicketNode, ticketNodeTextX } from './ticket-node.tsx'
@@ -292,7 +292,7 @@ export function MapLedger({
           </text>
         ))}
 
-        <DestinationMark x={ledger.gutterX} y={ledger.destY} />
+        <DestinationMark variant="plot" x={ledger.gutterX} y={ledger.destY} />
         <text x={ledger.textX} y={ledger.destTextTop - 14} className="goal-caption">
           the destination
         </text>

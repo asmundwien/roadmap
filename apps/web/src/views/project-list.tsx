@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { Badge } from '../components/badge/badge.tsx'
 import { connectionSettingsHash, projectHash } from '../router.ts'
 import { useRoadmap } from '../store/roadmap-provider.tsx'
 import { integrationLabel } from './project-meta.ts'
@@ -162,7 +163,7 @@ function ActiveProjectRow({ presentation }: { presentation: ProjectPresentation 
       <span className="overview-copy">
         <span className="overview-kicker">
           {project.name}
-          <span className="badge">{integrationLabel(project.key.integration)}</span>
+          <Badge>{integrationLabel(project.key.integration)}</Badge>
           {connection && <span className="overview-connection">{connection.name}</span>}
         </span>
         <strong>{destination}</strong>
@@ -192,7 +193,7 @@ function RestingProjectRow({ presentation }: { presentation: ProjectPresentation
       <span className="overview-copy">
         <strong>
           {project.name}
-          <span className="badge">{integrationLabel(project.key.integration)}</span>
+          <Badge>{integrationLabel(project.key.integration)}</Badge>
         </strong>
         <span className="overview-detail">
           All {mapCount === 1 ? '1 map' : `${mapCount} maps`} closed · {decisions} decisions
@@ -221,7 +222,7 @@ function WaitingProjectRow({ presentation }: { presentation: ProjectPresentation
       <span className="overview-copy">
         <strong>
           {project.name}
-          <span className="badge">{integrationLabel(project.key.integration)}</span>
+          <Badge>{integrationLabel(project.key.integration)}</Badge>
         </strong>
         <span className="overview-detail">
           {unavailableCause !== null

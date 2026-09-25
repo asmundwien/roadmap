@@ -1,0 +1,24 @@
+.alert {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: var(--sp-2) 0;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--edge);
+  background: var(--wash);
+  font-size: 0.8rem;
+}
+
+.alert-error {
+  border-left: 3px solid var(--state-blocked);
+}
+
+.alert-info {
+  border-left: 3px solid var(--goal);
+  background: color-mix(in srgb, var(--goal) 6%, transparent);
+}
+
+.alert span,
+.alert:not(:has(strong)) {
+  color: var(--muted);
+}
