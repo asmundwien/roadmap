@@ -1,7 +1,7 @@
 import type { AutomationEvidence, Project, ProjectKey, WayfinderMap } from '@roadmap/contracts'
 import { useEffect, useRef, useState } from 'react'
-import { AutomationMark } from '../components/automation-mark/automation-mark.tsx'
-import { Badge } from '../components/badge/badge.tsx'
+import { AutomationMark } from '../../components/automation-mark/automation-mark.tsx'
+import { Badge } from '../../components/badge/badge.tsx'
 import {
   encodeSelection,
   mapHash,
@@ -11,14 +11,14 @@ import {
   replaceHash,
   resolveSelection,
   selectionHash,
-} from '../router.ts'
-import { useRoadmap } from '../store/roadmap-provider.tsx'
+} from '../../router.ts'
+import { useRoadmap } from '../../store/roadmap-provider.tsx'
+import { integrationLabel } from '../shared/project-meta.ts'
 import { activeMapOf } from './active-map.ts'
-import { MapChild, sameSelection } from './map/map-child.tsx'
-import { Panel, type PanelAutomation } from './map/panel.tsx'
-import { ledgerSequence } from './map/sequence.ts'
-import { integrationLabel } from './project-meta.ts'
-import './views.css'
+import { MapChild, sameSelection } from './map-child.tsx'
+import { Panel, type PanelAutomation } from './panel.tsx'
+import { ledgerSequence } from './sequence.ts'
+import '../shared/views.css'
 
 type ProjectScreenProps = { route: Extract<Route, { screen: 'project' }> }
 

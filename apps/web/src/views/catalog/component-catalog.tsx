@@ -1,15 +1,15 @@
 import type { ReactNode } from 'react'
-import { Action, ActionGroup } from '../components/action/action.tsx'
-import { Alert } from '../components/alert/alert.tsx'
-import { AutomationMark } from '../components/automation-mark/automation-mark.tsx'
-import { Badge } from '../components/badge/badge.tsx'
-import { DestinationMark } from '../components/destination-mark/destination-mark.tsx'
+import { Action, ActionGroup } from '../../components/action/action.tsx'
+import { Alert } from '../../components/alert/alert.tsx'
+import { AutomationMark } from '../../components/automation-mark/automation-mark.tsx'
+import { Badge } from '../../components/badge/badge.tsx'
+import { DestinationMark } from '../../components/destination-mark/destination-mark.tsx'
 import {
   TicketMark,
   type TicketMarkCornerCount,
   type TicketMarkFill,
-} from '../components/ticket-mark/ticket-mark.tsx'
-import type { Variant } from '../components/variant.ts'
+} from '../../components/ticket-mark/ticket-mark.tsx'
+import type { Variant } from '../../components/variant.ts'
 import './component-catalog.css'
 
 const TICKET_MARK_FILLS = ['none', 'half', 'fill'] as const satisfies readonly TicketMarkFill[]

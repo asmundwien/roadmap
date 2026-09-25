@@ -1,6 +1,6 @@
 import type { ProjectKey, WayfinderMap } from '@roadmap/contracts'
 import { useMemo, useSyncExternalStore } from 'react'
-import { stripInlineMarkdown } from './views/gist.ts'
+import { stripInlineMarkdown } from './views/shared/gist.ts'
 
 /**
  * Hash routing, hand-rolled. Five screens still do not justify a router dependency, and hash URLs

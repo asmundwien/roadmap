@@ -8,15 +8,15 @@ import type {
   WayfinderSession,
 } from '@roadmap/contracts'
 import { useMemo, useState } from 'react'
-import { Alert } from '../components/alert/alert.tsx'
-import { selectionHash } from '../router.ts'
-import { useRoadmap } from '../store/roadmap-provider.tsx'
+import { Alert } from '../../components/alert/alert.tsx'
+import { selectionHash } from '../../router.ts'
+import { useRoadmap } from '../../store/roadmap-provider.tsx'
 import {
   type AutomationPresentation,
   type AutomationSummary,
   type AutomationTicketPresentation,
   presentAutomation,
-} from './project-presentation.ts'
+} from '../overview/project-presentation.ts'
 import { ErrorText, projectIdentity, sameProject } from './settings-shared.tsx'
 import './settings.css'
 

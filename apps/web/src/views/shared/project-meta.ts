@@ -1,5 +1,5 @@
 import type { Integration } from '@roadmap/contracts'
-import type { Variant } from '../components/variant.ts'
+import type { Variant } from '../../components/variant.ts'
 
 type IntegrationMeta = {
   label: string

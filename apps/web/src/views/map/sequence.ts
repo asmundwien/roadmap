@@ -1,6 +1,6 @@
 import type { WayfinderMap } from '@roadmap/contracts'
 import type { ResolvedSelection } from '../../router.ts'
-import { stripInlineMarkdown } from '../gist.ts'
+import { stripInlineMarkdown } from '../shared/gist.ts'
 import { buildLedger } from './geometry.ts'
 
 /** What a click on the map means — everything the Panel can show except the map's own prose. */

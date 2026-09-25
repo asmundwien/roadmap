@@ -1,11 +1,11 @@
 import { useRoute } from './router.ts'
-import { AutomationSettings } from './views/automation-settings.tsx'
-import { ComponentCatalog } from './views/component-catalog.tsx'
-import { ConnectionSettings } from './views/connection-settings.tsx'
-import { ProjectList } from './views/project-list.tsx'
-import { ProjectScreen } from './views/project-screen.tsx'
-import { ProjectSettings } from './views/project-settings.tsx'
-import { SiteHeader } from './views/site-header.tsx'
+import { ComponentCatalog } from './views/catalog/component-catalog.tsx'
+import { ProjectScreen } from './views/map/project-screen.tsx'
+import { ProjectList } from './views/overview/project-list.tsx'
+import { AutomationSettings } from './views/settings/automation-settings.tsx'
+import { ConnectionSettings } from './views/settings/connection-settings.tsx'
+import { ProjectSettings } from './views/settings/project-settings.tsx'
+import { SiteHeader } from './views/shell/site-header.tsx'
 
 /** The persistent header frames Overview, settings, and existing Project/map routes. */
 export function App() {

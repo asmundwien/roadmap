@@ -18,7 +18,7 @@ WebSocket carries full state replacements. HTTP carries `query` and `execute` re
 
 `apps/web/src/router.ts` owns navigation in the URL hash. `#/owner/repo/<map>` identifies the open map; another segment identifies the Panel selection. `PanelSelection` resolves against each live snapshot into `ResolvedSelection`. Components do not mirror URL state in `useState`.
 
-`apps/web/src/views` contains the map view. The ledger in `map/ledger.tsx` and `map/geometry.ts` draws titles. Descriptive text lives in the docked Panel rendered by `map/panel.tsx`, not in an overlay. `map/sequence.ts` owns traversal order and decides which out-of-scope items to display. `map/prose.tsx` renders Panel prose as Markdown. `project-screen.tsx` owns the map's roving-tabindex keyboard navigation.
+`apps/web/src/views` groups screens by area. The map area lives in `map/`; `map/ledger.tsx` and `map/geometry.ts` draw titles. Descriptive text lives in the docked Panel rendered by `map/panel.tsx`, not in an overlay. `map/sequence.ts` owns traversal order and decides which out-of-scope items to display. `map/prose.tsx` renders Panel prose as Markdown. `map/project-screen.tsx` owns the map's roving-tabindex keyboard navigation.
 
 Reusable UI lives under `apps/web/src/components`, with each module's implementation, styles, and tests in its own folder. Components use the shared `Variant` color vocabulary. Views adapt domain state into generic component props, including `TicketMark` size, fill, accent, corners, and content.
 

@@ -1,12 +1,12 @@
 import type { ReactNode } from 'react'
-import { Badge } from '../components/badge/badge.tsx'
-import { connectionSettingsHash, projectHash } from '../router.ts'
-import { useRoadmap } from '../store/roadmap-provider.tsx'
-import { integrationLabel } from './project-meta.ts'
+import { Badge } from '../../components/badge/badge.tsx'
+import { connectionSettingsHash, projectHash } from '../../router.ts'
+import { useRoadmap } from '../../store/roadmap-provider.tsx'
+import { integrationLabel } from '../shared/project-meta.ts'
 import type { AttentionItem } from './project-presentation.ts'
 import { type ProjectPresentation, presentProjects } from './project-presentation.ts'
 import { formatMonth, formatRecency } from './recency.ts'
-import './views.css'
+import '../shared/views.css'
 
 /** The registration-led whole-product view: attention, active routes, ground covered, then fog. */
 export function ProjectList() {

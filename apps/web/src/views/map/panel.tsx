@@ -17,7 +17,7 @@ import type {
 import { ticketTypeOf } from '@roadmap/contracts'
 import { useState } from 'react'
 import type { ResolvedSelection } from '../../router.ts'
-import { stripInlineMarkdown } from '../gist.ts'
+import { stripInlineMarkdown } from '../shared/gist.ts'
 import './map.css'
 import { Badge } from '../../components/badge/badge.tsx'
 import { automationEvidenceFor } from './automation-presentation.ts'
