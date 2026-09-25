@@ -62,17 +62,14 @@ export function TicketMark(props: TicketMarkProps) {
   )
 }
 
-function TypeCorners({
-  type,
-  scale,
-  x,
-  y,
-}: {
+type TypeCornersProps = {
   type: TicketType
   scale: number
   x: number
   y: number
-}) {
+}
+
+function TypeCorners({ type, scale, x, y }: TypeCornersProps) {
   const count = typeRank(type)
   if (count === 0) return null
   const radius = 11 * scale

@@ -39,6 +39,17 @@ export interface PanelAutomation {
   execute(command: Command): Promise<CommandOutcome>
 }
 
+type PanelProps = {
+  map: WayfinderMap
+  item: ResolvedSelection
+  onClose: () => void
+  onStep: (delta: number) => void
+  onSelect: (item: ResolvedSelection) => void
+  hasPrev: boolean
+  hasNext: boolean
+  automation: PanelAutomation
+}
+
 export function Panel({
   map,
   item,
@@ -48,16 +59,7 @@ export function Panel({
   hasPrev,
   hasNext,
   automation,
-}: {
-  map: WayfinderMap
-  item: ResolvedSelection
-  onClose: () => void
-  onStep: (delta: number) => void
-  onSelect: (item: ResolvedSelection) => void
-  hasPrev: boolean
-  hasNext: boolean
-  automation: PanelAutomation
-}) {
+}: PanelProps) {
   return (
     <>
       <div className="panel-nav" role="toolbar" aria-label="panel navigation">
@@ -99,7 +101,9 @@ export function Panel({
   )
 }
 
-function Chevron({ up = false }: { up?: boolean }) {
+type ChevronProps = { up?: boolean }
+
+function Chevron({ up = false }: ChevronProps) {
   return (
     <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
       <path
@@ -129,17 +133,14 @@ function ChevronsRight() {
   )
 }
 
-function PanelBody({
-  map,
-  selection,
-  onSelect,
-  automation,
-}: {
+type PanelBodyProps = {
   map: WayfinderMap
   selection: ResolvedSelection
   onSelect: (item: ResolvedSelection) => void
   automation: PanelAutomation
-}) {
+}
+
+function PanelBody({ map, selection, onSelect, automation }: PanelBodyProps) {
   switch (selection.kind) {
     case 'map':
       return <MapContent map={map} onSelect={onSelect} />
@@ -170,13 +171,12 @@ function PanelBody({
   }
 }
 
-function MapContent({
-  map,
-  onSelect,
-}: {
+type MapContentProps = {
   map: WayfinderMap
   onSelect: (item: ResolvedSelection) => void
-}) {
+}
+
+function MapContent({ map, onSelect }: MapContentProps) {
   const partial = !map.ticketsComplete || map.tickets.some((ticket) => !ticket.blockersComplete)
   const resolveLink = proseLinkResolver(map, map.sourcePath)
 
@@ -223,17 +223,14 @@ function MapContent({
   )
 }
 
-function TicketContent({
-  map,
-  id,
-  onSelect,
-  automation,
-}: {
+type TicketContentProps = {
   map: WayfinderMap
   id: string
   onSelect: (item: ResolvedSelection) => void
   automation: PanelAutomation
-}) {
+}
+
+function TicketContent({ map, id, onSelect, automation }: TicketContentProps) {
   const ticket = map.tickets.find((t) => t.id === id)
   if (!ticket) return null
   const gist = map.body.decisions.find((d) => d.title === ticket.title)
@@ -300,19 +297,15 @@ function TicketContent({
   )
 }
 
-function AutomationSection({
-  automation,
-  control,
-  evidence,
-  map,
-  ticket,
-}: {
+type AutomationSectionProps = {
   automation: PanelAutomation
   control: AutomationOverrideControl | undefined
   evidence: AutomationEvidence | undefined
   map: WayfinderMap
   ticket: Ticket
-}) {
+}
+
+function AutomationSection({ automation, control, evidence, map, ticket }: AutomationSectionProps) {
   const [feedback, setFeedback] = useState<{ kind: 'notice' | 'error'; text: string } | null>(null)
   const fallbackReason =
     automation.state.availability.status === 'unavailable'
@@ -388,13 +381,12 @@ function AutomationSection({
   )
 }
 
-function AutomationEvidenceDetails({
-  evidence,
-  ticket,
-}: {
+type AutomationEvidenceDetailsProps = {
   evidence: AutomationEvidence
   ticket: Ticket
-}) {
+}
+
+function AutomationEvidenceDetails({ evidence, ticket }: AutomationEvidenceDetailsProps) {
   return (
     <section className="automation-evidence" aria-label="Recorded Automation evidence">
       <dl className="automation-tracker-fact">
@@ -406,7 +398,9 @@ function AutomationEvidenceDetails({
   )
 }
 
-function ClassificationEvidence({ attempt }: { attempt: ClassificationAttempt }) {
+type ClassificationEvidenceProps = { attempt: ClassificationAttempt }
+
+function ClassificationEvidence({ attempt }: ClassificationEvidenceProps) {
   return (
     <section className="automation-stage is-classification">
       <h3>Classification</h3>
@@ -433,7 +427,9 @@ function ClassificationEvidence({ attempt }: { attempt: ClassificationAttempt })
   )
 }
 
-function WayfinderEvidence({ session }: { session: WayfinderSession }) {
+type WayfinderEvidenceProps = { session: WayfinderSession }
+
+function WayfinderEvidence({ session }: WayfinderEvidenceProps) {
   return (
     <section className="automation-stage is-wayfinder">
       <h3>Wayfinder Session</h3>
@@ -463,7 +459,9 @@ function WayfinderEvidence({ session }: { session: WayfinderSession }) {
   )
 }
 
-function ProcessEvidence({ result }: { result: AutomationProcessResult }) {
+type ProcessEvidenceProps = { result: AutomationProcessResult }
+
+function ProcessEvidence({ result }: ProcessEvidenceProps) {
   switch (result.status) {
     case 'exited':
       return <EvidenceFact term="Process result" value={`Exited ${result.code}`} />
@@ -478,7 +476,9 @@ function ProcessEvidence({ result }: { result: AutomationProcessResult }) {
   }
 }
 
-function ReportEvidence({ report }: { report: SessionReportEvidence }) {
+type ReportEvidenceProps = { report: SessionReportEvidence }
+
+function ReportEvidence({ report }: ReportEvidenceProps) {
   switch (report.status) {
     case 'received':
       return (
@@ -499,7 +499,9 @@ function ReportEvidence({ report }: { report: SessionReportEvidence }) {
   }
 }
 
-function EvidenceFact({ term, value, detail }: { term: string; value: string; detail?: string }) {
+type EvidenceFactProps = { term: string; value: string; detail?: string }
+
+function EvidenceFact({ term, value, detail }: EvidenceFactProps) {
   return (
     <div>
       <dt>{term}</dt>
@@ -565,6 +567,15 @@ function sentenceCase(value: string): string {
   return `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`
 }
 
+type OverrideButtonProps = {
+  label: string
+  available: AutomationOverrideControl['classification'] | undefined
+  fallbackReason: string
+  commandInFlight: boolean
+  eligibleHint: string
+  onClick: () => void
+}
+
 function OverrideButton({
   label,
   available,
@@ -572,14 +583,7 @@ function OverrideButton({
   commandInFlight,
   eligibleHint,
   onClick,
-}: {
-  label: string
-  available: AutomationOverrideControl['classification'] | undefined
-  fallbackReason: string
-  commandInFlight: boolean
-  eligibleHint: string
-  onClick: () => void
-}) {
+}: OverrideButtonProps) {
   const reason = commandInFlight
     ? 'Another operation is in progress.'
     : available?.status === 'ineligible'
@@ -598,15 +602,13 @@ function OverrideButton({
   )
 }
 
-function BlockerList({
-  map,
-  ticket,
-  onSelect,
-}: {
+type BlockerListProps = {
   map: WayfinderMap
   ticket: Ticket
   onSelect: (item: ResolvedSelection) => void
-}) {
+}
+
+function BlockerList({ map, ticket, onSelect }: BlockerListProps) {
   if (ticket.blockedBy.length === 0) return null
   return (
     <>
@@ -626,13 +628,12 @@ function BlockerList({
   )
 }
 
-function DecisionList({
-  map,
-  onSelect,
-}: {
+type DecisionListProps = {
   map: WayfinderMap
   onSelect: (item: ResolvedSelection) => void
-}) {
+}
+
+function DecisionList({ map, onSelect }: DecisionListProps) {
   const resolveLink = proseLinkResolver(map, map.sourcePath)
   return (
     <>
@@ -652,17 +653,14 @@ function DecisionList({
   )
 }
 
-function DecisionLink({
-  title,
-  gist,
-  target,
-  onSelect,
-}: {
+type DecisionLinkProps = {
   title: string
   gist: string
   target: ProseLinkTarget | null
   onSelect: (item: ResolvedSelection) => void
-}) {
+}
+
+function DecisionLink({ title, gist, target, onSelect }: DecisionLinkProps) {
   const gistNode = gist ? (
     <div className="item-link-state item-link-gist">
       <Prose markdown={gist} />
@@ -695,15 +693,13 @@ function DecisionLink({
   )
 }
 
-export function ItemLink({
-  map,
-  itemRef,
-  onSelect,
-}: {
+type ItemLinkProps = {
   map: WayfinderMap
   itemRef: Blocker
   onSelect: (item: ResolvedSelection) => void
-}) {
+}
+
+export function ItemLink({ map, itemRef, onSelect }: ItemLinkProps) {
   const local = sameProject(itemRef.project, map.project)
     ? map.tickets.find((t) => t.id === itemRef.ticketId)
     : undefined
@@ -751,17 +747,14 @@ function rawListItem(items: string[], stripped: string): string {
   return items.find((item) => stripInlineMarkdown(item) === stripped) ?? stripped
 }
 
-function ListItemContent({
-  map,
-  caption,
-  markdown,
-  onSelect,
-}: {
+type ListItemContentProps = {
   map: WayfinderMap
   caption: string
   markdown: string
   onSelect: (item: ResolvedSelection) => void
-}) {
+}
+
+function ListItemContent({ map, caption, markdown, onSelect }: ListItemContentProps) {
   return (
     <div className="cartouche">
       <p className="cart-caption">{caption}</p>
@@ -775,13 +768,12 @@ function ListItemContent({
   )
 }
 
-function ScopeAllContent({
-  map,
-  onSelect,
-}: {
+type ScopeAllContentProps = {
   map: WayfinderMap
   onSelect: (item: ResolvedSelection) => void
-}) {
+}
+
+function ScopeAllContent({ map, onSelect }: ScopeAllContentProps) {
   const resolveLink = proseLinkResolver(map, map.sourcePath)
   return (
     <div className="cartouche">
@@ -798,7 +790,9 @@ function ScopeAllContent({
   )
 }
 
-function SourceButton({ url, label }: { url?: string; label: string }) {
+type SourceButtonProps = { url?: string; label: string }
+
+function SourceButton({ url, label }: SourceButtonProps) {
   if (!url) return null
   return (
     <p className="gh-row">

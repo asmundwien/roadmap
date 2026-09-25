@@ -48,6 +48,15 @@ function pressProps(
   }
 }
 
+type MapLedgerProps = {
+  map: WayfinderMap
+  automationEvidence: readonly AutomationEvidence[]
+  trunkToEdge?: boolean
+  onSelect: (selection: LedgerSelection) => void
+  selected: LedgerSelection | null
+  kbNav: boolean
+}
+
 export function MapLedger({
   map,
   automationEvidence,
@@ -55,14 +64,7 @@ export function MapLedger({
   onSelect,
   selected,
   kbNav,
-}: {
-  map: WayfinderMap
-  automationEvidence: readonly AutomationEvidence[]
-  trunkToEdge?: boolean
-  onSelect: (selection: LedgerSelection) => void
-  selected: LedgerSelection | null
-  kbNav: boolean
-}) {
+}: MapLedgerProps) {
   const { aggregated, aggLabel, scopeSet, fogMap } = useMemo(() => scopePlan(map), [map])
   const ledger = useMemo(() => buildLedger(fogMap), [fogMap])
   const fresh = useFreshTickets(map)
@@ -356,7 +358,9 @@ function ghostSelected(selected: LedgerSelection | null, sel: LedgerSelection): 
   return true
 }
 
-function GhostMark({ kind, x, y }: { kind: LedgerSelection['kind']; x: number; y: number }) {
+type GhostMarkProps = { kind: LedgerSelection['kind']; x: number; y: number }
+
+function GhostMark({ kind, x, y }: GhostMarkProps) {
   if (kind === 'fog') {
     return (
       <circle
@@ -406,7 +410,9 @@ function GhostMark({ kind, x, y }: { kind: LedgerSelection['kind']; x: number; y
   )
 }
 
-function Section({ ledger, y, label }: { ledger: Ledger; y: number; label: string }) {
+type SectionProps = { ledger: Ledger; y: number; label: string }
+
+function Section({ ledger, y, label }: SectionProps) {
   return (
     <>
       <line x1="0" y1={y} x2={ledger.width + EXT} y2={y} stroke="var(--edge)" />
@@ -417,19 +423,15 @@ function Section({ ledger, y, label }: { ledger: Ledger; y: number; label: strin
   )
 }
 
-function TypeChip({
-  type,
-  title,
-  titleWeight,
-  x,
-  baselineY,
-}: {
+type TypeChipProps = {
   type: TicketType
   title: string
   titleWeight: number
   x: number
   baselineY: number
-}) {
+}
+
+function TypeChip({ type, title, titleWeight, x, baselineY }: TypeChipProps) {
   if (type === 'untyped') return null
   const left = x + textWidth(title, `${titleWeight} 12px ${FONT_STACK}`) + 8
   const label = type.toUpperCase()

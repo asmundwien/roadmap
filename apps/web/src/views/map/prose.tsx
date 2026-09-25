@@ -22,16 +22,14 @@ function disabledReason(target: ProseLinkTarget | null, canSelect: boolean): str
   return null
 }
 
-/** A markdown string — a whole issue body or a sliced fragment — as formatted prose. */
-export function Prose({
-  markdown,
-  resolveLink,
-  onSelect,
-}: {
+type ProseProps = {
   markdown: string
   resolveLink?: (href: string | undefined) => ProseLinkTarget | null
   onSelect?: (item: ResolvedSelection) => void
-}) {
+}
+
+/** A markdown string — a whole issue body or a sliced fragment — as formatted prose. */
+export function Prose({ markdown, resolveLink, onSelect }: ProseProps) {
   const components = useMemo<Components>(
     () => ({
       // Headings downshift so a shouty issue body can't outrank the Panel's own chrome.

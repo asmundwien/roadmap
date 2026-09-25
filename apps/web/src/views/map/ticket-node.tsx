@@ -11,19 +11,15 @@ const NODE_SCALE = MAJOR_TICKET_MARK_SCALE
 const FIRST_TAG_OFFSET = 19 * NODE_SCALE
 const TAG_PITCH = 14 * NODE_SCALE
 
-export function TicketNode({
-  ticket,
-  type,
-  tags,
-  x,
-  y,
-}: {
+type TicketNodeProps = {
   ticket: Ticket
   type: TicketType
   tags: readonly AutomationTag[]
   x: number
   y: number
-}) {
+}
+
+export function TicketNode({ ticket, type, tags, x, y }: TicketNodeProps) {
   return (
     <g className="ticket-node">
       <MajorTicketNode ticket={ticket} type={type} x={x} y={y} />
@@ -41,17 +37,14 @@ export function ticketNodeTextX(x: number, baseline: number, tagCount: number): 
   return Math.max(baseline, lastTagRight + 8)
 }
 
-function MajorTicketNode({
-  ticket,
-  type,
-  x,
-  y,
-}: {
+type MajorTicketNodeProps = {
   ticket: Ticket
   type: TicketType
   x: number
   y: number
-}) {
+}
+
+function MajorTicketNode({ ticket, type, x, y }: MajorTicketNodeProps) {
   return (
     <g className="major-node">
       <TicketMark state={ticket.state} type={type} variant="major" x={x} y={y} />
@@ -60,7 +53,9 @@ function MajorTicketNode({
   )
 }
 
-function DataDiamond({ tag, x, y }: { tag: AutomationTag; x: number; y: number }) {
+type DataDiamondProps = { tag: AutomationTag; x: number; y: number }
+
+function DataDiamond({ tag, x, y }: DataDiamondProps) {
   return (
     <g className={`data-diamond slot-${tag.slot}`}>
       <AutomationMark variant="plot" stage={tag.stage} glyph={tag.glyph} x={x} y={y} />
@@ -69,7 +64,9 @@ function DataDiamond({ tag, x, y }: { tag: AutomationTag; x: number; y: number }
   )
 }
 
-function NodeTooltip({ x, y, word }: { x: number; y: number; word: string }) {
+type NodeTooltipProps = { x: number; y: number; word: string }
+
+function NodeTooltip({ x, y, word }: NodeTooltipProps) {
   const width = Math.max(32, word.length * 5.2 + 10)
   return (
     <g className="node-tooltip" transform={`translate(${x - width / 2} ${y})`}>

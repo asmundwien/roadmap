@@ -1,14 +1,11 @@
-export function Diamond({
-  className,
-  x,
-  y,
-  radius,
-}: {
+type DiamondProps = {
   className: string
   x: number
   y: number
   radius: number
-}) {
+}
+
+export function Diamond({ className, x, y, radius }: DiamondProps) {
   return (
     <path
       className={className}

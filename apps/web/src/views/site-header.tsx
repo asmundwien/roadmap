@@ -9,11 +9,13 @@ import {
 import { useRoadmap } from '../store/roadmap-provider.tsx'
 import './views.css'
 
+type SiteHeaderProps = { route: Route }
+
 /**
  * The persistent top bar: the fork-tile mark and wordmark leading home, with transport health on
  * the right. The readout lives here because liveness is global truth; domain Connections are not.
  */
-export function SiteHeader({ route }: { route: Route }) {
+export function SiteHeader({ route }: SiteHeaderProps) {
   const { transport, capturedAt } = useRoadmap()
 
   return (

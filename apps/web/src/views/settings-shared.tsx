@@ -1,15 +1,13 @@
 import type { ProjectKey, RegisteredProject, SafeError } from '@roadmap/contracts'
 import { type ReactNode, useEffect, useRef } from 'react'
 
-export function SettingsPane({
-  children,
-  label,
-  onClose,
-}: {
+type SettingsPaneProps = {
   children: ReactNode
   label: string
   onClose: () => void
-}) {
+}
+
+export function SettingsPane({ children, label, onClose }: SettingsPaneProps) {
   const paneRef = useRef<HTMLElement>(null)
   useEffect(() => {
     const closePane = (event: KeyboardEvent | MouseEvent) => {
@@ -48,7 +46,9 @@ export function SettingsPane({
   )
 }
 
-export function ErrorText({ error }: { error: SafeError | string | null }) {
+type ErrorTextProps = { error: SafeError | string | null }
+
+export function ErrorText({ error }: ErrorTextProps) {
   if (!error) return null
   return <p className="settings-error">{typeof error === 'string' ? error : error.message}</p>
 }

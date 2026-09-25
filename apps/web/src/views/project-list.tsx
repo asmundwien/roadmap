@@ -88,15 +88,13 @@ export function ProjectList() {
   )
 }
 
-function OverviewCount({
-  tone,
-  count,
-  label,
-}: {
+type OverviewCountProps = {
   tone: 'decided' | 'active' | 'resting' | 'attention'
   count: number
   label: string
-}) {
+}
+
+function OverviewCount({ tone, count, label }: OverviewCountProps) {
   return (
     <span>
       <i className={`overview-dot is-${tone}`} aria-hidden="true" />
@@ -105,7 +103,9 @@ function OverviewCount({
   )
 }
 
-function OverviewSection({ children, label }: { children: ReactNode; label: string }) {
+type OverviewSectionProps = { children: ReactNode; label: string }
+
+function OverviewSection({ children, label }: OverviewSectionProps) {
   return (
     <section className="overview-section">
       <h2 className="overview-section-label">{label}</h2>
@@ -114,7 +114,9 @@ function OverviewSection({ children, label }: { children: ReactNode; label: stri
   )
 }
 
-function AttentionRow({ item }: { item: AttentionItem }) {
+type AttentionRowProps = { item: AttentionItem }
+
+function AttentionRow({ item }: AttentionRowProps) {
   const content = (
     <>
       <span className="overview-node is-attention" aria-hidden="true">
@@ -151,7 +153,9 @@ function AttentionRow({ item }: { item: AttentionItem }) {
   return <div className="overview-row">{content}</div>
 }
 
-function ActiveProjectRow({ presentation }: { presentation: ProjectPresentation }) {
+type ActiveProjectRowProps = { presentation: ProjectPresentation }
+
+function ActiveProjectRow({ presentation }: ActiveProjectRowProps) {
   const { project, connection, destination, decisions, openTickets, hasFog, priorities } =
     presentation
   const unavailable = project.availability.status === 'unavailable'
@@ -183,7 +187,9 @@ function ActiveProjectRow({ presentation }: { presentation: ProjectPresentation 
   )
 }
 
-function RestingProjectRow({ presentation }: { presentation: ProjectPresentation }) {
+type RestingProjectRowProps = { presentation: ProjectPresentation }
+
+function RestingProjectRow({ presentation }: RestingProjectRowProps) {
   const { project, mapCount, decisions, activityAt } = presentation
   return (
     <a className="overview-row" href={projectHash(project.key)}>
@@ -207,7 +213,9 @@ function RestingProjectRow({ presentation }: { presentation: ProjectPresentation
   )
 }
 
-function WaitingProjectRow({ presentation }: { presentation: ProjectPresentation }) {
+type WaitingProjectRowProps = { presentation: ProjectPresentation }
+
+function WaitingProjectRow({ presentation }: WaitingProjectRowProps) {
   const { project, connection } = presentation
   const unavailableCause =
     project.availability.status === 'unavailable' ? project.availability.cause : null

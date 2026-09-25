@@ -172,15 +172,13 @@ export function ComponentCatalog() {
   )
 }
 
-function CatalogSection({
-  title,
-  description,
-  children,
-}: {
+type CatalogSectionProps = {
   title: string
   description: string
   children: ReactNode
-}) {
+}
+
+function CatalogSection({ title, description, children }: CatalogSectionProps) {
   return (
     <section className="catalog-section">
       <header>
@@ -192,7 +190,9 @@ function CatalogSection({
   )
 }
 
-function TicketMarkRow({ type }: { type: TicketType }) {
+type TicketMarkRowProps = { type: TicketType }
+
+function TicketMarkRow({ type }: TicketMarkRowProps) {
   return (
     <>
       <strong className="catalog-row-label">{type}</strong>
@@ -210,7 +210,9 @@ function TicketMarkRow({ type }: { type: TicketType }) {
   )
 }
 
-function Signal({ label, children }: { label: string; children: ReactNode }) {
+type SignalProps = { label: string; children: ReactNode }
+
+function Signal({ label, children }: SignalProps) {
   return (
     <div className="catalog-signal">
       <svg viewBox="0 0 48 48" aria-hidden="true">

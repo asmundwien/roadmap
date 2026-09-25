@@ -222,6 +222,16 @@ export function ConnectionSettings() {
   )
 }
 
+type ConnectionStrideProps = {
+  connection: Connection
+  dependents: RegisteredProject[]
+  authorization: AuthorizationOperation | undefined
+  github: Extract<SupportedIntegration, { integration: 'github' }> | undefined
+  blocked: boolean
+  onAuthorize: () => void
+  onEdit: () => void
+}
+
 function ConnectionStride({
   connection,
   dependents,
@@ -230,15 +240,7 @@ function ConnectionStride({
   blocked,
   onAuthorize,
   onEdit,
-}: {
-  connection: Connection
-  dependents: RegisteredProject[]
-  authorization: AuthorizationOperation | undefined
-  github: Extract<SupportedIntegration, { integration: 'github' }> | undefined
-  blocked: boolean
-  onAuthorize: () => void
-  onEdit: () => void
-}) {
+}: ConnectionStrideProps) {
   const healthy = connection.availability.status === 'available'
   const reauthenticationAvailable =
     connection.availability.status !== 'available' || authorization?.status === 'waiting'
@@ -316,17 +318,19 @@ function ConnectionStride({
   )
 }
 
+type AddConnectionPaneProps = {
+  operation: ConnectionOperation
+  configurationVersion: number
+  onClose: () => void
+  onStarted: (operationId: string) => void
+}
+
 function AddConnectionPane({
   operation,
   configurationVersion,
   onClose,
   onStarted,
-}: {
-  operation: ConnectionOperation
-  configurationVersion: number
-  onClose: () => void
-  onStarted: (operationId: string) => void
-}) {
+}: AddConnectionPaneProps) {
   const [error, setError] = useState<SafeError | string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -391,19 +395,21 @@ function AddConnectionPane({
   )
 }
 
+type AuthorizationPaneProps = {
+  authorization: AuthorizationOperation
+  operation: ConnectionOperation
+  configurationVersion: number
+  onClose: () => void
+  onFinished: (message: string) => void
+}
+
 function AuthorizationPane({
   authorization,
   operation,
   configurationVersion,
   onClose,
   onFinished,
-}: {
-  authorization: AuthorizationOperation
-  operation: ConnectionOperation
-  configurationVersion: number
-  onClose: () => void
-  onFinished: (message: string) => void
-}) {
+}: AuthorizationPaneProps) {
   const [error, setError] = useState<SafeError | string | null>(null)
   const [copied, setCopied] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -534,6 +540,15 @@ function AuthorizationPane({
   )
 }
 
+type EditConnectionPaneProps = {
+  connection: Connection
+  dependents: RegisteredProject[]
+  operation: ConnectionOperation
+  configurationVersion: number
+  onClose: () => void
+  onChanged: (message: string) => void
+}
+
 function EditConnectionPane({
   connection,
   dependents,
@@ -541,14 +556,7 @@ function EditConnectionPane({
   configurationVersion,
   onClose,
   onChanged,
-}: {
-  connection: Connection
-  dependents: RegisteredProject[]
-  operation: ConnectionOperation
-  configurationVersion: number
-  onClose: () => void
-  onChanged: (message: string) => void
-}) {
+}: EditConnectionPaneProps) {
   const [error, setError] = useState<SafeError | string | null>(null)
   const [busy, setBusy] = useState(false)
   const [confirmingRemoval, setConfirmingRemoval] = useState(false)
@@ -681,19 +689,21 @@ function EditConnectionPane({
   )
 }
 
+type BeginAuthorizationOptions = {
+  connection: Connection
+  configurationVersion: number
+  operation: ConnectionOperation
+  setError: (error: SafeError | string | null) => void
+  onStarted: (operationId: string) => void
+}
+
 async function beginAuthorization({
   connection,
   configurationVersion,
   operation,
   setError,
   onStarted,
-}: {
-  connection: Connection
-  configurationVersion: number
-  operation: ConnectionOperation
-  setError: (error: SafeError | string | null) => void
-  onStarted: (operationId: string) => void
-}) {
+}: BeginAuthorizationOptions) {
   setError(null)
   try {
     const outcome = await operation.execute({

@@ -31,14 +31,13 @@ export interface RoadmapViewState {
   execute: RoadmapStore['execute']
 }
 
-/** Owns the single store the app renders from; injectable for prototypes and tests. */
-export function RoadmapProvider({
-  children,
-  store,
-}: {
+type RoadmapProviderProps = {
   children: ReactNode
   store?: RoadmapStore
-}) {
+}
+
+/** Owns the single store the app renders from; injectable for prototypes and tests. */
+export function RoadmapProvider({ children, store }: RoadmapProviderProps) {
   const value = useMemo(() => store ?? createStoreFromEnv(), [store])
   return <RoadmapContext.Provider value={value}>{children}</RoadmapContext.Provider>
 }

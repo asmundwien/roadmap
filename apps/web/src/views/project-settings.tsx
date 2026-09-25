@@ -208,6 +208,15 @@ export function ProjectSettings() {
   )
 }
 
+type ProjectDetailProps = {
+  project: RegisteredProject
+  connection: Connection | undefined
+  busy: boolean
+  configurationVersion: number
+  executeAction: (command: Command, success: string) => Promise<boolean>
+  onEdit: () => void
+}
+
 function ProjectDetail({
   project,
   connection,
@@ -215,14 +224,7 @@ function ProjectDetail({
   configurationVersion,
   executeAction,
   onEdit,
-}: {
-  project: RegisteredProject
-  connection: Connection | undefined
-  busy: boolean
-  configurationVersion: number
-  executeAction: (command: Command, success: string) => Promise<boolean>
-  onEdit: () => void
-}) {
+}: ProjectDetailProps) {
   const unavailableCause =
     project.availability.status === 'unavailable' ? project.availability.cause : null
   const connectionProblem = connection?.availability.status !== 'available'
@@ -353,6 +355,15 @@ function ProjectDetail({
   )
 }
 
+type AddProjectPaneProps = {
+  connections: Connection[]
+  githubInstallationUrl: string | undefined
+  operation: ProjectSettingsOperation
+  configurationVersion: number
+  onClose: () => void
+  onSaved: (project: ProjectKey | undefined) => void
+}
+
 function AddProjectPane({
   connections,
   githubInstallationUrl,
@@ -360,14 +371,7 @@ function AddProjectPane({
   configurationVersion,
   onClose,
   onSaved,
-}: {
-  connections: Connection[]
-  githubInstallationUrl: string | undefined
-  operation: ProjectSettingsOperation
-  configurationVersion: number
-  onClose: () => void
-  onSaved: (project: ProjectKey | undefined) => void
-}) {
+}: AddProjectPaneProps) {
   const initialConnection = connections.find(
     (connection) => connection.availability.status === 'available',
   )
@@ -500,6 +504,15 @@ function AddProjectPane({
   )
 }
 
+type EditProjectPaneProps = {
+  project: RegisteredProject
+  connection: Connection | undefined
+  operation: ProjectSettingsOperation
+  configurationVersion: number
+  onClose: () => void
+  onChanged: (message: string) => void
+}
+
 function EditProjectPane({
   project,
   connection,
@@ -507,14 +520,7 @@ function EditProjectPane({
   configurationVersion,
   onClose,
   onChanged,
-}: {
-  project: RegisteredProject
-  connection: Connection | undefined
-  operation: ProjectSettingsOperation
-  configurationVersion: number
-  onClose: () => void
-  onChanged: (message: string) => void
-}) {
+}: EditProjectPaneProps) {
   const [error, setError] = useState<SafeError | string | null>(null)
   const [fieldError, setFieldError] = useState<string | null>(null)
   const [confirmingRemoval, setConfirmingRemoval] = useState(false)
@@ -670,6 +676,16 @@ function EditProjectPane({
   )
 }
 
+type WorkspaceFolderSelectorProps = {
+  label: string
+  description: string
+  path: string
+  error: string | undefined
+  disabled: boolean
+  operation: ProjectSettingsOperation
+  onChange: (path: string) => void
+}
+
 function WorkspaceFolderSelector({
   label,
   description,
@@ -678,15 +694,7 @@ function WorkspaceFolderSelector({
   disabled,
   operation,
   onChange,
-}: {
-  label: string
-  description: string
-  path: string
-  error: string | undefined
-  disabled: boolean
-  operation: ProjectSettingsOperation
-  onChange: (path: string) => void
-}) {
+}: WorkspaceFolderSelectorProps) {
   const [choosing, setChoosing] = useState(false)
   const [selectionError, setSelectionError] = useState<string | null>(null)
 
@@ -729,7 +737,9 @@ function WorkspaceFolderSelector({
   )
 }
 
-function FieldError({ message }: { message: string | undefined }) {
+type FieldErrorProps = { message: string | undefined }
+
+function FieldError({ message }: FieldErrorProps) {
   return message ? <span className="settings-field-error">{message}</span> : null
 }
 

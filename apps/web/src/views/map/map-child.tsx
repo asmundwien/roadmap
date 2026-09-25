@@ -8,6 +8,22 @@ import { MapLedger } from './ledger.tsx'
 import './map.css'
 import type { LedgerSelection } from './sequence.ts'
 
+type MapChildProps = {
+  map: WayfinderMap
+  automationEvidence: readonly AutomationEvidence[]
+  open: boolean
+  /** The earliest map is the journey's start: its trunk ends at the last decision, every other
+   * map runs its trunk to the svg's edge, into the map below. */
+  last: boolean
+  onSelect: (item: ResolvedSelection) => void
+  /** Re-pin the hash to this map so its accordion unfolds — without touching the selection. */
+  onUnfold: () => void
+  panelOpen: boolean
+  selected: ResolvedSelection | null
+  kbNav: boolean
+  entry: boolean
+}
+
 /**
  * One map, self-contained: the trigger is inverted — the map title big, the destination prose a
  * one-line gist — and that whole block is the accordion trigger AND an item like any other. The
@@ -26,21 +42,7 @@ export function MapChild({
   selected,
   entry,
   kbNav,
-}: {
-  map: WayfinderMap
-  automationEvidence: readonly AutomationEvidence[]
-  open: boolean
-  /** The earliest map is the journey's start: its trunk ends at the last decision, every other
-   * map runs its trunk to the svg's edge, into the map below. */
-  last: boolean
-  onSelect: (item: ResolvedSelection) => void
-  /** Re-pin the hash to this map so its accordion unfolds — without touching the selection. */
-  onUnfold: () => void
-  panelOpen: boolean
-  selected: ResolvedSelection | null
-  kbNav: boolean
-  entry: boolean
-}) {
+}: MapChildProps) {
   const textLeft = useMemo(() => buildLedger(map).textX * LEDGER_SCALE, [map])
   const partial = !map.ticketsComplete || map.tickets.some((ticket) => !ticket.blockersComplete)
   const ledgerSelected = selected !== null && selected.kind !== 'map' ? selected : null
@@ -114,6 +116,15 @@ export function sameSelection(a: ResolvedSelection, b: ResolvedSelection): boole
   return a.kind === b.kind
 }
 
+type CroppedLedgerProps = {
+  map: WayfinderMap
+  automationEvidence: readonly AutomationEvidence[]
+  trunkToEdge: boolean
+  onSelect: (selection: LedgerSelection) => void
+  selected: LedgerSelection | null
+  kbNav: boolean
+}
+
 function CroppedLedger({
   map,
   automationEvidence,
@@ -121,14 +132,7 @@ function CroppedLedger({
   onSelect,
   selected,
   kbNav,
-}: {
-  map: WayfinderMap
-  automationEvidence: readonly AutomationEvidence[]
-  trunkToEdge: boolean
-  onSelect: (selection: LedgerSelection) => void
-  selected: LedgerSelection | null
-  kbNav: boolean
-}) {
+}: CroppedLedgerProps) {
   const cropPx = useMemo(() => buildLedger(map).sepFog * LEDGER_SCALE, [map])
   return (
     <div className="fl-crop">
@@ -146,7 +150,9 @@ function CroppedLedger({
   )
 }
 
-function Fold({ open, children }: { open: boolean; children: ReactNode }) {
+type FoldProps = { open: boolean; children: ReactNode }
+
+function Fold({ open, children }: FoldProps) {
   return (
     <div className={`fold${open ? ' is-open' : ''}`} aria-hidden={!open}>
       <div className="fold-inner">{children}</div>

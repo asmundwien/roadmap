@@ -1,3 +1,4 @@
+import cn from 'classnames'
 import type { AnchorHTMLAttributes, ButtonHTMLAttributes, ReactNode } from 'react'
 import './action.css'
 
@@ -24,7 +25,12 @@ export type ActionProps = ButtonActionProps | LinkActionProps
 export function Action(props: ActionProps) {
   if (props.element === 'link') {
     const { element: _element, size = 'default', variant = 'default', ...linkProps } = props
-    return <a className={actionClassName(variant, size)} {...linkProps} />
+    return (
+      <a
+        className={cn('action', `action-${variant}`, size === 'field' && 'action-field')}
+        {...linkProps}
+      />
+    )
   }
 
   const {
@@ -34,19 +40,20 @@ export function Action(props: ActionProps) {
     type = 'button',
     ...buttonProps
   } = props
-  return <button type={type} className={actionClassName(variant, size)} {...buttonProps} />
+  return (
+    <button
+      type={type}
+      className={cn('action', `action-${variant}`, size === 'field' && 'action-field')}
+      {...buttonProps}
+    />
+  )
 }
 
-export function ActionGroup({
-  children,
-  variant = 'default',
-}: {
+type ActionGroupProps = {
   children: ReactNode
   variant?: 'default' | 'form' | 'connection'
-}) {
-  return <div className={`action-group action-group-${variant}`}>{children}</div>
 }
 
-function actionClassName(variant: ActionVariant, size: ActionPresentation['size']): string {
-  return `action action-${variant}${size === 'field' ? ' action-field' : ''}`
+export function ActionGroup({ children, variant = 'default' }: ActionGroupProps) {
+  return <div className={`action-group action-group-${variant}`}>{children}</div>
 }

@@ -22,6 +22,8 @@ WebSocket carries full state replacements. HTTP carries `query` and `execute` re
 
 Reusable UI lives under `apps/web/src/components`, with each module's implementation, styles, and tests in its own folder. Callers select presentation through typed variants rather than recreating markup or CSS. `apps/web/src/views/component-catalog.tsx` renders these modules and semantic color tokens at `#/components`.
 
+React functions use named `...Props` types instead of inline object annotations. Dynamic class composition uses `classnames` imported as `cn`; modules do not define class-name helper functions.
+
 ## Server
 
 `apps/server/src/application/application.ts` composes the transport-agnostic `RoadmapApplication`. It owns a consistent `ApplicationState`, adapter generations, serialized configuration changes, and the current roadmap without exposing adapter mechanics. Its public interface is `start/current/subscribe/query/execute/stop`; callers and tests use only that interface.

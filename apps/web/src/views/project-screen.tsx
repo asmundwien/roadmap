@@ -20,13 +20,15 @@ import { ledgerSequence } from './map/sequence.ts'
 import { integrationLabel } from './project-meta.ts'
 import './views.css'
 
+type ProjectScreenProps = { route: Extract<Route, { screen: 'project' }> }
+
 /**
  * The project screen: one single-open accordion of the project's maps with the ledger's rail
  * threaded through — the active map at the top, open by default, history descending to the
  * earliest map, nothing drawn past the head — and the docked Panel beside it, the one detail
  * layer every map feeds.
  */
-export function ProjectScreen({ route }: { route: Extract<Route, { screen: 'project' }> }) {
+export function ProjectScreen({ route }: ProjectScreenProps) {
   const {
     transport,
     projects,
@@ -85,6 +87,15 @@ export function ProjectScreen({ route }: { route: Extract<Route, { screen: 'proj
   )
 }
 
+type PanelScreenProps = {
+  project: Project
+  selected: string | null
+  selection: PanelSelection | null
+  disconnected: boolean
+  unavailable: string | null
+  automation: PanelAutomation
+}
+
 /**
  * The docked-panel screen. The Panel is not an overlay — it flexes in beside the page and eats
  * its width, so the map stays clickable and picks swap the Panel's content without a close in
@@ -103,14 +114,7 @@ function PanelScreen({
   disconnected,
   unavailable,
   automation,
-}: {
-  project: Project
-  selected: string | null
-  selection: PanelSelection | null
-  disconnected: boolean
-  unavailable: string | null
-  automation: PanelAutomation
-}) {
+}: PanelScreenProps) {
   const trace = [...project.openMaps, ...project.closedMaps]
   const pinnedMap = selected !== null ? trace.find((m) => m.id === selected) : undefined
   const item = pinnedMap && selection ? resolveSelection(pinnedMap, selection) : null
@@ -304,15 +308,13 @@ function PanelScreen({
   )
 }
 
-function ProjectStateNotices({
-  disconnected,
-  unavailable,
-  hasMaps,
-}: {
+type ProjectStateNoticesProps = {
   disconnected: boolean
   unavailable: string | null
   hasMaps: boolean
-}) {
+}
+
+function ProjectStateNotices({ disconnected, unavailable, hasMaps }: ProjectStateNoticesProps) {
   return (
     <>
       {disconnected && (
@@ -330,13 +332,12 @@ function ProjectStateNotices({
   )
 }
 
-function ProjectHead({
-  project,
-  automationEvidence,
-}: {
+type ProjectHeadProps = {
   project: Project
   automationEvidence: readonly AutomationEvidence[]
-}) {
+}
+
+function ProjectHead({ project, automationEvidence }: ProjectHeadProps) {
   const open = project.openMaps.length
   const closed = project.closedMaps.length
   const title = githubRepoName(project) ?? project.name
@@ -377,6 +378,15 @@ function ProjectHead({
   )
 }
 
+type MapTraceProps = {
+  project: Project
+  automationEvidence: readonly AutomationEvidence[]
+  selected: string | null
+  onPickItem: (map: WayfinderMap, item: ResolvedSelection) => void
+  pick: { mapId: string; item: ResolvedSelection } | null
+  kbNav: boolean
+}
+
 /**
  * The trace, newest first: open maps by recency (the active map leads), then closed history down
  * to the earliest. Bare `#/projects/<integration>/<project-id>` unfolds the active map; a map id
@@ -390,14 +400,7 @@ function MapTrace({
   onPickItem,
   pick,
   kbNav,
-}: {
-  project: Project
-  automationEvidence: readonly AutomationEvidence[]
-  selected: string | null
-  onPickItem: (map: WayfinderMap, item: ResolvedSelection) => void
-  pick: { mapId: string; item: ResolvedSelection } | null
-  kbNav: boolean
-}) {
+}: MapTraceProps) {
   const trace = [...project.openMaps, ...project.closedMaps]
   const active = activeMapOf(project)
 

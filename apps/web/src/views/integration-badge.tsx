@@ -2,7 +2,9 @@ import type { Connection } from '@roadmap/contracts'
 import { Badge } from '../components/badge/badge.tsx'
 import { INTEGRATION_META } from './project-meta.ts'
 
-export function IntegrationBadge({ connection }: { connection: Connection | undefined }) {
+type IntegrationBadgeProps = { connection: Connection | undefined }
+
+export function IntegrationBadge({ connection }: IntegrationBadgeProps) {
   if (!connection) return <Badge>Unknown</Badge>
 
   const meta = INTEGRATION_META[connection.integration]

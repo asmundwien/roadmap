@@ -240,17 +240,14 @@ export function AutomationSettings() {
   )
 }
 
-function SwitchControl({
-  checked,
-  disabled,
-  label,
-  onChange,
-}: {
+type SwitchControlProps = {
   checked: boolean
   disabled: boolean
   label: string
   onChange: (checked: boolean) => void
-}) {
+}
+
+function SwitchControl({ checked, disabled, label, onChange }: SwitchControlProps) {
   return (
     <label className="automation-switch">
       <input
@@ -267,7 +264,9 @@ function SwitchControl({
   )
 }
 
-function StateLabel({ enabled }: { enabled: boolean }) {
+type StateLabelProps = { enabled: boolean }
+
+function StateLabel({ enabled }: StateLabelProps) {
   return (
     <span className={`automation-state${enabled ? ' is-enabled' : ''}`}>
       {enabled ? 'On' : 'Off'}
@@ -275,17 +274,14 @@ function StateLabel({ enabled }: { enabled: boolean }) {
   )
 }
 
-function AutomationDetail({
-  automation,
-  preferred,
-  project,
-  summary,
-}: {
+type AutomationDetailProps = {
   automation: ReturnType<typeof useRoadmap>['automation']
   preferred: boolean
   project: RegisteredProject | undefined
   summary: AutomationSummary
-}) {
+}
+
+function AutomationDetail({ automation, preferred, project, summary }: AutomationDetailProps) {
   return project ? (
     <ProjectAutomationDetail
       automation={automation}
@@ -298,17 +294,19 @@ function AutomationDetail({
   )
 }
 
+type ProjectAutomationDetailProps = {
+  automation: ReturnType<typeof useRoadmap>['automation']
+  preferred: boolean
+  project: RegisteredProject
+  summary: AutomationSummary
+}
+
 function ProjectAutomationDetail({
   automation,
   preferred,
   project,
   summary,
-}: {
-  automation: ReturnType<typeof useRoadmap>['automation']
-  preferred: boolean
-  project: RegisteredProject
-  summary: AutomationSummary
-}) {
+}: ProjectAutomationDetailProps) {
   const ready = automation.availability.status === 'ready'
   const interrupted = hasUnacknowledgedInterruption(project.key, automation.evidence)
   const effective = ready && automation.enabled && preferred && !interrupted
@@ -348,13 +346,12 @@ function ProjectAutomationDetail({
   )
 }
 
-function GlobalAutomationDetail({
-  automation,
-  summary,
-}: {
+type GlobalAutomationDetailProps = {
   automation: ReturnType<typeof useRoadmap>['automation']
   summary: AutomationSummary
-}) {
+}
+
+function GlobalAutomationDetail({ automation, summary }: GlobalAutomationDetailProps) {
   const ready = automation.availability.status === 'ready'
   const effective = automation.enabled && ready
   return (
@@ -384,7 +381,9 @@ function GlobalAutomationDetail({
   )
 }
 
-function AutomationRowSummary({ summary }: { summary: AutomationSummary }) {
+type AutomationRowSummaryProps = { summary: AutomationSummary }
+
+function AutomationRowSummary({ summary }: AutomationRowSummaryProps) {
   if (summary.tickets.length === 0) return null
   return (
     <span className="automation-row-summary">
@@ -395,7 +394,9 @@ function AutomationRowSummary({ summary }: { summary: AutomationSummary }) {
   )
 }
 
-function AutomationEvidenceSummary({ summary }: { summary: AutomationSummary }) {
+type AutomationEvidenceSummaryProps = { summary: AutomationSummary }
+
+function AutomationEvidenceSummary({ summary }: AutomationEvidenceSummaryProps) {
   const ticketCount = summary.tickets.length
   return (
     <section className="automation-evidence" aria-label="Recorded Automation evidence">
@@ -429,13 +430,12 @@ function AutomationEvidenceSummary({ summary }: { summary: AutomationSummary }) 
   )
 }
 
-function AutomationStageTotal({
-  label,
-  summary,
-}: {
+type AutomationStageTotalProps = {
   label: string
   summary: AutomationSummary['classification'] | AutomationSummary['wayfinder']
-}) {
+}
+
+function AutomationStageTotal({ label, summary }: AutomationStageTotalProps) {
   return (
     <div className="automation-stage-total">
       <span>{label}</span>
@@ -446,7 +446,9 @@ function AutomationStageTotal({
   )
 }
 
-function AutomationEvidenceTicket({ entry }: { entry: AutomationTicketPresentation }) {
+type AutomationEvidenceTicketProps = { entry: AutomationTicketPresentation }
+
+function AutomationEvidenceTicket({ entry }: AutomationEvidenceTicketProps) {
   const title =
     entry.ticket?.title ?? entry.ticket?.displayId ?? `Ticket ${entry.evidence.target.ticketId}`
   const project = entry.project?.name ?? entry.evidence.target.project.id
