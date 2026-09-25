@@ -72,13 +72,8 @@
   fill: color-mix(in srgb, var(--state-frontier) 12%, transparent);
 }
 
-.node-mark .claimed-half,
-.node-mark .claimed-corner {
+.node-mark .claimed-half {
   fill: var(--state-claimed);
-}
-
-.node-mark .blocked-corner {
-  fill: var(--state-blocked);
 }
 
 .node-mark .type-rune {

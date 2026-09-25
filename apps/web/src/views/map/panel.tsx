@@ -260,8 +260,10 @@ function TicketContent({
       <SourceButton url={ticket.url} label="View item in source" />
       <p className="panel-item-title">{ticket.title}</p>
       <p className="panel-item-state">
-        <TicketMark ticket={ticket} type={type} variant="inline" />
-        <Badge variant={stateMeta.badgeVariant}>{sentenceCase(stateMeta.word)}</Badge>
+        <Badge variant={stateMeta.badgeVariant}>
+          <TicketMark state={ticket.state} type={type} variant="inline" />
+          {sentenceCase(stateMeta.word)}
+        </Badge>
         {assignee !== undefined && (
           <>
             {' · '}
@@ -717,8 +719,10 @@ export function ItemLink({
       >
         <span className="item-link-title">{local.title}</span>
         <span className="item-link-state">
-          <TicketMark ticket={local} type={type} variant="inline" />
-          <Badge variant={stateMeta.badgeVariant}>{sentenceCase(stateMeta.word)}</Badge>
+          <Badge variant={stateMeta.badgeVariant}>
+            <TicketMark state={local.state} type={type} variant="inline" />
+            {sentenceCase(stateMeta.word)}
+          </Badge>
         </span>
       </button>
     )

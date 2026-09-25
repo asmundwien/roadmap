@@ -224,7 +224,7 @@ export function MapLedger({
                 baselineY={y - 4}
               />
               <TicketMark
-                ticket={ticket}
+                state={ticket.state}
                 type={type}
                 variant="minor"
                 x={titleX + STATUS_MARK_X_OFFSET}

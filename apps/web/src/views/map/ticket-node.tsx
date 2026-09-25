@@ -54,7 +54,7 @@ function MajorTicketNode({
 }) {
   return (
     <g className="major-node">
-      <TicketMark ticket={ticket} type={type} variant="major" x={x} y={y} />
+      <TicketMark state={ticket.state} type={type} variant="major" x={x} y={y} />
       <NodeTooltip x={x} y={y - 20 * NODE_SCALE} word={STATE_META[ticket.state].word} />
     </g>
   )

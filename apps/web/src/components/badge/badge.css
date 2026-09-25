@@ -5,9 +5,12 @@
   --badge-success: #0ca30c;
   --badge-info: #2a78d6;
   --badge-muted: #898781;
+  --badge-violet: #7656c9;
+  --badge-teal: #087f8c;
 
   display: inline-flex;
   align-items: center;
+  gap: 0.3em;
   height: fit-content;
   padding: 0.1rem 0.45rem;
   border: 1px solid currentColor;
@@ -44,6 +47,14 @@
   color: var(--badge-muted);
 }
 
+.badge-violet {
+  color: var(--badge-violet);
+}
+
+.badge-teal {
+  color: var(--badge-teal);
+}
+
 @media (prefers-color-scheme: dark) {
   .badge {
     --badge-accent: #74a5ea;
@@ -52,5 +63,7 @@
     --badge-success: #0ca30c;
     --badge-info: #3987e5;
     --badge-muted: #898781;
+    --badge-violet: #ad8cff;
+    --badge-teal: #43c7d2;
   }
 }

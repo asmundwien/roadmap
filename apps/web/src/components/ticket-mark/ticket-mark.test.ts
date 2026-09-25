@@ -7,7 +7,7 @@ describe('TicketMark', () => {
   it('renders tracker and ticket-type evidence in a major mark', () => {
     const markup = renderToStaticMarkup(
       createElement(TicketMark, {
-        ticket: { state: 'frontier', isBlocked: true, isClaimed: true },
+        state: 'frontier',
         type: 'prototype',
         variant: 'major',
         x: 10,
@@ -17,8 +17,6 @@ describe('TicketMark', () => {
 
     expect(markup).toContain('class="ticket-mark type-prototype state-frontier"')
     expect(markup).toContain('class="frontier-field"')
-    expect(markup).toContain('class="blocked-corner"')
-    expect(markup).toContain('class="claimed-corner"')
     expect(markup).toContain('class="type-rune"')
     expect(markup).toContain('>P</text>')
   })
@@ -26,7 +24,7 @@ describe('TicketMark', () => {
   it('wraps the minor mark for inline text without exposing decorative SVG', () => {
     const markup = renderToStaticMarkup(
       createElement(TicketMark, {
-        ticket: { state: 'closed', isBlocked: false, isClaimed: false },
+        state: 'closed',
         type: 'task',
         variant: 'inline',
       }),

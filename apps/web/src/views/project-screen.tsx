@@ -363,14 +363,14 @@ function ProjectHead({
       </p>
       {hasAutomationEvidence && (
         <p className="project-automation-legend muted small">
-          <span className="automation-legend is-classification">
+          <Badge variant="violet">
             <AutomationMark variant="inline" stage="classification" />
             Classification
-          </span>
-          <span className="automation-legend is-wayfinder">
+          </Badge>
+          <Badge variant="teal">
             <AutomationMark variant="inline" stage="wayfinder" />
             Wayfinder and Session
-          </span>
+          </Badge>
         </p>
       )}
     </header>

@@ -104,6 +104,13 @@
   overflow: visible;
 }
 
+.catalog-minor-marks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
 .catalog-signals {
   display: grid;
   grid-template-columns: repeat(3, minmax(7rem, 1fr));

@@ -1,22 +1,20 @@
-import type { Ticket, TicketType } from '@roadmap/contracts'
+import type { TicketState, TicketType } from '@roadmap/contracts'
 import { Diamond } from '../diamond/diamond.tsx'
 import './ticket-mark.css'
 
 export const MAJOR_TICKET_MARK_SCALE = 4 / 3
 const MINOR_TICKET_MARK_SCALE = 0.42
 
-type TicketMarkState = Pick<Ticket, 'state' | 'isBlocked' | 'isClaimed'>
-
 type TicketMarkProps =
   | {
-      ticket: TicketMarkState
+      state: TicketState
       type: TicketType
       variant: 'major' | 'minor'
       x: number
       y: number
     }
   | {
-      ticket: TicketMarkState
+      state: TicketState
       type: TicketType
       variant: 'inline'
     }
@@ -31,43 +29,31 @@ export function TicketMark(props: TicketMarkProps) {
         aria-hidden="true"
         focusable="false"
       >
-        <TicketMark ticket={props.ticket} type={props.type} variant="minor" x={0} y={0} />
+        <TicketMark state={props.state} type={props.type} variant="minor" x={0} y={0} />
       </svg>
     )
   }
 
-  const { ticket, type, variant, x, y } = props
+  const { state, type, variant, x, y } = props
   const scale = variant === 'major' ? MAJOR_TICKET_MARK_SCALE : MINOR_TICKET_MARK_SCALE
   const radius = 11 * scale
   const frontierRadius = 17 * scale
   return (
-    <g className={`ticket-mark type-${type} state-${ticket.state}`}>
+    <g className={`ticket-mark type-${type} state-${state}`}>
       <g className={`node-shape node-mark is-${variant}`}>
-        {ticket.state === 'frontier' && (
+        {state === 'frontier' && (
           <Diamond className="frontier-field" x={x} y={y} radius={frontierRadius} />
         )}
         <Diamond className="diamond-face" x={x} y={y} radius={radius} />
-        {ticket.state === 'claimed' && (
+        {state === 'claimed' && (
           <path
             className="claimed-half"
             d={`M ${x} ${y - radius} L ${x} ${y + radius} L ${x - radius} ${y} Z`}
           />
         )}
-        {ticket.state !== 'closed' && ticket.isBlocked && ticket.state !== 'blocked' && (
-          <path
-            className="blocked-corner"
-            d={`M ${x - radius} ${y} L ${x} ${y + radius} L ${x - 4 * scale} ${y + 7 * scale} Z`}
-          />
-        )}
-        {ticket.state !== 'closed' && ticket.isClaimed && ticket.state !== 'claimed' && (
-          <path
-            className="claimed-corner"
-            d={`M ${x} ${y - radius} L ${x + radius} ${y} L ${x + 5 * scale} ${y - 6 * scale} Z`}
-          />
-        )}
         {variant === 'major' && (
           <text className="type-rune" x={x} y={y + 3.3 * scale} textAnchor="middle">
-            {ticket.state === 'closed' ? '✓' : typeRune(type)}
+            {state === 'closed' ? '✓' : typeRune(type)}
           </text>
         )}
         <TypeCorners type={type} scale={scale} x={x} y={y} />

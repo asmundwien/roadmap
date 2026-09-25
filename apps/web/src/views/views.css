@@ -162,24 +162,9 @@
   gap: var(--sp-1) var(--sp-3);
 }
 
-.automation-legend {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25em;
-  font-weight: 600;
-}
-
-.automation-legend.is-classification {
-  color: var(--automation-classification);
-}
-
-.automation-legend.is-wayfinder {
-  color: var(--automation-wayfinder);
-}
-
 .overview-kicker .badge,
 .overview-copy > strong .badge,
-.project-head .badge {
+.project-head h1 > .badge {
   margin-left: 0.5rem;
 }
 

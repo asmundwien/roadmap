@@ -1,4 +1,4 @@
-import type { Ticket, TicketType } from '@roadmap/contracts'
+import type { TicketState, TicketType } from '@roadmap/contracts'
 import type { ReactNode } from 'react'
 import { Action, ActionGroup } from '../components/action/action.tsx'
 import { Alert } from '../components/alert/alert.tsx'
@@ -6,6 +6,7 @@ import { AutomationMark } from '../components/automation-mark/automation-mark.ts
 import { Badge } from '../components/badge/badge.tsx'
 import { DestinationMark } from '../components/destination-mark/destination-mark.tsx'
 import { TicketMark } from '../components/ticket-mark/ticket-mark.tsx'
+import { STATE_META } from './map/state-meta.ts'
 import './component-catalog.css'
 
 const TICKET_TYPES = [
@@ -14,12 +15,12 @@ const TICKET_TYPES = [
   'grilling',
   'task',
 ] as const satisfies readonly TicketType[]
-const TICKET_STATES = [
-  { state: 'frontier', isBlocked: false, isClaimed: false },
-  { state: 'claimed', isBlocked: false, isClaimed: true },
-  { state: 'blocked', isBlocked: true, isClaimed: false },
-  { state: 'closed', isBlocked: false, isClaimed: false },
-] as const satisfies readonly Pick<Ticket, 'state' | 'isBlocked' | 'isClaimed'>[]
+const commit = [
+  'frontier',
+  'claimed',
+  'blocked',
+  'closed',
+] as const satisfies readonly TicketState[]
 
 const PALETTE = [
   ['Background', '--bg'],
@@ -65,7 +66,7 @@ export function ComponentCatalog() {
       >
         <div className="catalog-mark-matrix">
           <span />
-          {TICKET_STATES.map(({ state }) => (
+          {TICKET_STATES.map((state) => (
             <strong className="catalog-column-label" key={state}>
               {state}
             </strong>
@@ -73,6 +74,32 @@ export function ComponentCatalog() {
           {TICKET_TYPES.map((type) => (
             <TicketMarkRow key={type} type={type} />
           ))}
+        </div>
+      </CatalogSection>
+
+      <CatalogSection
+        title="Minor marks"
+        description="Compact variants repeat tracker state and Automation evidence beside text."
+      >
+        <div className="catalog-minor-marks">
+          {TICKET_STATES.map((state) => {
+            const meta = STATE_META[state]
+            return (
+              <Badge variant={meta.badgeVariant} key={state}>
+                <TicketMark state={state} type="task" variant="inline" />
+                {meta.word.slice(0, 1).toUpperCase()}
+                {meta.word.slice(1)}
+              </Badge>
+            )
+          })}
+          <Badge variant="violet">
+            <AutomationMark variant="inline" stage="classification" />
+            Classification
+          </Badge>
+          <Badge variant="teal">
+            <AutomationMark variant="inline" stage="wayfinder" />
+            Wayfinder
+          </Badge>
         </div>
       </CatalogSection>
 
@@ -169,14 +196,14 @@ function TicketMarkRow({ type }: { type: TicketType }) {
   return (
     <>
       <strong className="catalog-row-label">{type}</strong>
-      {TICKET_STATES.map((ticket) => (
+      {TICKET_STATES.map((state) => (
         <svg
           className="catalog-ticket-mark"
           viewBox="-24 -24 48 48"
-          aria-label={`${type} ${ticket.state}`}
-          key={ticket.state}
+          aria-label={`${type} ${state}`}
+          key={state}
         >
-          <TicketMark ticket={ticket} type={type} variant="major" x={0} y={0} />
+          <TicketMark state={state} type={type} variant="major" x={0} y={0} />
         </svg>
       ))}
     </>

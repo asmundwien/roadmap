@@ -9,6 +9,8 @@ export type BadgeVariant =
   | 'success'
   | 'info'
   | 'muted'
+  | 'violet'
+  | 'teal'
 
 export type BadgeProps = {
   children: ReactNode
