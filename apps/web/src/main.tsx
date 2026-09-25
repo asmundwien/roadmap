@@ -1,7 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { App } from './App.tsx'
-import { RoadmapProvider } from './store/roadmap-provider.tsx'
+import { App } from './App'
+import { RoadmapProvider } from './store/roadmap-provider'
 import './index.css'
 
 const root = document.getElementById('root')

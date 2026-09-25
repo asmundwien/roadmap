@@ -6,7 +6,7 @@ import {
   RoadmapSignalsCatalogSection,
   TicketMarkCatalogSection,
   TinyTicketMarksCatalogSection,
-} from './component-catalog.tsx'
+} from './component-catalog'
 import './component-catalog.css'
 
 export function CatalogPage() {

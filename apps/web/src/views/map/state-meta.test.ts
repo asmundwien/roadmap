@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { STATE_META } from './state-meta.ts'
+import { STATE_META } from './state-meta'
 
 describe('ticket state presentation', () => {
   it.each([

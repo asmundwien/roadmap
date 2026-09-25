@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { Alert } from './alert.tsx'
+import { Alert } from './alert'
 
 describe('Alert', () => {
   it('renders the requested tone and alert semantics', () => {

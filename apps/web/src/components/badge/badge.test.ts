@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { Badge } from './badge.tsx'
+import { Badge } from './badge'
 
 describe('Badge', () => {
   it('renders the neutral variant by default', () => {

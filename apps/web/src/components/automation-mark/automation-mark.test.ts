@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { AutomationMark } from './automation-mark.tsx'
+import { AutomationMark } from './automation-mark'
 
 describe('AutomationMark', () => {
   it('renders a stage-specific plot mark and glyph at the requested coordinates', () => {

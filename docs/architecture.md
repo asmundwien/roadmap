@@ -26,7 +26,7 @@ Reusable UI lives under `apps/web/src/components`, with each module's implementa
 
 React functions use named `...Props` types instead of inline object annotations. Dynamic class composition uses `classnames` imported as `cn`; modules do not define class-name helper functions.
 
-Web source files use `@/` for imports outside their current directory. The alias maps to `apps/web/src`; sibling imports remain relative.
+Web source files use `@/` for imports outside their current directory. The alias maps to `apps/web/src`; sibling imports remain relative. TypeScript imports omit `.ts` and `.tsx` extensions.
 
 ## Server
 

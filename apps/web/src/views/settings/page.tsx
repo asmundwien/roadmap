@@ -1,7 +1,7 @@
-import type { Route } from '@/router.ts'
-import { AutomationSettings } from './automation-settings.tsx'
-import { ConnectionSettings } from './connection-settings.tsx'
-import { ProjectSettings } from './project-settings.tsx'
+import type { Route } from '@/router'
+import { AutomationSettings } from './automation-settings'
+import { ConnectionSettings } from './connection-settings'
+import { ProjectSettings } from './project-settings'
 
 type SettingsRoute = Extract<
   Route,

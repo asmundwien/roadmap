@@ -1,12 +1,12 @@
 import type { AutomationEvidence, WayfinderMap } from '@roadmap/contracts'
 import { type ReactNode, useMemo } from 'react'
-import { DestinationMark } from '@/components/destination-mark/destination-mark.tsx'
-import type { ResolvedSelection } from '@/router.ts'
-import { stripInlineMarkdown } from '@/views/shared/gist.ts'
-import { buildLedger, LEDGER_SCALE } from './geometry.ts'
-import { MapLedger } from './ledger.tsx'
+import { DestinationMark } from '@/components/destination-mark/destination-mark'
+import type { ResolvedSelection } from '@/router'
+import { stripInlineMarkdown } from '@/views/shared/gist'
+import { buildLedger, LEDGER_SCALE } from './geometry'
+import { MapLedger } from './ledger'
 import './map.css'
-import type { LedgerSelection } from './sequence.ts'
+import type { LedgerSelection } from './sequence'
 
 type MapChildProps = {
   map: WayfinderMap

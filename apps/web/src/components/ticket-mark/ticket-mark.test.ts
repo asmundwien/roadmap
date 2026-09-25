@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { TicketMark } from './ticket-mark.tsx'
+import { TicketMark } from './ticket-mark'
 
 describe('TicketMark', () => {
   const presentation = {

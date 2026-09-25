@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { buildLedger } from './geometry.ts'
-import { blocker, makeMap, ticket } from './test-fixtures.ts'
+import { buildLedger } from './geometry'
+import { blocker, makeMap, ticket } from './test-fixtures'
 
 const id = (value: number | string) => String(value)
 

@@ -1,6 +1,6 @@
 import type { TicketState } from '@roadmap/contracts'
-import type { TicketMarkFill } from '@/components/ticket-mark/ticket-mark.tsx'
-import { VARIANT_COLORS, type Variant } from '@/components/variant.ts'
+import type { TicketMarkFill } from '@/components/ticket-mark/ticket-mark'
+import { VARIANT_COLORS, type Variant } from '@/components/variant'
 
 type StateMeta = {
   word: string

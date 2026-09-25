@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { Action, ActionGroup } from './action.tsx'
+import { Action, ActionGroup } from './action'
 
 describe('Action', () => {
   it('renders button and link variants through one interface', () => {

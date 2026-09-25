@@ -8,16 +8,16 @@ import type {
   WayfinderSession,
 } from '@roadmap/contracts'
 import { useMemo, useState } from 'react'
-import { Alert } from '@/components/alert/alert.tsx'
-import { selectionHash } from '@/router.ts'
-import { useRoadmap } from '@/store/roadmap-provider.tsx'
+import { Alert } from '@/components/alert/alert'
+import { selectionHash } from '@/router'
+import { useRoadmap } from '@/store/roadmap-provider'
 import {
   type AutomationPresentation,
   type AutomationSummary,
   type AutomationTicketPresentation,
   presentAutomation,
-} from '@/views/overview/project-presentation.ts'
-import { ErrorText, projectIdentity, sameProject } from './settings-shared.tsx'
+} from '@/views/overview/project-presentation'
+import { ErrorText, projectIdentity, sameProject } from './settings-shared'
 import './settings.css'
 
 type AutomationSelection = { kind: 'global' } | { kind: 'project'; project: ProjectKey }

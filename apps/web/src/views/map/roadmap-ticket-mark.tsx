@@ -1,7 +1,7 @@
 import type { TicketState, TicketType } from '@roadmap/contracts'
-import { TicketMark, type TicketMarkCornerCount } from '@/components/ticket-mark/ticket-mark.tsx'
-import type { Variant } from '@/components/variant.ts'
-import { STATE_META } from './state-meta.ts'
+import { TicketMark, type TicketMarkCornerCount } from '@/components/ticket-mark/ticket-mark'
+import type { Variant } from '@/components/variant'
+import { STATE_META } from './state-meta'
 
 type TicketTypeMark = {
   accent: Variant

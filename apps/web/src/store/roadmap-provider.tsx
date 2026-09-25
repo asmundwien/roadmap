@@ -7,8 +7,8 @@ import {
   useMemo,
   useSyncExternalStore,
 } from 'react'
-import { createStoreFromEnv } from './create-store.ts'
-import type { CommandActivity, RoadmapStore, TransportLiveness } from './roadmap-store.ts'
+import { createStoreFromEnv } from './create-store'
+import type { CommandActivity, RoadmapStore, TransportLiveness } from './roadmap-store'
 
 const RoadmapContext = createContext<RoadmapStore | null>(null)
 const EMPTY_ROADMAP: Snapshot = { capturedAt: 0, projects: [], unreachable: [] }

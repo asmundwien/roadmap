@@ -2,11 +2,11 @@ import type { Ticket, TicketType } from '@roadmap/contracts'
 import {
   AUTOMATION_MARK_RADIUS,
   AutomationMark,
-} from '@/components/automation-mark/automation-mark.tsx'
-import { MAJOR_TICKET_MARK_SCALE } from '@/components/ticket-mark/ticket-mark.tsx'
-import type { AutomationTag } from './automation-presentation.ts'
-import { RoadmapTicketMark } from './roadmap-ticket-mark.tsx'
-import { STATE_META } from './state-meta.ts'
+} from '@/components/automation-mark/automation-mark'
+import { MAJOR_TICKET_MARK_SCALE } from '@/components/ticket-mark/ticket-mark'
+import type { AutomationTag } from './automation-presentation'
+import { RoadmapTicketMark } from './roadmap-ticket-mark'
+import { STATE_META } from './state-meta'
 
 const NODE_SCALE = MAJOR_TICKET_MARK_SCALE
 const FIRST_TAG_OFFSET = 19 * NODE_SCALE

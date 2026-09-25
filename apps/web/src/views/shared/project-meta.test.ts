@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { INTEGRATION_META, integrationLabel } from './project-meta.ts'
+import { INTEGRATION_META, integrationLabel } from './project-meta'
 
 describe('integration presentation', () => {
   it('uses human-facing labels and generic badge variants', () => {

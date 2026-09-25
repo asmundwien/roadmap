@@ -2,8 +2,8 @@ import { useMemo } from 'react'
 import type { Components } from 'react-markdown'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { ResolvedSelection } from '@/router.ts'
-import type { ProseLinkTarget } from './link-targets.ts'
+import type { ResolvedSelection } from '@/router'
+import type { ProseLinkTarget } from './link-targets'
 
 /*
  * The Panel's one markdown renderer — react-markdown + GFM, no rehype plugins. Safe by default:

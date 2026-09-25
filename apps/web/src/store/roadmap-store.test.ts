@@ -1,6 +1,6 @@
 import type { ApplicationState, CommandOutcome, Project, QueryResult } from '@roadmap/contracts'
 import { describe, expect, it } from 'vitest'
-import { createRoadmapStore, type SocketLike } from './roadmap-store.ts'
+import { createRoadmapStore, type SocketLike } from './roadmap-store'
 
 type SocketEvent = 'open' | 'message' | 'close'
 

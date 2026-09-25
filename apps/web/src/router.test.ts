@@ -12,7 +12,7 @@ import {
   projectSettingsHash,
   resolveSelection,
   selectionHash,
-} from './router.ts'
+} from './router'
 
 const PROJECT = { integration: 'github' as const, id: 'asmundwien/roadmap' }
 

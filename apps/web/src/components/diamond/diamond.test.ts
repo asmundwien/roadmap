@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { Diamond } from './diamond.tsx'
+import { Diamond } from './diamond'
 
 describe('Diamond', () => {
   it('centers all four points around the requested coordinates', () => {

@@ -7,7 +7,7 @@ import type {
   WayfinderMap,
 } from '@roadmap/contracts'
 import { describe, expect, it } from 'vitest'
-import { presentAutomation, presentProjects } from './project-presentation.ts'
+import { presentAutomation, presentProjects } from './project-presentation'
 
 const AVAILABLE_CONNECTION: Connection = {
   id: 'local',

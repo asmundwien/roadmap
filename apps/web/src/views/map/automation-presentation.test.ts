@@ -1,6 +1,6 @@
 import type { AutomationEvidence } from '@roadmap/contracts'
 import { describe, expect, it } from 'vitest'
-import { automationTags } from './automation-presentation.ts'
+import { automationTags } from './automation-presentation'
 
 const target: AutomationEvidence['target'] = {
   project: { integration: 'github', id: 'owner/repo' },

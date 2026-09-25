@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { ledgerSequence, SCOPE_INLINE_MAX, scopePlan } from './sequence.ts'
-import { blocker, makeMap, ticket } from './test-fixtures.ts'
+import { ledgerSequence, SCOPE_INLINE_MAX, scopePlan } from './sequence'
+import { blocker, makeMap, ticket } from './test-fixtures'
 
 describe('scopePlan', () => {
   it('rides a small out-of-scope list inline as ⊘ stops in the fog band', () => {

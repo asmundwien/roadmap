@@ -1,13 +1,9 @@
 import type { ReactNode } from 'react'
-import { Badge } from '@/components/badge/badge.tsx'
-import { connectionSettingsHash, projectHash } from '@/router.ts'
-import { integrationLabel } from '@/views/shared/project-meta.ts'
-import type {
-  AttentionItem,
-  ProjectPortfolio,
-  ProjectPresentation,
-} from './project-presentation.ts'
-import { formatMonth, formatRecency } from './recency.ts'
+import { Badge } from '@/components/badge/badge'
+import { connectionSettingsHash, projectHash } from '@/router'
+import { integrationLabel } from '@/views/shared/project-meta'
+import type { AttentionItem, ProjectPortfolio, ProjectPresentation } from './project-presentation'
+import { formatMonth, formatRecency } from './recency'
 
 type OverviewHeaderProps = {
   capturedAt: number | null

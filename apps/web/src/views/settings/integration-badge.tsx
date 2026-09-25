@@ -1,6 +1,6 @@
 import type { Connection } from '@roadmap/contracts'
-import { Badge } from '@/components/badge/badge.tsx'
-import { INTEGRATION_META } from '@/views/shared/project-meta.ts'
+import { Badge } from '@/components/badge/badge'
+import { INTEGRATION_META } from '@/views/shared/project-meta'
 
 type IntegrationBadgeProps = { connection: Connection | undefined }
 

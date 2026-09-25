@@ -1,4 +1,4 @@
-import { createRoadmapStore, type RoadmapStore } from './roadmap-store.ts'
+import { createRoadmapStore, type RoadmapStore } from './roadmap-store'
 
 /** Mirrors the server's default HTTP origin; the store derives `/ws` and request endpoints. */
 const DEFAULT_SERVER_URL = 'http://localhost:8790'

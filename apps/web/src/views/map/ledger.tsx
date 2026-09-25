@@ -7,18 +7,18 @@ import {
   type WayfinderMap,
 } from '@roadmap/contracts'
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
-import { DestinationMark } from '@/components/destination-mark/destination-mark.tsx'
+import { DestinationMark } from '@/components/destination-mark/destination-mark'
 import {
   type AutomationTag,
   automationEvidenceFor,
   automationTags,
-} from './automation-presentation.ts'
-import { buildLedger, type Ledger, type LedgerEdge } from './geometry.ts'
+} from './automation-presentation'
+import { buildLedger, type Ledger, type LedgerEdge } from './geometry'
 import './map.css'
-import { RoadmapTicketMark } from './roadmap-ticket-mark.tsx'
-import { type LedgerSelection, scopePlan } from './sequence.ts'
-import { STATE_META } from './state-meta.ts'
-import { TicketNode, ticketNodeTextX } from './ticket-node.tsx'
+import { RoadmapTicketMark } from './roadmap-ticket-mark'
+import { type LedgerSelection, scopePlan } from './sequence'
+import { STATE_META } from './state-meta'
+import { TicketNode, ticketNodeTextX } from './ticket-node'
 
 const EXT = 800
 const STATUS_MARK_X_OFFSET = 5

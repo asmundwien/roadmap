@@ -1,9 +1,9 @@
-import { useRoute } from './router.ts'
-import { CatalogPage } from './views/catalog/page.tsx'
-import { MapPage } from './views/map/page.tsx'
-import { OverviewPage } from './views/overview/page.tsx'
-import { SettingsPage } from './views/settings/page.tsx'
-import { SiteHeader } from './views/shell/site-header.tsx'
+import { useRoute } from './router'
+import { CatalogPage } from './views/catalog/page'
+import { MapPage } from './views/map/page'
+import { OverviewPage } from './views/overview/page'
+import { SettingsPage } from './views/settings/page'
+import { SiteHeader } from './views/shell/site-header'
 
 /** The persistent header frames Overview, settings, and existing Project/map routes. */
 export function App() {

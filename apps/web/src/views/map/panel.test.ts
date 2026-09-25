@@ -1,8 +1,8 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { Panel } from './panel.tsx'
-import { makeMap, ticket } from './test-fixtures.ts'
+import { Panel } from './panel'
+import { makeMap, ticket } from './test-fixtures'
 
 describe('Panel', () => {
   it('separates ticket state metadata in text output', () => {

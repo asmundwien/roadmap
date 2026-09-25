@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { DestinationMark } from './destination-mark.tsx'
+import { DestinationMark } from './destination-mark'
 
 describe('DestinationMark', () => {
   it('renders the destination signal at plot coordinates', () => {

@@ -1,8 +1,8 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { MapChild } from './map-child.tsx'
-import { makeMap } from './test-fixtures.ts'
+import { MapChild } from './map-child'
+import { makeMap } from './test-fixtures'
 
 describe('MapChild', () => {
   it('keeps a closed map collapsed when it is the Project’s only map', () => {

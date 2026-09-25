@@ -1,6 +1,6 @@
 import type { WayfinderMap } from '@roadmap/contracts'
 import { describe, expect, it } from 'vitest'
-import { resolveProseLink } from './link-targets.ts'
+import { resolveProseLink } from './link-targets'
 
 const ROOT = '/Users/asmund.wien/source/hdir/platform/microsoft-risiko'
 

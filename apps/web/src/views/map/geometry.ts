@@ -1,5 +1,5 @@
 import { type ProjectKey, type Ticket, ticketTypeOf, type WayfinderMap } from '@roadmap/contracts'
-import { stripInlineMarkdown } from '@/views/shared/gist.ts'
+import { stripInlineMarkdown } from '@/views/shared/gist'
 
 /**
  * The unified-ledger geometry — everything the map screen draws, computed as plain data.

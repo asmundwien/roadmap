@@ -1,7 +1,7 @@
 import type { ProjectKey } from '@roadmap/contracts'
-import type { Route } from '@/router.ts'
-import { useRoadmap } from '@/store/roadmap-provider.tsx'
-import { MissingProjectSection, ProjectMapSections } from './project-screen.tsx'
+import type { Route } from '@/router'
+import { useRoadmap } from '@/store/roadmap-provider'
+import { MissingProjectSection, ProjectMapSections } from './project-screen'
 import '@/views/shared/views.css'
 
 type MapPageProps = { route: Extract<Route, { screen: 'project' }> }

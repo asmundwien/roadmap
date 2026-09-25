@@ -16,15 +16,15 @@ import type {
 } from '@roadmap/contracts'
 import { ticketTypeOf } from '@roadmap/contracts'
 import { useState } from 'react'
-import type { ResolvedSelection } from '@/router.ts'
-import { stripInlineMarkdown } from '@/views/shared/gist.ts'
+import type { ResolvedSelection } from '@/router'
+import { stripInlineMarkdown } from '@/views/shared/gist'
 import './map.css'
-import { Badge } from '@/components/badge/badge.tsx'
-import { automationEvidenceFor } from './automation-presentation.ts'
-import { type ProseLinkTarget, resolveProseLink } from './link-targets.ts'
-import { Prose } from './prose.tsx'
-import { RoadmapTicketMark } from './roadmap-ticket-mark.tsx'
-import { STATE_META } from './state-meta.ts'
+import { Badge } from '@/components/badge/badge'
+import { automationEvidenceFor } from './automation-presentation'
+import { type ProseLinkTarget, resolveProseLink } from './link-targets'
+import { Prose } from './prose'
+import { RoadmapTicketMark } from './roadmap-ticket-mark'
+import { STATE_META } from './state-meta'
 
 /**
  * The docked Panel — the one detail layer of the map view. NOT an overlay: it docks beside the

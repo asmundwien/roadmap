@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatMonth, formatRecency } from './recency.ts'
+import { formatMonth, formatRecency } from './recency'
 
 // Local-time construction throughout, matching the formatter's calendar-day arithmetic.
 const noon = (y: number, m: number, d: number) => new Date(y, m, d, 12).getTime()

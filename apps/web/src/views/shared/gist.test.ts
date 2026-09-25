@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { stripInlineMarkdown } from './gist.ts'
+import { stripInlineMarkdown } from './gist'
 
 describe('stripInlineMarkdown', () => {
   it('flattens emphasis, code ticks, and links to their words', () => {
