@@ -1,127 +1,154 @@
-import type { TicketState, TicketType } from '@roadmap/contracts'
+import cn from 'classnames'
 import { Diamond } from '../diamond/diamond.tsx'
+import { VARIANT_COLORS, type Variant } from '../variant.ts'
 import './ticket-mark.css'
 
 export const MAJOR_TICKET_MARK_SCALE = 4 / 3
 const MINOR_TICKET_MARK_SCALE = 0.42
+const TINY_TICKET_MARK_SCALE = 0.42
 
-type TicketMarkProps =
-  | {
-      state: TicketState
-      type: TicketType
-      variant: 'major' | 'minor'
-      x: number
-      y: number
-    }
-  | {
-      state: TicketState
-      type: TicketType
-      variant: 'inline'
-    }
+export type TicketMarkFill = 'fill' | 'half' | 'none'
+export type TicketMarkCornerCount = 0 | 1 | 2 | 3 | 4
 
-/** The project page's one ticket-state mark, shared by ledger nodes and inline status text. */
+type TicketMarkPresentationProps = {
+  accent: Variant
+  children: string
+  cornerCount: TicketMarkCornerCount
+  fill: TicketMarkFill
+  variant: Variant
+}
+
+export type TicketMarkProps = TicketMarkPresentationProps &
+  (
+    | {
+        size: 'major' | 'minor'
+        x: number
+        y: number
+      }
+    | {
+        size: 'tiny'
+      }
+  )
+
+/** A domain-independent diamond mark with separate color, accent, fill, and size controls. */
 export function TicketMark(props: TicketMarkProps) {
-  if (props.variant === 'inline') {
-    return (
-      <svg
-        className="ticket-mark-inline"
-        viewBox="-8 -8 16 16"
-        aria-hidden="true"
-        focusable="false"
-      >
-        <TicketMark state={props.state} type={props.type} variant="minor" x={0} y={0} />
-      </svg>
-    )
+  switch (props.size) {
+    case 'major':
+      return <MajorTicketMark {...props} />
+    case 'minor':
+      return <MinorTicketMark {...props} />
+    case 'tiny':
+      return <TinyTicketMark {...props} />
+    default: {
+      const _exhaustive: never = props
+      return _exhaustive
+    }
   }
+}
 
-  const { state, type, variant, x, y } = props
-  const scale = variant === 'major' ? MAJOR_TICKET_MARK_SCALE : MINOR_TICKET_MARK_SCALE
-  const radius = 11 * scale
-  const frontierRadius = 17 * scale
+type PositionedTicketMarkProps = TicketMarkPresentationProps & {
+  x: number
+  y: number
+}
+
+function MajorTicketMark(props: PositionedTicketMarkProps) {
+  return <MarkShape {...props} scale={MAJOR_TICKET_MARK_SCALE} size="major" showContent />
+}
+
+function MinorTicketMark(props: PositionedTicketMarkProps) {
+  return <MarkShape {...props} scale={MINOR_TICKET_MARK_SCALE} size="minor" />
+}
+
+function TinyTicketMark(props: TicketMarkPresentationProps) {
   return (
-    <g className={`ticket-mark type-${type} state-${state}`}>
-      <g className={`node-shape node-mark is-${variant}`}>
-        {state === 'frontier' && (
-          <Diamond className="frontier-field" x={x} y={y} radius={frontierRadius} />
-        )}
+    <svg className="ticket-mark-tiny" viewBox="-8 -8 16 16" aria-hidden="true" focusable="false">
+      <MarkShape {...props} scale={TINY_TICKET_MARK_SCALE} size="tiny" x={0} y={0} />
+    </svg>
+  )
+}
+
+type MarkShapeProps = PositionedTicketMarkProps & {
+  scale: number
+  size: 'major' | 'minor' | 'tiny'
+  showContent?: boolean
+}
+
+function MarkShape({
+  accent,
+  children,
+  cornerCount,
+  fill,
+  scale,
+  showContent = false,
+  size,
+  variant,
+  x,
+  y,
+}: MarkShapeProps) {
+  const radius = 11 * scale
+  return (
+    <g className={cn('ticket-mark', `fill-${fill}`)} color={VARIANT_COLORS[variant]}>
+      <g className={cn('node-shape', 'node-mark', `is-${size}`)}>
         <Diamond className="diamond-face" x={x} y={y} radius={radius} />
-        {state === 'claimed' && (
+        {fill === 'half' && (
           <path
-            className="claimed-half"
+            className="mark-half"
             d={`M ${x} ${y - radius} L ${x} ${y + radius} L ${x - radius} ${y} Z`}
           />
         )}
-        {variant === 'major' && (
-          <text className="type-rune" x={x} y={y + 3.3 * scale} textAnchor="middle">
-            {state === 'closed' ? '✓' : typeRune(type)}
+        {showContent && children[0] !== undefined && (
+          <text
+            className="mark-content"
+            color={VARIANT_COLORS[variant]}
+            x={x}
+            y={y + 3.3 * scale}
+            textAnchor="middle"
+          >
+            {children[0]}
           </text>
         )}
-        <TypeCorners type={type} scale={scale} x={x} y={y} />
+        <g className="mark-accent" color={VARIANT_COLORS[accent]}>
+          <MarkCorners cornerCount={cornerCount} scale={scale} x={x} y={y} />
+        </g>
       </g>
     </g>
   )
 }
 
-type TypeCornersProps = {
-  type: TicketType
+type MarkCornersProps = {
+  cornerCount: TicketMarkCornerCount
   scale: number
   x: number
   y: number
 }
 
-function TypeCorners({ type, scale, x, y }: TypeCornersProps) {
-  const count = typeRank(type)
-  if (count === 0) return null
+function MarkCorners({ cornerCount, scale, x, y }: MarkCornersProps) {
+  if (cornerCount === 0) return null
   const radius = 11 * scale
-  const corners = [
-    `M ${x - 7 * scale} ${y - 4 * scale} L ${x} ${y - radius}`,
-    `M ${x + 4 * scale} ${y - 7 * scale} L ${x + radius} ${y}`,
-    `M ${x + 7 * scale} ${y + 4 * scale} L ${x} ${y + radius}`,
-    `M ${x - 4 * scale} ${y + 7 * scale} L ${x - radius} ${y}`,
-  ]
   return (
-    <g className="type-corners">
-      {corners.slice(0, count).map((path) => (
-        <path key={path} d={path} />
-      ))}
+    <g className="mark-corners">
+      <path
+        className="mark-corner"
+        d={`M ${x - 7 * scale} ${y - 4 * scale} L ${x} ${y - radius}`}
+      />
+      {cornerCount >= 2 && (
+        <path
+          className="mark-corner"
+          d={`M ${x + 4 * scale} ${y - 7 * scale} L ${x + radius} ${y}`}
+        />
+      )}
+      {cornerCount >= 3 && (
+        <path
+          className="mark-corner"
+          d={`M ${x + 7 * scale} ${y + 4 * scale} L ${x} ${y + radius}`}
+        />
+      )}
+      {cornerCount === 4 && (
+        <path
+          className="mark-corner"
+          d={`M ${x - 4 * scale} ${y + 7 * scale} L ${x - radius} ${y}`}
+        />
+      )}
     </g>
   )
-}
-
-function typeRune(type: TicketType): string {
-  switch (type) {
-    case 'research':
-      return 'R'
-    case 'prototype':
-      return 'P'
-    case 'grilling':
-      return 'G'
-    case 'task':
-      return 'T'
-    case 'untyped':
-      return '·'
-    default: {
-      const _exhaustive: never = type
-      return _exhaustive
-    }
-  }
-}
-
-function typeRank(type: TicketType): number {
-  switch (type) {
-    case 'research':
-      return 1
-    case 'prototype':
-      return 2
-    case 'grilling':
-      return 3
-    case 'task':
-      return 4
-    case 'untyped':
-      return 0
-    default: {
-      const _exhaustive: never = type
-      return _exhaustive
-    }
-  }
 }

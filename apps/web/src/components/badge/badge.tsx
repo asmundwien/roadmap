@@ -1,20 +1,10 @@
 import type { ReactNode } from 'react'
+import type { Variant } from '../variant.ts'
 import './badge.css'
-
-export type BadgeVariant =
-  | 'neutral'
-  | 'accent'
-  | 'warning'
-  | 'danger'
-  | 'success'
-  | 'info'
-  | 'muted'
-  | 'violet'
-  | 'teal'
 
 export type BadgeProps = {
   children: ReactNode
-  variant?: BadgeVariant
+  variant?: Variant
 }
 
 export function Badge({ children, variant = 'neutral' }: BadgeProps) {

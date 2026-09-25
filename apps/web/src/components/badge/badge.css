@@ -1,13 +1,4 @@
 .badge {
-  --badge-accent: #2563c0;
-  --badge-warning: #856208;
-  --badge-danger: #e87ba4;
-  --badge-success: #0ca30c;
-  --badge-info: #2a78d6;
-  --badge-muted: #898781;
-  --badge-violet: #7656c9;
-  --badge-teal: #087f8c;
-
   display: inline-flex;
   align-items: center;
   gap: 0.3em;
@@ -16,7 +7,7 @@
   border: 1px solid currentColor;
   border-radius: 999px;
   background: color-mix(in srgb, currentColor 9%, transparent);
-  color: var(--muted);
+  color: var(--variant-neutral);
   font-size: 0.68rem;
   font-weight: 700;
   line-height: 1.3;
@@ -24,46 +15,33 @@
 }
 
 .badge-accent {
-  color: var(--badge-accent);
+  color: var(--variant-accent);
 }
 
 .badge-warning {
-  color: var(--badge-warning);
+  color: var(--variant-warning);
 }
 
 .badge-danger {
-  color: var(--badge-danger);
+  color: var(--variant-danger);
 }
 
 .badge-success {
-  color: var(--badge-success);
+  color: var(--variant-success);
 }
 
 .badge-info {
-  color: var(--badge-info);
+  color: var(--variant-info);
 }
 
 .badge-muted {
-  color: var(--badge-muted);
+  color: var(--variant-muted);
 }
 
 .badge-violet {
-  color: var(--badge-violet);
+  color: var(--variant-violet);
 }
 
 .badge-teal {
-  color: var(--badge-teal);
-}
-
-@media (prefers-color-scheme: dark) {
-  .badge {
-    --badge-accent: #74a5ea;
-    --badge-warning: #d1a730;
-    --badge-danger: #d55181;
-    --badge-success: #0ca30c;
-    --badge-info: #3987e5;
-    --badge-muted: #898781;
-    --badge-violet: #ad8cff;
-    --badge-teal: #43c7d2;
-  }
+  color: var(--variant-teal);
 }

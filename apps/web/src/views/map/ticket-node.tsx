@@ -3,8 +3,9 @@ import {
   AUTOMATION_MARK_RADIUS,
   AutomationMark,
 } from '../../components/automation-mark/automation-mark.tsx'
-import { MAJOR_TICKET_MARK_SCALE, TicketMark } from '../../components/ticket-mark/ticket-mark.tsx'
+import { MAJOR_TICKET_MARK_SCALE } from '../../components/ticket-mark/ticket-mark.tsx'
 import type { AutomationTag } from './automation-presentation.ts'
+import { RoadmapTicketMark } from './roadmap-ticket-mark.tsx'
 import { STATE_META } from './state-meta.ts'
 
 const NODE_SCALE = MAJOR_TICKET_MARK_SCALE
@@ -47,7 +48,7 @@ type MajorTicketNodeProps = {
 function MajorTicketNode({ ticket, type, x, y }: MajorTicketNodeProps) {
   return (
     <g className="major-node">
-      <TicketMark state={ticket.state} type={type} variant="major" x={x} y={y} />
+      <RoadmapTicketMark state={ticket.state} type={type} size="major" x={x} y={y} />
       <NodeTooltip x={x} y={y - 20 * NODE_SCALE} word={STATE_META[ticket.state].word} />
     </g>
   )

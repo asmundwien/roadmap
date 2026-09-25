@@ -15,7 +15,7 @@ import {
 } from './automation-presentation.ts'
 import { buildLedger, type Ledger, type LedgerEdge } from './geometry.ts'
 import './map.css'
-import { TicketMark } from '../../components/ticket-mark/ticket-mark.tsx'
+import { RoadmapTicketMark } from './roadmap-ticket-mark.tsx'
 import { type LedgerSelection, scopePlan } from './sequence.ts'
 import { STATE_META } from './state-meta.ts'
 import { TicketNode, ticketNodeTextX } from './ticket-node.tsx'
@@ -225,10 +225,10 @@ export function MapLedger({
                 x={titleX}
                 baselineY={y - 4}
               />
-              <TicketMark
+              <RoadmapTicketMark
                 state={ticket.state}
                 type={type}
-                variant="minor"
+                size="minor"
                 x={titleX + STATUS_MARK_X_OFFSET}
                 y={y + STATUS_MARK_Y_OFFSET}
               />

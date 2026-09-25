@@ -104,7 +104,7 @@
   overflow: visible;
 }
 
-.catalog-minor-marks {
+.catalog-tiny-marks {
   display: flex;
   flex-wrap: wrap;
   align-items: center;

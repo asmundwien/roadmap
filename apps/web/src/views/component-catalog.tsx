@@ -5,7 +5,7 @@ import { Alert } from '../components/alert/alert.tsx'
 import { AutomationMark } from '../components/automation-mark/automation-mark.tsx'
 import { Badge } from '../components/badge/badge.tsx'
 import { DestinationMark } from '../components/destination-mark/destination-mark.tsx'
-import { TicketMark } from '../components/ticket-mark/ticket-mark.tsx'
+import { RoadmapTicketMark } from './map/roadmap-ticket-mark.tsx'
 import { STATE_META } from './map/state-meta.ts'
 import './component-catalog.css'
 
@@ -78,15 +78,15 @@ export function ComponentCatalog() {
       </CatalogSection>
 
       <CatalogSection
-        title="Minor marks"
-        description="Compact variants repeat tracker state and Automation evidence beside text."
+        title="Tiny marks"
+        description="Tiny marks repeat tracker state and Automation evidence beside text."
       >
-        <div className="catalog-minor-marks">
+        <div className="catalog-tiny-marks">
           {TICKET_STATES.map((state) => {
             const meta = STATE_META[state]
             return (
-              <Badge variant={meta.badgeVariant} key={state}>
-                <TicketMark state={state} type="task" variant="inline" />
+              <Badge variant={meta.variant} key={state}>
+                <RoadmapTicketMark state={state} type="task" size="tiny" />
                 {meta.word.slice(0, 1).toUpperCase()}
                 {meta.word.slice(1)}
               </Badge>
@@ -203,7 +203,7 @@ function TicketMarkRow({ type }: TicketMarkRowProps) {
           aria-label={`${type} ${state}`}
           key={state}
         >
-          <TicketMark state={state} type={type} variant="major" x={0} y={0} />
+          <RoadmapTicketMark state={state} type={type} size="major" x={0} y={0} />
         </svg>
       ))}
     </>

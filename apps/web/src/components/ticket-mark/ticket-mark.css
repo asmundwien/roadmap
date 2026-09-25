@@ -1,52 +1,24 @@
-.ticket-mark {
-  --node-type: var(--muted);
-  --node-state: var(--state-closed);
-}
-
-.ticket-mark.type-research {
-  --node-type: var(--type-research);
-}
-
-.ticket-mark.type-prototype {
-  --node-type: var(--type-prototype);
-}
-
-.ticket-mark.type-grilling {
-  --node-type: var(--type-grilling);
-}
-
-.ticket-mark.type-task {
-  --node-type: var(--type-task);
-}
-
-.ticket-mark.state-frontier {
-  --node-state: var(--state-frontier);
-}
-
-.ticket-mark.state-claimed {
-  --node-state: var(--state-claimed);
-}
-
-.ticket-mark.state-blocked {
-  --node-state: var(--state-blocked);
-}
-
-.ticket-mark.state-closed {
-  --node-state: var(--fg);
-}
-
 .node-mark .diamond-face {
-  fill: color-mix(in srgb, var(--node-state) 13%, var(--bg));
-  stroke: var(--node-state);
+  fill: var(--bg);
+  stroke: currentColor;
   stroke-width: 2.5px;
   stroke-linejoin: miter;
 }
 
-.node-mark.is-minor .diamond-face {
+.ticket-mark.fill-fill .diamond-face {
+  fill: currentColor;
+}
+
+.ticket-mark.fill-none .diamond-face {
+  fill: none;
+}
+
+.node-mark.is-minor .diamond-face,
+.node-mark.is-tiny .diamond-face {
   stroke-width: 0.8px;
 }
 
-.ticket-mark-inline {
+.ticket-mark-tiny {
   display: inline-block;
   width: 1em;
   height: 1em;
@@ -55,29 +27,12 @@
   vertical-align: -0.13em;
 }
 
-.ticket-mark.state-frontier .diamond-face {
-  fill: var(--node-state);
+.node-mark .mark-half {
+  fill: currentColor;
 }
 
-.ticket-mark.state-claimed .diamond-face {
-  fill: var(--bg);
-}
-
-.ticket-mark.state-closed .diamond-face {
-  fill: var(--fg);
-  stroke: var(--fg);
-}
-
-.node-mark .frontier-field {
-  fill: color-mix(in srgb, var(--state-frontier) 12%, transparent);
-}
-
-.node-mark .claimed-half {
-  fill: var(--state-claimed);
-}
-
-.node-mark .type-rune {
-  fill: var(--node-type);
+.node-mark .mark-content {
+  fill: currentColor;
   paint-order: stroke;
   stroke: var(--bg);
   stroke-width: 3.5px;
@@ -85,24 +40,14 @@
   font-weight: 900;
 }
 
-.ticket-mark.state-frontier .type-rune,
-.ticket-mark.state-closed .type-rune {
-  fill: var(--bg);
-  stroke: color-mix(in srgb, var(--node-state) 82%, var(--fg));
-}
-
-.node-mark .type-corners path {
+.node-mark .mark-corner {
   fill: none;
-  stroke: var(--node-type);
+  stroke: currentColor;
   stroke-width: 1.8px;
   stroke-linecap: square;
 }
 
-.node-mark.is-minor .type-corners path {
+.node-mark.is-minor .mark-corner,
+.node-mark.is-tiny .mark-corner {
   stroke-width: 0.6px;
-}
-
-.ticket-mark.state-frontier .type-corners path,
-.ticket-mark.state-closed .type-corners path {
-  stroke: var(--bg);
 }

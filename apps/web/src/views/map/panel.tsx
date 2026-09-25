@@ -20,10 +20,10 @@ import type { ResolvedSelection } from '../../router.ts'
 import { stripInlineMarkdown } from '../gist.ts'
 import './map.css'
 import { Badge } from '../../components/badge/badge.tsx'
-import { TicketMark } from '../../components/ticket-mark/ticket-mark.tsx'
 import { automationEvidenceFor } from './automation-presentation.ts'
 import { type ProseLinkTarget, resolveProseLink } from './link-targets.ts'
 import { Prose } from './prose.tsx'
+import { RoadmapTicketMark } from './roadmap-ticket-mark.tsx'
 import { STATE_META } from './state-meta.ts'
 
 /**
@@ -257,8 +257,8 @@ function TicketContent({ map, id, onSelect, automation }: TicketContentProps) {
       <SourceButton url={ticket.url} label="View item in source" />
       <p className="panel-item-title">{ticket.title}</p>
       <p className="panel-item-state">
-        <Badge variant={stateMeta.badgeVariant}>
-          <TicketMark state={ticket.state} type={type} variant="inline" />
+        <Badge variant={stateMeta.variant}>
+          <RoadmapTicketMark state={ticket.state} type={type} size="tiny" />
           {sentenceCase(stateMeta.word)}
         </Badge>
         {assignee !== undefined && (
@@ -715,8 +715,8 @@ export function ItemLink({ map, itemRef, onSelect }: ItemLinkProps) {
       >
         <span className="item-link-title">{local.title}</span>
         <span className="item-link-state">
-          <Badge variant={stateMeta.badgeVariant}>
-            <TicketMark state={local.state} type={type} variant="inline" />
+          <Badge variant={stateMeta.variant}>
+            <RoadmapTicketMark state={local.state} type={type} size="tiny" />
             {sentenceCase(stateMeta.word)}
           </Badge>
         </span>

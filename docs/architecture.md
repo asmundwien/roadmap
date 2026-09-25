@@ -20,7 +20,7 @@ WebSocket carries full state replacements. HTTP carries `query` and `execute` re
 
 `apps/web/src/views` contains the map view. The ledger in `map/ledger.tsx` and `map/geometry.ts` draws titles. Descriptive text lives in the docked Panel rendered by `map/panel.tsx`, not in an overlay. `map/sequence.ts` owns traversal order and decides which out-of-scope items to display. `map/prose.tsx` renders Panel prose as Markdown. `project-screen.tsx` owns the map's roving-tabindex keyboard navigation.
 
-Reusable UI lives under `apps/web/src/components`, with each module's implementation, styles, and tests in its own folder. Callers select presentation through typed variants rather than recreating markup or CSS. `apps/web/src/views/component-catalog.tsx` renders these modules and semantic color tokens at `#/components`.
+Reusable UI lives under `apps/web/src/components`, with each module's implementation, styles, and tests in its own folder. Components use the shared `Variant` color vocabulary. Views adapt domain state into generic component props, including `TicketMark` size, fill, accent, corners, and content.
 
 React functions use named `...Props` types instead of inline object annotations. Dynamic class composition uses `classnames` imported as `cn`; modules do not define class-name helper functions.
 

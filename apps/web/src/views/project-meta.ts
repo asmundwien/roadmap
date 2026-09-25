@@ -1,9 +1,9 @@
 import type { Integration } from '@roadmap/contracts'
-import type { BadgeVariant } from '../components/badge/badge.tsx'
+import type { Variant } from '../components/variant.ts'
 
 type IntegrationMeta = {
   label: string
-  badgeVariant: BadgeVariant
+  badgeVariant: Variant
 }
 
 export const INTEGRATION_META = {

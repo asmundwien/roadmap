@@ -4,39 +4,32 @@
   --muted: #6b6a67;
   --edge: rgba(28, 27, 26, 0.12);
 
-  /* Progress-signal ramp, validated against --bg in both modes (dataviz skill, ordinal checks). */
-  --signal-decided: #2a78d6;
+  /* Shared semantic palette for reusable UI variants. */
+  --variant-neutral: var(--muted);
+  --variant-accent: #2563c0;
+  --variant-warning: #856208;
+  --variant-danger: #e87ba4;
+  --variant-success: #0ca30c;
+  --variant-info: #2a78d6;
+  --variant-muted: #898781;
+  --variant-violet: #7656c9;
+  --variant-teal: #087f8c;
+
+  /* Domain aliases keep presentation mappings explicit at the view seam. */
+  --signal-decided: var(--variant-info);
   --signal-open: #86b6ef;
   --signal-fog: #a9a7a0;
-
-  /*
-   * Wayfinder state palette, validated against --bg in both modes (dataviz skill, all-pairs).
-   * `closed` is deliberately achromatic — it should recede. The light-mode blocked magenta sits at
-   * 2.6:1 against the surface, under the 3:1 floor, so a state is never colour alone: every mark
-   * ships a glyph and a word. The goal amber is a reserved accent — the destination flag only,
-   * never a fourth state mark; its deutan-side closeness to the frontier green is relieved by the
-   * flag glyph, its caption, and its own section.
-   */
-  --state-closed: #898781;
-  --state-frontier: #0ca30c;
-  --state-claimed: #2a78d6;
-  --state-blocked: #e87ba4;
+  --state-closed: var(--variant-muted);
+  --state-frontier: var(--variant-success);
+  --state-claimed: var(--variant-info);
+  --state-blocked: var(--variant-danger);
+  --type-research: var(--variant-success);
+  --type-prototype: var(--variant-warning);
+  --type-grilling: var(--variant-danger);
+  --type-task: var(--variant-accent);
+  --automation-classification: var(--variant-violet);
+  --automation-wayfinder: var(--variant-teal);
   --goal: #a87c10;
-
-  /*
-   * Ticket-type chip palette — the wayfinder labels' own GitHub hues (research green #0E8A16,
-   * prototype yellow #FBCA04, grilling red #D93F0B, task blue #0052CC), restated in this map's
-   * muted tones. Validated per mode (dataviz skill): every pair ≥15 normal-vision ΔE, every chip
-   * word ≥4.3:1 on its 12% tint; identity is never colour alone — the chip carries its word.
-   */
-  --type-research: #085a30;
-  --type-prototype: #856208;
-  --type-grilling: #c92e0e;
-  --type-task: #2563c0;
-
-  /* Independent Automation evidence: one hue per stage family, never a combined outcome. */
-  --automation-classification: #7656c9;
-  --automation-wayfinder: #087f8c;
 
   /*
    * The style vocabulary the stride prototype settled: every gap draws from --sp-*, every rounded
@@ -65,22 +58,17 @@
     --fg: #eeedeb;
     --muted: #9a9894;
     --edge: rgba(238, 237, 235, 0.14);
-    --signal-decided: #3987e5;
+    --variant-accent: #74a5ea;
+    --variant-warning: #d1a730;
+    --variant-danger: #d55181;
+    --variant-success: #0ca30c;
+    --variant-info: #3987e5;
+    --variant-muted: #898781;
+    --variant-violet: #ad8cff;
+    --variant-teal: #43c7d2;
     --signal-open: #184f95;
     --signal-fog: #4c4b47;
-
-    --state-closed: #898781;
-    --state-frontier: #0ca30c;
-    --state-claimed: #3987e5;
-    --state-blocked: #d55181;
     --goal: #dcaf3f;
-
-    --type-research: #4faf5c;
-    --type-prototype: #d1a730;
-    --type-grilling: #f0653a;
-    --type-task: #74a5ea;
-    --automation-classification: #ad8cff;
-    --automation-wayfinder: #43c7d2;
   }
 }
 
