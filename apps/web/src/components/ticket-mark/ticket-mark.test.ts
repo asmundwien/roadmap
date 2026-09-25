@@ -42,13 +42,4 @@ describe('TicketMark', () => {
     expect(markup).toContain('class="node-shape node-mark is-tiny"')
     expect(markup).not.toContain('<text')
   })
-
-  it('renders only the first character of content', () => {
-    const markup = renderToStaticMarkup(
-      TicketMark({ ...presentation, children: 'AB', size: 'major', x: 0, y: 0 }),
-    )
-
-    expect(markup).toContain('>A</text>')
-    expect(markup).not.toContain('>AB</text>')
-  })
 })

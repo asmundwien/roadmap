@@ -39,30 +39,24 @@ export function RoadmapTicketMark(props: RoadmapTicketMarkProps) {
   const type = TICKET_TYPE_MARK[props.type]
   const children = props.state === 'closed' ? '✓' : type.children
   if (props.size === 'tiny') {
-    return (
-      <TicketMark
-        accent={type.accent}
-        cornerCount={type.cornerCount}
-        fill={state.fill}
-        size="tiny"
-        variant={state.variant}
-      >
-        {children}
-      </TicketMark>
-    )
+    return TicketMark({
+      accent: type.accent,
+      children,
+      cornerCount: type.cornerCount,
+      fill: state.fill,
+      size: 'tiny',
+      variant: state.variant,
+    })
   }
 
-  return (
-    <TicketMark
-      accent={type.accent}
-      cornerCount={type.cornerCount}
-      fill={state.fill}
-      size={props.size}
-      variant={state.variant}
-      x={props.x}
-      y={props.y}
-    >
-      {children}
-    </TicketMark>
-  )
+  return TicketMark({
+    accent: type.accent,
+    children,
+    cornerCount: type.cornerCount,
+    fill: state.fill,
+    size: props.size,
+    variant: state.variant,
+    x: props.x,
+    y: props.y,
+  })
 }

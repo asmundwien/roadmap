@@ -26,6 +26,14 @@ const TINY_MARK_VARIANTS = [
   'danger',
   'success',
 ] as const satisfies readonly Variant[]
+const TINY_MARK_GLYPH = {
+  neutral: 'n',
+  accent: 'a',
+  warning: 'w',
+  danger: 'd',
+  success: 's',
+} as const satisfies Record<(typeof TINY_MARK_VARIANTS)[number], string>
+const TICKET_MARK_CORNER_GLYPHS = ['0', '1', '2', '3', '4'] as const
 
 const PALETTE = [
   ['Background', '--bg'],
@@ -96,9 +104,9 @@ export function ComponentCatalog() {
                 size="tiny"
                 variant={variant}
               >
-                {variant.slice(0, 1)}
+                {TINY_MARK_GLYPH[variant]}
               </TicketMark>
-              {variant.slice(0, 1).toUpperCase()}
+              {TINY_MARK_GLYPH[variant].toUpperCase()}
               {variant.slice(1)}
             </Badge>
           ))}
@@ -216,7 +224,7 @@ function TicketMarkRow({ fill }: TicketMarkRowProps) {
             x={0}
             y={0}
           >
-            {String(cornerCount)}
+            {TICKET_MARK_CORNER_GLYPHS[cornerCount]}
           </TicketMark>
         </svg>
       ))}

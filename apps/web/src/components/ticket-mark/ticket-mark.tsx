@@ -9,16 +9,21 @@ const TINY_TICKET_MARK_SCALE = 0.42
 
 export type TicketMarkFill = 'fill' | 'half' | 'none'
 export type TicketMarkCornerCount = 0 | 1 | 2 | 3 | 4
+type SingleChar<S extends string> = S extends `${infer _First}${infer Rest}`
+  ? Rest extends ''
+    ? S
+    : never
+  : never
 
-type TicketMarkPresentationProps = {
+type TicketMarkPresentationProps<S extends string> = {
   accent: Variant
-  children: string
+  children: S & SingleChar<S>
   cornerCount: TicketMarkCornerCount
   fill: TicketMarkFill
   variant: Variant
 }
 
-export type TicketMarkProps = TicketMarkPresentationProps &
+export type TicketMarkProps<S extends string> = TicketMarkPresentationProps<S> &
   (
     | {
         size: 'major' | 'minor'
@@ -31,7 +36,7 @@ export type TicketMarkProps = TicketMarkPresentationProps &
   )
 
 /** A domain-independent diamond mark with separate color, accent, fill, and size controls. */
-export function TicketMark(props: TicketMarkProps) {
+export function TicketMark<const S extends string>(props: TicketMarkProps<S>) {
   switch (props.size) {
     case 'major':
       return <MajorTicketMark {...props} />
@@ -46,20 +51,20 @@ export function TicketMark(props: TicketMarkProps) {
   }
 }
 
-type PositionedTicketMarkProps = TicketMarkPresentationProps & {
+type PositionedTicketMarkProps<S extends string> = TicketMarkPresentationProps<S> & {
   x: number
   y: number
 }
 
-function MajorTicketMark(props: PositionedTicketMarkProps) {
+function MajorTicketMark<S extends string>(props: PositionedTicketMarkProps<S>) {
   return <MarkShape {...props} scale={MAJOR_TICKET_MARK_SCALE} size="major" showContent />
 }
 
-function MinorTicketMark(props: PositionedTicketMarkProps) {
+function MinorTicketMark<S extends string>(props: PositionedTicketMarkProps<S>) {
   return <MarkShape {...props} scale={MINOR_TICKET_MARK_SCALE} size="minor" />
 }
 
-function TinyTicketMark(props: TicketMarkPresentationProps) {
+function TinyTicketMark<S extends string>(props: TicketMarkPresentationProps<S>) {
   return (
     <svg className="ticket-mark-tiny" viewBox="-8 -8 16 16" aria-hidden="true" focusable="false">
       <MarkShape {...props} scale={TINY_TICKET_MARK_SCALE} size="tiny" x={0} y={0} />
@@ -67,13 +72,13 @@ function TinyTicketMark(props: TicketMarkPresentationProps) {
   )
 }
 
-type MarkShapeProps = PositionedTicketMarkProps & {
+type MarkShapeProps<S extends string> = PositionedTicketMarkProps<S> & {
   scale: number
   size: 'major' | 'minor' | 'tiny'
   showContent?: boolean
 }
 
-function MarkShape({
+function MarkShape<S extends string>({
   accent,
   children,
   cornerCount,
@@ -84,7 +89,7 @@ function MarkShape({
   variant,
   x,
   y,
-}: MarkShapeProps) {
+}: MarkShapeProps<S>) {
   const radius = 11 * scale
   return (
     <g className={cn('ticket-mark', `fill-${fill}`)} color={VARIANT_COLORS[variant]}>
@@ -96,7 +101,7 @@ function MarkShape({
             d={`M ${x} ${y - radius} L ${x} ${y + radius} L ${x - radius} ${y} Z`}
           />
         )}
-        {showContent && children[0] !== undefined && (
+        {showContent && (
           <text
             className="mark-content"
             color={VARIANT_COLORS[variant]}
@@ -104,7 +109,7 @@ function MarkShape({
             y={y + 3.3 * scale}
             textAnchor="middle"
           >
-            {children[0]}
+            {children}
           </text>
         )}
         <g className="mark-accent" color={VARIANT_COLORS[accent]}>
