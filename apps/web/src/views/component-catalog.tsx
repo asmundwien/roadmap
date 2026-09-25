@@ -15,7 +15,7 @@ const TICKET_TYPES = [
   'grilling',
   'task',
 ] as const satisfies readonly TicketType[]
-const commit = [
+const TICKET_STATES = [
   'frontier',
   'claimed',
   'blocked',
