@@ -1,5 +1,5 @@
 import type { TicketState } from '@roadmap/contracts'
-import { statusTagForTicketState, statusTagLabel } from '../../components/status-tag/status-tag.tsx'
+import { badgeForTicketState, badgeLabel } from '../../components/badge/badge.tsx'
 
 /** Text and colour paired with the shared ticket mark component. */
 export const STATE_META: Record<TicketState, { word: string; color: string }> = {
@@ -10,5 +10,5 @@ export const STATE_META: Record<TicketState, { word: string; color: string }> = 
 }
 
 function labelFor(state: TicketState): string {
-  return statusTagLabel(statusTagForTicketState(state)).toLowerCase()
+  return badgeLabel(badgeForTicketState(state)).toLowerCase()
 }

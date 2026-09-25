@@ -19,7 +19,7 @@ import { useState } from 'react'
 import type { ResolvedSelection } from '../../router.ts'
 import { stripInlineMarkdown } from '../gist.ts'
 import './map.css'
-import { StatusTag, statusTagForTicketState } from '../../components/status-tag/status-tag.tsx'
+import { Badge, badgeForTicketState } from '../../components/badge/badge.tsx'
 import { TicketMark } from '../../components/ticket-mark/ticket-mark.tsx'
 import { automationEvidenceFor } from './automation-presentation.ts'
 import { type ProseLinkTarget, resolveProseLink } from './link-targets.ts'
@@ -260,7 +260,7 @@ function TicketContent({
       <p className="panel-item-title">{ticket.title}</p>
       <p className="panel-item-state">
         <TicketMark ticket={ticket} type={type} variant="inline" />
-        <StatusTag variant={statusTagForTicketState(ticket.state)} />
+        <Badge variant={badgeForTicketState(ticket.state)} />
         {assignee !== undefined && (
           <>
             {' · '}
@@ -716,7 +716,7 @@ export function ItemLink({
         <span className="item-link-title">{local.title}</span>
         <span className="item-link-state">
           <TicketMark ticket={local} type={type} variant="inline" />
-          <StatusTag variant={statusTagForTicketState(local.state)} />
+          <Badge variant={badgeForTicketState(local.state)} />
         </span>
       </button>
     )

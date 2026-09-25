@@ -5,7 +5,6 @@ import { Alert } from '../components/alert/alert.tsx'
 import { AutomationMark } from '../components/automation-mark/automation-mark.tsx'
 import { Badge } from '../components/badge/badge.tsx'
 import { DestinationMark } from '../components/destination-mark/destination-mark.tsx'
-import { StatusTag } from '../components/status-tag/status-tag.tsx'
 import { TicketMark } from '../components/ticket-mark/ticket-mark.tsx'
 import './component-catalog.css'
 
@@ -78,14 +77,17 @@ export function ComponentCatalog() {
       </CatalogSection>
 
       <CatalogSection
-        title="Status tags"
-        description="Ticket state labels use one semantic variant in every HTML context."
+        title="Badges"
+        description="Short semantic labels use one shape for ticket states and integrations."
       >
-        <div className="catalog-tags">
-          <StatusTag variant="blocked" />
-          <StatusTag variant="takeable" />
-          <StatusTag variant="claimed" />
-          <StatusTag variant="decided" />
+        <div className="catalog-badges">
+          <Badge>Unknown</Badge>
+          <Badge variant="github">GitHub</Badge>
+          <Badge variant="local">Local</Badge>
+          <Badge variant="blocked" />
+          <Badge variant="takeable" />
+          <Badge variant="claimed" />
+          <Badge variant="decided" />
         </div>
       </CatalogSection>
 
@@ -125,14 +127,6 @@ export function ComponentCatalog() {
                 Unavailable
               </Action>
             </ActionGroup>
-          </div>
-          <div className="catalog-control-group">
-            <span className="catalog-control-label">Badges</span>
-            <div className="catalog-badges">
-              <Badge>Unknown</Badge>
-              <Badge variant="github">GitHub</Badge>
-              <Badge variant="local">Local</Badge>
-            </div>
           </div>
           <div className="catalog-control-group">
             <span className="catalog-control-label">Messages</span>

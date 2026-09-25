@@ -148,7 +148,6 @@
   text-transform: uppercase;
 }
 
-.catalog-tags,
 .catalog-badges {
   display: flex;
   flex-wrap: wrap;

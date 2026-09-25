@@ -194,9 +194,9 @@ same identity. A never-read Project can be Unreachable with no maps.
 _Avoid_: missing, deleted (the cause may be unknown)
 
 **Badge**:
-The project-level marker naming a project's integration — provenance made visible exactly once,
-invisible everywhere below the project.
-_Avoid_: source label, origin tag
+A short semantic label for a ticket state or project integration. Its text always carries the
+meaning; color only reinforces it.
+_Avoid_: status tag, source label, origin tag
 
 **Panel**:
 The docked column that eats the page — the map view's one detail layer. It flexes in beside the
