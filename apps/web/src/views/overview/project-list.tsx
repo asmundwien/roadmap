@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
-import { Badge } from '../../components/badge/badge.tsx'
-import { connectionSettingsHash, projectHash } from '../../router.ts'
-import { integrationLabel } from '../shared/project-meta.ts'
+import { Badge } from '@/components/badge/badge.tsx'
+import { connectionSettingsHash, projectHash } from '@/router.ts'
+import { integrationLabel } from '@/views/shared/project-meta.ts'
 import type {
   AttentionItem,
   ProjectPortfolio,

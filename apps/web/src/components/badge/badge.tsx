@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { Variant } from '../variant.ts'
+import type { Variant } from '@/components/variant.ts'
 import './badge.css'
 
 export type BadgeProps = {

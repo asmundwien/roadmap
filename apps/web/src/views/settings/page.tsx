@@ -1,4 +1,4 @@
-import type { Route } from '../../router.ts'
+import type { Route } from '@/router.ts'
 import { AutomationSettings } from './automation-settings.tsx'
 import { ConnectionSettings } from './connection-settings.tsx'
 import { ProjectSettings } from './project-settings.tsx'

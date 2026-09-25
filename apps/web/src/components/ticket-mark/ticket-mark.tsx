@@ -1,6 +1,6 @@
 import cn from 'classnames'
-import { Diamond } from '../diamond/diamond.tsx'
-import { VARIANT_COLORS, type Variant } from '../variant.ts'
+import { Diamond } from '@/components/diamond/diamond.tsx'
+import { VARIANT_COLORS, type Variant } from '@/components/variant.ts'
 import './ticket-mark.css'
 
 export const MAJOR_TICKET_MARK_SCALE = 4 / 3

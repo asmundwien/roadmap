@@ -1,7 +1,7 @@
 import type { AutomationEvidence, Project, WayfinderMap } from '@roadmap/contracts'
 import { useEffect, useRef, useState } from 'react'
-import { AutomationMark } from '../../components/automation-mark/automation-mark.tsx'
-import { Badge } from '../../components/badge/badge.tsx'
+import { AutomationMark } from '@/components/automation-mark/automation-mark.tsx'
+import { Badge } from '@/components/badge/badge.tsx'
 import {
   encodeSelection,
   mapHash,
@@ -10,8 +10,8 @@ import {
   replaceHash,
   resolveSelection,
   selectionHash,
-} from '../../router.ts'
-import { integrationLabel } from '../shared/project-meta.ts'
+} from '@/router.ts'
+import { integrationLabel } from '@/views/shared/project-meta.ts'
 import { activeMapOf } from './active-map.ts'
 import { MapChild, sameSelection } from './map-child.tsx'
 import { Panel, type PanelAutomation } from './panel.tsx'

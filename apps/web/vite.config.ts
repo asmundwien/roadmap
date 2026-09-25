@@ -6,6 +6,9 @@ export default defineConfig({
   // `.env.local` lives at the repo root, shared with the server, not per-package.
   envDir: '../..',
   plugins: [react()],
+  resolve: {
+    tsconfigPaths: true,
+  },
   test: {
     // The data layer is pure functions and fetch; nothing here needs a DOM yet. The first
     // component test that does should add jsdom and Testing Library then, not before.

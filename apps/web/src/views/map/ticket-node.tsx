@@ -2,8 +2,8 @@ import type { Ticket, TicketType } from '@roadmap/contracts'
 import {
   AUTOMATION_MARK_RADIUS,
   AutomationMark,
-} from '../../components/automation-mark/automation-mark.tsx'
-import { MAJOR_TICKET_MARK_SCALE } from '../../components/ticket-mark/ticket-mark.tsx'
+} from '@/components/automation-mark/automation-mark.tsx'
+import { MAJOR_TICKET_MARK_SCALE } from '@/components/ticket-mark/ticket-mark.tsx'
 import type { AutomationTag } from './automation-presentation.ts'
 import { RoadmapTicketMark } from './roadmap-ticket-mark.tsx'
 import { STATE_META } from './state-meta.ts'

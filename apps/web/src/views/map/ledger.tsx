@@ -7,7 +7,7 @@ import {
   type WayfinderMap,
 } from '@roadmap/contracts'
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
-import { DestinationMark } from '../../components/destination-mark/destination-mark.tsx'
+import { DestinationMark } from '@/components/destination-mark/destination-mark.tsx'
 import {
   type AutomationTag,
   automationEvidenceFor,

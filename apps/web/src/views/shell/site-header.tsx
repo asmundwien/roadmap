@@ -5,9 +5,9 @@ import {
   overviewHash,
   projectSettingsHash,
   type Route,
-} from '../../router.ts'
-import { useRoadmap } from '../../store/roadmap-provider.tsx'
-import '../shared/views.css'
+} from '@/router.ts'
+import { useRoadmap } from '@/store/roadmap-provider.tsx'
+import '@/views/shared/views.css'
 
 type SiteHeaderProps = { route: Route }
 

@@ -8,7 +8,7 @@ import type {
   WayfinderMap,
   WayfinderSession,
 } from '@roadmap/contracts'
-import { stripInlineMarkdown } from '../shared/gist.ts'
+import { stripInlineMarkdown } from '@/views/shared/gist.ts'
 
 export type ProjectJourney = 'active' | 'resting' | 'waiting'
 

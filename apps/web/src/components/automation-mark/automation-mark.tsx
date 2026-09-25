@@ -1,5 +1,5 @@
 import type { AutomationOverrideStage } from '@roadmap/contracts'
-import { Diamond } from '../diamond/diamond.tsx'
+import { Diamond } from '@/components/diamond/diamond.tsx'
 import './automation-mark.css'
 
 export const AUTOMATION_MARK_RADIUS = 26 / 3

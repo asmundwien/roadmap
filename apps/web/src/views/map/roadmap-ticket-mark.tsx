@@ -1,9 +1,6 @@
 import type { TicketState, TicketType } from '@roadmap/contracts'
-import {
-  TicketMark,
-  type TicketMarkCornerCount,
-} from '../../components/ticket-mark/ticket-mark.tsx'
-import type { Variant } from '../../components/variant.ts'
+import { TicketMark, type TicketMarkCornerCount } from '@/components/ticket-mark/ticket-mark.tsx'
+import type { Variant } from '@/components/variant.ts'
 import { STATE_META } from './state-meta.ts'
 
 type TicketTypeMark = {

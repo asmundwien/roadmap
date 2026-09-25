@@ -1,11 +1,11 @@
-import { useRoadmap } from '../../store/roadmap-provider.tsx'
+import { useRoadmap } from '@/store/roadmap-provider.tsx'
 import {
   OverviewConnectionStatus,
   OverviewHeader,
   ProjectOverviewSections,
 } from './project-list.tsx'
 import { presentProjects } from './project-presentation.ts'
-import '../shared/views.css'
+import '@/views/shared/views.css'
 
 export function OverviewPage() {
   const { transport, projects, connections, configuration, capturedAt } = useRoadmap()
