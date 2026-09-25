@@ -12,9 +12,9 @@ import type {
 import { type FormEvent, useState } from 'react'
 import { Action, ActionGroup } from '../components/action/action.tsx'
 import { Alert } from '../components/alert/alert.tsx'
-import { IntegrationBadge } from '../components/badge/badge.tsx'
 import { projectHash } from '../router.ts'
 import { useRoadmap } from '../store/roadmap-provider.tsx'
+import { IntegrationBadge } from './integration-badge.tsx'
 import {
   ErrorText,
   locatorLabel,

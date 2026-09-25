@@ -1,14 +1,16 @@
 import type { TicketState } from '@roadmap/contracts'
-import { badgeForTicketState, badgeLabel } from '../../components/badge/badge.tsx'
+import type { BadgeVariant } from '../../components/badge/badge.tsx'
 
-/** Text and colour paired with the shared ticket mark component. */
-export const STATE_META: Record<TicketState, { word: string; color: string }> = {
-  closed: { word: labelFor('closed'), color: 'var(--state-closed)' },
-  frontier: { word: labelFor('frontier'), color: 'var(--state-frontier)' },
-  claimed: { word: labelFor('claimed'), color: 'var(--state-claimed)' },
-  blocked: { word: labelFor('blocked'), color: 'var(--state-blocked)' },
+type StateMeta = {
+  word: string
+  color: string
+  badgeVariant: BadgeVariant
 }
 
-function labelFor(state: TicketState): string {
-  return badgeLabel(badgeForTicketState(state)).toLowerCase()
-}
+/** Text and presentation paired with ticket state. */
+export const STATE_META = {
+  closed: { word: 'decided', color: 'var(--state-closed)', badgeVariant: 'muted' },
+  frontier: { word: 'takeable', color: 'var(--state-frontier)', badgeVariant: 'success' },
+  claimed: { word: 'claimed', color: 'var(--state-claimed)', badgeVariant: 'info' },
+  blocked: { word: 'blocked', color: 'var(--state-blocked)', badgeVariant: 'danger' },
+} as const satisfies Record<TicketState, StateMeta>

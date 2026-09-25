@@ -1,6 +1,17 @@
 import type { Integration } from '@roadmap/contracts'
+import type { BadgeVariant } from '../components/badge/badge.tsx'
 
-/** Human-facing labels for the integration badge; wire tags stay `github` / `local`. */
+type IntegrationMeta = {
+  label: string
+  badgeVariant: BadgeVariant
+}
+
+export const INTEGRATION_META = {
+  github: { label: 'GitHub', badgeVariant: 'accent' },
+  local: { label: 'Local', badgeVariant: 'warning' },
+} as const satisfies Record<Integration, IntegrationMeta>
+
+/** Human-facing labels for integrations; wire tags stay `github` / `local`. */
 export function integrationLabel(integration: Integration): string {
-  return integration === 'github' ? 'GitHub' : 'Local'
+  return INTEGRATION_META[integration].label
 }

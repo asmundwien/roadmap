@@ -194,8 +194,8 @@ same identity. A never-read Project can be Unreachable with no maps.
 _Avoid_: missing, deleted (the cause may be unknown)
 
 **Badge**:
-A short semantic label for a ticket state or project integration. Its text always carries the
-meaning; color only reinforces it.
+A short inline label whose text carries its meaning. It may label a ticket state, project
+Integration, or another compact fact; color only reinforces its content.
 _Avoid_: status tag, source label, origin tag
 
 **Panel**:

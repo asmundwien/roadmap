@@ -19,7 +19,7 @@ import { useState } from 'react'
 import type { ResolvedSelection } from '../../router.ts'
 import { stripInlineMarkdown } from '../gist.ts'
 import './map.css'
-import { Badge, badgeForTicketState } from '../../components/badge/badge.tsx'
+import { Badge } from '../../components/badge/badge.tsx'
 import { TicketMark } from '../../components/ticket-mark/ticket-mark.tsx'
 import { automationEvidenceFor } from './automation-presentation.ts'
 import { type ProseLinkTarget, resolveProseLink } from './link-targets.ts'
@@ -240,6 +240,7 @@ function TicketContent({
   const assignee = ticket.assignees[0]?.name
   const body = ticket.body.trim()
   const type = ticketTypeOf(ticket.typeEvidence)
+  const stateMeta = STATE_META[ticket.state]
   const resolveLink = proseLinkResolver(map, ticket.sourcePath)
   const overrideControl = automation.state.overrides.find(
     (control) =>
@@ -260,7 +261,7 @@ function TicketContent({
       <p className="panel-item-title">{ticket.title}</p>
       <p className="panel-item-state">
         <TicketMark ticket={ticket} type={type} variant="inline" />
-        <Badge variant={badgeForTicketState(ticket.state)} />
+        <Badge variant={stateMeta.badgeVariant}>{sentenceCase(stateMeta.word)}</Badge>
         {assignee !== undefined && (
           <>
             {' · '}
@@ -707,6 +708,7 @@ export function ItemLink({
 
   if (local) {
     const type = ticketTypeOf(local.typeEvidence)
+    const stateMeta = STATE_META[local.state]
     return (
       <button
         type="button"
@@ -716,7 +718,7 @@ export function ItemLink({
         <span className="item-link-title">{local.title}</span>
         <span className="item-link-state">
           <TicketMark ticket={local} type={type} variant="inline" />
-          <Badge variant={badgeForTicketState(local.state)} />
+          <Badge variant={stateMeta.badgeVariant}>{sentenceCase(stateMeta.word)}</Badge>
         </span>
       </button>
     )

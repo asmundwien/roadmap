@@ -1,24 +1,20 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { Badge, badgeForTicketState } from './badge.tsx'
+import { Badge } from './badge.tsx'
 
 describe('Badge', () => {
-  it.each([
-    ['blocked', 'blocked', 'Blocked'],
-    ['frontier', 'takeable', 'Takeable'],
-    ['claimed', 'claimed', 'Claimed'],
-    ['closed', 'decided', 'Decided'],
-  ] as const)('renders the canonical badge for %s tickets', (state, expectedVariant, label) => {
-    const variant = badgeForTicketState(state)
-
-    expect(variant).toBe(expectedVariant)
-    expect(renderToStaticMarkup(createElement(Badge, { variant }))).toContain(`>${label}</span>`)
+  it('renders the neutral variant by default', () => {
+    expect(renderToStaticMarkup(Badge({ children: 'Unknown' }))).toBe(
+      '<span class="badge badge-neutral">Unknown</span>',
+    )
   })
 
-  it('renders the golden integration variant', () => {
-    expect(renderToStaticMarkup(Badge({ variant: 'local', children: 'Local' }))).toContain(
-      'class="badge badge-local"',
+  it('renders caller-provided React content for a semantic variant', () => {
+    const children = createElement('strong', null, 'Needs review')
+
+    expect(renderToStaticMarkup(Badge({ variant: 'danger', children }))).toBe(
+      '<span class="badge badge-danger"><strong>Needs review</strong></span>',
     )
   })
 })

@@ -1,4 +1,11 @@
 .badge {
+  --badge-accent: #2563c0;
+  --badge-warning: #856208;
+  --badge-danger: #e87ba4;
+  --badge-success: #0ca30c;
+  --badge-info: #2a78d6;
+  --badge-muted: #898781;
+
   display: inline-flex;
   align-items: center;
   height: fit-content;
@@ -14,26 +21,37 @@
   vertical-align: middle;
 }
 
-.badge-github {
-  color: var(--type-task);
+.badge-accent {
+  color: var(--badge-accent);
 }
 
-.badge-local {
-  color: var(--type-prototype);
+.badge-warning {
+  color: var(--badge-warning);
 }
 
-.badge-blocked {
-  color: var(--state-blocked);
+.badge-danger {
+  color: var(--badge-danger);
 }
 
-.badge-takeable {
-  color: var(--state-frontier);
+.badge-success {
+  color: var(--badge-success);
 }
 
-.badge-claimed {
-  color: var(--state-claimed);
+.badge-info {
+  color: var(--badge-info);
 }
 
-.badge-decided {
-  color: var(--state-closed);
+.badge-muted {
+  color: var(--badge-muted);
+}
+
+@media (prefers-color-scheme: dark) {
+  .badge {
+    --badge-accent: #74a5ea;
+    --badge-warning: #d1a730;
+    --badge-danger: #d55181;
+    --badge-success: #0ca30c;
+    --badge-info: #3987e5;
+    --badge-muted: #898781;
+  }
 }

@@ -10,9 +10,10 @@ import type {
 import { type FormEvent, useState } from 'react'
 import { Action, ActionGroup } from '../components/action/action.tsx'
 import { Alert } from '../components/alert/alert.tsx'
-import { Badge, IntegrationBadge } from '../components/badge/badge.tsx'
+import { Badge } from '../components/badge/badge.tsx'
 import { projectHash } from '../router.ts'
 import { useRoadmap } from '../store/roadmap-provider.tsx'
+import { IntegrationBadge } from './integration-badge.tsx'
 import {
   ErrorText,
   locatorLabel,
@@ -271,7 +272,7 @@ function ConnectionStride({
             </Action>
           )}
           {connection.builtIn ? (
-            <Badge variant="local">Built in</Badge>
+            <Badge variant="warning">Built in</Badge>
           ) : (
             <Action type="button" disabled={blocked} onClick={onEdit}>
               Manage

@@ -78,16 +78,16 @@ export function ComponentCatalog() {
 
       <CatalogSection
         title="Badges"
-        description="Short semantic labels use one shape for ticket states and integrations."
+        description="Short labels and inline content use a shared shape with semantic color variants."
       >
         <div className="catalog-badges">
-          <Badge>Unknown</Badge>
-          <Badge variant="github">GitHub</Badge>
-          <Badge variant="local">Local</Badge>
-          <Badge variant="blocked" />
-          <Badge variant="takeable" />
-          <Badge variant="claimed" />
-          <Badge variant="decided" />
+          <Badge>Neutral</Badge>
+          <Badge variant="accent">Accent</Badge>
+          <Badge variant="warning">Warning</Badge>
+          <Badge variant="danger">Danger</Badge>
+          <Badge variant="success">Success</Badge>
+          <Badge variant="info">Info</Badge>
+          <Badge variant="muted">Muted</Badge>
         </div>
       </CatalogSection>
 
