@@ -34,36 +34,19 @@ const TINY_MARK_GLYPH = {
 } as const satisfies Record<(typeof TINY_MARK_VARIANTS)[number], string>
 const TICKET_MARK_CORNER_GLYPHS = ['0', '1', '2', '3', '4'] as const
 
-const PALETTE = [
-  ['Background', '--bg'],
-  ['Foreground', '--fg'],
-  ['Muted', '--muted'],
-  ['Edge', '--edge'],
-  ['Wash', '--wash'],
-  ['Trunk', '--trunk'],
-  ['Neutral variant', '--variant-neutral'],
-  ['Accent variant', '--variant-accent'],
-  ['Warning variant', '--variant-warning'],
-  ['Danger variant', '--variant-danger'],
-  ['Success variant', '--variant-success'],
-  ['Info variant', '--variant-info'],
-  ['Muted variant', '--variant-muted'],
-  ['Violet variant', '--variant-violet'],
-  ['Teal variant', '--variant-teal'],
-  ['Decided', '--signal-decided'],
-  ['Open signal', '--signal-open'],
-  ['Fog', '--signal-fog'],
-  ['Closed', '--state-closed'],
-  ['Frontier', '--state-frontier'],
-  ['Claimed', '--state-claimed'],
-  ['Blocked', '--state-blocked'],
-  ['Research', '--type-research'],
-  ['Prototype', '--type-prototype'],
-  ['Grilling', '--type-grilling'],
-  ['Task', '--type-task'],
-  ['Classification', '--automation-classification'],
-  ['Wayfinder', '--automation-wayfinder'],
-  ['Goal', '--goal'],
+const REFERENCE_COLOR_STEPS = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950] as const
+const REFERENCE_COLOR_FAMILIES = [
+  ['Neutral', 'neutral'],
+  ['Gold', 'gold'],
+  ['Blue', 'blue'],
+  ['Green', 'green'],
+  ['Rose', 'rose'],
+  ['Violet', 'violet'],
+  ['Teal', 'teal'],
+] as const
+const COMMON_REFERENCE_COLORS = [
+  ['White', '--ref-white'],
+  ['Black', '--ref-black'],
 ] as const
 
 export function CatalogHeader() {
@@ -79,19 +62,50 @@ export function CatalogHeader() {
   )
 }
 
-export function PaletteCatalogSection() {
+export function ReferencePaletteCatalogSection() {
   return (
-    <CatalogSection title="Palette" description="Semantic colors adapt to the active color scheme.">
-      <div className="catalog-palette">
-        {PALETTE.map(([label, token]) => (
-          <div className="catalog-swatch" key={token}>
-            <span style={{ background: `var(${token})` }} aria-hidden="true" />
-            <strong>{label}</strong>
-            <code>{token}</code>
+    <CatalogSection
+      title="Reference layer"
+      description="Literal color values without semantic or component meaning."
+    >
+      <div className="catalog-reference-palette">
+        <div className="catalog-reference-family">
+          <h3>Common</h3>
+          <div className="catalog-reference-swatches">
+            {COMMON_REFERENCE_COLORS.map(([label, token]) => (
+              <div className="catalog-reference-swatch" key={token}>
+                <span style={{ background: `var(${token})` }} aria-hidden="true" />
+                <strong>{label}</strong>
+                <code>{token}</code>
+              </div>
+            ))}
+          </div>
+        </div>
+        {REFERENCE_COLOR_FAMILIES.map(([label, family]) => (
+          <div className="catalog-reference-family" key={family}>
+            <h3>{label}</h3>
+            <div className="catalog-reference-swatches">
+              {REFERENCE_COLOR_STEPS.map((step) => {
+                const token = `--ref-${family}-${step}`
+                return (
+                  <div className="catalog-reference-swatch" key={token}>
+                    <span style={{ background: `var(${token})` }} aria-hidden="true" />
+                    <strong>{step}</strong>
+                    <code>{token}</code>
+                  </div>
+                )
+              })}
+            </div>
           </div>
         ))}
       </div>
     </CatalogSection>
+  )
+}
+
+export function AliasPaletteCatalogSection() {
+  return (
+    <CatalogSection title="Alias layer" description="The alias layer is yet to be implemented." />
   )
 }
 
@@ -218,7 +232,7 @@ export function ControlsCatalogSection() {
 type CatalogSectionProps = {
   title: string
   description: string
-  children: ReactNode
+  children?: ReactNode
 }
 
 function CatalogSection({ title, description, children }: CatalogSectionProps) {
