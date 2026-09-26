@@ -1,0 +1,111 @@
+.mark {
+  display: block;
+  overflow: visible;
+  color: var(--comp-mark-neutral-color);
+}
+
+.mark.variant-accent {
+  color: var(--comp-mark-accent-color);
+}
+
+.mark.variant-warning {
+  color: var(--comp-mark-warning-color);
+}
+
+.mark.variant-danger {
+  color: var(--comp-mark-danger-color);
+}
+
+.mark.variant-success {
+  color: var(--comp-mark-success-color);
+}
+
+.mark.variant-info {
+  color: var(--comp-mark-info-color);
+}
+
+.mark.variant-muted {
+  color: var(--comp-mark-muted-color);
+}
+
+.mark.variant-highlight {
+  color: var(--comp-mark-highlight-color);
+}
+
+.mark.accent-neutral {
+  --mark-corner-color: var(--comp-mark-neutral-color);
+}
+
+.mark.accent-accent {
+  --mark-corner-color: var(--comp-mark-accent-color);
+}
+
+.mark.accent-warning {
+  --mark-corner-color: var(--comp-mark-warning-color);
+}
+
+.mark.accent-danger {
+  --mark-corner-color: var(--comp-mark-danger-color);
+}
+
+.mark.accent-success {
+  --mark-corner-color: var(--comp-mark-success-color);
+}
+
+.mark.accent-info {
+  --mark-corner-color: var(--comp-mark-info-color);
+}
+
+.mark.accent-muted {
+  --mark-corner-color: var(--comp-mark-muted-color);
+}
+
+.mark.accent-highlight {
+  --mark-corner-color: var(--comp-mark-highlight-color);
+}
+
+.mark-small {
+  display: inline-block;
+  margin-right: 0.25em;
+  vertical-align: -0.13em;
+}
+
+.mark-face {
+  fill: var(--comp-mark-surface-color);
+  stroke: currentColor;
+  stroke-width: 2.5px;
+  stroke-linejoin: miter;
+}
+
+.mark.fill-solid .mark-face {
+  fill: currentColor;
+}
+
+.mark.fill-outline .mark-face {
+  fill: none;
+}
+
+.mark-half {
+  fill: currentColor;
+}
+
+.mark-glyph {
+  fill: currentColor;
+  paint-order: stroke;
+  stroke: var(--comp-mark-surface-color);
+  stroke-width: 3.5px;
+  font-size: 9.25px;
+  font-weight: 900;
+}
+
+.mark.fill-solid .mark-glyph {
+  fill: var(--comp-mark-surface-color);
+  stroke: none;
+}
+
+.mark-corner {
+  fill: none;
+  stroke: var(--mark-corner-color, currentColor);
+  stroke-width: 1.8px;
+  stroke-linecap: square;
+}

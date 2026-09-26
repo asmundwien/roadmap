@@ -1,22 +1,21 @@
 export type Variant =
   | 'neutral'
   | 'accent'
+  | 'highlight'
   | 'warning'
   | 'danger'
   | 'success'
   | 'info'
   | 'muted'
-  | 'violet'
-  | 'teal'
 
+/** The semantic role each variant resolves to, for SVG attributes that cannot take a class. */
 export const VARIANT_COLORS = {
-  neutral: 'var(--variant-neutral)',
-  accent: 'var(--variant-accent)',
-  warning: 'var(--variant-warning)',
-  danger: 'var(--variant-danger)',
-  success: 'var(--variant-success)',
-  info: 'var(--variant-info)',
-  muted: 'var(--variant-muted)',
-  violet: 'var(--variant-violet)',
-  teal: 'var(--variant-teal)',
+  neutral: 'var(--sys-color-on-surface-variant)',
+  accent: 'var(--sys-color-primary)',
+  highlight: 'var(--sys-color-secondary)',
+  warning: 'var(--sys-color-warning)',
+  danger: 'var(--sys-color-error)',
+  success: 'var(--sys-color-success)',
+  info: 'var(--sys-color-info)',
+  muted: 'var(--sys-color-outline)',
 } as const satisfies Record<Variant, string>

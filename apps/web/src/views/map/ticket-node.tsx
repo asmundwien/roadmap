@@ -1,14 +1,11 @@
 import type { Ticket, TicketType } from '@roadmap/contracts'
-import {
-  AUTOMATION_MARK_RADIUS,
-  AutomationMark,
-} from '@/components/automation-mark/automation-mark'
-import { TicketMark } from '@/components/ticket-mark/ticket-mark'
-import type { AutomationTag } from './automation-presentation'
-import { STATE_META } from './state-meta'
+import { Mark, MEDIUM_MARK_EXTENT } from '@/components/mark/mark'
+import { TicketMark } from '@/views/shared/ticket-mark'
+import { TICKET_STATE_META } from '@/views/shared/ticket-presentation'
+import { AUTOMATION_VARIANT, type AutomationTag } from './automation-presentation'
 
-const FIRST_TAG_OFFSET = 76 / 3
-const TAG_PITCH = 56 / 3
+const FIRST_TAG_OFFSET = 22
+const TAG_PITCH = 14
 const TICKET_TOOLTIP_OFFSET = 80 / 3
 
 type TicketNodeProps = {
@@ -38,7 +35,7 @@ export function TicketNode({ ticket, type, tags, x, y }: TicketNodeProps) {
 /** Keeps the title clear of the widest evidence ribbon while preserving normal row alignment. */
 export function ticketNodeTextX(x: number, baseline: number, tagCount: number): number {
   if (tagCount === 0) return baseline
-  const lastTagRight = x + FIRST_TAG_OFFSET + (tagCount - 1) * TAG_PITCH + AUTOMATION_MARK_RADIUS
+  const lastTagRight = x + FIRST_TAG_OFFSET + (tagCount - 1) * TAG_PITCH + MEDIUM_MARK_EXTENT
   return Math.max(baseline, lastTagRight + 8)
 }
 
@@ -55,7 +52,11 @@ function MajorTicketNode({ ticket, type, x, y }: MajorTicketNodeProps) {
       <g transform={`translate(${x} ${y})`}>
         <TicketMark state={ticket.state} type={type} size="large" />
       </g>
-      <NodeTooltip x={x} y={y - TICKET_TOOLTIP_OFFSET} word={STATE_META[ticket.state].word} />
+      <NodeTooltip
+        x={x}
+        y={y - TICKET_TOOLTIP_OFFSET}
+        word={TICKET_STATE_META[ticket.state].word}
+      />
     </g>
   )
 }
@@ -65,7 +66,14 @@ type AutomationNodeProps = { tag: AutomationTag; x: number; y: number }
 function AutomationNode({ tag, x, y }: AutomationNodeProps) {
   return (
     <g className={`automation-node slot-${tag.slot}`}>
-      <AutomationMark variant="plot" stage={tag.stage} glyph={tag.glyph} x={x} y={y} />
+      <g transform={`translate(${x} ${y})`}>
+        <Mark
+          fill="solid"
+          glyph={tag.glyph}
+          size="medium"
+          variant={AUTOMATION_VARIANT[tag.stage]}
+        />
+      </g>
       <NodeTooltip x={x} y={y - 52 / 3} word={tag.word} />
     </g>
   )

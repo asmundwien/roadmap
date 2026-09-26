@@ -38,10 +38,6 @@
   color: var(--comp-badge-muted-color);
 }
 
-.badge-violet {
-  color: var(--comp-badge-violet-color);
-}
-
-.badge-teal {
-  color: var(--comp-badge-teal-color);
+.badge-highlight {
+  color: var(--comp-badge-highlight-color);
 }

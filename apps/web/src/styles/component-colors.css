@@ -32,18 +32,16 @@
   --comp-badge-success-color: var(--sys-color-success);
   --comp-badge-info-color: var(--sys-color-info);
   --comp-badge-muted-color: var(--sys-color-outline);
-  --comp-badge-violet-color: var(--sys-color-secondary);
-  --comp-badge-teal-color: var(--sys-color-info);
+  --comp-badge-highlight-color: var(--sys-color-secondary);
 
-  /* Ticket mark. */
-  --comp-ticket-mark-surface-color: var(--sys-color-surface);
-  --comp-ticket-mark-closed-color: var(--sys-color-outline);
-  --comp-ticket-mark-frontier-color: var(--sys-color-success);
-  --comp-ticket-mark-claimed-color: var(--sys-color-info);
-  --comp-ticket-mark-blocked-color: var(--sys-color-error);
-  --comp-ticket-mark-research-color: var(--sys-color-success);
-  --comp-ticket-mark-prototype-color: var(--sys-color-warning);
-  --comp-ticket-mark-grilling-color: var(--sys-color-error);
-  --comp-ticket-mark-task-color: var(--sys-color-primary);
-  --comp-ticket-mark-untyped-color: var(--sys-color-on-surface-variant);
+  /* Mark. */
+  --comp-mark-surface-color: var(--sys-color-surface);
+  --comp-mark-neutral-color: var(--sys-color-on-surface-variant);
+  --comp-mark-accent-color: var(--sys-color-primary);
+  --comp-mark-warning-color: var(--sys-color-warning);
+  --comp-mark-danger-color: var(--sys-color-error);
+  --comp-mark-success-color: var(--sys-color-success);
+  --comp-mark-info-color: var(--sys-color-info);
+  --comp-mark-muted-color: var(--sys-color-outline);
+  --comp-mark-highlight-color: var(--sys-color-secondary);
 }

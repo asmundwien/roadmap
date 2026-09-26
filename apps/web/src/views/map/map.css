@@ -124,15 +124,14 @@
   opacity: 1;
 }
 
-.major-node .ticket-mark,
-.automation-node .automation-mark {
+.ticket-node .mark {
   transform-box: fill-box;
   transform-origin: center;
   transition: transform 0.12s ease-out;
 }
 
-.major-node:hover .ticket-mark,
-.automation-node:hover .automation-mark {
+.major-node:hover .mark,
+.automation-node:hover .mark {
   transform: scale(1.14);
 }
 
@@ -1104,8 +1103,7 @@
   .panel-rail,
   .panel-rail-inner,
   .node-tooltip,
-  .major-node .ticket-mark,
-  .automation-node .automation-mark {
+  .ticket-node .mark {
     transition: none;
   }
 }

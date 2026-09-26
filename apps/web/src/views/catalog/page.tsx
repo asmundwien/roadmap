@@ -1,11 +1,8 @@
 import { Page, PageDescription, PageEyebrow, PageHeader, PageTitle } from '@/components/page/page'
+import { ActionsCatalogSection } from './actions'
 import { AlertsCatalogSection } from './alerts'
 import { BadgesCatalogSection } from './badges'
-import {
-  ActionsCatalogSection,
-  RoadmapSignalsCatalogSection,
-  TicketMarkCatalogSection,
-} from './components'
+import { MarkCatalogSection, RoadmapSignalsCatalogSection, TicketMarkCatalogSection } from './mark'
 import { ReferencePaletteCatalogSection } from './reference'
 import { SemanticPaletteCatalogSection } from './semantic'
 
@@ -16,17 +13,18 @@ export function CatalogPage() {
         <PageEyebrow>UI inventory</PageEyebrow>
         <PageTitle>Components</PageTitle>
         <PageDescription>
-          Shared marks, actions, and tokens. Each example uses the same classes and renderers as the
-          product.
+          The color layers, the mark primitive, and the shared controls. Every example renders
+          through the same components and tokens as the product.
         </PageDescription>
       </PageHeader>
 
       <ReferencePaletteCatalogSection />
       <SemanticPaletteCatalogSection />
+      <MarkCatalogSection />
       <TicketMarkCatalogSection />
+      <RoadmapSignalsCatalogSection />
       <BadgesCatalogSection />
       <AlertsCatalogSection />
-      <RoadmapSignalsCatalogSection />
       <ActionsCatalogSection />
     </Page>
   )

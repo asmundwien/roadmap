@@ -1,4 +1,4 @@
-.catalog-ticket-mark-examples {
+.catalog-mark-examples {
   display: grid;
   gap: var(--sp-6);
 }
@@ -23,25 +23,31 @@
   text-align: center;
 }
 
-.catalog-ticket-mark-example {
+.catalog-mark-example {
   display: grid;
   min-height: 3rem;
   place-items: center;
 }
 
-.catalog-ticket-mark-sizes {
+.catalog-mark-group {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.catalog-mark-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: end;
   gap: var(--sp-6);
 }
 
-.catalog-ticket-mark-size {
+.catalog-mark-cell {
   display: grid;
   justify-items: center;
   gap: var(--sp-2);
 }
 
-.catalog-ticket-mark-size code {
+.catalog-mark-cell code {
   font-size: 0.66rem;
 }
 

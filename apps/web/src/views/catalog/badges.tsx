@@ -6,13 +6,12 @@ import './badges.css'
 const BADGE_VARIANTS = [
   ['Neutral', 'neutral', '--comp-badge-neutral-color'],
   ['Accent', 'accent', '--comp-badge-accent-color'],
+  ['Highlight', 'highlight', '--comp-badge-highlight-color'],
   ['Warning', 'warning', '--comp-badge-warning-color'],
   ['Danger', 'danger', '--comp-badge-danger-color'],
   ['Success', 'success', '--comp-badge-success-color'],
   ['Info', 'info', '--comp-badge-info-color'],
   ['Muted', 'muted', '--comp-badge-muted-color'],
-  ['Violet', 'violet', '--comp-badge-violet-color'],
-  ['Teal', 'teal', '--comp-badge-teal-color'],
 ] as const satisfies readonly (readonly [string, Variant, string])[]
 
 export function BadgesCatalogSection() {

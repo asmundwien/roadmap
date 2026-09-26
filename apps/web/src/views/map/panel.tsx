@@ -20,11 +20,11 @@ import type { ResolvedSelection } from '@/router'
 import { stripInlineMarkdown } from '@/views/shared/gist'
 import './map.css'
 import { Badge } from '@/components/badge/badge'
-import { TicketMark } from '@/components/ticket-mark/ticket-mark'
+import { TicketMark } from '@/views/shared/ticket-mark'
+import { TICKET_STATE_META } from '@/views/shared/ticket-presentation'
 import { automationEvidenceFor } from './automation-presentation'
 import { type ProseLinkTarget, resolveProseLink } from './link-targets'
 import { Prose } from './prose'
-import { STATE_META } from './state-meta'
 
 /**
  * The docked Panel — the one detail layer of the map view. NOT an overlay: it docks beside the
@@ -237,7 +237,7 @@ function TicketContent({ map, id, onSelect, automation }: TicketContentProps) {
   const assignee = ticket.assignees[0]?.name
   const body = ticket.body.trim()
   const type = ticketTypeOf(ticket.typeEvidence)
-  const stateMeta = STATE_META[ticket.state]
+  const stateMeta = TICKET_STATE_META[ticket.state]
   const resolveLink = proseLinkResolver(map, ticket.sourcePath)
   const overrideControl = automation.state.overrides.find(
     (control) =>
@@ -554,9 +554,9 @@ function wayfinderStateLabel(session: WayfinderSession): string {
 }
 
 function trackerStateLabel(ticket: Ticket): string {
-  if (ticket.state === 'closed') return sentenceCase(STATE_META.closed.word)
+  if (ticket.state === 'closed') return sentenceCase(TICKET_STATE_META.closed.word)
   if (ticket.isBlocked && ticket.isClaimed) return 'Blocked + claimed'
-  return sentenceCase(STATE_META[ticket.state].word)
+  return sentenceCase(TICKET_STATE_META[ticket.state].word)
 }
 
 function admissionLabel(admission: 'automatic' | 'override'): string {
@@ -706,7 +706,7 @@ export function ItemLink({ map, itemRef, onSelect }: ItemLinkProps) {
 
   if (local) {
     const type = ticketTypeOf(local.typeEvidence)
-    const stateMeta = STATE_META[local.state]
+    const stateMeta = TICKET_STATE_META[local.state]
     return (
       <button
         type="button"

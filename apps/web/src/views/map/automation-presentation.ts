@@ -8,6 +8,7 @@ import type {
   WayfinderMap,
   WayfinderSession,
 } from '@roadmap/contracts'
+import type { Variant } from '@/components/variant'
 
 export type AutomationTagSlot =
   | 'classification'
@@ -15,6 +16,12 @@ export type AutomationTagSlot =
   | 'wayfinder'
   | 'wayfinder-process'
   | 'report'
+
+/** Wayfinder shares the info color with a claimed ticket; glyph and slot separate them. */
+export const AUTOMATION_VARIANT = {
+  classification: 'highlight',
+  wayfinder: 'info',
+} as const satisfies Record<AutomationOverrideStage, Variant>
 
 export interface AutomationTag {
   slot: AutomationTagSlot

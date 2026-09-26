@@ -8,7 +8,9 @@ import {
 } from '@roadmap/contracts'
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { DestinationMark } from '@/components/destination-mark/destination-mark'
-import { TicketMark } from '@/components/ticket-mark/ticket-mark'
+import { VARIANT_COLORS } from '@/components/variant'
+import { TicketMark } from '@/views/shared/ticket-mark'
+import { TICKET_STATE_META } from '@/views/shared/ticket-presentation'
 import {
   type AutomationTag,
   automationEvidenceFor,
@@ -17,7 +19,6 @@ import {
 import { buildLedger, type Ledger, type LedgerEdge } from './geometry'
 import './map.css'
 import { type LedgerSelection, scopePlan } from './sequence'
-import { STATE_META } from './state-meta'
 import { TicketNode, ticketNodeTextX } from './ticket-node'
 
 const EXT = 800
@@ -181,7 +182,7 @@ export function MapLedger({
         })}
 
         {[...ledger.rows].reverse().map(({ ticket, x, y }) => {
-          const meta = STATE_META[ticket.state]
+          const meta = TICKET_STATE_META[ticket.state]
           const title = ticketTitle(ticket)
           const type = ticketTypeOf(ticket.typeEvidence)
           const tags = automationTags(automationEvidenceFor(map, ticket, automationEvidence))
@@ -234,7 +235,7 @@ export function MapLedger({
                 x={titleX + STATUS_TEXT_X_OFFSET}
                 y={y + 11}
                 className="row-word"
-                fill={meta.color}
+                fill={VARIANT_COLORS[meta.variant]}
               >
                 {meta.word}
                 {assignee !== undefined ? ` · ${assignee}` : ''}
@@ -458,14 +459,14 @@ function textWidth(text: string, font: string): number {
 function ticketAriaLabel(ticket: Ticket, type: TicketType, tags: readonly AutomationTag[]): string {
   const trackerState =
     ticket.state === 'closed'
-      ? STATE_META.closed.word
+      ? TICKET_STATE_META.closed.word
       : ticket.isBlocked && ticket.isClaimed
         ? 'blocked and claimed'
         : ticket.isBlocked
           ? 'blocked'
           : ticket.isClaimed
             ? 'claimed'
-            : STATE_META[ticket.state].word
+            : TICKET_STATE_META[ticket.state].word
   const waits = ticket.blockedBy
     .filter((blocker) => blocker.state !== 'closed')
     .map((blocker) => blocker.title ?? blocker.displayId ?? blocker.ticketId)

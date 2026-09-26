@@ -1,7 +1,7 @@
 import type { AutomationEvidence, Project, WayfinderMap } from '@roadmap/contracts'
 import { useEffect, useRef, useState } from 'react'
-import { AutomationMark } from '@/components/automation-mark/automation-mark'
 import { Badge } from '@/components/badge/badge'
+import { Mark } from '@/components/mark/mark'
 import {
   encodeSelection,
   mapHash,
@@ -13,6 +13,7 @@ import {
 } from '@/router'
 import { integrationLabel } from '@/views/shared/project-meta'
 import { activeMapOf } from './active-map'
+import { AUTOMATION_VARIANT } from './automation-presentation'
 import { MapChild, sameSelection } from './map-child'
 import { Panel, type PanelAutomation } from './panel'
 import { ledgerSequence } from './sequence'
@@ -322,12 +323,12 @@ function ProjectHead({ project, automationEvidence }: ProjectHeadProps) {
       </p>
       {hasAutomationEvidence && (
         <p className="project-automation-legend muted small">
-          <Badge variant="violet">
-            <AutomationMark variant="inline" stage="classification" />
+          <Badge variant={AUTOMATION_VARIANT.classification}>
+            <Mark fill="solid" size="small" variant={AUTOMATION_VARIANT.classification} />
             Classification
           </Badge>
-          <Badge variant="teal">
-            <AutomationMark variant="inline" stage="wayfinder" />
+          <Badge variant={AUTOMATION_VARIANT.wayfinder}>
+            <Mark fill="solid" size="small" variant={AUTOMATION_VARIANT.wayfinder} />
             Wayfinder and Session
           </Badge>
         </p>
