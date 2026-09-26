@@ -119,17 +119,6 @@
   opacity: 1;
 }
 
-.ticket-node .mark {
-  transform-box: fill-box;
-  transform-origin: center;
-  transition: transform 0.12s ease-out;
-}
-
-.major-node:hover .mark,
-.automation-node:hover .mark {
-  transform: scale(1.14);
-}
-
 .node-tooltip rect {
   fill: var(--fg);
   stroke: var(--bg);
@@ -1097,8 +1086,7 @@
   .fold,
   .panel-rail,
   .panel-rail-inner,
-  .node-tooltip,
-  .ticket-node .mark {
+  .node-tooltip {
     transition: none;
   }
 }

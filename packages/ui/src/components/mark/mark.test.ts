@@ -2,6 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { Mark, type MarkProps } from './mark'
+import styles from './mark.module.css'
 
 describe('Mark', () => {
   it.each([
@@ -28,18 +29,24 @@ describe('Mark', () => {
       variant: 'info',
     })
 
-    expect(markup).toContain('class="mark mark-large fill-half variant-info accent-warning"')
-    expect(markup).toContain('class="mark-half"')
+    expect(markup).toContain(`class="${styles.mark} ${styles.info} ${styles['corner-warning']}"`)
+    expect(markup).toContain(`class="${styles.half}"`)
     expect(markup).toContain('>P</text>')
-    expect(markup.match(/class="mark-corner"/g)).toHaveLength(2)
+    expect(markup.match(new RegExp(`class="${styles.corner}"`, 'g'))).toHaveLength(2)
   })
 
   it('omits the glyph, corners, and accent when the caller leaves them out', () => {
     const markup = render({ fill: 'outline', size: 'medium', variant: 'danger' })
 
-    expect(markup).toContain('class="mark mark-medium fill-outline variant-danger"')
+    expect(markup).toContain(`class="${styles.mark} ${styles.danger} ${styles.outline}"`)
     expect(markup).not.toContain('<text')
-    expect(markup).not.toContain('mark-corner')
+    expect(markup).not.toContain(styles.corner)
+  })
+
+  it('marks the inline size, which is the only size that changes the drawing', () => {
+    expect(render({ fill: 'solid', size: 'small', variant: 'neutral' })).toContain(
+      `class="${styles.mark} ${styles.neutral} ${styles.small} ${styles.solid}"`,
+    )
   })
 })
 

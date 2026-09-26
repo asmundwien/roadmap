@@ -2,11 +2,12 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { Badge } from './badge'
+import styles from './badge.module.css'
 
 describe('Badge', () => {
   it('renders the neutral variant by default', () => {
     expect(renderToStaticMarkup(Badge({ children: 'Unknown' }))).toBe(
-      '<span class="badge badge-neutral">Unknown</span>',
+      `<span class="${styles.badge} ${styles.neutral}">Unknown</span>`,
     )
   })
 
@@ -14,7 +15,7 @@ describe('Badge', () => {
     const children = createElement('strong', null, 'Needs review')
 
     expect(renderToStaticMarkup(Badge({ variant: 'danger', children }))).toBe(
-      '<span class="badge badge-danger"><strong>Needs review</strong></span>',
+      `<span class="${styles.badge} ${styles.danger}"><strong>Needs review</strong></span>`,
     )
   })
 })

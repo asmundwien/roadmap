@@ -207,8 +207,7 @@ function RestingProjectRow({ presentation }: RestingProjectRowProps) {
       </span>
       <span className="overview-copy">
         <strong>
-          {project.name}
-          <Badge>{integrationLabel(project.key.integration)}</Badge>
+          {project.name} <Badge>{integrationLabel(project.key.integration)}</Badge>
         </strong>
         <span className="overview-detail">
           All {mapCount === 1 ? '1 map' : `${mapCount} maps`} closed · {decisions} decisions
@@ -238,8 +237,7 @@ function WaitingProjectRow({ presentation }: WaitingProjectRowProps) {
       </span>
       <span className="overview-copy">
         <strong>
-          {project.name}
-          <Badge>{integrationLabel(project.key.integration)}</Badge>
+          {project.name} <Badge>{integrationLabel(project.key.integration)}</Badge>
         </strong>
         <span className="overview-detail">
           {unavailableCause !== null

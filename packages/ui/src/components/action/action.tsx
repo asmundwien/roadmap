@@ -1,6 +1,8 @@
-import cn from 'classnames'
+import classNames from 'classnames/bind'
 import type { AnchorHTMLAttributes, ButtonHTMLAttributes, ReactNode } from 'react'
-import './action.css'
+import styles from './action.module.css'
+
+const cx = classNames.bind(styles)
 
 export type ActionVariant = 'default' | 'strong' | 'danger'
 
@@ -25,12 +27,7 @@ export type ActionProps = ButtonActionProps | LinkActionProps
 export function Action(props: ActionProps) {
   if (props.element === 'link') {
     const { element: _element, size = 'default', variant = 'default', ...linkProps } = props
-    return (
-      <a
-        className={cn('action', `action-${variant}`, size === 'field' && 'action-field')}
-        {...linkProps}
-      />
-    )
+    return <a className={actionClass(variant, size)} {...linkProps} />
   }
 
   const {
@@ -40,13 +37,12 @@ export function Action(props: ActionProps) {
     type = 'button',
     ...buttonProps
   } = props
-  return (
-    <button
-      type={type}
-      className={cn('action', `action-${variant}`, size === 'field' && 'action-field')}
-      {...buttonProps}
-    />
-  )
+  return <button type={type} className={actionClass(variant, size)} {...buttonProps} />
+}
+
+/** The default variant and size are the base treatment, so neither adds a class of its own. */
+function actionClass(variant: ActionVariant, size: 'default' | 'field'): string {
+  return cx('action', variant !== 'default' && variant, size === 'field' && 'field')
 }
 
 type ActionGroupProps = {
@@ -55,5 +51,5 @@ type ActionGroupProps = {
 }
 
 export function ActionGroup({ children, variant = 'default' }: ActionGroupProps) {
-  return <div className={`action-group action-group-${variant}`}>{children}</div>
+  return <div className={cx('group', variant !== 'default' && `group-${variant}`)}>{children}</div>
 }

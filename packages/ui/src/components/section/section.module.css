@@ -11,14 +11,14 @@
   border-block-start: var(--comp-section-border-width) solid var(--comp-section-outline-color);
 }
 
-.section-header-title {
+.title {
   margin: 0;
   font-size: var(--comp-section-title-font-size);
   letter-spacing: var(--comp-section-title-letter-spacing);
   line-height: var(--comp-section-title-line-height);
 }
 
-.section-header-description {
+.description {
   margin: var(--comp-section-description-margin) 0 0;
   color: var(--comp-section-description-color);
   font-size: var(--comp-section-description-font-size);
@@ -29,19 +29,19 @@
  * The body is the content column beside the header: one stack of groups. A group titles a
  * subdivision of the section; its title is the h3 rank below the section's own h2.
  */
-.section-body {
+.body {
   display: grid;
   align-content: start;
   gap: var(--comp-section-body-gap);
 }
 
-.section-group {
+.group {
   display: grid;
   align-content: start;
   gap: var(--comp-section-group-gap);
 }
 
-.section-group-title {
+.group-title {
   margin: 0;
   font-size: var(--comp-section-group-title-font-size);
   letter-spacing: var(--comp-section-group-title-letter-spacing);
@@ -49,7 +49,7 @@
 }
 
 /* The group gap already separates the rows, so the paragraph carries no margin of its own. */
-.section-group-description {
+.group-description {
   max-width: var(--comp-section-group-description-max-width);
   margin: 0;
   color: var(--comp-section-group-description-color);

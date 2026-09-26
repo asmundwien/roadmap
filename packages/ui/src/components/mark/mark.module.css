@@ -6,95 +6,99 @@
 .mark {
   display: block;
   overflow: visible;
+}
+
+.neutral {
   color: var(--comp-mark-neutral-color);
 }
 
-.mark.variant-accent {
+.accent {
   color: var(--comp-mark-accent-color);
 }
 
-.mark.variant-warning {
+.warning {
   color: var(--comp-mark-warning-color);
 }
 
-.mark.variant-danger {
+.danger {
   color: var(--comp-mark-danger-color);
 }
 
-.mark.variant-success {
+.success {
   color: var(--comp-mark-success-color);
 }
 
-.mark.variant-info {
+.info {
   color: var(--comp-mark-info-color);
 }
 
-.mark.variant-muted {
+.muted {
   color: var(--comp-mark-muted-color);
 }
 
-.mark.variant-highlight {
+.highlight {
   color: var(--comp-mark-highlight-color);
 }
 
-.mark.accent-neutral {
+/* The accent prop colors the corner strokes only; the variant still colors the face. */
+.corner-neutral {
   --mark-corner-color: var(--comp-mark-neutral-color);
 }
 
-.mark.accent-accent {
+.corner-accent {
   --mark-corner-color: var(--comp-mark-accent-color);
 }
 
-.mark.accent-warning {
+.corner-warning {
   --mark-corner-color: var(--comp-mark-warning-color);
 }
 
-.mark.accent-danger {
+.corner-danger {
   --mark-corner-color: var(--comp-mark-danger-color);
 }
 
-.mark.accent-success {
+.corner-success {
   --mark-corner-color: var(--comp-mark-success-color);
 }
 
-.mark.accent-info {
+.corner-info {
   --mark-corner-color: var(--comp-mark-info-color);
 }
 
-.mark.accent-muted {
+.corner-muted {
   --mark-corner-color: var(--comp-mark-muted-color);
 }
 
-.mark.accent-highlight {
+.corner-highlight {
   --mark-corner-color: var(--comp-mark-highlight-color);
 }
 
-.mark-small {
+.small {
   display: inline-block;
   margin-right: var(--comp-mark-inline-margin);
   vertical-align: -0.13em;
 }
 
-.mark-face {
+.face {
   fill: var(--comp-mark-surface-color);
   stroke: currentColor;
   stroke-width: 2.5px;
   stroke-linejoin: miter;
 }
 
-.mark.fill-solid .mark-face {
+.solid .face {
   fill: currentColor;
 }
 
-.mark.fill-outline .mark-face {
+.outline .face {
   fill: none;
 }
 
-.mark-half {
+.half {
   fill: currentColor;
 }
 
-.mark-glyph {
+.glyph {
   fill: currentColor;
   paint-order: stroke;
   stroke: var(--comp-mark-surface-color);
@@ -103,12 +107,12 @@
   font-weight: var(--comp-mark-glyph-font-weight);
 }
 
-.mark.fill-solid .mark-glyph {
+.solid .glyph {
   fill: var(--comp-mark-surface-color);
   stroke: none;
 }
 
-.mark-corner {
+.corner {
   fill: none;
   stroke: var(--mark-corner-color, currentColor);
   stroke-width: 1.8px;

@@ -28,7 +28,6 @@
 
   /* Alert. */
   --comp-alert-gap: var(--sys-space-xs);
-  --comp-alert-margin: var(--sys-space-sm);
   --comp-alert-block-padding: var(--sys-space-sm);
   --comp-alert-inline-padding: var(--sys-space-md);
   --comp-alert-border-width: var(--sys-border-width-thin);

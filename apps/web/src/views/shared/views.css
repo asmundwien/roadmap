@@ -148,7 +148,12 @@
   margin-bottom: 2rem;
 }
 
+/* The badge sits beside the title on one baseline; the heading owns that gap, not the badge. */
 .project-head h1 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sys-space-sm);
   margin: 0;
 }
 
@@ -160,12 +165,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--sys-space-xs) var(--sys-space-md);
-}
-
-.overview-kicker .badge,
-.overview-copy > strong .badge,
-.project-head h1 > .badge {
-  margin-left: 0.5rem;
 }
 
 /* The whole-product road: registered Projects as one trace, never a dashboard of cards. */
@@ -290,7 +289,12 @@ a.overview-row:focus-visible {
   white-space: nowrap;
 }
 
+/* One baseline row: project name, integration badge, connection. The row owns the gaps. */
 .overview-kicker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sys-space-sm);
   margin-bottom: 0.22rem;
   color: var(--goal);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -302,7 +306,6 @@ a.overview-row:focus-visible {
 }
 
 .overview-connection {
-  margin-left: var(--sys-space-sm);
   color: var(--muted);
   font-weight: 500;
   letter-spacing: 0;

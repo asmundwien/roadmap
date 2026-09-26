@@ -1,6 +1,9 @@
+import classNames from 'classnames/bind'
 import type { ReactNode } from 'react'
 import type { Variant } from '../variant'
-import './badge.css'
+import styles from './badge.module.css'
+
+const cx = classNames.bind(styles)
 
 export type BadgeProps = {
   children: ReactNode
@@ -8,5 +11,5 @@ export type BadgeProps = {
 }
 
 export function Badge({ children, variant = 'neutral' }: BadgeProps) {
-  return <span className={`badge badge-${variant}`}>{children}</span>
+  return <span className={cx('badge', variant)}>{children}</span>
 }

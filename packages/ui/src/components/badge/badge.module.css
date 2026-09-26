@@ -7,37 +7,40 @@
   border: var(--comp-badge-border-width) solid currentColor;
   border-radius: var(--comp-badge-radius);
   background: var(--comp-badge-container-color);
-  color: var(--comp-badge-neutral-color);
   font-size: var(--comp-badge-font-size);
   font-weight: var(--comp-badge-font-weight);
   line-height: var(--comp-badge-line-height);
   vertical-align: middle;
 }
 
-.badge-accent {
+.neutral {
+  color: var(--comp-badge-neutral-color);
+}
+
+.accent {
   color: var(--comp-badge-accent-color);
 }
 
-.badge-warning {
+.warning {
   color: var(--comp-badge-warning-color);
 }
 
-.badge-danger {
+.danger {
   color: var(--comp-badge-danger-color);
 }
 
-.badge-success {
+.success {
   color: var(--comp-badge-success-color);
 }
 
-.badge-info {
+.info {
   color: var(--comp-badge-info-color);
 }
 
-.badge-muted {
+.muted {
   color: var(--comp-badge-muted-color);
 }
 
-.badge-highlight {
+.highlight {
   color: var(--comp-badge-highlight-color);
 }

@@ -27,17 +27,17 @@
   color: var(--comp-action-hover-label-color);
 }
 
-.action-strong {
+.strong {
   background: var(--comp-action-strong-container-color);
   color: var(--comp-action-strong-label-color);
   font-weight: var(--comp-action-strong-font-weight);
 }
 
-.action-danger {
+.danger {
   color: var(--comp-action-danger-label-color);
 }
 
-.action-danger:hover:not(:disabled) {
+.danger:hover:not(:disabled) {
   background: var(--comp-action-danger-hover-container-color);
   color: var(--comp-action-danger-hover-label-color);
 }
@@ -49,17 +49,17 @@
   cursor: not-allowed;
 }
 
-.action-field {
+.field {
   min-height: var(--comp-action-field-height);
 }
 
-.action-group {
+.group {
   display: flex;
   flex-wrap: wrap;
   gap: var(--comp-action-group-gap);
 }
 
-.action-group-form {
+.group-form {
   justify-content: flex-end;
   margin-top: var(--comp-action-group-form-margin);
 }
@@ -69,7 +69,7 @@
  * width stays literal here.
  */
 @media (max-width: 640px) {
-  .action-group-connection {
+  .group-connection {
     grid-column: 2;
     align-items: flex-start;
     justify-content: flex-start;
