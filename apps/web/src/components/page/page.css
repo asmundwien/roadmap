@@ -1,14 +1,19 @@
-.component-catalog-head {
+.shell.page {
+  max-width: 74rem;
+}
+
+.page-header {
   max-width: 42rem;
   margin-bottom: var(--sp-12);
 }
 
-.component-catalog-head h1,
-.component-catalog-head p {
+.page-header-title,
+.page-header-eyebrow,
+.page-header-description {
   margin-top: 0;
 }
 
-.component-catalog-eyebrow {
+.page-header-eyebrow {
   margin-bottom: 0.35rem;
   color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -16,4 +21,8 @@
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.page-header-description {
+  color: var(--muted);
 }

@@ -1,3 +1,4 @@
+import { Page, PageDescription, PageEyebrow, PageHeader, PageTitle } from '@/components/page/page'
 import { AlertsCatalogSection } from './alerts'
 import { BadgesCatalogSection } from './badges'
 import {
@@ -6,15 +7,21 @@ import {
   TicketMarkCatalogSection,
   TinyTicketMarksCatalogSection,
 } from './components'
-import { CatalogHeader } from './header'
 import { ReferencePaletteCatalogSection } from './reference'
 import { SemanticPaletteCatalogSection } from './semantic'
-import './page.css'
 
 export function CatalogPage() {
   return (
-    <main className="shell component-catalog">
-      <CatalogHeader />
+    <Page>
+      <PageHeader>
+        <PageEyebrow>UI inventory</PageEyebrow>
+        <PageTitle>Components</PageTitle>
+        <PageDescription>
+          Shared marks, controls, and tokens. Each example uses the same classes and renderers as
+          the product.
+        </PageDescription>
+      </PageHeader>
+
       <ReferencePaletteCatalogSection />
       <SemanticPaletteCatalogSection />
       <TicketMarkCatalogSection />
@@ -23,6 +30,6 @@ export function CatalogPage() {
       <AlertsCatalogSection />
       <RoadmapSignalsCatalogSection />
       <ControlsCatalogSection />
-    </main>
+    </Page>
   )
 }
