@@ -20,10 +20,10 @@ import type { ResolvedSelection } from '@/router'
 import { stripInlineMarkdown } from '@/views/shared/gist'
 import './map.css'
 import { Badge } from '@/components/badge/badge'
+import { TicketMark } from '@/components/ticket-mark/ticket-mark'
 import { automationEvidenceFor } from './automation-presentation'
 import { type ProseLinkTarget, resolveProseLink } from './link-targets'
 import { Prose } from './prose'
-import { RoadmapTicketMark } from './roadmap-ticket-mark'
 import { STATE_META } from './state-meta'
 
 /**
@@ -258,7 +258,7 @@ function TicketContent({ map, id, onSelect, automation }: TicketContentProps) {
       <p className="panel-item-title">{ticket.title}</p>
       <p className="panel-item-state">
         <Badge variant={stateMeta.variant}>
-          <RoadmapTicketMark state={ticket.state} type={type} size="tiny" />
+          <TicketMark state={ticket.state} type={type} size="small" />
           {sentenceCase(stateMeta.word)}
         </Badge>
         {assignee !== undefined && (
@@ -716,7 +716,7 @@ export function ItemLink({ map, itemRef, onSelect }: ItemLinkProps) {
         <span className="item-link-title">{local.title}</span>
         <span className="item-link-state">
           <Badge variant={stateMeta.variant}>
-            <RoadmapTicketMark state={local.state} type={type} size="tiny" />
+            <TicketMark state={local.state} type={type} size="small" />
             {sentenceCase(stateMeta.word)}
           </Badge>
         </span>

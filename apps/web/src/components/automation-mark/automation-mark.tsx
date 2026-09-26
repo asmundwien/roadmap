@@ -1,5 +1,4 @@
 import type { AutomationOverrideStage } from '@roadmap/contracts'
-import { Diamond } from '@/components/diamond/diamond'
 import './automation-mark.css'
 
 export const AUTOMATION_MARK_RADIUS = 26 / 3
@@ -35,7 +34,10 @@ export function AutomationMark(props: AutomationMarkProps) {
   const { stage, glyph, x, y } = props
   return (
     <g className={`automation-mark stage-${stage}`}>
-      <Diamond className="tag-face" x={x} y={y} radius={AUTOMATION_MARK_RADIUS} />
+      <path
+        className="tag-face"
+        d={`M ${x} ${y - AUTOMATION_MARK_RADIUS} L ${x + AUTOMATION_MARK_RADIUS} ${y} L ${x} ${y + AUTOMATION_MARK_RADIUS} L ${x - AUTOMATION_MARK_RADIUS} ${y} Z`}
+      />
       {glyph !== undefined && (
         <text className="tag-glyph" x={x} y={y + 10 / 3} textAnchor="middle">
           {glyph}

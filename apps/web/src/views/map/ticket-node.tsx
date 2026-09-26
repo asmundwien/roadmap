@@ -3,14 +3,13 @@ import {
   AUTOMATION_MARK_RADIUS,
   AutomationMark,
 } from '@/components/automation-mark/automation-mark'
-import { MAJOR_TICKET_MARK_SCALE } from '@/components/ticket-mark/ticket-mark'
+import { TicketMark } from '@/components/ticket-mark/ticket-mark'
 import type { AutomationTag } from './automation-presentation'
-import { RoadmapTicketMark } from './roadmap-ticket-mark'
 import { STATE_META } from './state-meta'
 
-const NODE_SCALE = MAJOR_TICKET_MARK_SCALE
-const FIRST_TAG_OFFSET = 19 * NODE_SCALE
-const TAG_PITCH = 14 * NODE_SCALE
+const FIRST_TAG_OFFSET = 76 / 3
+const TAG_PITCH = 56 / 3
+const TICKET_TOOLTIP_OFFSET = 80 / 3
 
 type TicketNodeProps = {
   ticket: Ticket
@@ -25,7 +24,12 @@ export function TicketNode({ ticket, type, tags, x, y }: TicketNodeProps) {
     <g className="ticket-node">
       <MajorTicketNode ticket={ticket} type={type} x={x} y={y} />
       {tags.map((tag, index) => (
-        <DataDiamond key={tag.slot} tag={tag} x={x + FIRST_TAG_OFFSET + index * TAG_PITCH} y={y} />
+        <AutomationNode
+          key={tag.slot}
+          tag={tag}
+          x={x + FIRST_TAG_OFFSET + index * TAG_PITCH}
+          y={y}
+        />
       ))}
     </g>
   )
@@ -48,19 +52,21 @@ type MajorTicketNodeProps = {
 function MajorTicketNode({ ticket, type, x, y }: MajorTicketNodeProps) {
   return (
     <g className="major-node">
-      <RoadmapTicketMark state={ticket.state} type={type} size="major" x={x} y={y} />
-      <NodeTooltip x={x} y={y - 20 * NODE_SCALE} word={STATE_META[ticket.state].word} />
+      <g transform={`translate(${x} ${y})`}>
+        <TicketMark state={ticket.state} type={type} size="large" />
+      </g>
+      <NodeTooltip x={x} y={y - TICKET_TOOLTIP_OFFSET} word={STATE_META[ticket.state].word} />
     </g>
   )
 }
 
-type DataDiamondProps = { tag: AutomationTag; x: number; y: number }
+type AutomationNodeProps = { tag: AutomationTag; x: number; y: number }
 
-function DataDiamond({ tag, x, y }: DataDiamondProps) {
+function AutomationNode({ tag, x, y }: AutomationNodeProps) {
   return (
-    <g className={`data-diamond slot-${tag.slot}`}>
+    <g className={`automation-node slot-${tag.slot}`}>
       <AutomationMark variant="plot" stage={tag.stage} glyph={tag.glyph} x={x} y={y} />
-      <NodeTooltip x={x} y={y - 13 * NODE_SCALE} word={tag.word} />
+      <NodeTooltip x={x} y={y - 52 / 3} word={tag.word} />
     </g>
   )
 }

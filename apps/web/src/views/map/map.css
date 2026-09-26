@@ -101,15 +101,14 @@
   fill: var(--chip);
 }
 
-/* Ticket marks share one renderer at two sizes. Major marks lead each row; minor marks repeat the
- * same tracker-state and ticket-type design beside the status word. Automation evidence stays
- * separate because it reports Roadmap activity rather than tracker state. */
+/* Ticket marks share one SVG renderer across map and inline contexts. Automation evidence stays
+ * separate because it reports Roadmap activity rather than ticket state. */
 .ticket-node {
   pointer-events: none;
 }
 
 .major-node,
-.data-diamond {
+.automation-node {
   pointer-events: all;
   cursor: help;
 }
@@ -121,19 +120,19 @@
 }
 
 .major-node:hover .node-tooltip,
-.data-diamond:hover .node-tooltip {
+.automation-node:hover .node-tooltip {
   opacity: 1;
 }
 
-.major-node .node-shape,
-.data-diamond .automation-mark {
+.major-node .ticket-mark,
+.automation-node .automation-mark {
   transform-box: fill-box;
   transform-origin: center;
   transition: transform 0.12s ease-out;
 }
 
-.major-node:hover .node-shape,
-.data-diamond:hover .automation-mark {
+.major-node:hover .ticket-mark,
+.automation-node:hover .automation-mark {
   transform: scale(1.14);
 }
 
@@ -1105,8 +1104,8 @@
   .panel-rail,
   .panel-rail-inner,
   .node-tooltip,
-  .major-node .node-shape,
-  .data-diamond .automation-mark {
+  .major-node .ticket-mark,
+  .automation-node .automation-mark {
     transition: none;
   }
 }

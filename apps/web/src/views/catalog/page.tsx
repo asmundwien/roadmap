@@ -5,7 +5,6 @@ import {
   ActionsCatalogSection,
   RoadmapSignalsCatalogSection,
   TicketMarkCatalogSection,
-  TinyTicketMarksCatalogSection,
 } from './components'
 import { ReferencePaletteCatalogSection } from './reference'
 import { SemanticPaletteCatalogSection } from './semantic'
@@ -25,7 +24,6 @@ export function CatalogPage() {
       <ReferencePaletteCatalogSection />
       <SemanticPaletteCatalogSection />
       <TicketMarkCatalogSection />
-      <TinyTicketMarksCatalogSection />
       <BadgesCatalogSection />
       <AlertsCatalogSection />
       <RoadmapSignalsCatalogSection />

@@ -8,6 +8,7 @@ import {
 } from '@roadmap/contracts'
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { DestinationMark } from '@/components/destination-mark/destination-mark'
+import { TicketMark } from '@/components/ticket-mark/ticket-mark'
 import {
   type AutomationTag,
   automationEvidenceFor,
@@ -15,7 +16,6 @@ import {
 } from './automation-presentation'
 import { buildLedger, type Ledger, type LedgerEdge } from './geometry'
 import './map.css'
-import { RoadmapTicketMark } from './roadmap-ticket-mark'
 import { type LedgerSelection, scopePlan } from './sequence'
 import { STATE_META } from './state-meta'
 import { TicketNode, ticketNodeTextX } from './ticket-node'
@@ -225,13 +225,11 @@ export function MapLedger({
                 x={titleX}
                 baselineY={y - 4}
               />
-              <RoadmapTicketMark
-                state={ticket.state}
-                type={type}
-                size="minor"
-                x={titleX + STATUS_MARK_X_OFFSET}
-                y={y + STATUS_MARK_Y_OFFSET}
-              />
+              <g
+                transform={`translate(${titleX + STATUS_MARK_X_OFFSET} ${y + STATUS_MARK_Y_OFFSET})`}
+              >
+                <TicketMark state={ticket.state} type={type} size="medium" />
+              </g>
               <text
                 x={titleX + STATUS_TEXT_X_OFFSET}
                 y={y + 11}

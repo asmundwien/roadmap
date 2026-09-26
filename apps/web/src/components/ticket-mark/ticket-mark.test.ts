@@ -1,45 +1,46 @@
+import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { TicketMark } from './ticket-mark'
+import { TicketMark, type TicketMarkSize } from './ticket-mark'
+
+const TICKET = {
+  state: 'claimed',
+  type: 'prototype',
+} as const
 
 describe('TicketMark', () => {
-  const presentation = {
-    accent: 'warning',
-    children: 'P',
-    cornerCount: 2,
-    fill: 'half',
-    variant: 'success',
-  } as const
+  it.each([
+    ['large', '32'],
+    ['medium', '12'],
+    ['small', '0.625em'],
+  ] as const)('renders the %s size as a complete decorative SVG', (size, dimension) => {
+    const markup = renderTicketMark(size)
 
-  it('renders independent color, accent, fill, corners, and content', () => {
-    const markup = renderToStaticMarkup(
-      TicketMark({ ...presentation, size: 'major', x: 10, y: 20 }),
-    )
-
-    expect(markup).toContain('class="ticket-mark fill-half"')
-    expect(markup).toContain('color="var(--variant-success)"')
-    expect(markup).toContain('color="var(--variant-warning)"')
-    expect(markup.match(/class="mark-corner"/g)).toHaveLength(2)
-    expect(markup).toContain('class="mark-half"')
-    expect(markup).toContain('class="mark-content" color="var(--variant-success)"')
-  })
-
-  it('renders the minor size at plot coordinates without content', () => {
-    const markup = renderToStaticMarkup(
-      TicketMark({ ...presentation, size: 'minor', x: 10, y: 20 }),
-    )
-
-    expect(markup).toContain('class="node-shape node-mark is-minor"')
-    expect(markup).not.toContain('<svg')
-    expect(markup).not.toContain('<text')
-  })
-
-  it('wraps the tiny size for inline text without exposing decorative SVG', () => {
-    const markup = renderToStaticMarkup(TicketMark({ ...presentation, size: 'tiny' }))
-
-    expect(markup).toContain('class="ticket-mark-tiny"')
+    expect(markup.startsWith('<svg')).toBe(true)
+    expect(markup).toContain(`class="ticket-mark ticket-mark-${size} state-claimed type-prototype"`)
+    expect(markup).toContain(`width="${dimension}"`)
+    expect(markup).toContain(`height="${dimension}"`)
     expect(markup).toContain('aria-hidden="true"')
-    expect(markup).toContain('class="node-shape node-mark is-tiny"')
-    expect(markup).not.toContain('<text')
   })
+
+  it.each(['large', 'medium', 'small'] as const)(
+    'preserves ticket state and type information at the %s size',
+    (size) => {
+      const markup = renderTicketMark(size)
+
+      expect(markup).toContain('class="ticket-mark-half"')
+      expect(markup).toContain('class="ticket-mark-content"')
+      expect(markup).toContain('>P</text>')
+      expect(markup.match(/class="ticket-mark-corner"/g)).toHaveLength(2)
+    },
+  )
 })
+
+function renderTicketMark(size: TicketMarkSize): string {
+  return renderToStaticMarkup(
+    createElement(TicketMark, {
+      ...TICKET,
+      size,
+    }),
+  )
+}

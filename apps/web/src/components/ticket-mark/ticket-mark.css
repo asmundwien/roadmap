@@ -1,53 +1,79 @@
-.node-mark .diamond-face {
-  fill: var(--bg);
+.ticket-mark {
+  display: block;
+  overflow: visible;
+  color: var(--comp-ticket-mark-closed-color);
+}
+
+.ticket-mark.state-frontier {
+  color: var(--comp-ticket-mark-frontier-color);
+}
+
+.ticket-mark.state-claimed {
+  color: var(--comp-ticket-mark-claimed-color);
+}
+
+.ticket-mark.state-blocked {
+  color: var(--comp-ticket-mark-blocked-color);
+}
+
+.ticket-mark.type-research {
+  --ticket-mark-accent-color: var(--comp-ticket-mark-research-color);
+}
+
+.ticket-mark.type-prototype {
+  --ticket-mark-accent-color: var(--comp-ticket-mark-prototype-color);
+}
+
+.ticket-mark.type-grilling {
+  --ticket-mark-accent-color: var(--comp-ticket-mark-grilling-color);
+}
+
+.ticket-mark.type-task {
+  --ticket-mark-accent-color: var(--comp-ticket-mark-task-color);
+}
+
+.ticket-mark.type-untyped {
+  --ticket-mark-accent-color: var(--comp-ticket-mark-untyped-color);
+}
+
+.ticket-mark-small {
+  display: inline-block;
+  margin-right: 0.25em;
+  vertical-align: -0.13em;
+}
+
+.ticket-mark-face {
+  fill: var(--comp-ticket-mark-surface-color);
   stroke: currentColor;
   stroke-width: 2.5px;
   stroke-linejoin: miter;
 }
 
-.ticket-mark.fill-fill .diamond-face {
+.ticket-mark.state-frontier .ticket-mark-face,
+.ticket-mark.state-closed .ticket-mark-face {
   fill: currentColor;
 }
 
-.ticket-mark.fill-none .diamond-face {
+.ticket-mark.state-blocked .ticket-mark-face {
   fill: none;
 }
 
-.node-mark.is-minor .diamond-face,
-.node-mark.is-tiny .diamond-face {
-  stroke-width: 0.8px;
-}
-
-.ticket-mark-tiny {
-  display: inline-block;
-  width: 1em;
-  height: 1em;
-  margin-right: 0.25em;
-  overflow: visible;
-  vertical-align: -0.13em;
-}
-
-.node-mark .mark-half {
+.ticket-mark-half {
   fill: currentColor;
 }
 
-.node-mark .mark-content {
+.ticket-mark-content {
   fill: currentColor;
   paint-order: stroke;
-  stroke: var(--bg);
+  stroke: var(--comp-ticket-mark-surface-color);
   stroke-width: 3.5px;
   font-size: 9.25px;
   font-weight: 900;
 }
 
-.node-mark .mark-corner {
+.ticket-mark-corner {
   fill: none;
-  stroke: currentColor;
+  stroke: var(--ticket-mark-accent-color);
   stroke-width: 1.8px;
   stroke-linecap: square;
-}
-
-.node-mark.is-minor .mark-corner,
-.node-mark.is-tiny .mark-corner {
-  stroke-width: 0.6px;
 }

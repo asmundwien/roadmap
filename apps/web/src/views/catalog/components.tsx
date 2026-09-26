@@ -1,42 +1,40 @@
+import type { TicketState, TicketType } from '@roadmap/contracts'
 import type { ReactNode } from 'react'
 import { Action, ActionGroup } from '@/components/action/action'
 import { AutomationMark } from '@/components/automation-mark/automation-mark'
-import { Badge } from '@/components/badge/badge'
 import { DestinationMark } from '@/components/destination-mark/destination-mark'
-import {
-  TicketMark,
-  type TicketMarkCornerCount,
-  type TicketMarkFill,
-} from '@/components/ticket-mark/ticket-mark'
-import type { Variant } from '@/components/variant'
+import { TicketMark, type TicketMarkSize } from '@/components/ticket-mark/ticket-mark'
 import { CatalogSection, ComponentTokenList } from './section'
 import './actions.css'
 import './signals.css'
 import './ticket.css'
-import './tiny.css'
 
-const TICKET_MARK_FILLS = ['none', 'half', 'fill'] as const satisfies readonly TicketMarkFill[]
-const TICKET_MARK_CORNERS = [0, 1, 2, 3, 4] as const satisfies readonly TicketMarkCornerCount[]
-const TICKET_MARK_VARIANT_BY_FILL = {
-  none: 'neutral',
-  half: 'info',
-  fill: 'success',
-} as const satisfies Record<TicketMarkFill, Variant>
-const TINY_MARK_VARIANTS = [
-  'neutral',
-  'accent',
-  'warning',
-  'danger',
-  'success',
-] as const satisfies readonly Variant[]
-const TINY_MARK_GLYPH = {
-  neutral: 'n',
-  accent: 'a',
-  warning: 'w',
-  danger: 'd',
-  success: 's',
-} as const satisfies Record<(typeof TINY_MARK_VARIANTS)[number], string>
-const TICKET_MARK_CORNER_GLYPHS = ['0', '1', '2', '3', '4'] as const
+const TICKET_STATES = [
+  ['Blocked', 'blocked'],
+  ['Takeable', 'frontier'],
+  ['Claimed', 'claimed'],
+  ['Decided', 'closed'],
+] as const satisfies readonly (readonly [string, TicketState])[]
+const TICKET_TYPES = [
+  ['Untyped', 'untyped'],
+  ['Research', 'research'],
+  ['Prototype', 'prototype'],
+  ['Grilling', 'grilling'],
+  ['Task', 'task'],
+] as const satisfies readonly (readonly [string, TicketType])[]
+const TICKET_MARK_SIZES = ['large', 'medium', 'small'] as const satisfies readonly TicketMarkSize[]
+const TICKET_MARK_COLOR_TOKENS = [
+  '--comp-ticket-mark-surface-color',
+  '--comp-ticket-mark-closed-color',
+  '--comp-ticket-mark-frontier-color',
+  '--comp-ticket-mark-claimed-color',
+  '--comp-ticket-mark-blocked-color',
+  '--comp-ticket-mark-research-color',
+  '--comp-ticket-mark-prototype-color',
+  '--comp-ticket-mark-grilling-color',
+  '--comp-ticket-mark-task-color',
+  '--comp-ticket-mark-untyped-color',
+] as const
 const ACTION_DEFAULT_COLOR_TOKENS = [
   '--comp-action-outline-color',
   '--comp-action-label-color',
@@ -61,39 +59,29 @@ export function TicketMarkCatalogSection() {
   return (
     <CatalogSection
       title="Ticket mark"
-      description="A diamond mark with independent color, accent, fill, corner, content, and size controls. Rows show fill; columns show corner count."
+      description="One ticket state and type mark rendered at three supported sizes."
     >
-      <div className="catalog-mark-matrix">
-        <span />
-        {TICKET_MARK_CORNERS.map((cornerCount) => (
-          <strong className="catalog-column-label" key={cornerCount}>
-            {cornerCount} {cornerCount === 1 ? 'corner' : 'corners'}
-          </strong>
-        ))}
-        {TICKET_MARK_FILLS.map((fill) => (
-          <TicketMarkRow fill={fill} key={fill} />
-        ))}
-      </div>
-    </CatalogSection>
-  )
-}
-
-export function TinyTicketMarksCatalogSection() {
-  return (
-    <CatalogSection
-      title="Tiny ticket marks"
-      description="The tiny size fits inline text and omits content."
-    >
-      <div className="catalog-tiny-marks">
-        {TINY_MARK_VARIANTS.map((variant) => (
-          <Badge variant={variant} key={variant}>
-            <TicketMark accent={variant} cornerCount={0} fill="fill" size="tiny" variant={variant}>
-              {TINY_MARK_GLYPH[variant]}
-            </TicketMark>
-            {TINY_MARK_GLYPH[variant].toUpperCase()}
-            {variant.slice(1)}
-          </Badge>
-        ))}
+      <div className="catalog-ticket-mark-examples">
+        <div className="catalog-mark-matrix">
+          <span />
+          {TICKET_TYPES.map(([label, type]) => (
+            <strong className="catalog-column-label" key={type}>
+              {label}
+            </strong>
+          ))}
+          {TICKET_STATES.map(([label, state]) => (
+            <TicketMarkStateRow key={state} label={label} state={state} />
+          ))}
+        </div>
+        <div className="catalog-ticket-mark-sizes">
+          {TICKET_MARK_SIZES.map((size) => (
+            <div className="catalog-ticket-mark-size" key={size}>
+              <TicketMark size={size} state="claimed" type="prototype" />
+              <code>{size}</code>
+            </div>
+          ))}
+        </div>
+        <ComponentTokenList tokens={TICKET_MARK_COLOR_TOKENS} />
       </div>
     </CatalogSection>
   )
@@ -199,33 +187,19 @@ export function ActionsCatalogSection() {
   )
 }
 
-type TicketMarkRowProps = { fill: TicketMarkFill }
+type TicketMarkStateRowProps = {
+  label: string
+  state: TicketState
+}
 
-function TicketMarkRow({ fill }: TicketMarkRowProps) {
-  const variant = TICKET_MARK_VARIANT_BY_FILL[fill]
-
+function TicketMarkStateRow({ label, state }: TicketMarkStateRowProps) {
   return (
     <>
-      <strong className="catalog-row-label">{fill}</strong>
-      {TICKET_MARK_CORNERS.map((cornerCount) => (
-        <svg
-          className="catalog-ticket-mark"
-          viewBox="-24 -24 48 48"
-          aria-label={`${fill} fill with ${cornerCount} ${cornerCount === 1 ? 'corner' : 'corners'}`}
-          key={cornerCount}
-        >
-          <TicketMark
-            accent="warning"
-            cornerCount={cornerCount}
-            fill={fill}
-            size="major"
-            variant={variant}
-            x={0}
-            y={0}
-          >
-            {TICKET_MARK_CORNER_GLYPHS[cornerCount]}
-          </TicketMark>
-        </svg>
+      <strong className="catalog-row-label">{label}</strong>
+      {TICKET_TYPES.map(([typeLabel, type]) => (
+        <div className="catalog-ticket-mark-example" key={type} title={`${label} ${typeLabel}`}>
+          <TicketMark size="large" state={state} type={type} />
+        </div>
       ))}
     </>
   )

@@ -1,159 +1,73 @@
-import cn from 'classnames'
-import { Diamond } from '@/components/diamond/diamond'
-import { VARIANT_COLORS, type Variant } from '@/components/variant'
+import type { TicketState, TicketType } from '@roadmap/contracts'
 import './ticket-mark.css'
 
-export const MAJOR_TICKET_MARK_SCALE = 4 / 3
-const MINOR_TICKET_MARK_SCALE = 0.42
-const TINY_TICKET_MARK_SCALE = 0.42
+export type TicketMarkSize = 'large' | 'medium' | 'small'
 
-export type TicketMarkFill = 'fill' | 'half' | 'none'
-export type TicketMarkCornerCount = 0 | 1 | 2 | 3 | 4
-type SingleChar<S extends string> = S extends `${infer _First}${infer Rest}`
-  ? Rest extends ''
-    ? S
-    : never
-  : never
-
-type TicketMarkPresentationProps<S extends string> = {
-  accent: Variant
-  children: S & SingleChar<S>
-  cornerCount: TicketMarkCornerCount
-  fill: TicketMarkFill
-  variant: Variant
+export type TicketMarkProps = {
+  size: TicketMarkSize
+  state: TicketState
+  type: TicketType
 }
 
-export type TicketMarkProps<S extends string> = TicketMarkPresentationProps<S> &
-  (
-    | {
-        size: 'major' | 'minor'
-        x: number
-        y: number
-      }
-    | {
-        size: 'tiny'
-      }
-  )
+const SIZE_ATTRIBUTES = {
+  large: { height: 32, width: 32, x: -16, y: -16 },
+  medium: { height: 12, width: 12, x: -6, y: -6 },
+  small: { height: '0.625em', width: '0.625em', x: '-0.3125em', y: '-0.3125em' },
+} as const satisfies Record<
+  TicketMarkSize,
+  { height: number | string; width: number | string; x: number | string; y: number | string }
+>
 
-/** A domain-independent diamond mark with separate color, accent, fill, and size controls. */
-export function TicketMark<const S extends string>(props: TicketMarkProps<S>) {
-  switch (props.size) {
-    case 'major':
-      return <MajorTicketMark {...props} />
-    case 'minor':
-      return <MinorTicketMark {...props} />
-    case 'tiny':
-      return <TinyTicketMark {...props} />
-    default: {
-      const _exhaustive: never = props
-      return _exhaustive
-    }
-  }
-}
+const TYPE_GLYPH = {
+  research: 'R',
+  prototype: 'P',
+  grilling: 'G',
+  task: 'T',
+  untyped: '·',
+} as const satisfies Record<TicketType, string>
 
-type PositionedTicketMarkProps<S extends string> = TicketMarkPresentationProps<S> & {
-  x: number
-  y: number
-}
+const TYPE_CORNER_COUNT = {
+  research: 1,
+  prototype: 2,
+  grilling: 3,
+  task: 4,
+  untyped: 0,
+} as const satisfies Record<TicketType, 0 | 1 | 2 | 3 | 4>
 
-function MajorTicketMark<S extends string>(props: PositionedTicketMarkProps<S>) {
-  return <MarkShape {...props} scale={MAJOR_TICKET_MARK_SCALE} size="major" showContent />
-}
+const FACE_PATH = 'M 0 -14.667 L 14.667 0 L 0 14.667 L -14.667 0 Z'
+const HALF_PATH = 'M 0 -14.667 L 0 14.667 L -14.667 0 Z'
 
-function MinorTicketMark<S extends string>(props: PositionedTicketMarkProps<S>) {
-  return <MarkShape {...props} scale={MINOR_TICKET_MARK_SCALE} size="minor" />
-}
-
-function TinyTicketMark<S extends string>(props: TicketMarkPresentationProps<S>) {
+/** The ticket state and type mark in each supported application size. */
+export function TicketMark({ size, state, type }: TicketMarkProps) {
+  const sizeAttributes = SIZE_ATTRIBUTES[size]
   return (
-    <svg className="ticket-mark-tiny" viewBox="-8 -8 16 16" aria-hidden="true" focusable="false">
-      <MarkShape {...props} scale={TINY_TICKET_MARK_SCALE} size="tiny" x={0} y={0} />
+    <svg
+      className={`ticket-mark ticket-mark-${size} state-${state} type-${type}`}
+      viewBox="-16 -16 32 32"
+      aria-hidden="true"
+      focusable="false"
+      {...sizeAttributes}
+    >
+      <path className="ticket-mark-face" d={FACE_PATH} />
+      {state === 'claimed' && <path className="ticket-mark-half" d={HALF_PATH} />}
+      <text className="ticket-mark-content" x="0" y="4.4" textAnchor="middle">
+        {state === 'closed' ? '✓' : TYPE_GLYPH[type]}
+      </text>
+      <TicketMarkCorners count={TYPE_CORNER_COUNT[type]} />
     </svg>
   )
 }
 
-type MarkShapeProps<S extends string> = PositionedTicketMarkProps<S> & {
-  scale: number
-  size: 'major' | 'minor' | 'tiny'
-  showContent?: boolean
-}
+type TicketMarkCornersProps = { count: 0 | 1 | 2 | 3 | 4 }
 
-function MarkShape<S extends string>({
-  accent,
-  children,
-  cornerCount,
-  fill,
-  scale,
-  showContent = false,
-  size,
-  variant,
-  x,
-  y,
-}: MarkShapeProps<S>) {
-  const radius = 11 * scale
+function TicketMarkCorners({ count }: TicketMarkCornersProps) {
+  if (count === 0) return null
   return (
-    <g className={cn('ticket-mark', `fill-${fill}`)} color={VARIANT_COLORS[variant]}>
-      <g className={cn('node-shape', 'node-mark', `is-${size}`)}>
-        <Diamond className="diamond-face" x={x} y={y} radius={radius} />
-        {fill === 'half' && (
-          <path
-            className="mark-half"
-            d={`M ${x} ${y - radius} L ${x} ${y + radius} L ${x - radius} ${y} Z`}
-          />
-        )}
-        {showContent && (
-          <text
-            className="mark-content"
-            color={VARIANT_COLORS[variant]}
-            x={x}
-            y={y + 3.3 * scale}
-            textAnchor="middle"
-          >
-            {children}
-          </text>
-        )}
-        <g className="mark-accent" color={VARIANT_COLORS[accent]}>
-          <MarkCorners cornerCount={cornerCount} scale={scale} x={x} y={y} />
-        </g>
-      </g>
-    </g>
-  )
-}
-
-type MarkCornersProps = {
-  cornerCount: TicketMarkCornerCount
-  scale: number
-  x: number
-  y: number
-}
-
-function MarkCorners({ cornerCount, scale, x, y }: MarkCornersProps) {
-  if (cornerCount === 0) return null
-  const radius = 11 * scale
-  return (
-    <g className="mark-corners">
-      <path
-        className="mark-corner"
-        d={`M ${x - 7 * scale} ${y - 4 * scale} L ${x} ${y - radius}`}
-      />
-      {cornerCount >= 2 && (
-        <path
-          className="mark-corner"
-          d={`M ${x + 4 * scale} ${y - 7 * scale} L ${x + radius} ${y}`}
-        />
-      )}
-      {cornerCount >= 3 && (
-        <path
-          className="mark-corner"
-          d={`M ${x + 7 * scale} ${y + 4 * scale} L ${x} ${y + radius}`}
-        />
-      )}
-      {cornerCount === 4 && (
-        <path
-          className="mark-corner"
-          d={`M ${x - 4 * scale} ${y + 7 * scale} L ${x - radius} ${y}`}
-        />
-      )}
+    <g className="ticket-mark-corners">
+      <path className="ticket-mark-corner" d="M -9.333 -5.333 L 0 -14.667" />
+      {count >= 2 && <path className="ticket-mark-corner" d="M 5.333 -9.333 L 14.667 0" />}
+      {count >= 3 && <path className="ticket-mark-corner" d="M 9.333 5.333 L 0 14.667" />}
+      {count === 4 && <path className="ticket-mark-corner" d="M -5.333 9.333 L -14.667 0" />}
     </g>
   )
 }
