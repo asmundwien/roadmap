@@ -1,4 +1,12 @@
-import { Section, SectionDescription, SectionHeader, SectionTitle } from '@roadmap/ui/section'
+import {
+  Section,
+  SectionBody,
+  SectionDescription,
+  SectionGroup,
+  SectionGroupTitle,
+  SectionHeader,
+  SectionTitle,
+} from '@roadmap/ui/section'
 import './reference.css'
 
 const REFERENCE_COLOR_STEPS = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950] as const
@@ -26,9 +34,9 @@ export function ReferencePaletteCatalogSection() {
         </SectionDescription>
       </SectionHeader>
 
-      <div className="catalog-reference-palette">
-        <div className="catalog-reference-family">
-          <h3>Common</h3>
+      <SectionBody>
+        <SectionGroup>
+          <SectionGroupTitle>Common</SectionGroupTitle>
           <div className="catalog-reference-swatches">
             {COMMON_REFERENCE_COLORS.map(([label, token]) => (
               <div className="catalog-reference-swatch" key={token}>
@@ -38,10 +46,10 @@ export function ReferencePaletteCatalogSection() {
               </div>
             ))}
           </div>
-        </div>
+        </SectionGroup>
         {REFERENCE_COLOR_FAMILIES.map(([label, family]) => (
-          <div className="catalog-reference-family" key={family}>
-            <h3>{label}</h3>
+          <SectionGroup key={family}>
+            <SectionGroupTitle>{label}</SectionGroupTitle>
             <div className="catalog-reference-swatches">
               {REFERENCE_COLOR_STEPS.map((step) => {
                 const token = `--ref-${family}-${step}`
@@ -54,9 +62,9 @@ export function ReferencePaletteCatalogSection() {
                 )
               })}
             </div>
-          </div>
+          </SectionGroup>
         ))}
-      </div>
+      </SectionBody>
     </Section>
   )
 }

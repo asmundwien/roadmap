@@ -1,5 +1,14 @@
 import { Action, ActionGroup } from '@roadmap/ui/action'
-import { Section, SectionDescription, SectionHeader, SectionTitle } from '@roadmap/ui/section'
+import {
+  Section,
+  SectionBody,
+  SectionDescription,
+  SectionGroup,
+  SectionGroupDescription,
+  SectionGroupTitle,
+  SectionHeader,
+  SectionTitle,
+} from '@roadmap/ui/section'
 import { ComponentTokenList } from './token-list'
 import './actions.css'
 
@@ -37,15 +46,13 @@ export function ActionsCatalogSection() {
         </SectionDescription>
       </SectionHeader>
 
-      <div className="catalog-action-examples">
-        <section className="catalog-action-example">
-          <header>
-            <h3>Default</h3>
-            <p>
-              Use for routine commands and navigation. Hover and keyboard focus change both the
-              container and label roles.
-            </p>
-          </header>
+      <SectionBody>
+        <SectionGroup className="catalog-action-example">
+          <SectionGroupTitle>Default</SectionGroupTitle>
+          <SectionGroupDescription>
+            Use for routine commands and navigation. Hover and keyboard focus change both the
+            container and label roles.
+          </SectionGroupDescription>
           <ActionGroup>
             <Action type="button">Button</Action>
             <Action element="link" href="#/components">
@@ -53,60 +60,54 @@ export function ActionsCatalogSection() {
             </Action>
           </ActionGroup>
           <ComponentTokenList tokens={ACTION_DEFAULT_COLOR_TOKENS} />
-        </section>
+        </SectionGroup>
 
-        <section className="catalog-action-example">
-          <header>
-            <h3>Strong</h3>
-            <p>
-              Use for the preferred action in a group. The resting container has higher emphasis;
-              hover and keyboard focus use the shared interaction roles.
-            </p>
-          </header>
+        <SectionGroup className="catalog-action-example">
+          <SectionGroupTitle>Strong</SectionGroupTitle>
+          <SectionGroupDescription>
+            Use for the preferred action in a group. The resting container has higher emphasis;
+            hover and keyboard focus use the shared interaction roles.
+          </SectionGroupDescription>
           <Action variant="strong" type="button">
             Continue
           </Action>
           <ComponentTokenList tokens={ACTION_STRONG_COLOR_TOKENS} />
-        </section>
+        </SectionGroup>
 
-        <section className="catalog-action-example">
-          <header>
-            <h3>Danger</h3>
-            <p>
-              Use only for destructive commands. Resting and hover colors use the error role and its
-              paired container content role.
-            </p>
-          </header>
+        <SectionGroup className="catalog-action-example">
+          <SectionGroupTitle>Danger</SectionGroupTitle>
+          <SectionGroupDescription>
+            Use only for destructive commands. Resting and hover colors use the error role and its
+            paired container content role.
+          </SectionGroupDescription>
           <Action variant="danger" type="button">
             Remove
           </Action>
           <ComponentTokenList tokens={ACTION_DANGER_COLOR_TOKENS} />
-        </section>
+        </SectionGroup>
 
-        <section className="catalog-action-example">
-          <header>
-            <h3>Unavailable</h3>
-            <p>
-              Only buttons support this state. The native disabled attribute blocks activation, and
-              the outline and label drop to the muted pair so the label keeps its contrast.
-            </p>
-          </header>
+        <SectionGroup className="catalog-action-example">
+          <SectionGroupTitle>Unavailable</SectionGroupTitle>
+          <SectionGroupDescription>
+            Only buttons support this state. The native disabled attribute blocks activation, and
+            the outline and label drop to the muted pair so the label keeps its contrast.
+          </SectionGroupDescription>
           <Action type="button" disabled>
             Unavailable
           </Action>
           <ComponentTokenList tokens={ACTION_DISABLED_COLOR_TOKENS} />
-        </section>
+        </SectionGroup>
 
-        <section className="catalog-action-example">
-          <header>
-            <h3>Field size</h3>
-            <p>Use the taller size when an action sits beside a form field.</p>
-          </header>
+        <SectionGroup className="catalog-action-example">
+          <SectionGroupTitle>Field size</SectionGroupTitle>
+          <SectionGroupDescription>
+            Use the taller size when an action sits beside a form field.
+          </SectionGroupDescription>
           <Action size="field" type="button">
             Choose directory
           </Action>
-        </section>
-      </div>
+        </SectionGroup>
+      </SectionBody>
     </Section>
   )
 }

@@ -1,26 +1,4 @@
-.catalog-action-examples {
-  display: grid;
-  gap: var(--sys-space-xl);
-}
-
+/* The examples keep their controls left-aligned; spacing comes from the section group. */
 .catalog-action-example {
-  display: grid;
   justify-items: start;
-  gap: var(--sys-space-sm);
-}
-
-.catalog-action-example header,
-.catalog-action-example h3,
-.catalog-action-example p {
-  margin: 0;
-}
-
-.catalog-action-example h3 {
-  font-size: 0.8rem;
-}
-
-.catalog-action-example p {
-  max-width: 42rem;
-  color: var(--muted);
-  font-size: 0.75rem;
 }

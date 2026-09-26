@@ -1,28 +1,3 @@
-.catalog-semantic-palette,
-.catalog-semantic-group {
-  display: grid;
-  gap: var(--sys-space-xl);
-}
-
-.catalog-semantic-group {
-  gap: var(--sys-space-md);
-}
-
-.catalog-semantic-group h3,
-.catalog-semantic-group p {
-  margin: 0;
-}
-
-.catalog-semantic-group h3 {
-  font-size: 0.8rem;
-}
-
-.catalog-semantic-group > p {
-  max-width: 48rem;
-  color: var(--muted);
-  font-size: 0.75rem;
-}
-
 .catalog-semantic-pairs {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));

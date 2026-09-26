@@ -1,14 +1,3 @@
-.catalog-alert-example {
-  display: grid;
-  align-items: start;
-  gap: var(--sys-space-sm);
-}
-
-.catalog-alert-examples {
-  display: grid;
-  gap: var(--sys-space-lg);
-}
-
 .catalog-alert-example .alert {
   margin: 0;
 }

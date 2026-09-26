@@ -1,5 +1,12 @@
 import { Alert } from '@roadmap/ui/alert'
-import { Section, SectionDescription, SectionHeader, SectionTitle } from '@roadmap/ui/section'
+import {
+  Section,
+  SectionBody,
+  SectionDescription,
+  SectionGroup,
+  SectionHeader,
+  SectionTitle,
+} from '@roadmap/ui/section'
 import { ComponentTokenList } from './token-list'
 import './alerts.css'
 
@@ -14,8 +21,8 @@ export function AlertsCatalogSection() {
         </SectionDescription>
       </SectionHeader>
 
-      <div className="catalog-alert-examples">
-        <div className="catalog-alert-example">
+      <SectionBody>
+        <SectionGroup className="catalog-alert-example">
           <Alert>
             <strong>Action required.</strong>
             <span>The operation stays blocked until the problem is fixed.</span>
@@ -28,8 +35,8 @@ export function AlertsCatalogSection() {
               '--comp-alert-error-content-color',
             ]}
           />
-        </div>
-        <div className="catalog-alert-example">
+        </SectionGroup>
+        <SectionGroup className="catalog-alert-example">
           <Alert variant="info">
             <strong>Change saved.</strong>
             <span>The new configuration is active.</span>
@@ -42,8 +49,8 @@ export function AlertsCatalogSection() {
               '--comp-alert-info-content-color',
             ]}
           />
-        </div>
-      </div>
+        </SectionGroup>
+      </SectionBody>
     </Section>
   )
 }

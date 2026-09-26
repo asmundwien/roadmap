@@ -68,4 +68,5 @@
   /* Section. */
   --comp-section-outline-color: var(--sys-color-outline-variant);
   --comp-section-description-color: var(--sys-color-on-surface-variant);
+  --comp-section-group-description-color: var(--sys-color-on-surface-variant);
 }

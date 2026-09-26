@@ -38,6 +38,11 @@
   --sys-typescale-heading-line-height: var(--ref-line-height-130);
   --sys-typescale-heading-letter-spacing: var(--ref-letter-spacing-tight);
 
+  /* Subheading: the title of one group inside a section. */
+  --sys-typescale-subheading-size: var(--ref-font-size-13);
+  --sys-typescale-subheading-line-height: var(--ref-line-height-130);
+  --sys-typescale-subheading-letter-spacing: var(--ref-letter-spacing-tight);
+
   /* Body: prose read at length. */
   --sys-typescale-body-size: var(--ref-font-size-16);
   --sys-typescale-body-line-height: var(--ref-line-height-150);

@@ -1,14 +1,3 @@
-.catalog-reference-palette,
-.catalog-reference-family {
-  display: grid;
-  gap: var(--sys-space-lg);
-}
-
-.catalog-reference-family h3 {
-  margin: 0;
-  font-size: 0.8rem;
-}
-
 .catalog-reference-swatches {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));

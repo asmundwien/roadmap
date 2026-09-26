@@ -53,4 +53,9 @@
   --comp-section-title-letter-spacing: var(--sys-typescale-heading-letter-spacing);
   --comp-section-description-font-size: var(--sys-typescale-body-sm-size);
   --comp-section-description-line-height: var(--sys-typescale-body-sm-line-height);
+  --comp-section-group-title-font-size: var(--sys-typescale-subheading-size);
+  --comp-section-group-title-line-height: var(--sys-typescale-subheading-line-height);
+  --comp-section-group-title-letter-spacing: var(--sys-typescale-subheading-letter-spacing);
+  --comp-section-group-description-font-size: var(--sys-typescale-body-sm-size);
+  --comp-section-group-description-line-height: var(--sys-typescale-body-sm-line-height);
 }

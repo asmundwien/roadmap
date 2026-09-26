@@ -25,3 +25,27 @@ export type SectionDescriptionProps = HTMLAttributes<HTMLParagraphElement>
 export function SectionDescription({ className, ...props }: SectionDescriptionProps) {
   return <p className={cn('section-header-description', className)} {...props} />
 }
+
+export type SectionBodyProps = HTMLAttributes<HTMLDivElement>
+
+export function SectionBody({ className, ...props }: SectionBodyProps) {
+  return <div className={cn('section-body', className)} {...props} />
+}
+
+export type SectionGroupProps = HTMLAttributes<HTMLElement>
+
+export function SectionGroup({ className, ...props }: SectionGroupProps) {
+  return <section className={cn('section-group', className)} {...props} />
+}
+
+export type SectionGroupTitleProps = HTMLAttributes<HTMLHeadingElement>
+
+export function SectionGroupTitle({ className, ...props }: SectionGroupTitleProps) {
+  return <h3 className={cn('section-group-title', className)} {...props} />
+}
+
+export type SectionGroupDescriptionProps = HTMLAttributes<HTMLParagraphElement>
+
+export function SectionGroupDescription({ className, ...props }: SectionGroupDescriptionProps) {
+  return <p className={cn('section-group-description', className)} {...props} />
+}

@@ -1,6 +1,13 @@
 import type { TicketState, TicketType } from '@roadmap/contracts'
 import { Mark, type MarkCornerCount, type MarkFill, type MarkSize } from '@roadmap/ui/mark'
-import { Section, SectionDescription, SectionHeader, SectionTitle } from '@roadmap/ui/section'
+import {
+  Section,
+  SectionBody,
+  SectionDescription,
+  SectionGroup,
+  SectionHeader,
+  SectionTitle,
+} from '@roadmap/ui/section'
 import type { Variant } from '@roadmap/ui/variant'
 import type { ReactNode } from 'react'
 import { TicketMark } from '@/views/shared/ticket-mark'
@@ -46,7 +53,7 @@ export function MarkCatalogSection() {
         </SectionDescription>
       </SectionHeader>
 
-      <div className="catalog-mark-examples">
+      <SectionBody>
         <MarkGroup label="Fill">
           {MARK_FILLS.map((fill) => (
             <MarkCell caption={fill} key={fill}>
@@ -75,7 +82,7 @@ export function MarkCatalogSection() {
             </MarkCell>
           ))}
         </MarkGroup>
-      </div>
+      </SectionBody>
     </Section>
   )
 }
@@ -111,10 +118,10 @@ type MarkGroupProps = { label: string; children: ReactNode }
 
 function MarkGroup({ label, children }: MarkGroupProps) {
   return (
-    <div className="catalog-mark-group">
+    <SectionGroup>
       <strong className="catalog-row-label">{label}</strong>
       <div className="catalog-mark-row">{children}</div>
-    </div>
+    </SectionGroup>
   )
 }
 
