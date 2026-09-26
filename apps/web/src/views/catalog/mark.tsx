@@ -5,6 +5,7 @@ import {
   SectionBody,
   SectionDescription,
   SectionGroup,
+  SectionGroupTitle,
   SectionHeader,
   SectionTitle,
 } from '@roadmap/ui/section'
@@ -119,7 +120,7 @@ type MarkGroupProps = { label: string; children: ReactNode }
 function MarkGroup({ label, children }: MarkGroupProps) {
   return (
     <SectionGroup>
-      <strong className="catalog-row-label">{label}</strong>
+      <SectionGroupTitle>{label}</SectionGroupTitle>
       <div className="catalog-mark-row">{children}</div>
     </SectionGroup>
   )

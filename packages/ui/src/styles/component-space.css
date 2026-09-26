@@ -61,7 +61,7 @@
   --comp-section-block-padding: var(--sys-space-2xl);
   --comp-section-border-width: var(--sys-border-width-thin);
   --comp-section-description-margin: var(--sys-space-sm);
-  --comp-section-body-gap: var(--sys-space-xl);
+  --comp-section-body-gap: var(--sys-space-2xl);
   --comp-section-group-gap: var(--sys-space-md);
   --comp-section-group-description-max-width: var(--sys-size-measure);
 }
