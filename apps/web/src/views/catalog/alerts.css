@@ -1,12 +1,12 @@
 .catalog-alert-example {
   display: grid;
   align-items: start;
-  gap: var(--sp-2);
+  gap: var(--sys-space-sm);
 }
 
 .catalog-alert-examples {
   display: grid;
-  gap: var(--sp-4);
+  gap: var(--sys-space-lg);
 }
 
 .catalog-alert-example .alert {

@@ -2,9 +2,10 @@
 
 ## System shape
 
-Roadmap is a local-first, read-only application for one user. The code is split across three workspace areas:
+Roadmap is a local-first, read-only application for one user. The code is split across four workspace areas:
 
 - `packages/contracts` defines domain types such as `Project`, `WayfinderMap`, `Ticket`, and `ApplicationState`. It also provides runtime codecs for transport messages through `@roadmap/contracts/codecs`.
+- `packages/ui` is the design system: presentational components and the design tokens they read, published as `@roadmap/ui`. It depends on no domain type.
 - `apps/server` owns application state, persistence, integrations, and network access.
 - `apps/web` renders application state and sends queries and commands.
 
@@ -22,7 +23,9 @@ WebSocket carries full state replacements. HTTP carries `query` and `execute` re
 
 Each routable area under `apps/web/src/views` has a `page.tsx` entry point. Page modules select data and compose named sections; section implementation stays in sibling files. `shared/` and `shell/` are support areas, not pages.
 
-Reusable UI lives under `apps/web/src/components`, with each module's implementation, styles, and tests in its own folder. Components carry no domain types or domain vocabulary: they use the shared `Variant` color vocabulary and their own presentational props. `Mark` is the diamond primitive, and views own the encoding that drives it. `views/shared/ticket-presentation.ts` maps ticket state and type onto mark props and state words, `views/shared/destination-mark.tsx` draws the Wayfinder destination in the goal color, and `views/map/automation-presentation.ts` maps each Automation stage onto a variant. Color styling is migrating bottom-up through reference, semantic, component, and rendered layers. Action, Badge, Alert, Mark, and Page consume component tokens that directly alias semantic roles; `index.css` remains legacy styling and is not a token source. The catalog at `#/components` documents the token layers and supported component variants.
+Reusable UI lives in `packages/ui`, with each component's implementation, styles, and tests in its own folder. Views import it by package name (`import { Badge } from '@roadmap/ui'`) and never reach into its folders. Components carry no domain types or domain vocabulary: they use the shared `Variant` color vocabulary and their own presentational props. `Mark` is the diamond primitive, and views own the encoding that drives it. `views/shared/ticket-presentation.ts` maps ticket state and type onto mark props and state words, `views/shared/destination-mark.tsx` draws the Wayfinder destination in the goal color, and `views/map/automation-presentation.ts` maps each Automation stage onto a variant. The catalog at `#/components` documents the token layers and supported component variants.
+
+`packages/ui/src/styles` holds four token families: color, space, typography, and motion. Each runs reference (literal values) to semantic (named roles) to component (rendered parts), and `tokens.css` imports the twelve files in that order. `apps/web/src/main.tsx` loads `@roadmap/ui/tokens.css` before `index.css`. Components read `--comp-*`, views read `--sys-*`, and only the semantic layer reads `--ref-*`. Component stylesheets hold no literal dimension, type value, or duration; the exceptions are media-query widths, which custom properties cannot express, and the mark's viewBox geometry. `index.css` keeps the legacy color aliases that unmigrated views still read and defines no measurement of its own.
 
 React functions use named `...Props` types instead of inline object annotations. Dynamic class composition uses `classnames` imported as `cn`; modules do not define class-name helper functions.
 

@@ -1,0 +1,49 @@
+/**
+ * Component typography tokens describe the text of rendered component parts.
+ *
+ * Fits: one token per component part, named
+ * --comp-<component>-<variant>-<part>-<font-family|font-size|font-weight|line-height|letter-spacing>.
+ * Does not fit: literal type values, reference tokens, or tokens shared by several components.
+ *
+ * Usage:
+ *   --comp-badge-font-size: var(--sys-typescale-label-sm-size);
+ *   .badge { font-size: var(--comp-badge-font-size); }
+ *
+ * Every token aliases exactly one system role, so retuning the typescale is resolved once in
+ * semantic-typography.css.
+ *
+ * @see https://m3.material.io/styles/typography/applying-type
+ * @see https://primer.style/foundations/primitives/typography
+ */
+:root {
+  /* Action. */
+  --comp-action-font-family: var(--sys-font-family-ui);
+  --comp-action-font-size: var(--sys-typescale-label-size);
+  --comp-action-line-height: var(--sys-typescale-label-line-height);
+  --comp-action-font-weight: var(--sys-font-weight-regular);
+  --comp-action-strong-font-weight: var(--sys-font-weight-strong);
+
+  /* Alert. */
+  --comp-alert-font-size: var(--sys-typescale-body-sm-size);
+  --comp-alert-line-height: var(--sys-typescale-body-sm-line-height);
+
+  /* Badge. */
+  --comp-badge-font-size: var(--sys-typescale-label-sm-size);
+  --comp-badge-line-height: var(--sys-typescale-label-sm-line-height);
+  --comp-badge-font-weight: var(--sys-font-weight-bold);
+
+  /* Mark. */
+  --comp-mark-glyph-font-weight: var(--sys-font-weight-black);
+
+  /* Page. */
+  --comp-page-title-font-size: var(--sys-typescale-title-size);
+  --comp-page-title-line-height: var(--sys-typescale-title-line-height);
+  --comp-page-title-letter-spacing: var(--sys-typescale-title-letter-spacing);
+  --comp-page-eyebrow-font-family: var(--sys-font-family-code);
+  --comp-page-eyebrow-font-size: var(--sys-typescale-overline-size);
+  --comp-page-eyebrow-line-height: var(--sys-typescale-overline-line-height);
+  --comp-page-eyebrow-letter-spacing: var(--sys-typescale-overline-letter-spacing);
+  --comp-page-eyebrow-font-weight: var(--sys-font-weight-bold);
+  --comp-page-description-font-size: var(--sys-typescale-body-size);
+  --comp-page-description-line-height: var(--sys-typescale-body-line-height);
+}

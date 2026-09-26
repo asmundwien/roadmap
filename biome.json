@@ -59,7 +59,11 @@
   },
   "overrides": [
     {
-      "includes": ["apps/web/vite.config.ts", "apps/server/vitest.config.ts"],
+      "includes": [
+        "apps/web/vite.config.ts",
+        "apps/server/vitest.config.ts",
+        "packages/ui/vitest.config.ts"
+      ],
       "linter": {
         "rules": {
           "style": {

@@ -1,3 +1,10 @@
+/*
+ * The application base. Design tokens come from '@roadmap/ui/tokens.css', loaded first in
+ * main.tsx; nothing here defines a dimension, a type value, or a duration of its own.
+ *
+ * The colors below are the last legacy layer: views that have not moved onto --sys-color-* still
+ * read them, and they are removed as each view migrates.
+ */
 :root {
   --bg: #fbfbfa;
   --fg: #1c1b1a;
@@ -19,24 +26,15 @@
   --goal: #a87c10;
 
   /*
-   * The style vocabulary the stride prototype settled: every gap draws from --sp-*, every rounded
-   * hover from the one radius. --wash and --trunk are pre-mixed opaque against the surface so
-   * overlapping strokes never darken at the joints; the mixes re-resolve per colour scheme.
+   * --wash and --trunk are pre-mixed opaque against the surface so overlapping strokes never
+   * darken at the joints; the mixes re-resolve per color scheme.
    */
-  --sp-1: 0.25rem;
-  --sp-2: 0.5rem;
-  --sp-3: 0.75rem;
-  --sp-4: 1rem;
-  --sp-6: 1.5rem;
-  --sp-8: 2rem;
-  --sp-12: 3rem;
-  --radius: 10px;
   --wash: color-mix(in srgb, var(--fg) 4.5%, transparent);
   --trunk: color-mix(in srgb, var(--fg) 55%, var(--bg));
 
   color-scheme: light dark;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  line-height: 1.5;
+  font-family: var(--sys-font-family-ui);
+  line-height: var(--sys-typescale-body-line-height);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -63,15 +61,16 @@ body {
 }
 
 .shell {
-  max-width: 44rem;
+  max-width: var(--sys-size-page-narrow);
   margin: 0 auto;
-  padding: 2.5rem 1.5rem 4rem;
+  padding: var(--sys-space-section-sm) var(--sys-space-xl) var(--sys-space-section-lg);
 }
 
 .shell h1 {
-  margin: 0 0 0.5rem;
-  font-size: 2rem;
-  letter-spacing: -0.02em;
+  margin: 0 0 var(--sys-space-sm);
+  font-size: var(--sys-typescale-title-size);
+  letter-spacing: var(--sys-typescale-title-letter-spacing);
+  line-height: var(--sys-typescale-title-line-height);
 }
 
 .muted {

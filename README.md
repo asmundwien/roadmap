@@ -9,6 +9,7 @@ Roadmap is a pnpm workspace:
 - `apps/web` is the Vite and React SPA.
 - `apps/server` maintains the single `ApplicationState` and owns all external integrations.
 - `packages/contracts` defines shared domain types and runtime codecs for transport messages.
+- `packages/ui` is the design system: tokens and presentational components, with no domain knowledge.
 
 The server sends full state replacements over WebSocket. HTTP carries queries and commands. The browser renders server state and never receives credentials.
 

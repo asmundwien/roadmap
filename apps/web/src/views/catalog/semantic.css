@@ -1,11 +1,11 @@
 .catalog-semantic-palette,
 .catalog-semantic-group {
   display: grid;
-  gap: var(--sp-6);
+  gap: var(--sys-space-xl);
 }
 
 .catalog-semantic-group {
-  gap: var(--sp-3);
+  gap: var(--sys-space-md);
 }
 
 .catalog-semantic-group h3,
@@ -26,13 +26,13 @@
 .catalog-semantic-pairs {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
-  gap: var(--sp-3);
+  gap: var(--sys-space-md);
 }
 
 .catalog-semantic-pair {
   display: grid;
   min-height: 8rem;
-  padding: var(--sp-3);
+  padding: var(--sys-space-md);
   border: 1px solid var(--sys-color-outline);
 }
 
@@ -61,8 +61,8 @@
 .catalog-semantic-support > div {
   display: grid;
   grid-template-columns: 2rem minmax(0, 1fr);
-  gap: 0 var(--sp-2);
-  padding: var(--sp-3);
+  gap: 0 var(--sys-space-sm);
+  padding: var(--sys-space-md);
 }
 
 .catalog-semantic-support > div:nth-child(even) {
@@ -94,7 +94,7 @@
 }
 
 .catalog-semantic-support p {
-  margin-top: var(--sp-1);
+  margin-top: var(--sys-space-xs);
   color: var(--muted);
   font-size: 0.7rem;
 }

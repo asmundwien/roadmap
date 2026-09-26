@@ -1,13 +1,13 @@
 .catalog-mark-examples {
   display: grid;
-  gap: var(--sp-6);
+  gap: var(--sys-space-xl);
 }
 
 .catalog-mark-matrix {
   display: grid;
   grid-template-columns: minmax(4rem, 1fr) repeat(5, minmax(3.5rem, 1fr));
   align-items: center;
-  gap: var(--sp-2);
+  gap: var(--sys-space-sm);
 }
 
 .catalog-column-label,
@@ -31,20 +31,20 @@
 
 .catalog-mark-group {
   display: grid;
-  gap: var(--sp-2);
+  gap: var(--sys-space-sm);
 }
 
 .catalog-mark-row {
   display: flex;
   flex-wrap: wrap;
   align-items: end;
-  gap: var(--sp-6);
+  gap: var(--sys-space-xl);
 }
 
 .catalog-mark-cell {
   display: grid;
   justify-items: center;
-  gap: var(--sp-2);
+  gap: var(--sys-space-sm);
 }
 
 .catalog-mark-cell code {
@@ -54,6 +54,6 @@
 @media (max-width: 780px) {
   .catalog-mark-matrix {
     grid-template-columns: minmax(3rem, 1fr) repeat(5, minmax(2.75rem, 1fr));
-    gap: var(--sp-1);
+    gap: var(--sys-space-xs);
   }
 }

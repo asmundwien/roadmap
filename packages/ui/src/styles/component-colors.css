@@ -9,8 +9,8 @@
  *   .badge--danger { color: var(--comp-badge-danger-color); }
  *
  * Every token aliases exactly one semantic role, so a scheme change is resolved once in
- * semantic-colors.css and no component needs a dark-mode rule of its own.
- * Legacy components migrate into this layer one component at a time.
+ * semantic-colors.css and no component needs a dark-mode rule of its own. A token may tint
+ * currentColor when the value has to follow whichever variant the component is rendered with.
  *
  * @see https://m3.material.io/foundations/design-tokens/overview
  * @see https://m3.material.io/styles/color/roles
@@ -27,6 +27,8 @@
   --comp-action-danger-label-color: var(--sys-color-error);
   --comp-action-danger-hover-container-color: var(--sys-color-error-container);
   --comp-action-danger-hover-label-color: var(--sys-color-on-error-container);
+  --comp-action-disabled-outline-color: var(--sys-color-outline-variant);
+  --comp-action-disabled-label-color: var(--sys-color-outline);
 
   /* Alert. */
   --comp-alert-outline-color: var(--sys-color-outline-variant);
@@ -38,6 +40,7 @@
   --comp-alert-info-content-color: var(--sys-color-on-info-container);
 
   /* Badge. */
+  --comp-badge-container-color: color-mix(in srgb, currentColor 9%, transparent);
   --comp-badge-neutral-color: var(--sys-color-on-surface-variant);
   --comp-badge-accent-color: var(--sys-color-primary);
   --comp-badge-warning-color: var(--sys-color-warning);

@@ -1,6 +1,6 @@
 # Mark
 
-`Mark` is the diamond icon primitive in `apps/web/src/components/mark/mark.tsx`. It renders one complete SVG at one of three sizes and knows nothing about tickets, Automation, or any other domain concept.
+`Mark` is the diamond icon primitive in `packages/ui/src/components/mark/mark.tsx`, exported from `@roadmap/ui`. It renders one complete SVG at one of three sizes and knows nothing about tickets, Automation, or any other domain concept.
 
 ## Interface
 
@@ -54,9 +54,9 @@ A decided ticket replaces its type glyph with a check mark. Its type stays visib
 
 Do not add map coordinates to `Mark`. `MEDIUM_MARK_EXTENT` exports half the drawn width of a medium mark for views that lay out around one, such as the Automation ribbon in `ticket-node.tsx`.
 
-## Color tokens
+## Tokens
 
-`apps/web/src/styles/component-colors.css` defines `--comp-mark-surface-color` plus one token per `Variant`. Every token aliases a semantic role. The component does not read reference colors or view-level aliases such as `--state-blocked`.
+`packages/ui/src/styles/component-colors.css` defines `--comp-mark-surface-color` plus one token per `Variant`, and `component-space.css` and `component-typography.css` define the inline margin and the glyph weight. Every token aliases a semantic role. The component does not read reference tokens or view-level aliases such as `--state-blocked`. Stroke widths and the glyph size stay literal in `mark.css`: they are viewBox units that scale with the drawing, not layout dimensions.
 
 ## Accessibility
 

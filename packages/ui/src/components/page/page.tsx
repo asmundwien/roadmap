@@ -5,7 +5,7 @@ import './page.css'
 export type PageProps = HTMLAttributes<HTMLElement>
 
 export function Page({ className, ...props }: PageProps) {
-  return <main className={cn('shell page', className)} {...props} />
+  return <main className={cn('page', className)} {...props} />
 }
 
 export type PageHeaderProps = HTMLAttributes<HTMLElement>

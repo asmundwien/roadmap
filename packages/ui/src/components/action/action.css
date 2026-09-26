@@ -1,0 +1,85 @@
+.action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--comp-action-height);
+  padding: var(--comp-action-block-padding) var(--comp-action-inline-padding);
+  border: var(--comp-action-border-width) solid var(--comp-action-outline-color);
+  border-radius: var(--comp-action-radius);
+  background: transparent;
+  color: var(--comp-action-label-color);
+  font-family: var(--comp-action-font-family);
+  font-size: var(--comp-action-font-size);
+  font-weight: var(--comp-action-font-weight);
+  line-height: var(--comp-action-line-height);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+/* Adjacent actions share one border, so a group reads as a single bar of controls. */
+.action + .action {
+  border-left: 0;
+}
+
+.action:hover:not(:disabled),
+.action:focus-visible {
+  background: var(--comp-action-hover-container-color);
+  color: var(--comp-action-hover-label-color);
+}
+
+.action-strong {
+  background: var(--comp-action-strong-container-color);
+  color: var(--comp-action-strong-label-color);
+  font-weight: var(--comp-action-strong-font-weight);
+}
+
+.action-danger {
+  color: var(--comp-action-danger-label-color);
+}
+
+.action-danger:hover:not(:disabled) {
+  background: var(--comp-action-danger-hover-container-color);
+  color: var(--comp-action-danger-hover-label-color);
+}
+
+/* A disabled action drops to the muted pair rather than fading, so its label stays readable. */
+.action:disabled {
+  border-color: var(--comp-action-disabled-outline-color);
+  color: var(--comp-action-disabled-label-color);
+  cursor: not-allowed;
+}
+
+.action-field {
+  min-height: var(--comp-action-field-height);
+}
+
+.action-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--comp-action-group-gap);
+}
+
+.action-group-form {
+  justify-content: flex-end;
+  margin-top: var(--comp-action-group-form-margin);
+}
+
+/*
+ * Breakpoints are not tokens: custom properties do not resolve inside a media query, so the
+ * width stays literal here.
+ */
+@media (max-width: 640px) {
+  .action-group-connection {
+    grid-column: 2;
+    align-items: flex-start;
+    justify-content: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .action {
+    transition:
+      color var(--comp-action-transition-duration) var(--comp-action-transition-easing),
+      background var(--comp-action-transition-duration) var(--comp-action-transition-easing);
+  }
+}

@@ -1,12 +1,12 @@
 .catalog-action-examples {
   display: grid;
-  gap: var(--sp-6);
+  gap: var(--sys-space-xl);
 }
 
 .catalog-action-example {
   display: grid;
   justify-items: start;
-  gap: var(--sp-2);
+  gap: var(--sys-space-sm);
 }
 
 .catalog-action-example header,

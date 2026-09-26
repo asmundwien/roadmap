@@ -1,8 +1,8 @@
 .catalog-section {
   display: grid;
   grid-template-columns: minmax(12rem, 16rem) minmax(0, 1fr);
-  gap: var(--sp-8);
-  padding: var(--sp-8) 0;
+  gap: var(--sys-space-2xl);
+  padding: var(--sys-space-2xl) 0;
   border-top: 1px solid var(--edge);
 }
 
@@ -17,7 +17,7 @@
 }
 
 .catalog-section > header p {
-  margin-top: var(--sp-2);
+  margin-top: var(--sys-space-sm);
   color: var(--muted);
   font-size: 0.8rem;
 }
@@ -25,13 +25,13 @@
 .catalog-component-token-list {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--sp-1) var(--sp-3);
+  gap: var(--sys-space-xs) var(--sys-space-md);
   font-size: 0.66rem;
 }
 
 @media (max-width: 780px) {
   .catalog-section {
     grid-template-columns: 1fr;
-    gap: var(--sp-4);
+    gap: var(--sys-space-lg);
   }
 }

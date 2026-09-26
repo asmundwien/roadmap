@@ -1,0 +1,56 @@
+/**
+ * System space tokens name what a dimension is for and alias the reference ladder.
+ *
+ * Fits: the step scale a layout draws from, page rhythm, control heights, content widths,
+ * border weights, and corner shapes.
+ * Does not fit: literal dimensions, component parts, or product-specific measurements.
+ *
+ * Usage:
+ *   gap: var(--sys-space-sm);
+ *   padding-inline: var(--sys-space-md);
+ *   border-bottom: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
+ *
+ * One ladder covers gaps, padding, and margins inside a component; --sys-space-section-*
+ * separates regions of a page and is deliberately coarser. Views may read these roles directly;
+ * a component part that repeats gets a --comp-* token instead.
+ *
+ * Breakpoints are not tokens: custom properties do not resolve in media queries, so those widths
+ * stay literal in the stylesheet that needs them.
+ *
+ * @see https://m3.material.io/foundations/layout/applying-layout/window-size-classes
+ * @see https://primer.style/foundations/primitives/size
+ */
+:root {
+  /* Steps for gaps, padding, and margins within a component. */
+  --sys-space-none: var(--ref-space-0);
+  --sys-space-2xs: var(--ref-space-2);
+  --sys-space-xs: var(--ref-space-4);
+  --sys-space-sm: var(--ref-space-8);
+  --sys-space-md: var(--ref-space-12);
+  --sys-space-lg: var(--ref-space-16);
+  --sys-space-xl: var(--ref-space-24);
+  --sys-space-2xl: var(--ref-space-32);
+
+  /* Rhythm between the regions of a page. */
+  --sys-space-section-sm: var(--ref-space-40);
+  --sys-space-section-md: var(--ref-space-48);
+  --sys-space-section-lg: var(--ref-space-64);
+
+  /* Control heights, so buttons, fields, and chips line up on one baseline grid. */
+  --sys-size-control-sm: var(--ref-size-32);
+  --sys-size-control-md: var(--ref-size-36);
+  --sys-size-control-lg: var(--ref-size-40);
+
+  /* Content widths. */
+  --sys-size-measure: var(--ref-size-640);
+  --sys-size-page-narrow: var(--ref-size-768);
+  --sys-size-page-wide: var(--ref-size-1200);
+
+  /* Border weights. */
+  --sys-border-width-thin: var(--ref-border-width-1);
+  --sys-border-width-thick: var(--ref-border-width-3);
+
+  /* Corner shapes. */
+  --sys-radius-square: var(--ref-radius-0);
+  --sys-radius-pill: var(--ref-radius-full);
+}

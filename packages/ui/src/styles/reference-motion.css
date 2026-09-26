@@ -1,0 +1,22 @@
+/**
+ * Reference motion tokens hold literal durations and easing curves with no role meaning.
+ *
+ * Fits: millisecond durations named for their value, and named cubic-bezier curves.
+ * Does not fit: what a transition is for, component parts, or aliases of other tokens.
+ *
+ * Usage, from the semantic layer only:
+ *   --sys-motion-duration-short: var(--ref-duration-150);
+ *
+ * Components and page stylesheets read --sys-* or --comp-*, never --ref-*.
+ * Every animated rule stays inside a `prefers-reduced-motion: no-preference` query, so no token
+ * here needs a zero-duration twin.
+ *
+ * @see https://m3.material.io/styles/motion/easing-and-duration/tokens-specs
+ * @see https://www.w3.org/TR/WCAG22/#animation-from-interactions
+ */
+:root {
+  --ref-duration-150: 150ms;
+  --ref-duration-300: 300ms;
+
+  --ref-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+}

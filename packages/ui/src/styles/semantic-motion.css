@@ -1,0 +1,20 @@
+/**
+ * System motion tokens name what a transition is for and alias the reference durations.
+ *
+ * Fits: duration roles by the distance the change travels, and easing roles.
+ * Does not fit: literal durations, curves, or component parts.
+ *
+ * Usage:
+ *   transition: background var(--sys-motion-duration-short) var(--sys-motion-easing-standard);
+ *
+ * Short covers a state change in place, such as a hover or a focus ring. Medium covers an
+ * element entering or leaving the layout.
+ *
+ * @see https://m3.material.io/styles/motion/easing-and-duration/applying-easing-and-duration
+ */
+:root {
+  --sys-motion-duration-short: var(--ref-duration-150);
+  --sys-motion-duration-medium: var(--ref-duration-300);
+
+  --sys-motion-easing-standard: var(--ref-easing-standard);
+}

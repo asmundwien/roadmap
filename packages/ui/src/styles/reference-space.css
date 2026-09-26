@@ -1,0 +1,51 @@
+/**
+ * Reference space tokens hold literal dimensions with no role or component meaning.
+ *
+ * Fits: the spacing ladder, control heights, layout widths, border widths, and corner radii.
+ * Does not fit: purpose names, component parts, breakpoints, or aliases of other tokens.
+ *
+ * Every step is named for the pixel size it resolves to at a 16px root and is written in rem so
+ * the whole layout scales with the user's font size. Border widths and radii stay in px: they are
+ * hairlines and corner geometry, not text-relative rhythm.
+ *
+ * Usage, from the semantic layer only:
+ *   --sys-space-sm: var(--ref-space-8);
+ *
+ * Components and page stylesheets read --sys-* or --comp-*, never --ref-*.
+ * Add a step only when a semantic role needs it, and keep the 4px rhythm when adding one.
+ *
+ * @see https://m3.material.io/foundations/layout/understanding-layout/spacing
+ * @see https://primer.style/foundations/primitives/size
+ */
+:root {
+  /* The spacing ladder: gaps, padding, and margins all resolve here. */
+  --ref-space-0: 0;
+  --ref-space-2: 0.125rem;
+  --ref-space-4: 0.25rem;
+  --ref-space-8: 0.5rem;
+  --ref-space-12: 0.75rem;
+  --ref-space-16: 1rem;
+  --ref-space-24: 1.5rem;
+  --ref-space-32: 2rem;
+  --ref-space-40: 2.5rem;
+  --ref-space-48: 3rem;
+  --ref-space-64: 4rem;
+
+  /* Control heights. */
+  --ref-size-32: 2rem;
+  --ref-size-36: 2.25rem;
+  --ref-size-40: 2.5rem;
+
+  /* Layout widths. */
+  --ref-size-640: 40rem;
+  --ref-size-768: 48rem;
+  --ref-size-1200: 75rem;
+
+  /* Border widths. */
+  --ref-border-width-1: 1px;
+  --ref-border-width-3: 3px;
+
+  /* Corner radii. */
+  --ref-radius-0: 0;
+  --ref-radius-full: 9999px;
+}

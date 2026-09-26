@@ -8,8 +8,8 @@
   display: flex;
   align-items: end;
   justify-content: space-between;
-  gap: var(--sp-4);
-  margin-bottom: var(--sp-8);
+  gap: var(--sys-space-lg);
+  margin-bottom: var(--sys-space-2xl);
 }
 
 .settings-head h1,
@@ -31,7 +31,7 @@
 .settings-layout {
   display: grid;
   grid-template-columns: minmax(30rem, 1fr) minmax(18rem, 23rem);
-  gap: var(--sp-8);
+  gap: var(--sys-space-2xl);
   align-items: start;
 }
 
@@ -138,19 +138,19 @@
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: var(--sp-1);
+  gap: var(--sys-space-xs);
 }
 
 .settings-detail {
   position: sticky;
   top: 74px;
   min-width: 0;
-  padding: 0.25rem 0 var(--sp-4) var(--sp-6);
+  padding: 0.25rem 0 var(--sys-space-lg) var(--sys-space-xl);
   border-left: 1px solid var(--edge);
 }
 
 .settings-detail h2 {
-  margin: 0 0 var(--sp-4);
+  margin: 0 0 var(--sys-space-lg);
   font-size: 1.2rem;
   letter-spacing: -0.02em;
 }
@@ -159,14 +159,14 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--sp-2);
+  gap: var(--sys-space-sm);
 }
 
 .settings-facts {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 0.6rem 0.8rem;
-  margin: var(--sp-6) 0;
+  margin: var(--sys-space-xl) 0;
   font-size: 0.8rem;
 }
 
@@ -184,8 +184,8 @@
 .settings-links {
   display: flex;
   flex-direction: column;
-  margin: var(--sp-4) 0;
-  padding: var(--sp-3) 0;
+  margin: var(--sys-space-lg) 0;
+  padding: var(--sys-space-md) 0;
   border-top: 1px solid var(--edge);
   border-bottom: 1px solid var(--edge);
 }
@@ -194,10 +194,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--sp-3);
+  gap: var(--sys-space-md);
   width: calc(100% + 1rem);
   margin: 0 -0.5rem;
-  padding: var(--sp-2);
+  padding: var(--sys-space-sm);
   border: 0;
   background: transparent;
   color: inherit;
@@ -241,7 +241,7 @@
   display: flex;
   flex-direction: column;
   margin-left: 6rem;
-  padding: var(--sp-4);
+  padding: var(--sys-space-lg);
   border: 1px solid var(--edge);
   background: var(--bg);
   color: var(--muted);
@@ -259,7 +259,7 @@
 }
 
 .settings-error {
-  margin: var(--sp-3) 0;
+  margin: var(--sys-space-md) 0;
 }
 
 .settings-scrim {
@@ -276,7 +276,7 @@
   width: min(34rem, 100%);
   height: 100%;
   overflow: auto;
-  padding: var(--sp-6);
+  padding: var(--sys-space-xl);
   border-left: 1px solid var(--edge);
   background: var(--bg);
   box-shadow: -18px 0 48px rgb(0 0 0 / 18%);
@@ -284,8 +284,8 @@
 
 .settings-close {
   position: absolute;
-  top: var(--sp-4);
-  right: var(--sp-4);
+  top: var(--sys-space-lg);
+  right: var(--sys-space-lg);
   display: grid;
   place-items: center;
   width: 36px;
@@ -305,7 +305,7 @@
 
 .settings-flow-head {
   padding-right: 3rem;
-  margin-bottom: var(--sp-6);
+  margin-bottom: var(--sys-space-xl);
 }
 
 .settings-flow-head h2,
@@ -327,7 +327,7 @@
 .settings-form {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-4);
+  gap: var(--sys-space-lg);
 }
 
 .settings-form label {
@@ -399,8 +399,8 @@
 
 .settings-repair,
 .settings-danger {
-  margin-top: var(--sp-8);
-  padding-top: var(--sp-6);
+  margin-top: var(--sys-space-2xl);
+  padding-top: var(--sys-space-xl);
   border-top: 1px solid var(--edge);
 }
 
@@ -416,10 +416,10 @@
 
 .device-code {
   display: grid;
-  gap: var(--sp-2);
+  gap: var(--sys-space-sm);
   place-items: center;
   min-height: 10rem;
-  margin: var(--sp-6) 2px;
+  margin: var(--sys-space-xl) 2px;
   border: 1px solid var(--edge);
   outline: 1px solid var(--edge);
   outline-offset: 2px;
@@ -469,7 +469,7 @@
   position: relative;
   display: grid;
   grid-template-columns: 2rem minmax(0, 1fr) auto;
-  gap: var(--sp-3);
+  gap: var(--sys-space-md);
   align-items: center;
   width: calc(100% - 9rem);
   min-height: 50px;
@@ -539,7 +539,7 @@
 }
 
 .connection-inline-links {
-  margin: var(--sp-3) 0 0 9rem;
+  margin: var(--sys-space-md) 0 0 9rem;
   font-size: 0.76rem;
 }
 
@@ -551,9 +551,9 @@
 .connection-resource-band {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--sp-2) var(--sp-4);
-  margin-top: var(--sp-8);
-  padding: var(--sp-4) 0;
+  gap: var(--sys-space-sm) var(--sys-space-lg);
+  margin-top: var(--sys-space-2xl);
+  padding: var(--sys-space-lg) 0;
   border-top: 1px solid var(--edge);
   border-bottom: 1px solid var(--edge);
   font-size: 0.78rem;
@@ -567,10 +567,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--sp-4);
+  gap: var(--sys-space-lg);
   width: 100%;
-  margin-bottom: var(--sp-4);
-  padding: var(--sp-3);
+  margin-bottom: var(--sys-space-lg);
+  padding: var(--sys-space-md);
   border: 1px solid var(--edge);
   border-left: 3px solid var(--goal);
   background: var(--wash);
@@ -591,7 +591,7 @@
 .settings-dependent-list {
   display: flex;
   flex-direction: column;
-  margin: var(--sp-4) 0;
+  margin: var(--sys-space-lg) 0;
   border-top: 1px solid var(--edge);
   border-bottom: 1px solid var(--edge);
 }
@@ -600,8 +600,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--sp-4);
-  padding: var(--sp-2);
+  gap: var(--sys-space-lg);
+  padding: var(--sys-space-sm);
   color: inherit;
   font-size: 0.78rem;
   text-decoration: none;
@@ -621,7 +621,7 @@
 }
 
 .automation-head {
-  margin-bottom: var(--sp-6);
+  margin-bottom: var(--sys-space-xl);
 }
 
 .automation-road {
@@ -650,7 +650,7 @@
 }
 
 .automation-row.is-global {
-  margin-bottom: var(--sp-4);
+  margin-bottom: var(--sys-space-lg);
   border-top: 1px solid var(--edge);
   border-bottom-color: color-mix(in srgb, var(--goal) 38%, var(--edge));
 }
@@ -776,8 +776,8 @@
 .automation-verdict {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
-  margin: 0 0 var(--sp-4);
+  gap: var(--sys-space-sm);
+  margin: 0 0 var(--sys-space-lg);
   font-size: 0.82rem;
 }
 
@@ -786,7 +786,7 @@
 }
 
 .automation-explanation {
-  padding-top: var(--sp-4);
+  padding-top: var(--sys-space-lg);
   border-top: 1px solid var(--edge);
   color: var(--muted);
   font-size: 0.8rem;
@@ -805,8 +805,8 @@
 }
 
 .automation-evidence {
-  margin: var(--sp-6) 0 0;
-  padding-top: var(--sp-4);
+  margin: var(--sys-space-xl) 0 0;
+  padding-top: var(--sys-space-lg);
   border-top: 1px solid var(--edge);
 }
 
@@ -814,8 +814,8 @@
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: var(--sp-3);
-  margin-bottom: var(--sp-3);
+  gap: var(--sys-space-md);
+  margin-bottom: var(--sys-space-md);
 }
 
 .automation-evidence-head h3 {
@@ -832,7 +832,7 @@
 .automation-stage-totals {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--sp-4);
+  gap: var(--sys-space-lg);
 }
 
 .automation-stage-total {
@@ -840,7 +840,7 @@
   flex-direction: column;
   gap: 0.15rem;
   min-width: 0;
-  padding-left: var(--sp-3);
+  padding-left: var(--sys-space-md);
   border-left: 2px solid var(--state-closed);
   font-size: 0.72rem;
 }
@@ -864,7 +864,7 @@
 }
 
 .automation-evidence > p {
-  margin: var(--sp-4) 0;
+  margin: var(--sys-space-lg) 0;
   color: var(--muted);
   font-size: 0.76rem;
 }
@@ -876,7 +876,7 @@
 }
 
 .automation-evidence-tickets summary {
-  padding: var(--sp-2) 0;
+  padding: var(--sys-space-sm) 0;
   cursor: pointer;
 }
 
@@ -885,7 +885,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
-  padding: var(--sp-2);
+  padding: var(--sys-space-sm);
   border-top: 1px solid var(--edge);
   color: inherit;
   text-decoration: none;
@@ -913,7 +913,7 @@
 
   .settings-detail {
     position: static;
-    padding: var(--sp-6) 0 0;
+    padding: var(--sys-space-xl) 0 0;
     border-top: 1px solid var(--edge);
     border-left: 0;
   }

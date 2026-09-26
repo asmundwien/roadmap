@@ -1,4 +1,4 @@
-import { Alert } from '@/components/alert/alert'
+import { Alert } from '@roadmap/ui'
 import { CatalogSection, ComponentTokenList } from './section'
 import './alerts.css'
 

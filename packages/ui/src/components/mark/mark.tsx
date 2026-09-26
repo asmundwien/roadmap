@@ -1,5 +1,5 @@
 import cn from 'classnames'
-import type { Variant } from '@/components/variant'
+import type { Variant } from '../variant'
 import './mark.css'
 
 export type MarkSize = 'large' | 'medium' | 'small'

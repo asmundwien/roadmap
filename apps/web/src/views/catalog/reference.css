@@ -1,7 +1,7 @@
 .catalog-reference-palette,
 .catalog-reference-family {
   display: grid;
-  gap: var(--sp-4);
+  gap: var(--sys-space-lg);
 }
 
 .catalog-reference-family h3 {
@@ -12,7 +12,7 @@
 .catalog-reference-swatches {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
-  gap: var(--sp-3);
+  gap: var(--sys-space-md);
 }
 
 .catalog-reference-swatch {
@@ -20,7 +20,7 @@
   grid-template-columns: 2rem minmax(0, 1fr);
   align-items: center;
   min-width: 0;
-  column-gap: var(--sp-2);
+  column-gap: var(--sys-space-sm);
 }
 
 .catalog-reference-swatch > span {

@@ -1,4 +1,4 @@
-import { Action, ActionGroup } from '@/components/action/action'
+import { Action, ActionGroup } from '@roadmap/ui'
 import { CatalogSection, ComponentTokenList } from './section'
 import './actions.css'
 
@@ -20,6 +20,10 @@ const ACTION_DANGER_COLOR_TOKENS = [
   '--comp-action-danger-label-color',
   '--comp-action-danger-hover-container-color',
   '--comp-action-danger-hover-label-color',
+] as const
+const ACTION_DISABLED_COLOR_TOKENS = [
+  '--comp-action-disabled-outline-color',
+  '--comp-action-disabled-label-color',
 ] as const
 
 export function ActionsCatalogSection() {
@@ -78,13 +82,14 @@ export function ActionsCatalogSection() {
           <header>
             <h3>Unavailable</h3>
             <p>
-              Only buttons support this state. The native disabled attribute blocks activation; the
-              component keeps its base colors at 40% opacity.
+              Only buttons support this state. The native disabled attribute blocks activation, and
+              the outline and label drop to the muted pair so the label keeps its contrast.
             </p>
           </header>
           <Action type="button" disabled>
             Unavailable
           </Action>
+          <ComponentTokenList tokens={ACTION_DISABLED_COLOR_TOKENS} />
         </section>
 
         <section className="catalog-action-example">

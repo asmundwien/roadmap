@@ -1,0 +1,37 @@
+/* The page owns its own measure and gutters; it inherits no layout from the host application. */
+.page {
+  max-width: var(--comp-page-max-width);
+  margin-inline: auto;
+  padding-block: var(--comp-page-block-start-padding) var(--comp-page-block-end-padding);
+  padding-inline: var(--comp-page-inline-padding);
+}
+
+.page-header {
+  max-width: var(--comp-page-header-max-width);
+  margin-block-end: var(--comp-page-header-margin);
+}
+
+.page-header-eyebrow {
+  margin: 0 0 var(--comp-page-eyebrow-margin);
+  color: var(--comp-page-eyebrow-color);
+  font-family: var(--comp-page-eyebrow-font-family);
+  font-size: var(--comp-page-eyebrow-font-size);
+  font-weight: var(--comp-page-eyebrow-font-weight);
+  letter-spacing: var(--comp-page-eyebrow-letter-spacing);
+  line-height: var(--comp-page-eyebrow-line-height);
+  text-transform: uppercase;
+}
+
+.page-header-title {
+  margin: 0 0 var(--comp-page-title-margin);
+  font-size: var(--comp-page-title-font-size);
+  letter-spacing: var(--comp-page-title-letter-spacing);
+  line-height: var(--comp-page-title-line-height);
+}
+
+.page-header-description {
+  margin: 0;
+  color: var(--comp-page-description-color);
+  font-size: var(--comp-page-description-font-size);
+  line-height: var(--comp-page-description-line-height);
+}

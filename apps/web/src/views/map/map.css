@@ -330,10 +330,10 @@
 /* ---------------------------------------------------------------- the flagline */
 
 /*
- * The accordion of strides. Pixel values that are NOT on the --sp-* scale are ledger-derived:
- * the svg renders at 1.25× its 900-unit viewBox, so 3.125px (trunk), 45px/25px (flag halo and
- * glyph), and 11.25px (caption type) are the ledger's own dimensions expressed in CSS, and stay
- * exact rather than rounded to the scale.
+ * The accordion of strides. Pixel values that are NOT on the --sys-space-* scale are
+ * ledger-derived: the svg renders at 1.25× its 900-unit viewBox, so 3.125px (trunk), 45px/25px
+ * (flag halo and glyph), and 11.25px (caption type) are the ledger's own dimensions expressed in
+ * CSS, and stay exact rather than rounded to the scale.
  */
 
 .fl-trace {
@@ -345,7 +345,7 @@
   display: flex;
   align-items: center;
   width: 100%;
-  padding: var(--sp-4) var(--sp-2) var(--sp-4) 0;
+  padding: var(--sys-space-lg) var(--sys-space-sm) var(--sys-space-lg) 0;
   background: none;
   border: none;
   font: inherit;
@@ -443,7 +443,7 @@
 .fl-body {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-1);
+  gap: var(--sys-space-xs);
   min-width: 0;
 }
 
@@ -476,7 +476,7 @@
 .fl-meta {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
+  gap: var(--sys-space-sm);
 }
 
 .fl-flaw {
@@ -638,7 +638,7 @@
 }
 
 .panel-body {
-  padding: var(--sp-4) var(--sp-6) var(--sp-6);
+  padding: var(--sys-space-lg) var(--sys-space-xl) var(--sys-space-xl);
 }
 
 /* ---------------------------------------------------------------- the Panel's content */
@@ -646,7 +646,7 @@
 /* The printed-map legend box: a double rule, squarer than the app's hover radius. Inside the
  * Panel it sheds its chrome — the Panel's own borders carry the framing. */
 .cartouche {
-  padding: var(--sp-4);
+  padding: var(--sys-space-lg);
   border: 1px solid var(--edge);
   outline: 1px solid var(--edge);
   outline-offset: 2px;
@@ -663,7 +663,7 @@
 }
 
 .cart-caption {
-  margin: 0 0 var(--sp-2);
+  margin: 0 0 var(--sys-space-sm);
   font-size: 0.7rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -672,7 +672,7 @@
 }
 
 .cart-head {
-  margin: var(--sp-3) 0 var(--sp-1);
+  margin: var(--sys-space-md) 0 var(--sys-space-xs);
   font-size: 0.7rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -691,7 +691,7 @@
 }
 
 .cart-warn {
-  margin: var(--sp-3) 0 0;
+  margin: var(--sys-space-md) 0 0;
   font-size: 0.8rem;
   color: var(--goal);
 }
@@ -706,13 +706,13 @@
 .panel-item-state {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
-  margin: var(--sp-1) 0 var(--sp-3);
+  gap: var(--sys-space-sm);
+  margin: var(--sys-space-xs) 0 var(--sys-space-md);
   color: var(--muted);
   font-size: 0.8rem;
 }
 .automation-evidence {
-  margin: var(--sp-2) 0 var(--sp-4);
+  margin: var(--sys-space-sm) 0 var(--sys-space-lg);
 }
 
 .automation-tracker-fact,
@@ -721,12 +721,12 @@
 }
 
 .automation-tracker-fact {
-  padding-bottom: var(--sp-2);
+  padding-bottom: var(--sys-space-sm);
 }
 
 .automation-stage {
-  margin-top: var(--sp-2);
-  padding: var(--sp-2) 0 var(--sp-2) var(--sp-3);
+  margin-top: var(--sys-space-sm);
+  padding: var(--sys-space-sm) 0 var(--sys-space-sm) var(--sys-space-md);
   border-left: 3px solid var(--muted);
 }
 
@@ -739,7 +739,7 @@
 }
 
 .automation-stage h3 {
-  margin: 0 0 var(--sp-2);
+  margin: 0 0 var(--sys-space-sm);
   font-size: 0.78rem;
   letter-spacing: 0.04em;
 }
@@ -756,7 +756,7 @@
 .automation-stage dl > div {
   display: grid;
   grid-template-columns: 6.5rem minmax(0, 1fr);
-  gap: var(--sp-2);
+  gap: var(--sys-space-sm);
   padding: 0.15rem 0;
 }
 
@@ -791,31 +791,31 @@
 }
 
 .automation-override-intro {
-  margin: 0 0 var(--sp-2);
+  margin: 0 0 var(--sys-space-sm);
   font-size: 0.8rem;
   color: var(--muted);
 }
 
 .automation-evidence + .automation-override-intro {
-  margin-top: var(--sp-3);
+  margin-top: var(--sys-space-md);
 }
 
 .automation-override-actions {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-2);
+  gap: var(--sys-space-sm);
 }
 
 .automation-override-action {
   display: grid;
   grid-template-columns: minmax(8.5rem, 0.8fr) 1fr;
-  gap: var(--sp-2);
+  gap: var(--sys-space-sm);
   align-items: center;
 }
 
 .automation-override-action button {
   min-height: 2.2rem;
-  padding: var(--sp-1) var(--sp-2);
+  padding: var(--sys-space-xs) var(--sys-space-sm);
   border: 1px solid var(--edge);
   border-radius: 3px;
   background: var(--bg);
@@ -855,7 +855,7 @@
 
 .automation-override-notice,
 .automation-override-error {
-  margin: var(--sp-2) 0 0;
+  margin: var(--sys-space-sm) 0 0;
 }
 
 .automation-override-notice {
@@ -878,8 +878,8 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 0.1rem;
-  margin: 0 calc(-1 * var(--sp-2));
-  padding: var(--sp-2);
+  margin: 0 calc(-1 * var(--sys-space-sm));
+  padding: var(--sys-space-sm);
   background: none;
   border: none;
   font: inherit;
@@ -902,7 +902,7 @@
 .item-link-state {
   display: flex;
   align-items: center;
-  gap: var(--sp-1);
+  gap: var(--sys-space-xs);
   color: var(--muted);
   font-size: 0.72rem;
 }
@@ -924,7 +924,7 @@
 /* A full-column rule between the issue body and the blocked-by list: it breaks out of the
  * Panel body's side padding, so it spans the whole column like the navbar's own borders. */
 .panel-rule {
-  margin: var(--sp-4) calc(-1 * var(--sp-6));
+  margin: var(--sys-space-lg) calc(-1 * var(--sys-space-xl));
   border: none;
   border-top: 1px solid var(--edge);
 }
@@ -962,7 +962,7 @@
 .prose h4,
 .prose h5,
 .prose h6 {
-  margin: var(--sp-3) 0 var(--sp-1);
+  margin: var(--sys-space-md) 0 var(--sys-space-xs);
   font-size: 0.95rem;
   font-weight: 600;
   color: var(--fg);
@@ -1034,7 +1034,7 @@
 }
 
 .prose pre {
-  padding: var(--sp-3);
+  padding: var(--sys-space-md);
   border: 1px solid var(--edge);
   border-radius: 4px;
   background: var(--wash);
@@ -1049,7 +1049,7 @@
 }
 
 .prose blockquote {
-  padding-left: var(--sp-3);
+  padding-left: var(--sys-space-md);
   border-left: 3px solid var(--edge);
   color: var(--muted);
 }
@@ -1074,14 +1074,14 @@
 }
 
 .prose hr {
-  margin: var(--sp-3) 0;
+  margin: var(--sys-space-md) 0;
   border: none;
   border-top: 1px solid var(--edge);
 }
 
 /* Rides just under the caption, above the title — the way out to the source, always in reach. */
 .gh-row {
-  margin: 0 0 var(--sp-3);
+  margin: 0 0 var(--sys-space-md);
 }
 
 .gh-link {

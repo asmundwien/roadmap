@@ -1,0 +1,56 @@
+/**
+ * System typography tokens name text roles and alias the reference type values.
+ *
+ * Fits: typefaces, weights, and typescale roles that pair a size with the line height and
+ * tracking it was drawn against.
+ * Does not fit: literal type values, component parts, or product-specific meanings.
+ *
+ * Usage:
+ *   font-family: var(--sys-font-family-ui);
+ *   font-size: var(--sys-typescale-body-size);
+ *   line-height: var(--sys-typescale-body-line-height);
+ *
+ * Keep the members of a typescale role together: a size that is used without its line height
+ * breaks the vertical rhythm it was chosen for.
+ *
+ * @see https://m3.material.io/styles/typography/applying-type
+ * @see https://primer.style/foundations/primitives/typography
+ */
+:root {
+  /* Typefaces. */
+  --sys-font-family-ui: var(--ref-font-family-sans);
+  --sys-font-family-code: var(--ref-font-family-mono);
+
+  /* Weights. */
+  --sys-font-weight-regular: var(--ref-font-weight-400);
+  --sys-font-weight-medium: var(--ref-font-weight-500);
+  --sys-font-weight-strong: var(--ref-font-weight-600);
+  --sys-font-weight-bold: var(--ref-font-weight-700);
+  --sys-font-weight-black: var(--ref-font-weight-900);
+
+  /* Title: the one heading that names a page or a screen. */
+  --sys-typescale-title-size: var(--ref-font-size-32);
+  --sys-typescale-title-line-height: var(--ref-line-height-110);
+  --sys-typescale-title-letter-spacing: var(--ref-letter-spacing-tight);
+
+  /* Body: prose read at length. */
+  --sys-typescale-body-size: var(--ref-font-size-16);
+  --sys-typescale-body-line-height: var(--ref-line-height-150);
+
+  /* Body small: dense supporting prose. */
+  --sys-typescale-body-sm-size: var(--ref-font-size-13);
+  --sys-typescale-body-sm-line-height: var(--ref-line-height-150);
+
+  /* Label: text inside a control. */
+  --sys-typescale-label-size: var(--ref-font-size-13);
+  --sys-typescale-label-line-height: var(--ref-line-height-130);
+
+  /* Label small: chips, counts, and metadata. */
+  --sys-typescale-label-sm-size: var(--ref-font-size-11);
+  --sys-typescale-label-sm-line-height: var(--ref-line-height-130);
+
+  /* Overline: the uppercase eyebrow above a title. */
+  --sys-typescale-overline-size: var(--ref-font-size-11);
+  --sys-typescale-overline-line-height: var(--ref-line-height-130);
+  --sys-typescale-overline-letter-spacing: var(--ref-letter-spacing-wide);
+}

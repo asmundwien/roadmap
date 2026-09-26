@@ -1,5 +1,4 @@
-import { Badge } from '@/components/badge/badge'
-import type { Variant } from '@/components/variant'
+import { Badge, type Variant } from '@roadmap/ui'
 import { CatalogSection } from './section'
 import './badges.css'
 

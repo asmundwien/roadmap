@@ -1,0 +1,18 @@
+/**
+ * Component motion tokens describe the transitions of rendered component parts.
+ *
+ * Fits: one token per component part, named
+ * --comp-<component>-<variant>-<part>-<transition-duration|transition-easing>.
+ * Does not fit: literal durations, reference tokens, or tokens shared by several components.
+ *
+ * Usage:
+ *   --comp-action-transition-duration: var(--sys-motion-duration-short);
+ *   .action { transition: background var(--comp-action-transition-duration) …; }
+ *
+ * @see https://m3.material.io/styles/motion/easing-and-duration/applying-easing-and-duration
+ */
+:root {
+  /* Action. */
+  --comp-action-transition-duration: var(--sys-motion-duration-short);
+  --comp-action-transition-easing: var(--sys-motion-easing-standard);
+}

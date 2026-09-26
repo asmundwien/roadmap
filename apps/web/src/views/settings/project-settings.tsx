@@ -9,9 +9,8 @@ import type {
   RegisteredProject,
   SafeError,
 } from '@roadmap/contracts'
+import { Action, ActionGroup, Alert } from '@roadmap/ui'
 import { type FormEvent, useState } from 'react'
-import { Action, ActionGroup } from '@/components/action/action'
-import { Alert } from '@/components/alert/alert'
 import { projectHash } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { IntegrationBadge } from './integration-badge'

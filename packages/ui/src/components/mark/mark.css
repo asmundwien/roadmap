@@ -1,3 +1,8 @@
+/*
+ * Stroke widths, the glyph size, and the optical baseline nudge below are in the mark's own
+ * viewBox units, not layout dimensions: they scale with the rendered mark and mean nothing
+ * outside this drawing. Layout-facing dimensions read --comp-mark-* tokens.
+ */
 .mark {
   display: block;
   overflow: visible;
@@ -66,7 +71,7 @@
 
 .mark-small {
   display: inline-block;
-  margin-right: 0.25em;
+  margin-right: var(--comp-mark-inline-margin);
   vertical-align: -0.13em;
 }
 
@@ -95,7 +100,7 @@
   stroke: var(--comp-mark-surface-color);
   stroke-width: 3.5px;
   font-size: 9.25px;
-  font-weight: 900;
+  font-weight: var(--comp-mark-glyph-font-weight);
 }
 
 .mark.fill-solid .mark-glyph {
