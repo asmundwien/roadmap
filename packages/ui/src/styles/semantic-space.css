@@ -42,6 +42,7 @@
   --sys-size-control-lg: var(--ref-size-40);
 
   /* Content widths. */
+  --sys-size-sidebar: var(--ref-size-256);
   --sys-size-measure: var(--ref-size-640);
   --sys-size-page-narrow: var(--ref-size-768);
   --sys-size-page-wide: var(--ref-size-1200);

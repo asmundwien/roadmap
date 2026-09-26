@@ -1,9 +1,9 @@
 import type { TicketState, TicketType } from '@roadmap/contracts'
 import { Mark, type MarkCornerCount, type MarkFill, type MarkSize } from '@roadmap/ui/mark'
+import { Section, SectionDescription, SectionHeader, SectionTitle } from '@roadmap/ui/section'
 import type { Variant } from '@roadmap/ui/variant'
 import type { ReactNode } from 'react'
 import { TicketMark } from '@/views/shared/ticket-mark'
-import { CatalogSection } from './section'
 import './mark.css'
 
 const MARK_FILLS = ['solid', 'half', 'outline'] as const satisfies readonly MarkFill[]
@@ -36,10 +36,16 @@ const TICKET_TYPES = [
 
 export function MarkCatalogSection() {
   return (
-    <CatalogSection
-      title="Mark"
-      description="The diamond primitive. It holds no domain meaning: the caller picks fill, glyph, corner count, and color. A solid face knocks the glyph out in --comp-mark-surface-color; the other fills draw it in the variant color with a surface halo."
-    >
+    <Section>
+      <SectionHeader>
+        <SectionTitle>Mark</SectionTitle>
+        <SectionDescription>
+          The diamond primitive. It holds no domain meaning: the caller picks fill, glyph, corner
+          count, and color. A solid face knocks the glyph out in --comp-mark-surface-color; the
+          other fills draw it in the variant color with a surface halo.
+        </SectionDescription>
+      </SectionHeader>
+
       <div className="catalog-mark-examples">
         <MarkGroup label="Fill">
           {MARK_FILLS.map((fill) => (
@@ -70,16 +76,22 @@ export function MarkCatalogSection() {
           ))}
         </MarkGroup>
       </div>
-    </CatalogSection>
+    </Section>
   )
 }
 
 export function TicketMarkCatalogSection() {
   return (
-    <CatalogSection
-      title="Ticket mark"
-      description="The ticket encoding, owned by views/shared/ticket-presentation.ts. State picks the color and the fill. Type picks the glyph, the corner count, and the accent that colors the corners. A decided ticket swaps its glyph for a check and keeps its type corners."
-    >
+    <Section>
+      <SectionHeader>
+        <SectionTitle>Ticket mark</SectionTitle>
+        <SectionDescription>
+          The ticket encoding, owned by views/shared/ticket-presentation.ts. State picks the color
+          and the fill. Type picks the glyph, the corner count, and the accent that colors the
+          corners. A decided ticket swaps its glyph for a check and keeps its type corners.
+        </SectionDescription>
+      </SectionHeader>
+
       <div className="catalog-mark-matrix">
         <span />
         {TICKET_TYPES.map(([label, type]) => (
@@ -91,7 +103,7 @@ export function TicketMarkCatalogSection() {
           <TicketMarkStateRow key={state} label={label} state={state} />
         ))}
       </div>
-    </CatalogSection>
+    </Section>
   )
 }
 

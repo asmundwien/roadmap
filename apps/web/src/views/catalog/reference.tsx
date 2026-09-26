@@ -1,4 +1,4 @@
-import { CatalogSection } from './section'
+import { Section, SectionDescription, SectionHeader, SectionTitle } from '@roadmap/ui/section'
 import './reference.css'
 
 const REFERENCE_COLOR_STEPS = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950] as const
@@ -18,10 +18,14 @@ const COMMON_REFERENCE_COLORS = [
 
 export function ReferencePaletteCatalogSection() {
   return (
-    <CatalogSection
-      title="Reference layer"
-      description="Literal color values without semantic or component meaning."
-    >
+    <Section>
+      <SectionHeader>
+        <SectionTitle>Reference layer</SectionTitle>
+        <SectionDescription>
+          Literal color values without semantic or component meaning.
+        </SectionDescription>
+      </SectionHeader>
+
       <div className="catalog-reference-palette">
         <div className="catalog-reference-family">
           <h3>Common</h3>
@@ -53,6 +57,6 @@ export function ReferencePaletteCatalogSection() {
           </div>
         ))}
       </div>
-    </CatalogSection>
+    </Section>
   )
 }

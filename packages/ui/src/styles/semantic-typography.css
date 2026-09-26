@@ -33,6 +33,11 @@
   --sys-typescale-title-line-height: var(--ref-line-height-110);
   --sys-typescale-title-letter-spacing: var(--ref-letter-spacing-tight);
 
+  /* Heading: the title of one section inside a page. */
+  --sys-typescale-heading-size: var(--ref-font-size-16);
+  --sys-typescale-heading-line-height: var(--ref-line-height-130);
+  --sys-typescale-heading-letter-spacing: var(--ref-letter-spacing-tight);
+
   /* Body: prose read at length. */
   --sys-typescale-body-size: var(--ref-font-size-16);
   --sys-typescale-body-line-height: var(--ref-line-height-150);

@@ -1,6 +1,6 @@
 import { Badge } from '@roadmap/ui/badge'
+import { Section, SectionDescription, SectionHeader, SectionTitle } from '@roadmap/ui/section'
 import type { Variant } from '@roadmap/ui/variant'
-import { CatalogSection } from './section'
 import './badges.css'
 
 const BADGE_VARIANTS = [
@@ -16,10 +16,15 @@ const BADGE_VARIANTS = [
 
 export function BadgesCatalogSection() {
   return (
-    <CatalogSection
-      title="Badges"
-      description="Compact status and metadata labels. Text states the meaning; color supports it. Every supported variant appears here."
-    >
+    <Section>
+      <SectionHeader>
+        <SectionTitle>Badges</SectionTitle>
+        <SectionDescription>
+          Compact status and metadata labels. Text states the meaning; color supports it. Every
+          supported variant appears here.
+        </SectionDescription>
+      </SectionHeader>
+
       <div className="catalog-component-examples">
         {BADGE_VARIANTS.map(([label, variant, token]) => (
           <div className="catalog-component-example" key={variant}>
@@ -28,6 +33,6 @@ export function BadgesCatalogSection() {
           </div>
         ))}
       </div>
-    </CatalogSection>
+    </Section>
   )
 }

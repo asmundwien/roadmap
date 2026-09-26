@@ -64,4 +64,8 @@
   /* Page. */
   --comp-page-eyebrow-color: var(--sys-color-on-surface-variant);
   --comp-page-description-color: var(--sys-color-on-surface-variant);
+
+  /* Section. */
+  --comp-section-outline-color: var(--sys-color-outline-variant);
+  --comp-section-description-color: var(--sys-color-on-surface-variant);
 }

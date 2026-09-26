@@ -1,4 +1,4 @@
-import { CatalogSection } from './section'
+import { Section, SectionDescription, SectionHeader, SectionTitle } from '@roadmap/ui/section'
 import './semantic.css'
 
 const SEMANTIC_SURFACE_PAIRS = [
@@ -31,10 +31,15 @@ const SEMANTIC_SUPPORT_ROLES = [
 
 export function SemanticPaletteCatalogSection() {
   return (
-    <CatalogSection
-      title="Semantic role layer"
-      description="System tokens name a color's purpose. Components consume these roles; only this layer refers to reference colors."
-    >
+    <Section>
+      <SectionHeader>
+        <SectionTitle>Semantic role layer</SectionTitle>
+        <SectionDescription>
+          System tokens name a color's purpose. Components consume these roles; only this layer
+          refers to reference colors.
+        </SectionDescription>
+      </SectionHeader>
+
       <div className="catalog-semantic-palette">
         <div className="catalog-semantic-group">
           <h3>Surfaces</h3>
@@ -92,7 +97,7 @@ export function SemanticPaletteCatalogSection() {
           </div>
         </div>
       </div>
-    </CatalogSection>
+    </Section>
   )
 }
 

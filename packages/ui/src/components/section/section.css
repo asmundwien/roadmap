@@ -1,0 +1,33 @@
+/*
+ * A section pairs a fixed header column with its content. The header column keeps one width
+ * across every section on a page, so the titles line up; below the stacking width both parts
+ * run full width.
+ */
+.section {
+  display: grid;
+  grid-template-columns: var(--comp-section-header-width) minmax(0, 1fr);
+  gap: var(--comp-section-gap);
+  padding-block: var(--comp-section-block-padding);
+  border-block-start: var(--comp-section-border-width) solid var(--comp-section-outline-color);
+}
+
+.section-header-title {
+  margin: 0;
+  font-size: var(--comp-section-title-font-size);
+  letter-spacing: var(--comp-section-title-letter-spacing);
+  line-height: var(--comp-section-title-line-height);
+}
+
+.section-header-description {
+  margin: var(--comp-section-description-margin) 0 0;
+  color: var(--comp-section-description-color);
+  font-size: var(--comp-section-description-font-size);
+  line-height: var(--comp-section-description-line-height);
+}
+
+@media (max-width: 780px) {
+  .section {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--comp-section-stack-gap);
+  }
+}

@@ -46,4 +46,11 @@
   --comp-page-eyebrow-font-weight: var(--sys-font-weight-bold);
   --comp-page-description-font-size: var(--sys-typescale-body-size);
   --comp-page-description-line-height: var(--sys-typescale-body-line-height);
+
+  /* Section. */
+  --comp-section-title-font-size: var(--sys-typescale-heading-size);
+  --comp-section-title-line-height: var(--sys-typescale-heading-line-height);
+  --comp-section-title-letter-spacing: var(--sys-typescale-heading-letter-spacing);
+  --comp-section-description-font-size: var(--sys-typescale-body-sm-size);
+  --comp-section-description-line-height: var(--sys-typescale-body-sm-line-height);
 }

@@ -1,5 +1,6 @@
 import { Action, ActionGroup } from '@roadmap/ui/action'
-import { CatalogSection, ComponentTokenList } from './section'
+import { Section, SectionDescription, SectionHeader, SectionTitle } from '@roadmap/ui/section'
+import { ComponentTokenList } from './token-list'
 import './actions.css'
 
 const ACTION_DEFAULT_COLOR_TOKENS = [
@@ -28,10 +29,14 @@ const ACTION_DISABLED_COLOR_TOKENS = [
 
 export function ActionsCatalogSection() {
   return (
-    <CatalogSection
-      title="Actions"
-      description="Native buttons trigger commands; links navigate. Variants set emphasis and intent."
-    >
+    <Section>
+      <SectionHeader>
+        <SectionTitle>Actions</SectionTitle>
+        <SectionDescription>
+          Native buttons trigger commands; links navigate. Variants set emphasis and intent.
+        </SectionDescription>
+      </SectionHeader>
+
       <div className="catalog-action-examples">
         <section className="catalog-action-example">
           <header>
@@ -102,6 +107,6 @@ export function ActionsCatalogSection() {
           </Action>
         </section>
       </div>
-    </CatalogSection>
+    </Section>
   )
 }

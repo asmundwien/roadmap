@@ -1,13 +1,19 @@
 import { Alert } from '@roadmap/ui/alert'
-import { CatalogSection, ComponentTokenList } from './section'
+import { Section, SectionDescription, SectionHeader, SectionTitle } from '@roadmap/ui/section'
+import { ComponentTokenList } from './token-list'
 import './alerts.css'
 
 export function AlertsCatalogSection() {
   return (
-    <CatalogSection
-      title="Alerts"
-      description='Persistent messages. Error alerts use role="alert" and announce immediately; informational alerts do not interrupt assistive technology.'
-    >
+    <Section>
+      <SectionHeader>
+        <SectionTitle>Alerts</SectionTitle>
+        <SectionDescription>
+          Persistent messages. Error alerts use role="alert" and announce immediately; informational
+          alerts do not interrupt assistive technology.
+        </SectionDescription>
+      </SectionHeader>
+
       <div className="catalog-alert-examples">
         <div className="catalog-alert-example">
           <Alert>
@@ -38,6 +44,6 @@ export function AlertsCatalogSection() {
           />
         </div>
       </div>
-    </CatalogSection>
+    </Section>
   )
 }

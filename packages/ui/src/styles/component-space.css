@@ -53,4 +53,12 @@
   --comp-page-header-margin: var(--sys-space-section-md);
   --comp-page-title-margin: var(--sys-space-sm);
   --comp-page-eyebrow-margin: var(--sys-space-xs);
+
+  /* Section. */
+  --comp-section-header-width: var(--sys-size-sidebar);
+  --comp-section-gap: var(--sys-space-2xl);
+  --comp-section-stack-gap: var(--sys-space-lg);
+  --comp-section-block-padding: var(--sys-space-2xl);
+  --comp-section-border-width: var(--sys-border-width-thin);
+  --comp-section-description-margin: var(--sys-space-sm);
 }
