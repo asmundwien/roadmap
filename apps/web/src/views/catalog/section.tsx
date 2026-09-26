@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import './catalog-section.css'
+import './section.css'
 
 type CatalogSectionProps = {
   title: string

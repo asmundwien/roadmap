@@ -1,5 +1,5 @@
-import { CatalogSection } from './catalog-section'
-import './reference-palette-catalog-section.css'
+import { CatalogSection } from './section'
+import './reference.css'
 
 const REFERENCE_COLOR_STEPS = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950] as const
 const REFERENCE_COLOR_FAMILIES = [

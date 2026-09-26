@@ -1,6 +1,6 @@
 import { Alert } from '@/components/alert/alert'
-import { CatalogSection } from './catalog-section'
-import './alerts-catalog-section.css'
+import { CatalogSection } from './section'
+import './alerts.css'
 
 export function AlertsCatalogSection() {
   return (

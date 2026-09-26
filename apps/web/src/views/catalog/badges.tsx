@@ -1,7 +1,7 @@
 import { Badge } from '@/components/badge/badge'
 import type { Variant } from '@/components/variant'
-import { CatalogSection } from './catalog-section'
-import './badges-catalog-section.css'
+import { CatalogSection } from './section'
+import './badges.css'
 
 const BADGE_VARIANTS = [
   ['Neutral', 'neutral', '--comp-badge-neutral-color'],

@@ -1,5 +1,5 @@
-import { CatalogSection } from './catalog-section'
-import './semantic-palette-catalog-section.css'
+import { CatalogSection } from './section'
+import './semantic.css'
 
 const SEMANTIC_SURFACE_PAIRS = [
   ['Surface', '--sys-color-surface', '--sys-color-on-surface'],

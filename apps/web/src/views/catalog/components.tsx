@@ -9,11 +9,11 @@ import {
   type TicketMarkFill,
 } from '@/components/ticket-mark/ticket-mark'
 import type { Variant } from '@/components/variant'
-import { CatalogSection } from './catalog-section'
-import './controls-catalog-section.css'
-import './roadmap-signals-catalog-section.css'
-import './ticket-mark-catalog-section.css'
-import './tiny-ticket-marks-catalog-section.css'
+import { CatalogSection } from './section'
+import './controls.css'
+import './signals.css'
+import './ticket.css'
+import './tiny.css'
 
 const TICKET_MARK_FILLS = ['none', 'half', 'fill'] as const satisfies readonly TicketMarkFill[]
 const TICKET_MARK_CORNERS = [0, 1, 2, 3, 4] as const satisfies readonly TicketMarkCornerCount[]

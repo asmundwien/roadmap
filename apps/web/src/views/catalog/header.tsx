@@ -1,4 +1,4 @@
-import './catalog-header.css'
+import './header.css'
 
 export function CatalogHeader() {
   return (
