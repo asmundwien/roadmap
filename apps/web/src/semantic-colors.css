@@ -1,3 +1,20 @@
+/**
+ * System color tokens name UI roles and alias reference colors for each color scheme.
+ *
+ * Fits: surfaces, paired foregrounds, outlines, and semantic intents.
+ * Does not fit: literal colors, tonal steps, component states, or product-specific meanings.
+ *
+ * Usage:
+ *   color: var(--sys-color-on-surface);
+ *   background: var(--sys-color-surface);
+ *   border-color: var(--sys-color-outline);
+ *
+ * Keep paired roles together, such as on-primary content on a primary background.
+ *
+ * @see https://m3.material.io/foundations/design-tokens
+ * @see https://m3.material.io/styles/color/roles
+ * @see https://mui.com/material-ui/customization/palette/
+ */
 :root {
   /* Neutral surfaces and content. */
   --sys-color-surface: var(--ref-neutral-50);
