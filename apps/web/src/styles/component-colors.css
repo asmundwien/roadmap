@@ -44,4 +44,8 @@
   --comp-mark-info-color: var(--sys-color-info);
   --comp-mark-muted-color: var(--sys-color-outline);
   --comp-mark-highlight-color: var(--sys-color-secondary);
+
+  /* Page. */
+  --comp-page-eyebrow-color: var(--sys-color-on-surface-variant);
+  --comp-page-description-color: var(--sys-color-on-surface-variant);
 }
