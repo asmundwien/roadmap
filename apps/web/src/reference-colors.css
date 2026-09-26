@@ -1,0 +1,89 @@
+:root {
+  /* Literal pigment values without semantic or component meaning. */
+  --ref-white: #ffffff;
+  --ref-black: #000000;
+
+  --ref-neutral-50: #fbfbfa;
+  --ref-neutral-100: #f4f3f1;
+  --ref-neutral-200: #e7e5e2;
+  --ref-neutral-300: #d1cfca;
+  --ref-neutral-400: #aaa7a1;
+  --ref-neutral-500: #817f79;
+  --ref-neutral-600: #676662;
+  --ref-neutral-700: #4c4b47;
+  --ref-neutral-800: #302f2c;
+  --ref-neutral-900: #1c1b1a;
+  --ref-neutral-950: #121211;
+
+  --ref-gold-50: #fff9e8;
+  --ref-gold-100: #f9edc6;
+  --ref-gold-200: #efd98b;
+  --ref-gold-300: #e0b647;
+  --ref-gold-400: #c99722;
+  --ref-gold-500: #a87c10;
+  --ref-gold-600: #7a5700;
+  --ref-gold-700: #624500;
+  --ref-gold-800: #493300;
+  --ref-gold-900: #302100;
+  --ref-gold-950: #1e1400;
+
+  --ref-blue-50: #f1f7ff;
+  --ref-blue-100: #deedff;
+  --ref-blue-200: #bedbfa;
+  --ref-blue-300: #8fbef2;
+  --ref-blue-400: #74a5ea;
+  --ref-blue-500: #3987e5;
+  --ref-blue-600: #2a78d6;
+  --ref-blue-700: #2563c0;
+  --ref-blue-800: #1f4e99;
+  --ref-blue-900: #1d3e73;
+  --ref-blue-950: #13284a;
+
+  --ref-green-50: #f0fbef;
+  --ref-green-100: #d9f5d5;
+  --ref-green-200: #b5ebae;
+  --ref-green-300: #82d978;
+  --ref-green-400: #49c541;
+  --ref-green-500: #0ca30c;
+  --ref-green-600: #087f0b;
+  --ref-green-700: #08650a;
+  --ref-green-800: #084f0b;
+  --ref-green-900: #073f0b;
+  --ref-green-950: #032304;
+
+  --ref-rose-50: #fff2f6;
+  --ref-rose-100: #ffe0eb;
+  --ref-rose-200: #fabbd1;
+  --ref-rose-300: #eb8bae;
+  --ref-rose-400: #e06c9b;
+  --ref-rose-500: #cf3f78;
+  --ref-rose-600: #b4235a;
+  --ref-rose-700: #911844;
+  --ref-rose-800: #721337;
+  --ref-rose-900: #55102b;
+  --ref-rose-950: #350817;
+
+  --ref-violet-50: #f7f3ff;
+  --ref-violet-100: #ece3ff;
+  --ref-violet-200: #d8c5ff;
+  --ref-violet-300: #c0a6ff;
+  --ref-violet-400: #ad8cff;
+  --ref-violet-500: #916ee5;
+  --ref-violet-600: #7656c9;
+  --ref-violet-700: #6042ad;
+  --ref-violet-800: #4b3387;
+  --ref-violet-900: #382765;
+  --ref-violet-950: #25183f;
+
+  --ref-teal-50: #ecfcfd;
+  --ref-teal-100: #cff6f8;
+  --ref-teal-200: #9aebef;
+  --ref-teal-300: #63d8df;
+  --ref-teal-400: #43c7d2;
+  --ref-teal-500: #12a5b1;
+  --ref-teal-600: #087f8c;
+  --ref-teal-700: #086672;
+  --ref-teal-800: #09515b;
+  --ref-teal-900: #083f47;
+  --ref-teal-950: #03252b;
+}
