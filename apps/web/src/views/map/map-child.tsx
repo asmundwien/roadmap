@@ -1,7 +1,7 @@
 import type { AutomationEvidence, WayfinderMap } from '@roadmap/contracts'
 import { type ReactNode, useMemo } from 'react'
-import { DestinationMark } from '@/components/destination-mark/destination-mark'
 import type { ResolvedSelection } from '@/router'
+import { DestinationMark } from '@/views/shared/destination-mark'
 import { stripInlineMarkdown } from '@/views/shared/gist'
 import { buildLedger, LEDGER_SCALE } from './geometry'
 import { MapLedger } from './ledger'

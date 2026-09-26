@@ -1,13 +1,10 @@
 import type { TicketState, TicketType } from '@roadmap/contracts'
 import type { ReactNode } from 'react'
-import { DestinationMark } from '@/components/destination-mark/destination-mark'
 import { Mark, type MarkCornerCount, type MarkFill, type MarkSize } from '@/components/mark/mark'
 import type { Variant } from '@/components/variant'
-import { AUTOMATION_VARIANT } from '@/views/map/automation-presentation'
 import { TicketMark } from '@/views/shared/ticket-mark'
 import { CatalogSection } from './section'
 import './mark.css'
-import './signals.css'
 
 const MARK_FILLS = ['solid', 'half', 'outline'] as const satisfies readonly MarkFill[]
 const MARK_CORNER_COUNTS = [0, 1, 2, 3, 4] as const satisfies readonly MarkCornerCount[]
@@ -98,36 +95,6 @@ export function TicketMarkCatalogSection() {
   )
 }
 
-export function RoadmapSignalsCatalogSection() {
-  return (
-    <CatalogSection
-      title="Roadmap signals"
-      description="Destination and Automation evidence stay separate from ticket state. Each Automation stage is a solid medium mark in the variant that views/map/automation-presentation.ts assigns it, and the legend badges read the same constant."
-    >
-      <div className="catalog-signals">
-        <Signal label="Destination">
-          <DestinationMark variant="plot" x={24} y={24} />
-        </Signal>
-        <Signal label={`Classification · ${AUTOMATION_VARIANT.classification}`}>
-          <g transform="translate(24 24)">
-            <Mark
-              fill="solid"
-              glyph="C"
-              size="medium"
-              variant={AUTOMATION_VARIANT.classification}
-            />
-          </g>
-        </Signal>
-        <Signal label={`Wayfinder · ${AUTOMATION_VARIANT.wayfinder}`}>
-          <g transform="translate(24 24)">
-            <Mark fill="solid" glyph="W" size="medium" variant={AUTOMATION_VARIANT.wayfinder} />
-          </g>
-        </Signal>
-      </div>
-    </CatalogSection>
-  )
-}
-
 type MarkGroupProps = { label: string; children: ReactNode }
 
 function MarkGroup({ label, children }: MarkGroupProps) {
@@ -162,18 +129,5 @@ function TicketMarkStateRow({ label, state }: TicketMarkStateRowProps) {
         </div>
       ))}
     </>
-  )
-}
-
-type SignalProps = { label: string; children: ReactNode }
-
-function Signal({ label, children }: SignalProps) {
-  return (
-    <div className="catalog-signal">
-      <svg viewBox="0 0 48 48" aria-hidden="true">
-        {children}
-      </svg>
-      <span>{label}</span>
-    </div>
   )
 }

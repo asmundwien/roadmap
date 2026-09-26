@@ -2,7 +2,7 @@ import { Page, PageDescription, PageEyebrow, PageHeader, PageTitle } from '@/com
 import { ActionsCatalogSection } from './actions'
 import { AlertsCatalogSection } from './alerts'
 import { BadgesCatalogSection } from './badges'
-import { MarkCatalogSection, RoadmapSignalsCatalogSection, TicketMarkCatalogSection } from './mark'
+import { MarkCatalogSection, TicketMarkCatalogSection } from './mark'
 import { ReferencePaletteCatalogSection } from './reference'
 import { SemanticPaletteCatalogSection } from './semantic'
 
@@ -22,7 +22,6 @@ export function CatalogPage() {
       <SemanticPaletteCatalogSection />
       <MarkCatalogSection />
       <TicketMarkCatalogSection />
-      <RoadmapSignalsCatalogSection />
       <BadgesCatalogSection />
       <AlertsCatalogSection />
       <ActionsCatalogSection />
