@@ -1,7 +1,20 @@
 /**
  * Component color tokens describe rendered component parts and states.
- * Every token aliases one semantic role. Components never select reference colors.
+ *
+ * Fits: one token per component part or state, named --comp-<component>-<variant>-<part>-color.
+ * Does not fit: literal hex, reference colors, color-scheme overrides, or tokens shared by several components.
+ *
+ * Usage:
+ *   --comp-badge-danger-color: var(--sys-color-error);
+ *   .badge--danger { color: var(--comp-badge-danger-color); }
+ *
+ * Every token aliases exactly one semantic role, so a scheme change is resolved once in
+ * semantic-colors.css and no component needs a dark-mode rule of its own.
  * Legacy components migrate into this layer one component at a time.
+ *
+ * @see https://m3.material.io/foundations/design-tokens/overview
+ * @see https://m3.material.io/styles/color/roles
+ * @see https://primer.style/foundations/primitives/color
  */
 :root {
   /* Action. */
