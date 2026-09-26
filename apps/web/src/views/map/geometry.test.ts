@@ -429,7 +429,7 @@ describe('buildLedger', () => {
     expect(ledger.sepAhead).toBe(ledger.sepBehind)
   })
 
-  it('sits two-line ahead rows on the 52-unit pitch, single-line fog and covered rows on 40', () => {
+  it('sits every row on the same 40-unit pitch, ahead, fog, and covered alike', () => {
     const map = makeMap(
       [
         ticket(2, 'frontier'),
@@ -446,7 +446,7 @@ describe('buildLedger', () => {
       const sorted = [...ys].sort((a, b) => a - b)
       return sorted.slice(1).map((y, index) => y - (sorted[index] ?? Number.NaN))
     }
-    expect(pitches(ledger.rows.map((row) => row.y))).toEqual([52, 52])
+    expect(pitches(ledger.rows.map((row) => row.y))).toEqual([40, 40])
     expect(pitches(ledger.fogRows.map((row) => row.y))).toEqual([40, 40])
     expect(pitches(ledger.closedRows.map((row) => row.y))).toEqual([40, 40])
   })

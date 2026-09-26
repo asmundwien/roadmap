@@ -44,7 +44,6 @@
 
 /* titles ride over rails — a surface-coloured halo keeps them legible */
 .row-title,
-.row-word,
 .behind-title {
   paint-order: stroke;
   stroke: var(--bg);
@@ -61,10 +60,6 @@
 .row-title.is-dim {
   font-weight: 500;
   fill: var(--muted);
-}
-
-.row-word {
-  font-size: 9.5px;
 }
 
 /* The kind-of-work chip riding the title line — GitHub's tinted-label anatomy (12% fill, hued

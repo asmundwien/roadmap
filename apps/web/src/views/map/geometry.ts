@@ -39,8 +39,7 @@ const GX = 44
 const PITCH = 34
 const MIN_GUTTER_LANES = 4
 const MAX_GUTTER = 10 * PITCH
-const ROW_H = 52
-const THIN_ROW_H = 40
+const ROW_H = 40
 const SEC_PAD = 56
 const SEC_BOTTOM = 34
 const PAD_TOP = 20
@@ -471,13 +470,13 @@ export function buildLedger(map: WayfinderMap): Ledger {
     SEC_PAD + Math.max(count - 1, 0) * rowH + SEC_BOTTOM
 
   const fogItems = map.body.notYetSpecified.map(stripInlineMarkdown)
-  const ghostY = (index: number) => sepFog + SEC_PAD + index * THIN_ROW_H
-  const sepAhead = sepFog + sectionHeight(fogItems.length, THIN_ROW_H)
+  const ghostY = (index: number) => sepFog + SEC_PAD + index * ROW_H
+  const sepAhead = sepFog + sectionHeight(fogItems.length, ROW_H)
   const sepBehind =
     sepAhead + (orderedOpen.length > 0 ? sectionHeight(orderedOpen.length, ROW_H) : 0)
   const rowY = (index: number) => sepBehind - SEC_BOTTOM - index * ROW_H
-  const behindY = (index: number) => sepBehind + SEC_PAD + index * THIN_ROW_H
-  const height = sepBehind + sectionHeight(closed.length, THIN_ROW_H) + PAD_BOTTOM
+  const behindY = (index: number) => sepBehind + SEC_PAD + index * ROW_H
+  const height = sepBehind + sectionHeight(closed.length, ROW_H) + PAD_BOTTOM
 
   const placeholders: { y: number; text: string }[] = []
   if (fogItems.length === 0) {
@@ -537,7 +536,7 @@ export function buildLedger(map: WayfinderMap): Ledger {
     headY: head.y,
     trunkDashed: { y1: trunkTop ? trunkTop.y : head.y, y2: destY + 14 },
     trunkSolid: lastClosed
-      ? { y1: topTrunkClosed?.y ?? head.y, y2: lastClosed.y + THIN_ROW_H * 0.6 }
+      ? { y1: topTrunkClosed?.y ?? head.y, y2: lastClosed.y + ROW_H * 0.6 }
       : null,
     rows,
     closedRows,

@@ -6,10 +6,8 @@ import {
   ticketTypeOf,
   type WayfinderMap,
 } from '@roadmap/contracts'
-import { VARIANT_COLORS } from '@roadmap/ui/variant'
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { DestinationMark } from '@/views/shared/destination-mark'
-import { TicketMark } from '@/views/shared/ticket-mark'
 import { TICKET_STATE_META } from '@/views/shared/ticket-presentation'
 import {
   type AutomationTag,
@@ -22,9 +20,6 @@ import { type LedgerSelection, scopePlan } from './sequence'
 import { TicketNode, ticketNodeTextX } from './ticket-node'
 
 const EXT = 800
-const STATUS_MARK_X_OFFSET = 5
-const STATUS_MARK_Y_OFFSET = 7.5
-const STATUS_TEXT_X_OFFSET = 13
 
 function pressProps(
   select: () => void,
@@ -182,12 +177,10 @@ export function MapLedger({
         })}
 
         {[...ledger.rows].reverse().map(({ ticket, x, y }) => {
-          const meta = TICKET_STATE_META[ticket.state]
           const title = ticketTitle(ticket)
           const type = ticketTypeOf(ticket.typeEvidence)
           const tags = automationTags(automationEvidenceFor(map, ticket, automationEvidence))
           const titleX = ticketNodeTextX(x, ledger.textX, tags.length)
-          const assignee = ticket.assignees[0]?.name
           const isHot = related?.tickets.has(ticket.id) ?? false
           const isSelected = selected?.kind === 'ticket' && selected.id === ticket.id
           return (
@@ -206,15 +199,15 @@ export function MapLedger({
               <rect
                 className="row-hit"
                 x="0"
-                y={y - 26}
+                y={y - 20}
                 width={ledger.width + EXT}
-                height={52}
+                height={40}
                 fill="transparent"
               />
               <TicketNode ticket={ticket} type={type} tags={tags} x={x} y={y} />
               <text
                 x={titleX}
-                y={y - 4}
+                y={y + 4}
                 className={`row-title${ticket.state === 'blocked' ? ' is-dim' : ''}`}
               >
                 {truncate(title, 46)}
@@ -224,22 +217,8 @@ export function MapLedger({
                 title={truncate(title, 46)}
                 titleWeight={600}
                 x={titleX}
-                baselineY={y - 4}
+                baselineY={y + 4}
               />
-              <g
-                transform={`translate(${titleX + STATUS_MARK_X_OFFSET} ${y + STATUS_MARK_Y_OFFSET})`}
-              >
-                <TicketMark state={ticket.state} type={type} size="medium" />
-              </g>
-              <text
-                x={titleX + STATUS_TEXT_X_OFFSET}
-                y={y + 11}
-                className="row-word"
-                fill={VARIANT_COLORS[meta.variant]}
-              >
-                {meta.word}
-                {assignee !== undefined ? ` · ${assignee}` : ''}
-              </text>
             </g>
           )
         })}
