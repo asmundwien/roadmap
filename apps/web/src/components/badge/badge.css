@@ -7,7 +7,7 @@
   border: 1px solid currentColor;
   border-radius: 999px;
   background: color-mix(in srgb, currentColor 9%, transparent);
-  color: var(--variant-neutral);
+  color: var(--comp-badge-neutral-color);
   font-size: 0.68rem;
   font-weight: 700;
   line-height: 1.3;
@@ -15,33 +15,33 @@
 }
 
 .badge-accent {
-  color: var(--variant-accent);
+  color: var(--comp-badge-accent-color);
 }
 
 .badge-warning {
-  color: var(--variant-warning);
+  color: var(--comp-badge-warning-color);
 }
 
 .badge-danger {
-  color: var(--variant-danger);
+  color: var(--comp-badge-danger-color);
 }
 
 .badge-success {
-  color: var(--variant-success);
+  color: var(--comp-badge-success-color);
 }
 
 .badge-info {
-  color: var(--variant-info);
+  color: var(--comp-badge-info-color);
 }
 
 .badge-muted {
-  color: var(--variant-muted);
+  color: var(--comp-badge-muted-color);
 }
 
 .badge-violet {
-  color: var(--variant-violet);
+  color: var(--comp-badge-violet-color);
 }
 
 .badge-teal {
-  color: var(--variant-teal);
+  color: var(--comp-badge-teal-color);
 }

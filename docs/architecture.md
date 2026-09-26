@@ -22,7 +22,7 @@ WebSocket carries full state replacements. HTTP carries `query` and `execute` re
 
 Each routable area under `apps/web/src/views` has a `page.tsx` entry point. Page modules select data and compose named sections; section implementation stays in sibling files. `shared/` and `shell/` are support areas, not pages.
 
-Reusable UI lives under `apps/web/src/components`, with each module's implementation, styles, and tests in its own folder. Components use the shared `Variant` color vocabulary. Views adapt domain state into generic component props, including `TicketMark` size, fill, accent, corners, and content. The component catalog at `#/components` lists every color custom property declared in `apps/web/src/index.css`.
+Reusable UI lives under `apps/web/src/components`, with each module's implementation, styles, and tests in its own folder. Components use the shared `Variant` color vocabulary. Views adapt domain state into generic component props, including `TicketMark` size, fill, accent, corners, and content. Color styling is migrating bottom-up through reference, semantic, component, and rendered layers. Badge and Alert consume component tokens that directly alias semantic roles; `index.css` remains legacy styling and is not a token source. The catalog at `#/components` documents the token layers and supported component variants.
 
 React functions use named `...Props` types instead of inline object annotations. Dynamic class composition uses `classnames` imported as `cn`; modules do not define class-name helper functions.
 

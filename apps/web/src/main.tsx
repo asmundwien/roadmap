@@ -4,6 +4,7 @@ import { App } from './App'
 import { RoadmapProvider } from './store/roadmap-provider'
 import './styles/reference-colors.css'
 import './styles/semantic-colors.css'
+import './styles/component-colors.css'
 import './index.css'
 
 const root = document.getElementById('root')

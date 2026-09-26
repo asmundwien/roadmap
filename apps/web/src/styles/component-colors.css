@@ -1,0 +1,25 @@
+/**
+ * Component color tokens describe rendered Badge and Alert parts and states.
+ * Every token aliases one semantic role. Components never select reference colors.
+ */
+:root {
+  /* Alert. */
+  --comp-alert-outline-color: var(--sys-color-outline-variant);
+  --comp-alert-error-accent-color: var(--sys-color-error);
+  --comp-alert-error-container-color: var(--sys-color-error-container);
+  --comp-alert-error-content-color: var(--sys-color-on-error-container);
+  --comp-alert-info-accent-color: var(--sys-color-info);
+  --comp-alert-info-container-color: var(--sys-color-info-container);
+  --comp-alert-info-content-color: var(--sys-color-on-info-container);
+
+  /* Badge. */
+  --comp-badge-neutral-color: var(--sys-color-on-surface-variant);
+  --comp-badge-accent-color: var(--sys-color-primary);
+  --comp-badge-warning-color: var(--sys-color-warning);
+  --comp-badge-danger-color: var(--sys-color-error);
+  --comp-badge-success-color: var(--sys-color-success);
+  --comp-badge-info-color: var(--sys-color-info);
+  --comp-badge-muted-color: var(--sys-color-outline);
+  --comp-badge-violet-color: var(--sys-color-secondary);
+  --comp-badge-teal-color: var(--sys-color-info);
+}

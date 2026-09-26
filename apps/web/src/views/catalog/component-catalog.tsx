@@ -33,6 +33,17 @@ const TINY_MARK_GLYPH = {
   success: 's',
 } as const satisfies Record<(typeof TINY_MARK_VARIANTS)[number], string>
 const TICKET_MARK_CORNER_GLYPHS = ['0', '1', '2', '3', '4'] as const
+const BADGE_VARIANTS = [
+  ['Neutral', 'neutral', '--comp-badge-neutral-color'],
+  ['Accent', 'accent', '--comp-badge-accent-color'],
+  ['Warning', 'warning', '--comp-badge-warning-color'],
+  ['Danger', 'danger', '--comp-badge-danger-color'],
+  ['Success', 'success', '--comp-badge-success-color'],
+  ['Info', 'info', '--comp-badge-info-color'],
+  ['Muted', 'muted', '--comp-badge-muted-color'],
+  ['Violet', 'violet', '--comp-badge-violet-color'],
+  ['Teal', 'teal', '--comp-badge-teal-color'],
+] as const satisfies readonly (readonly [string, Variant, string])[]
 
 const REFERENCE_COLOR_STEPS = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950] as const
 const REFERENCE_COLOR_FAMILIES = [
@@ -244,16 +255,55 @@ export function BadgesCatalogSection() {
   return (
     <CatalogSection
       title="Badges"
-      description="Short labels and inline content use a shared shape with semantic color variants."
+      description="Compact status and metadata labels. Text states the meaning; color supports it. Every supported variant appears here."
     >
-      <div className="catalog-badges">
-        <Badge>Neutral</Badge>
-        <Badge variant="accent">Accent</Badge>
-        <Badge variant="warning">Warning</Badge>
-        <Badge variant="danger">Danger</Badge>
-        <Badge variant="success">Success</Badge>
-        <Badge variant="info">Info</Badge>
-        <Badge variant="muted">Muted</Badge>
+      <div className="catalog-component-examples">
+        {BADGE_VARIANTS.map(([label, variant, token]) => (
+          <div className="catalog-component-example" key={variant}>
+            <Badge variant={variant}>{label}</Badge>
+            <code>{token}</code>
+          </div>
+        ))}
+      </div>
+    </CatalogSection>
+  )
+}
+
+export function AlertsCatalogSection() {
+  return (
+    <CatalogSection
+      title="Alerts"
+      description='Persistent messages. Error alerts use role="alert" and announce immediately; informational alerts do not interrupt assistive technology.'
+    >
+      <div className="catalog-alert-examples">
+        <div className="catalog-alert-example">
+          <Alert>
+            <strong>Action required.</strong>
+            <span>The operation stays blocked until the problem is fixed.</span>
+          </Alert>
+          <ComponentTokenList
+            tokens={[
+              '--comp-alert-outline-color',
+              '--comp-alert-error-accent-color',
+              '--comp-alert-error-container-color',
+              '--comp-alert-error-content-color',
+            ]}
+          />
+        </div>
+        <div className="catalog-alert-example">
+          <Alert variant="info">
+            <strong>Change saved.</strong>
+            <span>The new configuration is active.</span>
+          </Alert>
+          <ComponentTokenList
+            tokens={[
+              '--comp-alert-outline-color',
+              '--comp-alert-info-accent-color',
+              '--comp-alert-info-container-color',
+              '--comp-alert-info-content-color',
+            ]}
+          />
+        </div>
       </div>
     </CatalogSection>
   )
@@ -282,10 +332,7 @@ export function RoadmapSignalsCatalogSection() {
 
 export function ControlsCatalogSection() {
   return (
-    <CatalogSection
-      title="Controls"
-      description="Default, emphasized, destructive, and unavailable states."
-    >
+    <CatalogSection title="Controls" description="Button and link actions in each supported state.">
       <div className="catalog-control-groups">
         <div className="catalog-control-group">
           <span className="catalog-control-label">Actions</span>
@@ -302,19 +349,20 @@ export function ControlsCatalogSection() {
             </Action>
           </ActionGroup>
         </div>
-        <div className="catalog-control-group">
-          <span className="catalog-control-label">Messages</span>
-          <Alert>
-            <strong>Action required.</strong>
-            <span>The operation stays blocked until the problem is fixed.</span>
-          </Alert>
-          <Alert variant="info">
-            <strong>Change saved.</strong>
-            <span>The new configuration is active.</span>
-          </Alert>
-        </div>
       </div>
     </CatalogSection>
+  )
+}
+
+type ComponentTokenListProps = { tokens: readonly string[] }
+
+function ComponentTokenList({ tokens }: ComponentTokenListProps) {
+  return (
+    <div className="catalog-component-token-list">
+      {tokens.map((token) => (
+        <code key={token}>{token}</code>
+      ))}
+    </div>
   )
 }
 

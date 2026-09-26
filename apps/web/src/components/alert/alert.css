@@ -4,21 +4,18 @@
   gap: 0.15rem;
   margin: var(--sp-2) 0;
   padding: 0.65rem 0.75rem;
-  border: 1px solid var(--edge);
-  background: var(--wash);
+  border: 1px solid var(--comp-alert-outline-color);
   font-size: 0.8rem;
 }
 
 .alert-error {
-  border-left: 3px solid var(--state-blocked);
+  border-left: 3px solid var(--comp-alert-error-accent-color);
+  background: var(--comp-alert-error-container-color);
+  color: var(--comp-alert-error-content-color);
 }
 
 .alert-info {
-  border-left: 3px solid var(--goal);
-  background: color-mix(in srgb, var(--goal) 6%, transparent);
-}
-
-.alert span,
-.alert:not(:has(strong)) {
-  color: var(--muted);
+  border-left: 3px solid var(--comp-alert-info-accent-color);
+  background: var(--comp-alert-info-container-color);
+  color: var(--comp-alert-info-content-color);
 }

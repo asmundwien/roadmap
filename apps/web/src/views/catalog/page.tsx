@@ -1,4 +1,5 @@
 import {
+  AlertsCatalogSection,
   BadgesCatalogSection,
   CatalogHeader,
   ControlsCatalogSection,
@@ -19,6 +20,7 @@ export function CatalogPage() {
       <TicketMarkCatalogSection />
       <TinyTicketMarksCatalogSection />
       <BadgesCatalogSection />
+      <AlertsCatalogSection />
       <RoadmapSignalsCatalogSection />
       <ControlsCatalogSection />
     </main>

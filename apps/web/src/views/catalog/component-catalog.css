@@ -269,13 +269,32 @@
   text-transform: uppercase;
 }
 
-.catalog-badges {
-  display: flex;
-  flex-wrap: wrap;
+.catalog-component-examples {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--sp-3);
+}
+
+.catalog-component-example,
+.catalog-alert-example {
+  display: grid;
+  align-items: start;
   gap: var(--sp-2);
 }
 
-.catalog-control-group .alert {
+.catalog-component-token-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-3);
+  font-size: 0.66rem;
+}
+
+.catalog-alert-examples {
+  display: grid;
+  gap: var(--sp-4);
+}
+
+.catalog-alert-example .alert {
   margin: 0;
 }
 
