@@ -2,7 +2,7 @@ import { Page, PageDescription, PageEyebrow, PageHeader, PageTitle } from '@/com
 import { AlertsCatalogSection } from './alerts'
 import { BadgesCatalogSection } from './badges'
 import {
-  ControlsCatalogSection,
+  ActionsCatalogSection,
   RoadmapSignalsCatalogSection,
   TicketMarkCatalogSection,
   TinyTicketMarksCatalogSection,
@@ -17,8 +17,8 @@ export function CatalogPage() {
         <PageEyebrow>UI inventory</PageEyebrow>
         <PageTitle>Components</PageTitle>
         <PageDescription>
-          Shared marks, controls, and tokens. Each example uses the same classes and renderers as
-          the product.
+          Shared marks, actions, and tokens. Each example uses the same classes and renderers as the
+          product.
         </PageDescription>
       </PageHeader>
 
@@ -29,7 +29,7 @@ export function CatalogPage() {
       <BadgesCatalogSection />
       <AlertsCatalogSection />
       <RoadmapSignalsCatalogSection />
-      <ControlsCatalogSection />
+      <ActionsCatalogSection />
     </Page>
   )
 }

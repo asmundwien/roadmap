@@ -18,3 +18,15 @@ export function CatalogSection({ title, description, children }: CatalogSectionP
     </section>
   )
 }
+
+export type ComponentTokenListProps = { tokens: readonly string[] }
+
+export function ComponentTokenList({ tokens }: ComponentTokenListProps) {
+  return (
+    <div className="catalog-component-token-list">
+      {tokens.map((token) => (
+        <code key={token}>{token}</code>
+      ))}
+    </div>
+  )
+}

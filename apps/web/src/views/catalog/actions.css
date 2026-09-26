@@ -1,0 +1,26 @@
+.catalog-action-examples {
+  display: grid;
+  gap: var(--sp-6);
+}
+
+.catalog-action-example {
+  display: grid;
+  justify-items: start;
+  gap: var(--sp-2);
+}
+
+.catalog-action-example header,
+.catalog-action-example h3,
+.catalog-action-example p {
+  margin: 0;
+}
+
+.catalog-action-example h3 {
+  font-size: 0.8rem;
+}
+
+.catalog-action-example p {
+  max-width: 42rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+}

@@ -1,8 +1,20 @@
 /**
- * Component color tokens describe rendered Badge and Alert parts and states.
+ * Component color tokens describe rendered component parts and states.
  * Every token aliases one semantic role. Components never select reference colors.
+ * Legacy components migrate into this layer one component at a time.
  */
 :root {
+  /* Action. */
+  --comp-action-outline-color: var(--sys-color-outline-variant);
+  --comp-action-label-color: var(--sys-color-on-surface-variant);
+  --comp-action-hover-container-color: var(--sys-color-surface-container);
+  --comp-action-hover-label-color: var(--sys-color-on-surface);
+  --comp-action-strong-container-color: var(--sys-color-surface-container-high);
+  --comp-action-strong-label-color: var(--sys-color-on-surface);
+  --comp-action-danger-label-color: var(--sys-color-error);
+  --comp-action-danger-hover-container-color: var(--sys-color-error-container);
+  --comp-action-danger-hover-label-color: var(--sys-color-on-error-container);
+
   /* Alert. */
   --comp-alert-outline-color: var(--sys-color-outline-variant);
   --comp-alert-error-accent-color: var(--sys-color-error);

@@ -4,10 +4,10 @@
   justify-content: center;
   min-height: 36px;
   padding: 0 var(--sp-3);
-  border: 1px solid var(--edge);
+  border: 1px solid var(--comp-action-outline-color);
   border-radius: 0;
   background: transparent;
-  color: var(--muted);
+  color: var(--comp-action-label-color);
   font: inherit;
   font-size: 0.8rem;
   text-decoration: none;
@@ -20,23 +20,23 @@
 
 .action:hover:not(:disabled),
 .action:focus-visible {
-  background: var(--wash);
-  color: var(--fg);
+  background: var(--comp-action-hover-container-color);
+  color: var(--comp-action-hover-label-color);
 }
 
 .action-strong {
-  background: color-mix(in srgb, var(--fg) 8%, transparent);
-  color: var(--fg);
+  background: var(--comp-action-strong-container-color);
+  color: var(--comp-action-strong-label-color);
   font-weight: 600;
 }
 
 .action-danger {
-  color: var(--state-blocked);
+  color: var(--comp-action-danger-label-color);
 }
 
 .action-danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--state-blocked) 9%, transparent);
-  color: var(--state-blocked);
+  background: var(--comp-action-danger-hover-container-color);
+  color: var(--comp-action-danger-hover-label-color);
 }
 
 .action:disabled {

@@ -1,5 +1,5 @@
 import { Alert } from '@/components/alert/alert'
-import { CatalogSection } from './section'
+import { CatalogSection, ComponentTokenList } from './section'
 import './alerts.css'
 
 export function AlertsCatalogSection() {
@@ -39,17 +39,5 @@ export function AlertsCatalogSection() {
         </div>
       </div>
     </CatalogSection>
-  )
-}
-
-type ComponentTokenListProps = { tokens: readonly string[] }
-
-function ComponentTokenList({ tokens }: ComponentTokenListProps) {
-  return (
-    <div className="catalog-component-token-list">
-      {tokens.map((token) => (
-        <code key={token}>{token}</code>
-      ))}
-    </div>
   )
 }
