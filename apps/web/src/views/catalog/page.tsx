@@ -1,15 +1,15 @@
+import { AlertsCatalogSection } from './alerts-catalog-section'
+import { BadgesCatalogSection } from './badges-catalog-section'
+import { CatalogHeader } from './catalog-header'
 import {
-  AlertsCatalogSection,
-  BadgesCatalogSection,
-  CatalogHeader,
   ControlsCatalogSection,
-  ReferencePaletteCatalogSection,
   RoadmapSignalsCatalogSection,
-  SemanticPaletteCatalogSection,
   TicketMarkCatalogSection,
   TinyTicketMarksCatalogSection,
 } from './component-catalog'
-import './component-catalog.css'
+import { ReferencePaletteCatalogSection } from './reference-palette-catalog-section'
+import { SemanticPaletteCatalogSection } from './semantic-palette-catalog-section'
+import './page.css'
 
 export function CatalogPage() {
   return (

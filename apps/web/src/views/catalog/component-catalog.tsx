@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react'
 import { Action, ActionGroup } from '@/components/action/action'
-import { Alert } from '@/components/alert/alert'
 import { AutomationMark } from '@/components/automation-mark/automation-mark'
 import { Badge } from '@/components/badge/badge'
 import { DestinationMark } from '@/components/destination-mark/destination-mark'
@@ -10,6 +9,11 @@ import {
   type TicketMarkFill,
 } from '@/components/ticket-mark/ticket-mark'
 import type { Variant } from '@/components/variant'
+import { CatalogSection } from './catalog-section'
+import './controls-catalog-section.css'
+import './roadmap-signals-catalog-section.css'
+import './ticket-mark-catalog-section.css'
+import './tiny-ticket-marks-catalog-section.css'
 
 const TICKET_MARK_FILLS = ['none', 'half', 'fill'] as const satisfies readonly TicketMarkFill[]
 const TICKET_MARK_CORNERS = [0, 1, 2, 3, 4] as const satisfies readonly TicketMarkCornerCount[]
@@ -33,181 +37,6 @@ const TINY_MARK_GLYPH = {
   success: 's',
 } as const satisfies Record<(typeof TINY_MARK_VARIANTS)[number], string>
 const TICKET_MARK_CORNER_GLYPHS = ['0', '1', '2', '3', '4'] as const
-const BADGE_VARIANTS = [
-  ['Neutral', 'neutral', '--comp-badge-neutral-color'],
-  ['Accent', 'accent', '--comp-badge-accent-color'],
-  ['Warning', 'warning', '--comp-badge-warning-color'],
-  ['Danger', 'danger', '--comp-badge-danger-color'],
-  ['Success', 'success', '--comp-badge-success-color'],
-  ['Info', 'info', '--comp-badge-info-color'],
-  ['Muted', 'muted', '--comp-badge-muted-color'],
-  ['Violet', 'violet', '--comp-badge-violet-color'],
-  ['Teal', 'teal', '--comp-badge-teal-color'],
-] as const satisfies readonly (readonly [string, Variant, string])[]
-
-const REFERENCE_COLOR_STEPS = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950] as const
-const REFERENCE_COLOR_FAMILIES = [
-  ['Neutral', 'neutral'],
-  ['Gold', 'gold'],
-  ['Blue', 'blue'],
-  ['Green', 'green'],
-  ['Rose', 'rose'],
-  ['Violet', 'violet'],
-  ['Teal', 'teal'],
-] as const
-const COMMON_REFERENCE_COLORS = [
-  ['White', '--ref-white'],
-  ['Black', '--ref-black'],
-] as const
-
-const SEMANTIC_SURFACE_PAIRS = [
-  ['Surface', '--sys-color-surface', '--sys-color-on-surface'],
-  ['Dim surface', '--sys-color-surface-dim', '--sys-color-on-surface'],
-  ['Bright surface', '--sys-color-surface-bright', '--sys-color-on-surface'],
-  ['Lowest container', '--sys-color-surface-container-lowest', '--sys-color-on-surface'],
-  ['Low container', '--sys-color-surface-container-low', '--sys-color-on-surface'],
-  ['Container', '--sys-color-surface-container', '--sys-color-on-surface'],
-  ['High container', '--sys-color-surface-container-high', '--sys-color-on-surface'],
-  ['Highest container', '--sys-color-surface-container-highest', '--sys-color-on-surface'],
-  ['Inverse surface', '--sys-color-inverse-surface', '--sys-color-inverse-on-surface'],
-] as const
-
-const SEMANTIC_INTENTS = [
-  ['Primary', 'primary'],
-  ['Secondary', 'secondary'],
-  ['Error', 'error'],
-  ['Warning', 'warning'],
-  ['Info', 'info'],
-  ['Success', 'success'],
-] as const
-
-const SEMANTIC_SUPPORT_ROLES = [
-  ['Outline', '--sys-color-outline', 'Visible boundaries and high-emphasis separators.'],
-  ['Outline variant', '--sys-color-outline-variant', 'Low-emphasis boundaries and separators.'],
-  ['Shadow', '--sys-color-shadow', 'The source color for elevation shadows.'],
-  ['Scrim', '--sys-color-scrim', 'The source color for content-obscuring overlays.'],
-] as const
-
-export function CatalogHeader() {
-  return (
-    <header className="component-catalog-head">
-      <p className="component-catalog-eyebrow">UI inventory</p>
-      <h1>Components</h1>
-      <p className="muted">
-        Shared marks, controls, and tokens. Each example uses the same classes and renderers as the
-        product.
-      </p>
-    </header>
-  )
-}
-
-export function ReferencePaletteCatalogSection() {
-  return (
-    <CatalogSection
-      title="Reference layer"
-      description="Literal color values without semantic or component meaning."
-    >
-      <div className="catalog-reference-palette">
-        <div className="catalog-reference-family">
-          <h3>Common</h3>
-          <div className="catalog-reference-swatches">
-            {COMMON_REFERENCE_COLORS.map(([label, token]) => (
-              <div className="catalog-reference-swatch" key={token}>
-                <span style={{ background: `var(${token})` }} aria-hidden="true" />
-                <strong>{label}</strong>
-                <code>{token}</code>
-              </div>
-            ))}
-          </div>
-        </div>
-        {REFERENCE_COLOR_FAMILIES.map(([label, family]) => (
-          <div className="catalog-reference-family" key={family}>
-            <h3>{label}</h3>
-            <div className="catalog-reference-swatches">
-              {REFERENCE_COLOR_STEPS.map((step) => {
-                const token = `--ref-${family}-${step}`
-                return (
-                  <div className="catalog-reference-swatch" key={token}>
-                    <span style={{ background: `var(${token})` }} aria-hidden="true" />
-                    <strong>{step}</strong>
-                    <code>{token}</code>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        ))}
-      </div>
-    </CatalogSection>
-  )
-}
-
-export function SemanticPaletteCatalogSection() {
-  return (
-    <CatalogSection
-      title="Semantic role layer"
-      description="System tokens name a color's purpose. Components consume these roles; only this layer refers to reference colors."
-    >
-      <div className="catalog-semantic-palette">
-        <div className="catalog-semantic-group">
-          <h3>Surfaces</h3>
-          <p>
-            Surface roles establish elevation without naming a pigment. On-surface roles are the
-            supported foregrounds for these backgrounds.
-          </p>
-          <div className="catalog-semantic-pairs">
-            {SEMANTIC_SURFACE_PAIRS.map(([label, background, foreground]) => (
-              <SemanticColorPair
-                background={background}
-                foreground={foreground}
-                label={label}
-                key={background}
-              />
-            ))}
-          </div>
-        </div>
-
-        <div className="catalog-semantic-group">
-          <h3>Intents</h3>
-          <p>
-            Each intent has a strong pair and a quieter container pair. An on-color role is valid
-            only on its matching background role.
-          </p>
-          <div className="catalog-semantic-pairs">
-            {SEMANTIC_INTENTS.flatMap(([label, intent]) => [
-              <SemanticColorPair
-                background={`--sys-color-${intent}`}
-                foreground={`--sys-color-on-${intent}`}
-                label={label}
-                key={intent}
-              />,
-              <SemanticColorPair
-                background={`--sys-color-${intent}-container`}
-                foreground={`--sys-color-on-${intent}-container`}
-                label={`${label} container`}
-                key={`${intent}-container`}
-              />,
-            ])}
-          </div>
-        </div>
-
-        <div className="catalog-semantic-group">
-          <h3>Supporting roles</h3>
-          <div className="catalog-semantic-support">
-            {SEMANTIC_SUPPORT_ROLES.map(([label, token, description]) => (
-              <div key={token}>
-                <span style={{ backgroundColor: `var(${token})` }} aria-hidden="true" />
-                <strong>{label}</strong>
-                <code>{token}</code>
-                <p>{description}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </CatalogSection>
-  )
-}
 
 export function TicketMarkCatalogSection() {
   return (
@@ -246,64 +75,6 @@ export function TinyTicketMarksCatalogSection() {
             {variant.slice(1)}
           </Badge>
         ))}
-      </div>
-    </CatalogSection>
-  )
-}
-
-export function BadgesCatalogSection() {
-  return (
-    <CatalogSection
-      title="Badges"
-      description="Compact status and metadata labels. Text states the meaning; color supports it. Every supported variant appears here."
-    >
-      <div className="catalog-component-examples">
-        {BADGE_VARIANTS.map(([label, variant, token]) => (
-          <div className="catalog-component-example" key={variant}>
-            <Badge variant={variant}>{label}</Badge>
-            <code>{token}</code>
-          </div>
-        ))}
-      </div>
-    </CatalogSection>
-  )
-}
-
-export function AlertsCatalogSection() {
-  return (
-    <CatalogSection
-      title="Alerts"
-      description='Persistent messages. Error alerts use role="alert" and announce immediately; informational alerts do not interrupt assistive technology.'
-    >
-      <div className="catalog-alert-examples">
-        <div className="catalog-alert-example">
-          <Alert>
-            <strong>Action required.</strong>
-            <span>The operation stays blocked until the problem is fixed.</span>
-          </Alert>
-          <ComponentTokenList
-            tokens={[
-              '--comp-alert-outline-color',
-              '--comp-alert-error-accent-color',
-              '--comp-alert-error-container-color',
-              '--comp-alert-error-content-color',
-            ]}
-          />
-        </div>
-        <div className="catalog-alert-example">
-          <Alert variant="info">
-            <strong>Change saved.</strong>
-            <span>The new configuration is active.</span>
-          </Alert>
-          <ComponentTokenList
-            tokens={[
-              '--comp-alert-outline-color',
-              '--comp-alert-info-accent-color',
-              '--comp-alert-info-container-color',
-              '--comp-alert-info-content-color',
-            ]}
-          />
-        </div>
       </div>
     </CatalogSection>
   )
@@ -351,56 +122,6 @@ export function ControlsCatalogSection() {
         </div>
       </div>
     </CatalogSection>
-  )
-}
-
-type ComponentTokenListProps = { tokens: readonly string[] }
-
-function ComponentTokenList({ tokens }: ComponentTokenListProps) {
-  return (
-    <div className="catalog-component-token-list">
-      {tokens.map((token) => (
-        <code key={token}>{token}</code>
-      ))}
-    </div>
-  )
-}
-
-type CatalogSectionProps = {
-  title: string
-  description: string
-  children?: ReactNode
-}
-
-function CatalogSection({ title, description, children }: CatalogSectionProps) {
-  return (
-    <section className="catalog-section">
-      <header>
-        <h2>{title}</h2>
-        <p>{description}</p>
-      </header>
-      {children}
-    </section>
-  )
-}
-
-type SemanticColorPairProps = {
-  label: string
-  background: string
-  foreground: string
-}
-
-function SemanticColorPair({ label, background, foreground }: SemanticColorPairProps) {
-  return (
-    <div
-      className="catalog-semantic-pair"
-      style={{ backgroundColor: `var(${background})`, color: `var(${foreground})` }}
-    >
-      <strong>{label}</strong>
-      <span>Foreground on background</span>
-      <code>{foreground}</code>
-      <code>{background}</code>
-    </div>
   )
 }
 

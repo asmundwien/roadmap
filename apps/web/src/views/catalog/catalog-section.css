@@ -1,0 +1,30 @@
+.catalog-section {
+  display: grid;
+  grid-template-columns: minmax(12rem, 16rem) minmax(0, 1fr);
+  gap: var(--sp-8);
+  padding: var(--sp-8) 0;
+  border-top: 1px solid var(--edge);
+}
+
+.catalog-section > header h2,
+.catalog-section > header p {
+  margin: 0;
+}
+
+.catalog-section > header h2 {
+  font-size: 1rem;
+  letter-spacing: -0.01em;
+}
+
+.catalog-section > header p {
+  margin-top: var(--sp-2);
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+@media (max-width: 780px) {
+  .catalog-section {
+    grid-template-columns: 1fr;
+    gap: var(--sp-4);
+  }
+}

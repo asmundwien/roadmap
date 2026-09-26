@@ -1,0 +1,36 @@
+.catalog-signals {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(7rem, 1fr));
+  border: 1px solid var(--edge);
+}
+
+.catalog-signal {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 4.5rem;
+  padding: var(--sp-3);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.catalog-signal + .catalog-signal {
+  border-left: 1px solid var(--edge);
+}
+
+.catalog-signal svg {
+  flex: none;
+  width: 2.5rem;
+  height: 2.5rem;
+}
+
+@media (max-width: 780px) {
+  .catalog-signals {
+    grid-template-columns: 1fr;
+  }
+
+  .catalog-signal + .catalog-signal {
+    border-top: 1px solid var(--edge);
+    border-left: 0;
+  }
+}

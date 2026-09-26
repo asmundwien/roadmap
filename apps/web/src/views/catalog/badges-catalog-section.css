@@ -1,0 +1,11 @@
+.catalog-component-examples {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--sp-3);
+}
+
+.catalog-component-example {
+  display: grid;
+  align-items: start;
+  gap: var(--sp-2);
+}

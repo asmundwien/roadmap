@@ -1,0 +1,19 @@
+.component-catalog-head {
+  max-width: 42rem;
+  margin-bottom: var(--sp-12);
+}
+
+.component-catalog-head h1,
+.component-catalog-head p {
+  margin-top: 0;
+}
+
+.component-catalog-eyebrow {
+  margin-bottom: 0.35rem;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}

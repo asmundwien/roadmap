@@ -1,0 +1,114 @@
+.catalog-semantic-palette,
+.catalog-semantic-group {
+  display: grid;
+  gap: var(--sp-6);
+}
+
+.catalog-semantic-group {
+  gap: var(--sp-3);
+}
+
+.catalog-semantic-group h3,
+.catalog-semantic-group p {
+  margin: 0;
+}
+
+.catalog-semantic-group h3 {
+  font-size: 0.8rem;
+}
+
+.catalog-semantic-group > p {
+  max-width: 48rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.catalog-semantic-pairs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--sp-3);
+}
+
+.catalog-semantic-pair {
+  display: grid;
+  min-height: 8rem;
+  padding: var(--sp-3);
+  border: 1px solid var(--sys-color-outline);
+}
+
+.catalog-semantic-pair strong {
+  font-size: 0.8rem;
+}
+
+.catalog-semantic-pair span {
+  margin-bottom: auto;
+  font-size: 0.72rem;
+}
+
+.catalog-semantic-pair code {
+  overflow: hidden;
+  font-size: 0.66rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.catalog-semantic-support {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid var(--sys-color-outline-variant);
+}
+
+.catalog-semantic-support > div {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr);
+  gap: 0 var(--sp-2);
+  padding: var(--sp-3);
+}
+
+.catalog-semantic-support > div:nth-child(even) {
+  border-left: 1px solid var(--sys-color-outline-variant);
+}
+
+.catalog-semantic-support > div:nth-child(n + 3) {
+  border-top: 1px solid var(--sys-color-outline-variant);
+}
+
+.catalog-semantic-support span {
+  grid-row: span 3;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--sys-color-outline);
+  border-radius: 50%;
+}
+
+.catalog-semantic-support strong {
+  font-size: 0.75rem;
+}
+
+.catalog-semantic-support code {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.66rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.catalog-semantic-support p {
+  margin-top: var(--sp-1);
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+@media (max-width: 780px) {
+  .catalog-semantic-support {
+    grid-template-columns: 1fr;
+  }
+
+  .catalog-semantic-support > div:nth-child(even) {
+    border-left: 0;
+  }
+
+  .catalog-semantic-support > div + div {
+    border-top: 1px solid var(--sys-color-outline-variant);
+  }
+}

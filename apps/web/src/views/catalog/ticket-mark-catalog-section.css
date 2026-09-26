@@ -1,0 +1,32 @@
+.catalog-mark-matrix {
+  display: grid;
+  grid-template-columns: minmax(4rem, 1fr) repeat(5, minmax(3.5rem, 1fr));
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.catalog-column-label,
+.catalog-row-label {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.catalog-column-label {
+  text-align: center;
+}
+
+.catalog-ticket-mark {
+  width: 100%;
+  height: 3rem;
+  overflow: visible;
+}
+
+@media (max-width: 780px) {
+  .catalog-mark-matrix {
+    grid-template-columns: minmax(3rem, 1fr) repeat(5, minmax(2.75rem, 1fr));
+    gap: var(--sp-1);
+  }
+}
