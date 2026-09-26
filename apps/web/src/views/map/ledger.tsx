@@ -6,7 +6,7 @@ import {
   ticketTypeOf,
   type WayfinderMap,
 } from '@roadmap/contracts'
-import { VARIANT_COLORS } from '@roadmap/ui'
+import { VARIANT_COLORS } from '@roadmap/ui/variant'
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { DestinationMark } from '@/views/shared/destination-mark'
 import { TicketMark } from '@/views/shared/ticket-mark'

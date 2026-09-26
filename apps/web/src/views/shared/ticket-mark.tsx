@@ -1,5 +1,5 @@
 import type { TicketState, TicketType } from '@roadmap/contracts'
-import { Mark, type MarkSize } from '@roadmap/ui'
+import { Mark, type MarkSize } from '@roadmap/ui/mark'
 import { TICKET_STATE_META, TICKET_TYPE_META } from './ticket-presentation'
 
 const CLOSED_GLYPH = '✓'

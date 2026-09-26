@@ -8,7 +8,7 @@ import type {
   WayfinderMap,
   WayfinderSession,
 } from '@roadmap/contracts'
-import type { Variant } from '@roadmap/ui'
+import type { Variant } from '@roadmap/ui/variant'
 
 export type AutomationTagSlot =
   | 'classification'

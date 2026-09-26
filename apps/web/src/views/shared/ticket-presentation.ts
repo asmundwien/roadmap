@@ -1,5 +1,6 @@
 import type { TicketState, TicketType } from '@roadmap/contracts'
-import type { MarkCornerCount, MarkFill, Variant } from '@roadmap/ui'
+import type { MarkCornerCount, MarkFill } from '@roadmap/ui/mark'
+import type { Variant } from '@roadmap/ui/variant'
 
 type TicketStateMeta = { word: string; variant: Variant; fill: MarkFill }
 type TicketTypeMeta = { glyph: string; accent: Variant; corners: MarkCornerCount }

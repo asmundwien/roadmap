@@ -1,4 +1,5 @@
-import { Badge, type Variant } from '@roadmap/ui'
+import { Badge } from '@roadmap/ui/badge'
+import type { Variant } from '@roadmap/ui/variant'
 import { CatalogSection } from './section'
 import './badges.css'
 

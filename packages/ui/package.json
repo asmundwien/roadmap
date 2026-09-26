@@ -5,7 +5,12 @@
   "type": "module",
   "description": "Design tokens and presentational components, with no knowledge of the roadmap domain.",
   "exports": {
-    ".": "./src/index.ts",
+    "./action": "./src/components/action/action.tsx",
+    "./alert": "./src/components/alert/alert.tsx",
+    "./badge": "./src/components/badge/badge.tsx",
+    "./mark": "./src/components/mark/mark.tsx",
+    "./page": "./src/components/page/page.tsx",
+    "./variant": "./src/components/variant.ts",
     "./tokens.css": "./src/styles/tokens.css"
   },
   "scripts": {

@@ -1,5 +1,5 @@
 import type { Connection } from '@roadmap/contracts'
-import { Badge } from '@roadmap/ui'
+import { Badge } from '@roadmap/ui/badge'
 import { INTEGRATION_META } from '@/views/shared/project-meta'
 
 type IntegrationBadgeProps = { connection: Connection | undefined }

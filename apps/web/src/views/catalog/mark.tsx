@@ -1,5 +1,6 @@
 import type { TicketState, TicketType } from '@roadmap/contracts'
-import { Mark, type MarkCornerCount, type MarkFill, type MarkSize, type Variant } from '@roadmap/ui'
+import { Mark, type MarkCornerCount, type MarkFill, type MarkSize } from '@roadmap/ui/mark'
+import type { Variant } from '@roadmap/ui/variant'
 import type { ReactNode } from 'react'
 import { TicketMark } from '@/views/shared/ticket-mark'
 import { CatalogSection } from './section'

@@ -1,4 +1,4 @@
-import { Action, ActionGroup } from '@roadmap/ui'
+import { Action, ActionGroup } from '@roadmap/ui/action'
 import { CatalogSection, ComponentTokenList } from './section'
 import './actions.css'
 

@@ -1,4 +1,4 @@
-import { Page, PageDescription, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui'
+import { Page, PageDescription, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
 import { ActionsCatalogSection } from './actions'
 import { AlertsCatalogSection } from './alerts'
 import { BadgesCatalogSection } from './badges'

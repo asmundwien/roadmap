@@ -1,5 +1,5 @@
 import type { Ticket, TicketType } from '@roadmap/contracts'
-import { Mark, MEDIUM_MARK_EXTENT } from '@roadmap/ui'
+import { Mark, MEDIUM_MARK_EXTENT } from '@roadmap/ui/mark'
 import { TicketMark } from '@/views/shared/ticket-mark'
 import { TICKET_STATE_META } from '@/views/shared/ticket-presentation'
 import { AUTOMATION_VARIANT, type AutomationTag } from './automation-presentation'

@@ -1,5 +1,6 @@
 import type { AutomationEvidence, Project, WayfinderMap } from '@roadmap/contracts'
-import { Badge, Mark } from '@roadmap/ui'
+import { Badge } from '@roadmap/ui/badge'
+import { Mark } from '@roadmap/ui/mark'
 import { useEffect, useRef, useState } from 'react'
 import {
   encodeSelection,

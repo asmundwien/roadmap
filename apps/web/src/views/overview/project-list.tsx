@@ -1,4 +1,4 @@
-import { Badge } from '@roadmap/ui'
+import { Badge } from '@roadmap/ui/badge'
 import type { ReactNode } from 'react'
 import { connectionSettingsHash, projectHash } from '@/router'
 import { integrationLabel } from '@/views/shared/project-meta'

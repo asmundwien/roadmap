@@ -7,7 +7,9 @@ import type {
   SafeError,
   SupportedIntegration,
 } from '@roadmap/contracts'
-import { Action, ActionGroup, Alert, Badge } from '@roadmap/ui'
+import { Action, ActionGroup } from '@roadmap/ui/action'
+import { Alert } from '@roadmap/ui/alert'
+import { Badge } from '@roadmap/ui/badge'
 import { type FormEvent, useState } from 'react'
 import { projectHash } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'

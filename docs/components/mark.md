@@ -1,6 +1,6 @@
 # Mark
 
-`Mark` is the diamond icon primitive in `packages/ui/src/components/mark/mark.tsx`, exported from `@roadmap/ui`. It renders one complete SVG at one of three sizes and knows nothing about tickets, Automation, or any other domain concept.
+`Mark` is the diamond icon primitive in `packages/ui/src/components/mark/mark.tsx`, exported from `@roadmap/ui/mark`. It renders one complete SVG at one of three sizes and knows nothing about tickets, Automation, or any other domain concept.
 
 ## Interface
 

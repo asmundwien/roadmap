@@ -7,7 +7,7 @@ import type {
   SafeError,
   WayfinderSession,
 } from '@roadmap/contracts'
-import { Alert } from '@roadmap/ui'
+import { Alert } from '@roadmap/ui/alert'
 import { useMemo, useState } from 'react'
 import { selectionHash } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
