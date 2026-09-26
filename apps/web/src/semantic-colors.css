@@ -1,0 +1,104 @@
+:root {
+  /* Neutral surfaces and content. */
+  --sys-color-surface: var(--ref-neutral-50);
+  --sys-color-surface-dim: var(--ref-neutral-200);
+  --sys-color-surface-bright: var(--ref-white);
+  --sys-color-surface-container-lowest: var(--ref-white);
+  --sys-color-surface-container-low: var(--ref-neutral-50);
+  --sys-color-surface-container: var(--ref-neutral-100);
+  --sys-color-surface-container-high: var(--ref-neutral-200);
+  --sys-color-surface-container-highest: var(--ref-neutral-300);
+  --sys-color-on-surface: var(--ref-neutral-900);
+  --sys-color-on-surface-variant: var(--ref-neutral-700);
+  --sys-color-outline: var(--ref-neutral-500);
+  --sys-color-outline-variant: var(--ref-neutral-300);
+  --sys-color-inverse-surface: var(--ref-neutral-900);
+  --sys-color-inverse-on-surface: var(--ref-neutral-100);
+  --sys-color-shadow: var(--ref-black);
+  --sys-color-scrim: var(--ref-black);
+
+  /* Primary interface elements. */
+  --sys-color-primary: var(--ref-blue-700);
+  --sys-color-on-primary: var(--ref-white);
+  --sys-color-primary-container: var(--ref-blue-100);
+  --sys-color-on-primary-container: var(--ref-blue-900);
+
+  /* Secondary interface elements. */
+  --sys-color-secondary: var(--ref-violet-700);
+  --sys-color-on-secondary: var(--ref-white);
+  --sys-color-secondary-container: var(--ref-violet-100);
+  --sys-color-on-secondary-container: var(--ref-violet-900);
+
+  /* Errors and destructive actions. */
+  --sys-color-error: var(--ref-rose-700);
+  --sys-color-on-error: var(--ref-white);
+  --sys-color-error-container: var(--ref-rose-100);
+  --sys-color-on-error-container: var(--ref-rose-900);
+
+  /* Potentially dangerous actions and important messages. */
+  --sys-color-warning: var(--ref-gold-700);
+  --sys-color-on-warning: var(--ref-white);
+  --sys-color-warning-container: var(--ref-gold-100);
+  --sys-color-on-warning-container: var(--ref-gold-900);
+
+  /* Neutral information. */
+  --sys-color-info: var(--ref-teal-700);
+  --sys-color-on-info: var(--ref-white);
+  --sys-color-info-container: var(--ref-teal-100);
+  --sys-color-on-info-container: var(--ref-teal-900);
+
+  /* Successful user-triggered outcomes. */
+  --sys-color-success: var(--ref-green-700);
+  --sys-color-on-success: var(--ref-white);
+  --sys-color-success-container: var(--ref-green-100);
+  --sys-color-on-success-container: var(--ref-green-900);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --sys-color-surface: var(--ref-neutral-950);
+    --sys-color-surface-dim: var(--ref-black);
+    --sys-color-surface-bright: var(--ref-neutral-800);
+    --sys-color-surface-container-lowest: var(--ref-black);
+    --sys-color-surface-container-low: var(--ref-neutral-950);
+    --sys-color-surface-container: var(--ref-neutral-900);
+    --sys-color-surface-container-high: var(--ref-neutral-800);
+    --sys-color-surface-container-highest: var(--ref-neutral-700);
+    --sys-color-on-surface: var(--ref-neutral-100);
+    --sys-color-on-surface-variant: var(--ref-neutral-300);
+    --sys-color-outline: var(--ref-neutral-500);
+    --sys-color-outline-variant: var(--ref-neutral-700);
+    --sys-color-inverse-surface: var(--ref-neutral-100);
+    --sys-color-inverse-on-surface: var(--ref-neutral-900);
+
+    --sys-color-primary: var(--ref-blue-300);
+    --sys-color-on-primary: var(--ref-blue-950);
+    --sys-color-primary-container: var(--ref-blue-800);
+    --sys-color-on-primary-container: var(--ref-blue-100);
+
+    --sys-color-secondary: var(--ref-violet-300);
+    --sys-color-on-secondary: var(--ref-violet-950);
+    --sys-color-secondary-container: var(--ref-violet-800);
+    --sys-color-on-secondary-container: var(--ref-violet-100);
+
+    --sys-color-error: var(--ref-rose-300);
+    --sys-color-on-error: var(--ref-rose-950);
+    --sys-color-error-container: var(--ref-rose-800);
+    --sys-color-on-error-container: var(--ref-rose-100);
+
+    --sys-color-warning: var(--ref-gold-300);
+    --sys-color-on-warning: var(--ref-gold-950);
+    --sys-color-warning-container: var(--ref-gold-800);
+    --sys-color-on-warning-container: var(--ref-gold-100);
+
+    --sys-color-info: var(--ref-teal-300);
+    --sys-color-on-info: var(--ref-teal-950);
+    --sys-color-info-container: var(--ref-teal-800);
+    --sys-color-on-info-container: var(--ref-teal-100);
+
+    --sys-color-success: var(--ref-green-300);
+    --sys-color-on-success: var(--ref-green-950);
+    --sys-color-success-container: var(--ref-green-800);
+    --sys-color-on-success-container: var(--ref-green-100);
+  }
+}

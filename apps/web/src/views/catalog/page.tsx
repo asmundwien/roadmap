@@ -1,10 +1,10 @@
 import {
-  AliasPaletteCatalogSection,
   BadgesCatalogSection,
   CatalogHeader,
   ControlsCatalogSection,
   ReferencePaletteCatalogSection,
   RoadmapSignalsCatalogSection,
+  SemanticPaletteCatalogSection,
   TicketMarkCatalogSection,
   TinyTicketMarksCatalogSection,
 } from './component-catalog'
@@ -15,7 +15,7 @@ export function CatalogPage() {
     <main className="shell component-catalog">
       <CatalogHeader />
       <ReferencePaletteCatalogSection />
-      <AliasPaletteCatalogSection />
+      <SemanticPaletteCatalogSection />
       <TicketMarkCatalogSection />
       <TinyTicketMarksCatalogSection />
       <BadgesCatalogSection />
