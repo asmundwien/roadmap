@@ -1,29 +1,3 @@
-.catalog-mark-matrix {
-  display: grid;
-  grid-template-columns: minmax(4rem, 1fr) repeat(5, minmax(3.5rem, 1fr));
-  align-items: center;
-  gap: var(--sys-space-sm);
-}
-
-.catalog-column-label,
-.catalog-row-label {
-  color: var(--muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.66rem;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.catalog-column-label {
-  text-align: center;
-}
-
-.catalog-mark-example {
-  display: grid;
-  min-height: 3rem;
-  place-items: center;
-}
-
 .catalog-mark-row {
   display: flex;
   flex-wrap: wrap;
@@ -39,11 +13,4 @@
 
 .catalog-mark-cell code {
   font-size: 0.66rem;
-}
-
-@media (max-width: 780px) {
-  .catalog-mark-matrix {
-    grid-template-columns: minmax(3rem, 1fr) repeat(5, minmax(2.75rem, 1fr));
-    gap: var(--sys-space-xs);
-  }
 }

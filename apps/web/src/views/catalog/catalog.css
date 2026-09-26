@@ -1,0 +1,31 @@
+/* The catalog's two-column frame: the tab rail in the margin, sections beside it. The rail sticks
+   below the site header so the tabs stay reachable down a long page; it stacks above the sections
+   on narrow screens, where a margin column would leave nothing for the content. */
+
+.catalog-layout {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  gap: var(--sys-space-2xl);
+  align-items: start;
+}
+
+.catalog-rail {
+  position: sticky;
+  /* The site header is sticky and opaque; its height is a screen fact, not a token. */
+  top: calc(52px + var(--sys-space-lg));
+}
+
+.catalog-sections {
+  min-width: 0;
+}
+
+@media (max-width: 720px) {
+  .catalog-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .catalog-rail {
+    position: static;
+    margin-block-end: var(--sys-space-lg);
+  }
+}

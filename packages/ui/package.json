@@ -9,6 +9,7 @@
     "./alert": "./src/components/alert/alert.tsx",
     "./badge": "./src/components/badge/badge.tsx",
     "./mark": "./src/components/mark/mark.tsx",
+    "./navbar": "./src/components/navbar/navbar.tsx",
     "./page": "./src/components/page/page.tsx",
     "./section": "./src/components/section/section.tsx",
     "./variant": "./src/components/variant.ts",

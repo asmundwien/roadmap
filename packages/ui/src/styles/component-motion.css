@@ -15,4 +15,8 @@
   /* Action. */
   --comp-action-transition-duration: var(--sys-motion-duration-short);
   --comp-action-transition-easing: var(--sys-motion-easing-standard);
+
+  /* Navbar. */
+  --comp-navbar-transition-duration: var(--sys-motion-duration-short);
+  --comp-navbar-transition-easing: var(--sys-motion-easing-standard);
 }

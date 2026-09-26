@@ -61,6 +61,16 @@
   --comp-mark-muted-color: var(--sys-color-outline);
   --comp-mark-highlight-color: var(--sys-color-secondary);
 
+  /* Navbar. */
+  --comp-navbar-container-color: transparent;
+  --comp-navbar-outline-color: var(--sys-color-outline-variant);
+  --comp-navbar-link-color: var(--sys-color-on-surface-variant);
+  --comp-navbar-hover-container-color: var(--sys-color-surface-container-low);
+  --comp-navbar-hover-link-color: var(--sys-color-on-surface);
+  --comp-navbar-current-container-color: transparent;
+  --comp-navbar-current-link-color: var(--sys-color-on-surface);
+  --comp-navbar-current-accent-color: var(--sys-color-primary);
+
   /* Page. */
   --comp-page-eyebrow-color: var(--sys-color-on-surface-variant);
   --comp-page-description-color: var(--sys-color-on-surface-variant);

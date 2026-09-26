@@ -43,6 +43,15 @@
   /* Mark. */
   --comp-mark-inline-margin: var(--sys-space-xs);
 
+  /* Navbar. */
+  --comp-navbar-height: var(--sys-size-control-md);
+  --comp-navbar-min-width: var(--sys-size-rail);
+  --comp-navbar-gap: var(--sys-space-none);
+  --comp-navbar-link-inline-padding: var(--sys-space-lg);
+  --comp-navbar-link-block-padding: var(--sys-space-sm);
+  --comp-navbar-border-width: var(--sys-border-width-thin);
+  --comp-navbar-current-accent-width: var(--sys-border-width-thick);
+
   /* Page. */
   --comp-page-max-width: var(--sys-size-page-wide);
   --comp-page-block-start-padding: var(--sys-space-2xl);
