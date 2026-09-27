@@ -1,0 +1,101 @@
+.catalog-reference-dimension-list {
+  display: grid;
+  gap: var(--sys-space-xs);
+}
+
+.catalog-reference-dimension-row {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr) minmax(9rem, auto);
+  align-items: center;
+  gap: var(--sys-space-sm);
+}
+
+.catalog-reference-space-track {
+  border-left: 1px solid var(--sys-color-outline);
+}
+
+.catalog-reference-space-track span {
+  display: block;
+  height: 0.75rem;
+  background: var(--sys-color-primary);
+}
+
+.catalog-reference-control-sizes,
+.catalog-reference-dimension-pairs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--sys-space-lg);
+}
+
+.catalog-reference-control-size,
+.catalog-reference-border-sample,
+.catalog-reference-radius-sample {
+  display: grid;
+  justify-items: center;
+  gap: var(--sys-space-xs);
+}
+
+.catalog-reference-control-size > span {
+  width: 8rem;
+  border: 1px solid var(--sys-color-outline);
+  background: var(--sys-color-surface-container);
+}
+
+.catalog-reference-layout-widths {
+  display: grid;
+  gap: var(--sys-space-sm);
+  overflow-x: auto;
+}
+
+.catalog-reference-layout-width {
+  display: grid;
+  justify-items: start;
+  gap: var(--sys-space-xs);
+}
+
+.catalog-reference-layout-width > span {
+  box-sizing: border-box;
+  height: 1rem;
+  border: 1px solid var(--sys-color-outline);
+  background: var(--sys-color-surface-container);
+}
+
+.catalog-reference-border-sample > span,
+.catalog-reference-radius-sample > span {
+  box-sizing: border-box;
+  width: 3rem;
+  height: 3rem;
+  border: 1px solid var(--sys-color-outline);
+}
+
+.catalog-reference-radius-sample > span {
+  background: var(--sys-color-surface-container);
+}
+
+.catalog-reference-dimension-row strong,
+.catalog-reference-control-size strong,
+.catalog-reference-layout-width strong,
+.catalog-reference-border-sample strong,
+.catalog-reference-radius-sample strong {
+  font-size: var(--sys-typescale-body-sm-size);
+}
+
+.catalog-reference-dimension-row code,
+.catalog-reference-control-size code,
+.catalog-reference-layout-width code,
+.catalog-reference-border-sample code,
+.catalog-reference-radius-sample code {
+  color: var(--sys-color-on-surface-variant);
+  font-size: var(--sys-typescale-body-sm-size);
+}
+
+@media (max-width: 600px) {
+  .catalog-reference-dimension-row {
+    grid-template-columns: 3rem minmax(0, 1fr);
+  }
+
+  .catalog-reference-dimension-row code {
+    grid-column: 2;
+  }
+}

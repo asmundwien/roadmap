@@ -3,11 +3,12 @@ import {
   SectionBody,
   SectionDescription,
   SectionGroup,
+  SectionGroupDescription,
   SectionGroupTitle,
   SectionHeader,
   SectionTitle,
 } from '@roadmap/ui/section'
-import './reference.css'
+import './reference-colors.css'
 
 const REFERENCE_COLOR_STEPS = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950] as const
 const REFERENCE_COLOR_FAMILIES = [
@@ -24,19 +25,25 @@ const COMMON_REFERENCE_COLORS = [
   ['Black', '--ref-black'],
 ] as const
 
-export function ReferencePaletteCatalogSection() {
+export function ReferenceColorsCatalogSection() {
   return (
     <Section>
       <SectionHeader>
-        <SectionTitle>Reference layer</SectionTitle>
+        <SectionTitle>Reference colors</SectionTitle>
         <SectionDescription>
-          Literal color values without semantic or component meaning.
+          Literal pigments, not foreground and background pairs. The ramps run from 50 (lightest) to
+          950 (darkest); a step alone does not promise readable text. Product styles use semantic
+          roles so contrast and dark mode can change independently.
         </SectionDescription>
       </SectionHeader>
 
       <SectionBody>
         <SectionGroup>
           <SectionGroupTitle>Common</SectionGroupTitle>
+          <SectionGroupDescription>
+            White and black sit outside the tonal ramps. Their names describe the pigment, not a
+            surface or text role.
+          </SectionGroupDescription>
           <div className="catalog-reference-swatches">
             {COMMON_REFERENCE_COLORS.map(([label, token]) => (
               <div className="catalog-reference-swatch" key={token}>

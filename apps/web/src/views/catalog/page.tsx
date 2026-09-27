@@ -3,7 +3,10 @@ import { ActionsCatalogSection } from './actions'
 import { AlertsCatalogSection } from './alerts'
 import { BadgesCatalogSection } from './badges'
 import { MarkCatalogSection, TicketMarkCatalogSection } from './mark'
-import { ReferencePaletteCatalogSection } from './reference'
+import { ReferenceColorsCatalogSection } from './reference-colors'
+import { ReferenceDimensionsCatalogSection } from './reference-dimensions'
+import { ReferenceMotionCatalogSection } from './reference-motion'
+import { ReferenceTypographyCatalogSection } from './reference-typography'
 import { SemanticPaletteCatalogSection } from './semantic'
 
 export function CatalogPage() {
@@ -13,12 +16,15 @@ export function CatalogPage() {
         <PageEyebrow>UI inventory</PageEyebrow>
         <PageTitle>Components</PageTitle>
         <PageDescription>
-          The color layers, the mark primitive, and the shared controls. Every example renders
-          through the same components and tokens as the product.
+          Reference values, semantic color roles, the mark primitive, and shared controls. The
+          examples render with the same tokens as the product.
         </PageDescription>
       </PageHeader>
 
-      <ReferencePaletteCatalogSection />
+      <ReferenceColorsCatalogSection />
+      <ReferenceTypographyCatalogSection />
+      <ReferenceDimensionsCatalogSection />
+      <ReferenceMotionCatalogSection />
       <SemanticPaletteCatalogSection />
       <MarkCatalogSection />
       <TicketMarkCatalogSection />

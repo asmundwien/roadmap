@@ -1,0 +1,31 @@
+.catalog-reference-type-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: var(--sys-space-sm);
+}
+
+.catalog-reference-type-sample {
+  display: grid;
+  align-content: space-between;
+  gap: var(--sys-space-xs);
+  min-width: 0;
+  min-height: 7rem;
+  padding: var(--sys-space-md);
+  border: 1px solid var(--sys-color-outline-variant);
+}
+
+.catalog-reference-type-sample > span {
+  align-self: center;
+  overflow-wrap: anywhere;
+  color: var(--sys-color-on-surface);
+}
+
+.catalog-reference-type-sample strong {
+  font-size: var(--sys-typescale-body-sm-size);
+}
+
+.catalog-reference-type-sample code {
+  overflow-wrap: anywhere;
+  color: var(--sys-color-on-surface-variant);
+  font-size: var(--sys-typescale-body-sm-size);
+}
