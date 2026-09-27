@@ -461,8 +461,8 @@ function AddProjectPane({
             <Alert variant="info">
               <span>GitHub authorization and repository installation are separate grants.</span>
               {githubInstallationUrl && (
-                <Link href={githubInstallationUrl} target="_blank" rel="noreferrer">
-                  Configure repository access ↗
+                <Link href={githubInstallationUrl} external>
+                  Configure repository access
                 </Link>
               )}
             </Alert>

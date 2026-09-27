@@ -1,8 +1,21 @@
 .link {
-  color: var(--sys-color-primary);
+  color: var(--sys-color-on-surface);
   font-family: var(--sys-font-family-ui);
   text-decoration: underline;
   text-underline-offset: 0.2em;
+}
+
+.arrow {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  margin-inline-start: 0.3em;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vertical-align: -0.08em;
 }
 
 .link:hover {

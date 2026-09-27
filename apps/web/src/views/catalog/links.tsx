@@ -21,11 +21,20 @@ export function LinksCatalogSection() {
       </SectionHeader>
       <SectionBody>
         <SectionGroup>
-          <SectionGroupTitle>Default</SectionGroupTitle>
+          <SectionGroupTitle>Internal</SectionGroupTitle>
           <SectionGroupDescription>
-            Underlined text identifies navigation without button borders or a button group.
+            Underlined text with a right arrow identifies navigation within the application.
           </SectionGroupDescription>
           <Link href="#/components">Components</Link>
+        </SectionGroup>
+        <SectionGroup>
+          <SectionGroupTitle>External</SectionGroupTitle>
+          <SectionGroupDescription>
+            An up-right arrow marks a destination that opens in a new tab.
+          </SectionGroupDescription>
+          <Link href="https://github.com" external>
+            GitHub
+          </Link>
         </SectionGroup>
       </SectionBody>
     </Section>

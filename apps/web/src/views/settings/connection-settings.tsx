@@ -455,7 +455,7 @@ function AuthorizationPane({
           </div>
           <div className="authorization-controls">
             {authorization.verificationUri && (
-              <Link href={authorization.verificationUri} target="_blank" rel="noreferrer">
+              <Link href={authorization.verificationUri} external>
                 Open GitHub
               </Link>
             )}
