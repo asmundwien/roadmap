@@ -69,7 +69,7 @@ export function ConnectionSettings() {
           <p className="muted">{connections.length} configured</p>
         </div>
         <Button
-          variant="strong"
+          variant="primary"
           type="button"
           disabled={blocked || !github}
           onClick={() => setPane({ kind: 'add' })}
@@ -268,20 +268,24 @@ function ConnectionStride({
             {dependents.length === 1 ? 'Project' : 'Projects'}
           </span>
         </span>
-        <ButtonGroup variant="connection">
-          {connection.integration === 'github' && reauthenticationAvailable && (
-            <Button variant="strong" type="button" disabled={blocked} onClick={onAuthorize}>
-              {authorization?.status === 'waiting' ? 'Authorization progress' : 'Reauthenticate'}
-            </Button>
-          )}
+        <div className="connection-actions">
           {connection.builtIn ? (
             <Badge variant="warning">Built in</Badge>
           ) : (
-            <Button type="button" disabled={blocked} onClick={onEdit}>
-              Manage
-            </Button>
+            <ButtonGroup>
+              {connection.integration === 'github' && reauthenticationAvailable && (
+                <Button type="button" disabled={blocked} onClick={onAuthorize}>
+                  {authorization?.status === 'waiting'
+                    ? 'Authorization progress'
+                    : 'Reauthenticate'}
+                </Button>
+              )}
+              <Button type="button" disabled={blocked} onClick={onEdit}>
+                Manage
+              </Button>
+            </ButtonGroup>
           )}
-        </ButtonGroup>
+        </div>
       </div>
 
       {connection.availability.status !== 'available' && (
@@ -383,11 +387,11 @@ function AddConnectionPane({
           browser.
         </Alert>
         <ErrorText error={error} />
-        <ButtonGroup variant="form">
+        <ButtonGroup className="settings-form-actions">
           <Button type="button" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="strong" type="submit" disabled={busy}>
+          <Button variant="primary" type="submit" disabled={busy}>
             {busy ? 'Starting…' : 'Start authorization'}
           </Button>
         </ButtonGroup>
@@ -469,7 +473,6 @@ function AuthorizationPane({
                 {copied ? 'Code copied' : 'Copy code'}
               </Button>
               <Button
-                variant="danger"
                 type="button"
                 disabled={busy}
                 onClick={() =>
@@ -502,7 +505,7 @@ function AuthorizationPane({
       <ErrorText error={error} />
 
       {authorization.status !== 'waiting' && (
-        <ButtonGroup variant="form">
+        <ButtonGroup className="settings-form-actions">
           <Button
             type="button"
             onClick={() =>
@@ -517,7 +520,6 @@ function AuthorizationPane({
           </Button>
           {authorization.status !== 'granted' && (
             <Button
-              variant="strong"
               type="button"
               disabled={busy}
               onClick={() =>
@@ -619,8 +621,8 @@ function EditConnectionPane({
           Connection name
           <input name="name" defaultValue={connection.name} />
         </label>
-        <ButtonGroup variant="form">
-          <Button variant="strong" type="submit" disabled={busy}>
+        <ButtonGroup className="settings-form-actions">
+          <Button variant="primary" type="submit" disabled={busy}>
             Save name
           </Button>
         </ButtonGroup>
@@ -659,6 +661,7 @@ function EditConnectionPane({
               </Button>
               <Button
                 variant="danger"
+                appearance="solid"
                 type="button"
                 disabled={busy}
                 onClick={() =>

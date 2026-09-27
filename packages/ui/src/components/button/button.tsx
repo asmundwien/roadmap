@@ -4,39 +4,36 @@ import styles from './button.module.css'
 
 const cx = classNames.bind(styles)
 
-export type ButtonVariant = 'default' | 'strong' | 'danger'
+export type ButtonVariant = 'primary' | 'secondary' | 'danger'
+export type ButtonAppearance = 'solid' | 'outline'
 
 export type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'className'> & {
   variant?: ButtonVariant
-  size?: 'default' | 'field'
+  appearance?: ButtonAppearance
+  size?: 'small' | 'medium' | 'large'
 }
 
 export function Button({
-  size = 'default',
-  variant = 'default',
+  size = 'medium',
+  variant = 'secondary',
+  appearance = variant === 'primary' ? 'solid' : 'outline',
   type = 'button',
   ...props
 }: ButtonProps) {
-  return (
-    <button
-      type={type}
-      className={cx('button', variant !== 'default' && variant, size === 'field' && 'field')}
-      {...props}
-    />
-  )
+  return <button type={type} className={cx('button', variant, appearance, size)} {...props} />
 }
 
 type ButtonGroupProps = {
   children: ReactNode
-  variant?: 'default' | 'form' | 'connection'
+  className?: string
 }
 
-export function ButtonGroup({ children, variant = 'default' }: ButtonGroupProps) {
+export function ButtonGroup({ children, className }: ButtonGroupProps) {
   Children.forEach(children, (child) => {
     if (child != null && (!isValidElement(child) || child.type !== Button)) {
       throw new Error('ButtonGroup accepts only Button children')
     }
   })
 
-  return <div className={cx('group', variant !== 'default' && `group-${variant}`)}>{children}</div>
+  return <div className={cx('group', className)}>{children}</div>
 }

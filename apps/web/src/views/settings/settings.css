@@ -436,6 +436,11 @@
   color: var(--muted);
 }
 
+.settings-form-actions {
+  justify-content: flex-end;
+  margin-top: var(--sys-space-sm);
+}
+
 .connection-stride {
   position: relative;
   z-index: 1;
@@ -454,6 +459,11 @@
   align-items: center;
   min-height: 70px;
   padding-right: 0.8rem;
+}
+
+.connection-actions {
+  display: flex;
+  align-items: center;
 }
 
 .settings-copy > .settings-kicker {
@@ -940,6 +950,12 @@
   .settings-row,
   .connection-main {
     grid-template-columns: 3.8rem minmax(0, 1fr);
+  }
+
+  .connection-actions {
+    grid-column: 2;
+    align-items: flex-start;
+    justify-content: flex-start;
   }
 
   .settings-row-meta {

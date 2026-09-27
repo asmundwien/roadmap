@@ -89,7 +89,7 @@ export function ProjectSettings() {
           <p className="muted">{projects.length} registered</p>
         </div>
         <Button
-          variant="strong"
+          variant="primary"
           type="button"
           disabled={blocked || connections.length === 0}
           onClick={() => setPane({ kind: 'add' })}
@@ -332,7 +332,7 @@ function ProjectDetail({
       </div>
 
       <ButtonGroup>
-        <Button variant="strong" type="button" disabled={busy} onClick={onEdit}>
+        <Button type="button" disabled={busy} onClick={onEdit}>
           Edit registration
         </Button>
         <Button
@@ -487,11 +487,11 @@ function AddProjectPane({
           <input name="displayName" placeholder="Optional" />
         </label>
         <ErrorText error={generalError} />
-        <ButtonGroup variant="form">
+        <ButtonGroup className="settings-form-actions">
           <Button type="button" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="strong" type="submit" disabled={saving}>
+          <Button variant="primary" type="submit" disabled={saving}>
             {saving ? 'Validating…' : 'Validate and save'}
           </Button>
         </ButtonGroup>
@@ -602,8 +602,8 @@ function EditProjectPane({
           <input name="name" defaultValue={project.name} />
           <FieldError message={fieldError ?? undefined} />
         </label>
-        <ButtonGroup variant="form">
-          <Button variant="strong" type="submit" disabled={busy}>
+        <ButtonGroup className="settings-form-actions">
+          <Button variant="primary" type="submit" disabled={busy}>
             Save name
           </Button>
         </ButtonGroup>
@@ -627,8 +627,8 @@ function EditProjectPane({
               setFieldError(null)
             }}
           />
-          <ButtonGroup variant="form">
-            <Button variant="strong" type="submit" disabled={busy}>
+          <ButtonGroup className="settings-form-actions">
+            <Button variant="primary" type="submit" disabled={busy}>
               Validate and repair
             </Button>
           </ButtonGroup>
@@ -646,6 +646,7 @@ function EditProjectPane({
             </Button>
             <Button
               variant="danger"
+              appearance="solid"
               type="button"
               disabled={busy}
               onClick={() =>
@@ -715,8 +716,7 @@ function WorkspaceFolderSelector({
       <legend>{label}</legend>
       <div className="settings-folder-control">
         <Button
-          variant="strong"
-          size="field"
+          size="medium"
           type="button"
           disabled={disabled || choosing}
           onClick={() => void choose()}

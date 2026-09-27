@@ -1,3 +1,10 @@
 .catalog-button-example {
   justify-items: start;
 }
+
+.catalog-button-sizes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sys-space-sm);
+}

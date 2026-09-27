@@ -2,12 +2,13 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: fit-content;
-  padding: var(--sys-space-xs) var(--sys-space-md);
-  border: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
+  box-sizing: border-box;
+  min-height: 40px;
+  padding: 0 var(--sys-space-md);
+  border: var(--sys-border-width-thin) solid var(--button-outline);
   border-radius: var(--sys-radius-square);
   background: transparent;
-  color: var(--sys-color-on-surface-variant);
+  color: var(--button-color);
   font-family: var(--sys-font-family-ui);
   font-size: var(--sys-typescale-label-size);
   font-weight: var(--sys-font-weight-regular);
@@ -20,54 +21,77 @@
   border-left: 0;
 }
 
-.button:hover:not(:disabled),
-.button:focus-visible {
-  background: var(--sys-color-surface-container);
-  color: var(--sys-color-on-surface);
+.small {
+  min-height: 32px;
+  padding-inline: var(--sys-space-sm);
+  font-size: var(--sys-typescale-label-sm-size);
+  line-height: var(--sys-typescale-label-sm-line-height);
 }
 
-.strong {
-  background: var(--sys-color-surface-container-high);
-  color: var(--sys-color-on-surface);
-  font-weight: var(--sys-font-weight-strong);
+.large {
+  min-height: 48px;
+  padding-inline: var(--sys-space-lg);
+}
+
+.secondary {
+  --button-color: var(--sys-color-on-surface-variant);
+  --button-outline: var(--sys-color-outline-variant);
+  --button-fill: var(--sys-color-inverse-surface);
+  --button-on-fill: var(--sys-color-inverse-on-surface);
+  --button-container: var(--sys-color-surface-container);
+  --button-on-container: var(--sys-color-on-surface);
+}
+
+.primary {
+  --button-color: var(--sys-color-primary);
+  --button-outline: var(--sys-color-primary);
+  --button-fill: var(--sys-color-primary);
+  --button-on-fill: var(--sys-color-on-primary);
+  --button-container: var(--sys-color-primary-container);
+  --button-on-container: var(--sys-color-on-primary-container);
 }
 
 .danger {
-  color: var(--sys-color-error);
+  --button-color: var(--sys-color-error);
+  --button-outline: var(--sys-color-error);
+  --button-fill: var(--sys-color-error);
+  --button-on-fill: var(--sys-color-on-error);
+  --button-container: var(--sys-color-error-container);
+  --button-on-container: var(--sys-color-on-error-container);
 }
 
-.danger:hover:not(:disabled) {
-  background: var(--sys-color-error-container);
-  color: var(--sys-color-on-error-container);
+.solid {
+  border-color: var(--button-fill);
+  background: var(--button-fill);
+  color: var(--button-on-fill);
+  font-weight: var(--sys-font-weight-strong);
+}
+
+.outline:hover:not(:disabled) {
+  background: var(--button-container);
+  color: var(--button-on-container);
+}
+
+.solid:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--button-fill) 85%, var(--sys-color-on-surface) 15%);
+}
+
+.button:focus-visible {
+  outline: var(--sys-border-width-thick) solid var(--sys-color-primary);
+  outline-offset: 2px;
 }
 
 .button:disabled {
   border-color: var(--sys-color-outline-variant);
+  background: var(--sys-color-surface-container);
   color: var(--sys-color-outline);
   cursor: not-allowed;
-}
-
-.field {
-  padding-block: var(--sys-space-sm);
 }
 
 .group {
   display: flex;
   flex-wrap: wrap;
   gap: var(--sys-space-none);
-}
-
-.group-form {
-  justify-content: flex-end;
-  margin-top: var(--sys-space-sm);
-}
-
-@media (max-width: 640px) {
-  .group-connection {
-    grid-column: 2;
-    align-items: flex-start;
-    justify-content: flex-start;
-  }
 }
 
 @media (prefers-reduced-motion: no-preference) {

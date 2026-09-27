@@ -17,17 +17,17 @@ export function ButtonsCatalogSection() {
       <SectionHeader>
         <SectionTitle>Buttons</SectionTitle>
         <SectionDescription>
-          Buttons trigger commands. Variants set emphasis and intent.
+          Variants express action role. Appearance sets fill; size sets control height.
         </SectionDescription>
       </SectionHeader>
 
       <SectionBody>
         <SectionGroup className="catalog-button-example">
-          <SectionGroupTitle>Default</SectionGroupTitle>
+          <SectionGroupTitle>Secondary</SectionGroupTitle>
           <SectionGroupDescription>
-            Use for routine commands. Hover and keyboard focus change the container and label roles.
+            Use the neutral outline for routine actions. Hover changes the container.
           </SectionGroupDescription>
-          <Button type="button">Button</Button>
+          <Button type="button">Routine action</Button>
         </SectionGroup>
 
         <SectionGroup className="catalog-button-example">
@@ -37,19 +37,18 @@ export function ButtonsCatalogSection() {
           </SectionGroupDescription>
           <ButtonGroup>
             <Button type="button">Cancel</Button>
-            <Button variant="strong" type="button">
+            <Button variant="primary" type="button">
               Apply
             </Button>
           </ButtonGroup>
         </SectionGroup>
 
         <SectionGroup className="catalog-button-example">
-          <SectionGroupTitle>Strong</SectionGroupTitle>
+          <SectionGroupTitle>Primary</SectionGroupTitle>
           <SectionGroupDescription>
-            Use for the preferred action in a group. The resting container has higher emphasis;
-            hover and keyboard focus use the shared interaction roles.
+            Use a solid primary button for the preferred action in a group.
           </SectionGroupDescription>
-          <Button variant="strong" type="button">
+          <Button variant="primary" type="button">
             Continue
           </Button>
         </SectionGroup>
@@ -57,11 +56,20 @@ export function ButtonsCatalogSection() {
         <SectionGroup className="catalog-button-example">
           <SectionGroupTitle>Danger</SectionGroupTitle>
           <SectionGroupDescription>
-            Use only for destructive commands. Resting and hover colors use the error role and its
-            paired container content role.
+            Use danger only for destructive actions. Keep the initial action outlined.
           </SectionGroupDescription>
           <Button variant="danger" type="button">
             Remove
+          </Button>
+        </SectionGroup>
+
+        <SectionGroup className="catalog-button-example">
+          <SectionGroupTitle>Solid danger</SectionGroupTitle>
+          <SectionGroupDescription>
+            A confirmed destructive action can use the solid appearance.
+          </SectionGroupDescription>
+          <Button variant="danger" appearance="solid" type="button">
+            Confirm removal
           </Button>
         </SectionGroup>
 
@@ -77,13 +85,20 @@ export function ButtonsCatalogSection() {
         </SectionGroup>
 
         <SectionGroup className="catalog-button-example">
-          <SectionGroupTitle>Field size</SectionGroupTitle>
+          <SectionGroupTitle>Sizes</SectionGroupTitle>
           <SectionGroupDescription>
-            Use the taller size when a button sits beside a form field.
+            Small, medium, and large have minimum heights of 32, 40, and 48 pixels. Medium is the
+            default and aligns with standard form fields.
           </SectionGroupDescription>
-          <Button size="field" type="button">
-            Choose directory
-          </Button>
+          <div className="catalog-button-sizes">
+            <Button size="small" type="button">
+              Small
+            </Button>
+            <Button type="button">Medium</Button>
+            <Button size="large" type="button">
+              Large
+            </Button>
+          </div>
         </SectionGroup>
       </SectionBody>
     </Section>
