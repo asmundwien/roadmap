@@ -1,0 +1,15 @@
+.link {
+  color: var(--sys-color-primary);
+  font-family: var(--sys-font-family-ui);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.link:hover {
+  text-decoration-thickness: var(--sys-border-width-thick);
+}
+
+.link:focus-visible {
+  outline: var(--sys-border-width-thick) solid currentcolor;
+  outline-offset: var(--sys-space-2xs);
+}

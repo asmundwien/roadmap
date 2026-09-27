@@ -1,7 +1,8 @@
 import { Page, PageDescription, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
-import { ActionsCatalogSection } from './actions'
 import { AlertsCatalogSection } from './alerts'
 import { BadgesCatalogSection } from './badges'
+import { ButtonsCatalogSection } from './buttons'
+import { LinksCatalogSection } from './links'
 import { MarkCatalogSection, TicketMarkCatalogSection } from './mark'
 import { ReferenceColorsCatalogSection } from './reference-colors'
 import { ReferenceDimensionsCatalogSection } from './reference-dimensions'
@@ -30,7 +31,8 @@ export function CatalogPage() {
       <TicketMarkCatalogSection />
       <BadgesCatalogSection />
       <AlertsCatalogSection />
-      <ActionsCatalogSection />
+      <ButtonsCatalogSection />
+      <LinksCatalogSection />
     </Page>
   )
 }

@@ -563,6 +563,13 @@
   flex-basis: 100%;
 }
 
+.authorization-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sys-space-sm) var(--sys-space-lg);
+}
+
 .settings-operation {
   display: flex;
   align-items: center;

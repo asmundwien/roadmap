@@ -9,8 +9,9 @@ import type {
   RegisteredProject,
   SafeError,
 } from '@roadmap/contracts'
-import { Action, ActionGroup } from '@roadmap/ui/action'
 import { Alert } from '@roadmap/ui/alert'
+import { Button, ButtonGroup } from '@roadmap/ui/button'
+import { Link } from '@roadmap/ui/link'
 import { type FormEvent, useState } from 'react'
 import { projectHash } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
@@ -87,14 +88,14 @@ export function ProjectSettings() {
           <h1>Projects</h1>
           <p className="muted">{projects.length} registered</p>
         </div>
-        <Action
+        <Button
           variant="strong"
           type="button"
           disabled={blocked || connections.length === 0}
           onClick={() => setPane({ kind: 'add' })}
         >
           Add project
-        </Action>
+        </Button>
       </header>
 
       {!configuration.valid && (
@@ -330,11 +331,11 @@ function ProjectDetail({
         )}
       </div>
 
-      <ActionGroup>
-        <Action variant="strong" type="button" disabled={busy} onClick={onEdit}>
+      <ButtonGroup>
+        <Button variant="strong" type="button" disabled={busy} onClick={onEdit}>
           Edit registration
-        </Action>
-        <Action
+        </Button>
+        <Button
           type="button"
           disabled={busy}
           onClick={() =>
@@ -349,8 +350,8 @@ function ProjectDetail({
           }
         >
           Refresh now
-        </Action>
-      </ActionGroup>
+        </Button>
+      </ButtonGroup>
     </aside>
   )
 }
@@ -460,14 +461,9 @@ function AddProjectPane({
             <Alert variant="info">
               <span>GitHub authorization and repository installation are separate grants.</span>
               {githubInstallationUrl && (
-                <Action
-                  element="link"
-                  href={githubInstallationUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                >
+                <Link href={githubInstallationUrl} target="_blank" rel="noreferrer">
                   Configure repository access ↗
-                </Action>
+                </Link>
               )}
             </Alert>
           </>
@@ -491,14 +487,14 @@ function AddProjectPane({
           <input name="displayName" placeholder="Optional" />
         </label>
         <ErrorText error={generalError} />
-        <ActionGroup variant="form">
-          <Action type="button" onClick={onClose}>
+        <ButtonGroup variant="form">
+          <Button type="button" onClick={onClose}>
             Cancel
-          </Action>
-          <Action variant="strong" type="submit" disabled={saving}>
+          </Button>
+          <Button variant="strong" type="submit" disabled={saving}>
             {saving ? 'Validating…' : 'Validate and save'}
-          </Action>
-        </ActionGroup>
+          </Button>
+        </ButtonGroup>
       </form>
     </SettingsPane>
   )
@@ -606,11 +602,11 @@ function EditProjectPane({
           <input name="name" defaultValue={project.name} />
           <FieldError message={fieldError ?? undefined} />
         </label>
-        <ActionGroup variant="form">
-          <Action variant="strong" type="submit" disabled={busy}>
+        <ButtonGroup variant="form">
+          <Button variant="strong" type="submit" disabled={busy}>
             Save name
-          </Action>
-        </ActionGroup>
+          </Button>
+        </ButtonGroup>
       </form>
 
       {project.availability.status === 'unavailable' && (
@@ -631,11 +627,11 @@ function EditProjectPane({
               setFieldError(null)
             }}
           />
-          <ActionGroup variant="form">
-            <Action variant="strong" type="submit" disabled={busy}>
+          <ButtonGroup variant="form">
+            <Button variant="strong" type="submit" disabled={busy}>
               Validate and repair
-            </Action>
-          </ActionGroup>
+            </Button>
+          </ButtonGroup>
         </form>
       )}
 
@@ -644,11 +640,11 @@ function EditProjectPane({
         <p className="settings-eyebrow">Remove from Roadmap</p>
         <p>The source repository, Wayfinder state, and Workspace remain unchanged.</p>
         {confirmingRemoval ? (
-          <ActionGroup>
-            <Action type="button" onClick={() => setConfirmingRemoval(false)}>
+          <ButtonGroup>
+            <Button type="button" onClick={() => setConfirmingRemoval(false)}>
               Keep project
-            </Action>
-            <Action
+            </Button>
+            <Button
               variant="danger"
               type="button"
               disabled={busy}
@@ -664,12 +660,12 @@ function EditProjectPane({
               }
             >
               Confirm removal
-            </Action>
-          </ActionGroup>
+            </Button>
+          </ButtonGroup>
         ) : (
-          <Action variant="danger" type="button" onClick={() => setConfirmingRemoval(true)}>
+          <Button variant="danger" type="button" onClick={() => setConfirmingRemoval(true)}>
             Remove project registration
-          </Action>
+          </Button>
         )}
       </section>
     </SettingsPane>
@@ -718,7 +714,7 @@ function WorkspaceFolderSelector({
     <fieldset className="settings-folder-field">
       <legend>{label}</legend>
       <div className="settings-folder-control">
-        <Action
+        <Button
           variant="strong"
           size="field"
           type="button"
@@ -726,7 +722,7 @@ function WorkspaceFolderSelector({
           onClick={() => void choose()}
         >
           {choosing ? 'Choosing…' : path ? 'Choose another folder' : 'Choose folder'}
-        </Action>
+        </Button>
         <output className={path ? '' : 'is-empty'} aria-live="polite">
           {path || 'No folder selected'}
         </output>

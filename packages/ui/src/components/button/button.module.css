@@ -1,4 +1,4 @@
-.action {
+.button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -12,17 +12,16 @@
   font-size: var(--sys-typescale-label-size);
   font-weight: var(--sys-font-weight-regular);
   line-height: var(--sys-typescale-label-line-height);
-  text-decoration: none;
   cursor: pointer;
 }
 
-/* Adjacent actions share one border, so a group reads as a single bar of controls. */
-.action + .action {
+/* Adjacent buttons share one border only inside a button group. */
+.group > .button + .button {
   border-left: 0;
 }
 
-.action:hover:not(:disabled),
-.action:focus-visible {
+.button:hover:not(:disabled),
+.button:focus-visible {
   background: var(--sys-color-surface-container);
   color: var(--sys-color-on-surface);
 }
@@ -42,8 +41,7 @@
   color: var(--sys-color-on-error-container);
 }
 
-/* A disabled action drops to the muted pair rather than fading, so its label stays readable. */
-.action:disabled {
+.button:disabled {
   border-color: var(--sys-color-outline-variant);
   color: var(--sys-color-outline);
   cursor: not-allowed;
@@ -64,10 +62,6 @@
   margin-top: var(--sys-space-sm);
 }
 
-/*
- * Breakpoints are not tokens: custom properties do not resolve inside a media query, so the
- * width stays literal here.
- */
 @media (max-width: 640px) {
   .group-connection {
     grid-column: 2;
@@ -77,7 +71,7 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .action {
+  .button {
     transition:
       color var(--sys-motion-duration-short) var(--sys-motion-easing-standard),
       background var(--sys-motion-duration-short) var(--sys-motion-easing-standard);

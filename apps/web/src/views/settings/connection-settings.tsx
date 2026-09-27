@@ -7,9 +7,10 @@ import type {
   SafeError,
   SupportedIntegration,
 } from '@roadmap/contracts'
-import { Action, ActionGroup } from '@roadmap/ui/action'
 import { Alert } from '@roadmap/ui/alert'
 import { Badge } from '@roadmap/ui/badge'
+import { Button, ButtonGroup } from '@roadmap/ui/button'
+import { Link } from '@roadmap/ui/link'
 import { type FormEvent, useState } from 'react'
 import { projectHash } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
@@ -67,14 +68,14 @@ export function ConnectionSettings() {
           <h1>Connections</h1>
           <p className="muted">{connections.length} configured</p>
         </div>
-        <Action
+        <Button
           variant="strong"
           type="button"
           disabled={blocked || !github}
           onClick={() => setPane({ kind: 'add' })}
         >
           Add connection
-        </Action>
+        </Button>
       </header>
 
       {!github && (
@@ -267,20 +268,20 @@ function ConnectionStride({
             {dependents.length === 1 ? 'Project' : 'Projects'}
           </span>
         </span>
-        <ActionGroup variant="connection">
+        <ButtonGroup variant="connection">
           {connection.integration === 'github' && reauthenticationAvailable && (
-            <Action variant="strong" type="button" disabled={blocked} onClick={onAuthorize}>
+            <Button variant="strong" type="button" disabled={blocked} onClick={onAuthorize}>
               {authorization?.status === 'waiting' ? 'Authorization progress' : 'Reauthenticate'}
-            </Action>
+            </Button>
           )}
           {connection.builtIn ? (
             <Badge variant="warning">Built in</Badge>
           ) : (
-            <Action type="button" disabled={blocked} onClick={onEdit}>
+            <Button type="button" disabled={blocked} onClick={onEdit}>
               Manage
-            </Action>
+            </Button>
           )}
-        </ActionGroup>
+        </ButtonGroup>
       </div>
 
       {connection.availability.status !== 'available' && (
@@ -382,14 +383,14 @@ function AddConnectionPane({
           browser.
         </Alert>
         <ErrorText error={error} />
-        <ActionGroup variant="form">
-          <Action type="button" onClick={onClose}>
+        <ButtonGroup variant="form">
+          <Button type="button" onClick={onClose}>
             Cancel
-          </Action>
-          <Action variant="strong" type="submit" disabled={busy}>
+          </Button>
+          <Button variant="strong" type="submit" disabled={busy}>
             {busy ? 'Starting…' : 'Start authorization'}
-          </Action>
-        </ActionGroup>
+          </Button>
+        </ButtonGroup>
       </form>
     </SettingsPane>
   )
@@ -448,45 +449,41 @@ function AuthorizationPane({
                 : 'Waiting for GitHub'}
             </span>
           </div>
-          <ActionGroup>
+          <div className="authorization-controls">
             {authorization.verificationUri && (
-              <Action
-                element="link"
-                variant="strong"
-                href={authorization.verificationUri}
-                target="_blank"
-                rel="noreferrer"
-              >
+              <Link href={authorization.verificationUri} target="_blank" rel="noreferrer">
                 Open GitHub
-              </Action>
+              </Link>
             )}
-            <Action
-              type="button"
-              disabled={!authorization.userCode}
-              onClick={() => {
-                if (!authorization.userCode) return
-                void navigator.clipboard
-                  .writeText(authorization.userCode)
-                  .then(() => setCopied(true))
-              }}
-            >
-              {copied ? 'Code copied' : 'Copy code'}
-            </Action>
-            <Action
-              variant="danger"
-              type="button"
-              disabled={busy}
-              onClick={() =>
-                void execute({
-                  type: 'cancel-github-authorization',
-                  expectedConfigurationVersion: configurationVersion,
-                  operationId: authorization.id,
-                })
-              }
-            >
-              Cancel authorization
-            </Action>
-          </ActionGroup>
+            <ButtonGroup>
+              <Button
+                type="button"
+                disabled={!authorization.userCode}
+                onClick={() => {
+                  if (!authorization.userCode) return
+                  void navigator.clipboard
+                    .writeText(authorization.userCode)
+                    .then(() => setCopied(true))
+                }}
+              >
+                {copied ? 'Code copied' : 'Copy code'}
+              </Button>
+              <Button
+                variant="danger"
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  void execute({
+                    type: 'cancel-github-authorization',
+                    expectedConfigurationVersion: configurationVersion,
+                    operationId: authorization.id,
+                  })
+                }
+              >
+                Cancel authorization
+              </Button>
+            </ButtonGroup>
+          </div>
         </>
       )}
 
@@ -505,8 +502,8 @@ function AuthorizationPane({
       <ErrorText error={error} />
 
       {authorization.status !== 'waiting' && (
-        <ActionGroup variant="form">
-          <Action
+        <ButtonGroup variant="form">
+          <Button
             type="button"
             onClick={() =>
               onFinished(
@@ -517,9 +514,9 @@ function AuthorizationPane({
             }
           >
             Close
-          </Action>
+          </Button>
           {authorization.status !== 'granted' && (
-            <Action
+            <Button
               variant="strong"
               type="button"
               disabled={busy}
@@ -532,9 +529,9 @@ function AuthorizationPane({
               }
             >
               Retry authorization
-            </Action>
+            </Button>
           )}
-        </ActionGroup>
+        </ButtonGroup>
       )}
     </SettingsPane>
   )
@@ -622,11 +619,11 @@ function EditConnectionPane({
           Connection name
           <input name="name" defaultValue={connection.name} />
         </label>
-        <ActionGroup variant="form">
-          <Action variant="strong" type="submit" disabled={busy}>
+        <ButtonGroup variant="form">
+          <Button variant="strong" type="submit" disabled={busy}>
             Save name
-          </Action>
-        </ActionGroup>
+          </Button>
+        </ButtonGroup>
       </form>
       <ErrorText error={error} />
 
@@ -649,18 +646,18 @@ function EditConnectionPane({
                 </a>
               ))}
             </div>
-            <Action variant="danger" type="button" disabled>
+            <Button variant="danger" type="button" disabled>
               Remove connection
-            </Action>
+            </Button>
           </>
         ) : confirmingRemoval ? (
           <>
             <p>External GitHub authorization and repositories remain unchanged.</p>
-            <ActionGroup>
-              <Action type="button" onClick={() => setConfirmingRemoval(false)}>
+            <ButtonGroup>
+              <Button type="button" onClick={() => setConfirmingRemoval(false)}>
                 Keep connection
-              </Action>
-              <Action
+              </Button>
+              <Button
                 variant="danger"
                 type="button"
                 disabled={busy}
@@ -676,13 +673,13 @@ function EditConnectionPane({
                 }
               >
                 Confirm removal
-              </Action>
-            </ActionGroup>
+              </Button>
+            </ButtonGroup>
           </>
         ) : (
-          <Action variant="danger" type="button" onClick={() => setConfirmingRemoval(true)}>
+          <Button variant="danger" type="button" onClick={() => setConfirmingRemoval(true)}>
             Remove connection
-          </Action>
+          </Button>
         )}
       </section>
     </SettingsPane>
