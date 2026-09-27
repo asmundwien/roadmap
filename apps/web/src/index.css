@@ -1,5 +1,5 @@
 /*
- * The application base. Design tokens come from '@roadmap/ui/tokens.css', loaded first in
+ * The application base. Design tokens come from '@roadmap/ui/index.css', loaded first in
  * main.tsx; nothing here defines a dimension, a type value, or a duration of its own.
  *
  * The colors below are the last legacy layer: views that have not moved onto --sys-color-* still

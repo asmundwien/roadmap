@@ -1,18 +1,18 @@
 /**
- * The one stylesheet a consumer loads: import '@roadmap/ui/tokens.css' once at the application
+ * The one stylesheet a consumer loads: import '@roadmap/ui/index.css' once at the application
  * entry, before any product stylesheet.
  *
  * Reference values feed semantic roles. Components and product views read --sys-*;
  * only the semantic layer and catalog reference previews read --ref-*.
  */
 @import "./references/colors.css";
-@import "./semantic-colors.css";
+@import "./semantic/colors.css";
 
 @import "./references/spacing.css";
-@import "./semantic-space.css";
+@import "./semantic/spacing.css";
 
 @import "./references/typography.css";
-@import "./semantic-typography.css";
+@import "./semantic/typography.css";
 
 @import "./references/motion.css";
-@import "./semantic-motion.css";
+@import "./semantic/motion.css";

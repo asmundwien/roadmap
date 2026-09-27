@@ -12,7 +12,7 @@
     "./page": "./src/components/page/page.tsx",
     "./section": "./src/components/section/section.tsx",
     "./variant": "./src/components/variant.ts",
-    "./tokens.css": "./src/styles/tokens.css"
+    "./index.css": "./src/styles/index.css"
   },
   "scripts": {
     "test": "vitest run",
