@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "Design tokens and presentational components, with no knowledge of the roadmap domain.",
+  "description": "Domain-independent React components and design tokens for the Roadmap interface.",
   "exports": {
     "./action": "./src/components/action/action.tsx",
     "./alert": "./src/components/alert/alert.tsx",
