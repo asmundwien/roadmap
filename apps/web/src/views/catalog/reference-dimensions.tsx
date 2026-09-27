@@ -23,11 +23,6 @@ const SPACES = [
   ['3xl', 48],
   ['4xl', 64],
 ] as const
-const CONTROL_SIZES = [
-  ['sm', 32],
-  ['md', 36],
-  ['lg', 40],
-] as const
 const LAYOUT_SIZES = [
   ['sidebar', 256],
   ['measure', 640],
@@ -50,7 +45,7 @@ export function ReferenceDimensionsCatalogSection() {
         <SectionTitle>Reference dimensions</SectionTitle>
         <SectionDescription>
           Reference spacing and geometry have no layout or component role. Semantic size tokens
-          assign these measurements to gaps, controls, and content widths.
+          assign these measurements to gaps and content widths.
         </SectionDescription>
       </SectionHeader>
       <SectionBody>
@@ -69,25 +64,6 @@ export function ReferenceDimensionsCatalogSection() {
                   <div className="catalog-reference-space-track">
                     <span style={{ width: `var(${token})` }} />
                   </div>
-                  <code>{token}</code>
-                </div>
-              )
-            })}
-          </div>
-        </SectionGroup>
-        <SectionGroup>
-          <SectionGroupTitle>Control heights</SectionGroupTitle>
-          <SectionGroupDescription>
-            Compare the three fixed control heights on one baseline. These are measurements, not
-            button or field styles.
-          </SectionGroupDescription>
-          <div className="catalog-reference-control-sizes">
-            {CONTROL_SIZES.map(([name, size]) => {
-              const token = `--ref-size-control-${name}`
-              return (
-                <div className="catalog-reference-control-size" key={token}>
-                  <span style={{ height: `var(${token})` }} aria-hidden="true" />
-                  <strong>{size}px</strong>
                   <code>{token}</code>
                 </div>
               )

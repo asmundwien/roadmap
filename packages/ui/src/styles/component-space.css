@@ -17,10 +17,9 @@
  */
 :root {
   /* Action. */
-  --comp-action-height: var(--sys-size-control-md);
-  --comp-action-field-height: var(--sys-size-control-lg);
-  --comp-action-block-padding: var(--sys-space-none);
+  --comp-action-block-padding: var(--sys-space-xs);
   --comp-action-inline-padding: var(--sys-space-md);
+  --comp-action-field-block-padding: var(--sys-space-sm);
   --comp-action-border-width: var(--sys-border-width-thin);
   --comp-action-radius: var(--sys-radius-square);
   --comp-action-group-gap: var(--sys-space-none);

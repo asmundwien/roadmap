@@ -20,7 +20,6 @@
   background: var(--sys-color-primary);
 }
 
-.catalog-reference-control-sizes,
 .catalog-reference-dimension-pairs {
   display: flex;
   flex-wrap: wrap;
@@ -28,18 +27,11 @@
   gap: var(--sys-space-lg);
 }
 
-.catalog-reference-control-size,
 .catalog-reference-border-sample,
 .catalog-reference-radius-sample {
   display: grid;
   justify-items: center;
   gap: var(--sys-space-xs);
-}
-
-.catalog-reference-control-size > span {
-  width: 8rem;
-  border: 1px solid var(--sys-color-outline);
-  background: var(--sys-color-surface-container);
 }
 
 .catalog-reference-layout-widths {
@@ -74,7 +66,6 @@
 }
 
 .catalog-reference-dimension-row strong,
-.catalog-reference-control-size strong,
 .catalog-reference-layout-width strong,
 .catalog-reference-border-sample strong,
 .catalog-reference-radius-sample strong {
@@ -82,7 +73,6 @@
 }
 
 .catalog-reference-dimension-row code,
-.catalog-reference-control-size code,
 .catalog-reference-layout-width code,
 .catalog-reference-border-sample code,
 .catalog-reference-radius-sample code {

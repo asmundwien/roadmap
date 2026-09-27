@@ -1,8 +1,8 @@
 /**
  * System space tokens name what a dimension is for and alias the reference ladder.
  *
- * Fits: the step scale a layout draws from, page rhythm, control heights, content widths,
- * border weights, and corner shapes.
+ * Fits: the step scale a layout draws from, page rhythm, content widths, border weights,
+ * and corner shapes.
  * Does not fit: literal dimensions, component parts, or product-specific measurements.
  *
  * Usage:
@@ -35,11 +35,6 @@
   --sys-space-section-sm: var(--ref-space-2xl);
   --sys-space-section-md: var(--ref-space-3xl);
   --sys-space-section-lg: var(--ref-space-4xl);
-
-  /* Control heights, so buttons, fields, and chips line up on one baseline grid. */
-  --sys-size-control-sm: var(--ref-size-control-sm);
-  --sys-size-control-md: var(--ref-size-control-md);
-  --sys-size-control-lg: var(--ref-size-control-lg);
 
   /* Content widths. */
   --sys-size-sidebar: var(--ref-size-sidebar);

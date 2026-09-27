@@ -2,7 +2,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: var(--comp-action-height);
+  height: fit-content;
   padding: var(--comp-action-block-padding) var(--comp-action-inline-padding);
   border: var(--comp-action-border-width) solid var(--comp-action-outline-color);
   border-radius: var(--comp-action-radius);
@@ -50,7 +50,7 @@
 }
 
 .field {
-  min-height: var(--comp-action-field-height);
+  padding-block: var(--comp-action-field-block-padding);
 }
 
 .group {
