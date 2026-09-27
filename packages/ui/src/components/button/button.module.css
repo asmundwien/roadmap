@@ -43,12 +43,12 @@
 }
 
 .primary {
-  --button-color: var(--sys-color-primary);
-  --button-outline: var(--sys-color-primary);
-  --button-fill: var(--sys-color-primary);
-  --button-on-fill: var(--sys-color-on-primary);
-  --button-container: var(--sys-color-primary-container);
-  --button-on-container: var(--sys-color-on-primary-container);
+  --button-color: var(--sys-color-on-surface);
+  --button-outline: var(--sys-color-on-surface);
+  --button-fill: var(--sys-color-inverse-surface);
+  --button-on-fill: var(--sys-color-inverse-on-surface);
+  --button-container: var(--sys-color-surface-container-high);
+  --button-on-container: var(--sys-color-on-surface);
 }
 
 .danger {
@@ -76,9 +76,17 @@
   background: color-mix(in srgb, var(--button-fill) 85%, var(--sys-color-on-surface) 15%);
 }
 
+.primary.solid:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--button-fill) 85%, var(--sys-color-surface) 15%);
+}
+
 .button:focus-visible {
   outline: var(--sys-border-width-thick) solid var(--sys-color-primary);
   outline-offset: 2px;
+}
+
+.primary:focus-visible {
+  outline-color: var(--sys-color-on-surface);
 }
 
 .button:disabled {

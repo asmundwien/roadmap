@@ -46,7 +46,7 @@ export function ButtonsCatalogSection() {
         <SectionGroup className="catalog-button-example">
           <SectionGroupTitle>Primary</SectionGroupTitle>
           <SectionGroupDescription>
-            Use a solid primary button for the preferred action in a group.
+            Use a solid neutral button for the preferred action in a group.
           </SectionGroupDescription>
           <Button variant="primary" type="button">
             Continue
