@@ -7,7 +7,6 @@ import {
   SectionHeader,
   SectionTitle,
 } from '@roadmap/ui/section'
-import { ComponentTokenList } from './token-list'
 
 export function AlertsCatalogSection() {
   return (
@@ -26,28 +25,12 @@ export function AlertsCatalogSection() {
             <strong>Action required.</strong>
             <span>The operation stays blocked until the problem is fixed.</span>
           </Alert>
-          <ComponentTokenList
-            tokens={[
-              '--comp-alert-outline-color',
-              '--comp-alert-error-accent-color',
-              '--comp-alert-error-container-color',
-              '--comp-alert-error-content-color',
-            ]}
-          />
         </SectionGroup>
         <SectionGroup>
           <Alert variant="info">
             <strong>Change saved.</strong>
             <span>The new configuration is active.</span>
           </Alert>
-          <ComponentTokenList
-            tokens={[
-              '--comp-alert-outline-color',
-              '--comp-alert-info-accent-color',
-              '--comp-alert-info-container-color',
-              '--comp-alert-info-content-color',
-            ]}
-          />
         </SectionGroup>
       </SectionBody>
     </Section>

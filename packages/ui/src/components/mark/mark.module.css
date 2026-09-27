@@ -1,7 +1,7 @@
 /*
  * Stroke widths, the glyph size, and the optical baseline nudge below are in the mark's own
  * viewBox units, not layout dimensions: they scale with the rendered mark and mean nothing
- * outside this drawing. Layout-facing dimensions read --comp-mark-* tokens.
+ * outside this drawing. Layout-facing dimensions read semantic tokens.
  */
 .mark {
   display: block;
@@ -9,78 +9,78 @@
 }
 
 .neutral {
-  color: var(--comp-mark-neutral-color);
+  color: var(--sys-color-on-surface-variant);
 }
 
 .accent {
-  color: var(--comp-mark-accent-color);
+  color: var(--sys-color-primary);
 }
 
 .warning {
-  color: var(--comp-mark-warning-color);
+  color: var(--sys-color-warning);
 }
 
 .danger {
-  color: var(--comp-mark-danger-color);
+  color: var(--sys-color-error);
 }
 
 .success {
-  color: var(--comp-mark-success-color);
+  color: var(--sys-color-success);
 }
 
 .info {
-  color: var(--comp-mark-info-color);
+  color: var(--sys-color-info);
 }
 
 .muted {
-  color: var(--comp-mark-muted-color);
+  color: var(--sys-color-outline);
 }
 
 .highlight {
-  color: var(--comp-mark-highlight-color);
+  color: var(--sys-color-secondary);
 }
 
 /* The accent prop colors the corner strokes only; the variant still colors the face. */
 .corner-neutral {
-  --mark-corner-color: var(--comp-mark-neutral-color);
+  --mark-corner-color: var(--sys-color-on-surface-variant);
 }
 
 .corner-accent {
-  --mark-corner-color: var(--comp-mark-accent-color);
+  --mark-corner-color: var(--sys-color-primary);
 }
 
 .corner-warning {
-  --mark-corner-color: var(--comp-mark-warning-color);
+  --mark-corner-color: var(--sys-color-warning);
 }
 
 .corner-danger {
-  --mark-corner-color: var(--comp-mark-danger-color);
+  --mark-corner-color: var(--sys-color-error);
 }
 
 .corner-success {
-  --mark-corner-color: var(--comp-mark-success-color);
+  --mark-corner-color: var(--sys-color-success);
 }
 
 .corner-info {
-  --mark-corner-color: var(--comp-mark-info-color);
+  --mark-corner-color: var(--sys-color-info);
 }
 
 .corner-muted {
-  --mark-corner-color: var(--comp-mark-muted-color);
+  --mark-corner-color: var(--sys-color-outline);
 }
 
 .corner-highlight {
-  --mark-corner-color: var(--comp-mark-highlight-color);
+  --mark-corner-color: var(--sys-color-secondary);
 }
 
 .small {
   display: inline-block;
-  margin-right: var(--comp-mark-inline-margin);
+  margin-right: var(--sys-space-xs);
   vertical-align: -0.13em;
 }
 
 .face {
-  fill: var(--comp-mark-surface-color);
+  fill: var(--sys-color-surface);
   stroke: currentColor;
   stroke-width: 2.5px;
   stroke-linejoin: miter;
@@ -101,14 +101,14 @@
 .glyph {
   fill: currentColor;
   paint-order: stroke;
-  stroke: var(--comp-mark-surface-color);
+  stroke: var(--sys-color-surface);
   stroke-width: 3.5px;
   font-size: 9.25px;
-  font-weight: var(--comp-mark-glyph-font-weight);
+  font-weight: var(--sys-font-weight-bold);
 }
 
 .solid .glyph {
-  fill: var(--comp-mark-surface-color);
+  fill: var(--sys-color-surface);
   stroke: none;
 }
 

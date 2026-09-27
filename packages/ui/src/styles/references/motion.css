@@ -7,7 +7,7 @@
  * Usage, from the semantic layer only:
  *   --sys-motion-duration-short: var(--ref-duration-150);
  *
- * Components and page stylesheets read --sys-* or --comp-*, never --ref-*.
+ * Components and page stylesheets read --sys-*, never --ref-*.
  * Every animated rule stays inside a `prefers-reduced-motion: no-preference` query, so no token
  * here needs a zero-duration twin.
  *

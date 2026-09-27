@@ -5,23 +5,23 @@
  */
 .section {
   display: grid;
-  grid-template-columns: var(--comp-section-header-width) minmax(0, 1fr);
-  gap: var(--comp-section-gap);
-  padding-block: var(--comp-section-block-padding);
-  border-block-start: var(--comp-section-border-width) solid var(--comp-section-outline-color);
+  grid-template-columns: var(--sys-size-sidebar) minmax(0, 1fr);
+  gap: var(--sys-space-2xl);
+  padding-block: var(--sys-space-2xl);
+  border-block-start: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
 }
 
 .title {
   margin: 0;
-  font-size: var(--comp-section-title-font-size);
-  line-height: var(--comp-section-title-line-height);
+  font-size: var(--sys-typescale-heading-size);
+  line-height: var(--sys-typescale-heading-line-height);
 }
 
 .description {
-  margin: var(--comp-section-description-margin) 0 0;
-  color: var(--comp-section-description-color);
-  font-size: var(--comp-section-description-font-size);
-  line-height: var(--comp-section-description-line-height);
+  margin: var(--sys-space-sm) 0 0;
+  color: var(--sys-color-on-surface-variant);
+  font-size: var(--sys-typescale-body-sm-size);
+  line-height: var(--sys-typescale-body-sm-line-height);
 }
 
 /*
@@ -31,33 +31,33 @@
 .body {
   display: grid;
   align-content: start;
-  gap: var(--comp-section-body-gap);
+  gap: var(--sys-space-2xl);
 }
 
 .group {
   display: grid;
   align-content: start;
-  gap: var(--comp-section-group-gap);
+  gap: var(--sys-space-md);
 }
 
 .group-title {
   margin: 0;
-  font-size: var(--comp-section-group-title-font-size);
-  line-height: var(--comp-section-group-title-line-height);
+  font-size: var(--sys-typescale-subheading-size);
+  line-height: var(--sys-typescale-subheading-line-height);
 }
 
 /* The group gap already separates the rows, so the paragraph carries no margin of its own. */
 .group-description {
-  max-width: var(--comp-section-group-description-max-width);
+  max-width: var(--sys-size-measure);
   margin: 0;
-  color: var(--comp-section-group-description-color);
-  font-size: var(--comp-section-group-description-font-size);
-  line-height: var(--comp-section-group-description-line-height);
+  color: var(--sys-color-on-surface-variant);
+  font-size: var(--sys-typescale-body-sm-size);
+  line-height: var(--sys-typescale-body-sm-line-height);
 }
 
 @media (max-width: 780px) {
   .section {
     grid-template-columns: minmax(0, 1fr);
-    gap: var(--comp-section-stack-gap);
+    gap: var(--sys-space-lg);
   }
 }

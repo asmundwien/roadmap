@@ -1,35 +1,35 @@
 /* The page owns its own measure and gutters; it inherits no layout from the host application. */
 .page {
-  max-width: var(--comp-page-max-width);
+  max-width: var(--sys-size-page-wide);
   margin-inline: auto;
-  padding-block: var(--comp-page-block-start-padding) var(--comp-page-block-end-padding);
-  padding-inline: var(--comp-page-inline-padding);
+  padding-block: var(--sys-space-2xl) var(--sys-space-section-lg);
+  padding-inline: var(--sys-space-xl);
 }
 
 .header {
-  max-width: var(--comp-page-header-max-width);
-  margin-block-end: var(--comp-page-header-margin);
+  max-width: var(--sys-size-measure);
+  margin-block-end: var(--sys-space-section-md);
 }
 
 .eyebrow {
-  margin: 0 0 var(--comp-page-eyebrow-margin);
-  color: var(--comp-page-eyebrow-color);
-  font-family: var(--comp-page-eyebrow-font-family);
-  font-size: var(--comp-page-eyebrow-font-size);
-  font-weight: var(--comp-page-eyebrow-font-weight);
-  line-height: var(--comp-page-eyebrow-line-height);
+  margin: 0 0 var(--sys-space-xs);
+  color: var(--sys-color-on-surface-variant);
+  font-family: var(--sys-font-family-code);
+  font-size: var(--sys-typescale-overline-size);
+  font-weight: var(--sys-font-weight-bold);
+  line-height: var(--sys-typescale-overline-line-height);
   text-transform: uppercase;
 }
 
 .title {
-  margin: 0 0 var(--comp-page-title-margin);
-  font-size: var(--comp-page-title-font-size);
-  line-height: var(--comp-page-title-line-height);
+  margin: 0 0 var(--sys-space-sm);
+  font-size: var(--sys-typescale-title-size);
+  line-height: var(--sys-typescale-title-line-height);
 }
 
 .description {
   margin: 0;
-  color: var(--comp-page-description-color);
-  font-size: var(--comp-page-description-font-size);
-  line-height: var(--comp-page-description-line-height);
+  color: var(--sys-color-on-surface-variant);
+  font-size: var(--sys-typescale-body-size);
+  line-height: var(--sys-typescale-body-line-height);
 }

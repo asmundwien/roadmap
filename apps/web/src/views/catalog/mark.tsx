@@ -18,15 +18,15 @@ const MARK_FILLS = ['solid', 'half', 'outline'] as const satisfies readonly Mark
 const MARK_CORNER_COUNTS = [0, 1, 2, 3, 4] as const satisfies readonly MarkCornerCount[]
 const MARK_SIZES = ['large', 'medium', 'small'] as const satisfies readonly MarkSize[]
 const MARK_VARIANTS = [
-  ['neutral', '--comp-mark-neutral-color'],
-  ['accent', '--comp-mark-accent-color'],
-  ['highlight', '--comp-mark-highlight-color'],
-  ['warning', '--comp-mark-warning-color'],
-  ['danger', '--comp-mark-danger-color'],
-  ['success', '--comp-mark-success-color'],
-  ['info', '--comp-mark-info-color'],
-  ['muted', '--comp-mark-muted-color'],
-] as const satisfies readonly (readonly [Variant, string])[]
+  'neutral',
+  'accent',
+  'highlight',
+  'warning',
+  'danger',
+  'success',
+  'info',
+  'muted',
+] as const satisfies readonly Variant[]
 
 const TICKET_STATES = [
   ['Blocked', 'blocked'],
@@ -49,8 +49,8 @@ export function MarkCatalogSection() {
         <SectionTitle>Mark</SectionTitle>
         <SectionDescription>
           The diamond primitive. It holds no domain meaning: the caller picks fill, glyph, corner
-          count, and color. A solid face knocks the glyph out in --comp-mark-surface-color; the
-          other fills draw it in the variant color with a surface halo.
+          count, and color. Solid faces knock out the glyph; other fills draw it with a surface
+          halo.
         </SectionDescription>
       </SectionHeader>
 
@@ -77,8 +77,8 @@ export function MarkCatalogSection() {
           ))}
         </MarkGroup>
         <MarkGroup label="Variant">
-          {MARK_VARIANTS.map(([variant, token]) => (
-            <MarkCell caption={token} key={variant}>
+          {MARK_VARIANTS.map((variant) => (
+            <MarkCell caption={variant} key={variant}>
               <Mark fill="solid" size="large" variant={variant} />
             </MarkCell>
           ))}

@@ -11,7 +11,7 @@
  * Usage, from the semantic layer only:
  *   --sys-space-sm: var(--ref-space-xs);
  *
- * Components and page stylesheets read --sys-* or --comp-*, never --ref-*.
+ * Components and page stylesheets read --sys-*, never --ref-*.
  * Add a step only when a semantic role needs it.
  *
  * @see https://m3.material.io/foundations/layout/understanding-layout/spacing

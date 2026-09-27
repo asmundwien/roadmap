@@ -11,8 +11,8 @@
  *   border-bottom: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
  *
  * One ladder covers gaps, padding, and margins inside a component; --sys-space-section-*
- * separates regions of a page and is deliberately coarser. Views may read these roles directly;
- * a component part that repeats gets a --comp-* token instead.
+ * separates regions of a page and is deliberately coarser. Views and components read these
+ * roles directly.
  *
  * Breakpoints are not tokens: custom properties do not resolve in media queries, so those widths
  * stay literal in the stylesheet that needs them.

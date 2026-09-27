@@ -3,15 +3,15 @@
   align-items: center;
   justify-content: center;
   height: fit-content;
-  padding: var(--comp-action-block-padding) var(--comp-action-inline-padding);
-  border: var(--comp-action-border-width) solid var(--comp-action-outline-color);
-  border-radius: var(--comp-action-radius);
+  padding: var(--sys-space-xs) var(--sys-space-md);
+  border: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
+  border-radius: var(--sys-radius-square);
   background: transparent;
-  color: var(--comp-action-label-color);
-  font-family: var(--comp-action-font-family);
-  font-size: var(--comp-action-font-size);
-  font-weight: var(--comp-action-font-weight);
-  line-height: var(--comp-action-line-height);
+  color: var(--sys-color-on-surface-variant);
+  font-family: var(--sys-font-family-ui);
+  font-size: var(--sys-typescale-label-size);
+  font-weight: var(--sys-font-weight-regular);
+  line-height: var(--sys-typescale-label-line-height);
   text-decoration: none;
   cursor: pointer;
 }
@@ -23,45 +23,45 @@
 
 .action:hover:not(:disabled),
 .action:focus-visible {
-  background: var(--comp-action-hover-container-color);
-  color: var(--comp-action-hover-label-color);
+  background: var(--sys-color-surface-container);
+  color: var(--sys-color-on-surface);
 }
 
 .strong {
-  background: var(--comp-action-strong-container-color);
-  color: var(--comp-action-strong-label-color);
-  font-weight: var(--comp-action-strong-font-weight);
+  background: var(--sys-color-surface-container-high);
+  color: var(--sys-color-on-surface);
+  font-weight: var(--sys-font-weight-strong);
 }
 
 .danger {
-  color: var(--comp-action-danger-label-color);
+  color: var(--sys-color-error);
 }
 
 .danger:hover:not(:disabled) {
-  background: var(--comp-action-danger-hover-container-color);
-  color: var(--comp-action-danger-hover-label-color);
+  background: var(--sys-color-error-container);
+  color: var(--sys-color-on-error-container);
 }
 
 /* A disabled action drops to the muted pair rather than fading, so its label stays readable. */
 .action:disabled {
-  border-color: var(--comp-action-disabled-outline-color);
-  color: var(--comp-action-disabled-label-color);
+  border-color: var(--sys-color-outline-variant);
+  color: var(--sys-color-outline);
   cursor: not-allowed;
 }
 
 .field {
-  padding-block: var(--comp-action-field-block-padding);
+  padding-block: var(--sys-space-sm);
 }
 
 .group {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--comp-action-group-gap);
+  gap: var(--sys-space-none);
 }
 
 .group-form {
   justify-content: flex-end;
-  margin-top: var(--comp-action-group-form-margin);
+  margin-top: var(--sys-space-sm);
 }
 
 /*
@@ -79,7 +79,7 @@
 @media (prefers-reduced-motion: no-preference) {
   .action {
     transition:
-      color var(--comp-action-transition-duration) var(--comp-action-transition-easing),
-      background var(--comp-action-transition-duration) var(--comp-action-transition-easing);
+      color var(--sys-motion-duration-short) var(--sys-motion-easing-standard),
+      background var(--sys-motion-duration-short) var(--sys-motion-easing-standard);
   }
 }

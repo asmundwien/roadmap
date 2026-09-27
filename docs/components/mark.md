@@ -56,7 +56,7 @@ Do not add map coordinates to `Mark`. `MEDIUM_MARK_EXTENT` exports half the draw
 
 ## Tokens
 
-`packages/ui/src/styles/component-colors.css` defines `--comp-mark-surface-color` plus one token per `Variant`, and `component-space.css` and `component-typography.css` define the inline margin and the glyph weight. Every token aliases a semantic role. The component does not read reference tokens or view-level aliases such as `--state-blocked`. Stroke widths and the glyph size stay literal in `mark.css`: they are viewBox units that scale with the drawing, not layout dimensions.
+`mark.module.css` reads semantic color roles for its surface and variants, a semantic spacing step for the inline margin, and a semantic font weight for the glyph. It does not read reference tokens or view-level aliases such as `--state-blocked`. Stroke widths and the glyph size stay literal in the CSS Module: they are viewBox units that scale with the drawing, not layout dimensions.
 
 ## Accessibility
 

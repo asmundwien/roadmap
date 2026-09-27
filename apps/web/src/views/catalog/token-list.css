@@ -1,7 +1,0 @@
-.catalog-token-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sys-space-xs) var(--sys-space-md);
-  font-size: var(--sys-typescale-label-sm-size);
-  line-height: var(--sys-typescale-label-sm-line-height);
-}

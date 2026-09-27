@@ -10,7 +10,7 @@
  * Usage, from the semantic layer only:
  *   --sys-typescale-body-size: var(--ref-font-size-md);
  *
- * Components and page stylesheets read --sys-* or --comp-*, never --ref-*.
+ * Components and page stylesheets read --sys-*, never --ref-*.
  * Add a step only when a semantic role needs it.
  *
  * @see https://m3.material.io/styles/typography/type-scale-tokens
