@@ -1,8 +1,7 @@
 /**
  * System typography tokens name text roles and alias the reference type values.
  *
- * Fits: typefaces, weights, and typescale roles that pair a size with the line height and
- * tracking it was drawn against.
+ * Fits: typefaces, weights, and typescale roles that pair a size with its line height.
  * Does not fit: literal type values, component parts, or product-specific meanings.
  *
  * Usage:
@@ -22,45 +21,39 @@
   --sys-font-family-code: var(--ref-font-family-mono);
 
   /* Weights. */
-  --sys-font-weight-regular: var(--ref-font-weight-400);
-  --sys-font-weight-medium: var(--ref-font-weight-500);
-  --sys-font-weight-strong: var(--ref-font-weight-600);
-  --sys-font-weight-bold: var(--ref-font-weight-700);
-  --sys-font-weight-black: var(--ref-font-weight-900);
+  --sys-font-weight-regular: var(--ref-font-weight-normal);
+  --sys-font-weight-strong: var(--ref-font-weight-semibold);
+  --sys-font-weight-bold: var(--ref-font-weight-bold);
 
   /* Title: the one heading that names a page or a screen. */
-  --sys-typescale-title-size: var(--ref-font-size-32);
-  --sys-typescale-title-line-height: var(--ref-line-height-110);
-  --sys-typescale-title-letter-spacing: var(--ref-letter-spacing-tight);
+  --sys-typescale-title-size: var(--ref-font-size-3xl);
+  --sys-typescale-title-line-height: var(--ref-line-height-tight);
 
   /* Heading: the title of one section inside a page. */
-  --sys-typescale-heading-size: var(--ref-font-size-16);
-  --sys-typescale-heading-line-height: var(--ref-line-height-130);
-  --sys-typescale-heading-letter-spacing: var(--ref-letter-spacing-tight);
+  --sys-typescale-heading-size: var(--ref-font-size-md);
+  --sys-typescale-heading-line-height: var(--ref-line-height-normal);
 
   /* Subheading: the title of one group inside a section. */
-  --sys-typescale-subheading-size: var(--ref-font-size-13);
-  --sys-typescale-subheading-line-height: var(--ref-line-height-130);
-  --sys-typescale-subheading-letter-spacing: var(--ref-letter-spacing-tight);
+  --sys-typescale-subheading-size: var(--ref-font-size-sm);
+  --sys-typescale-subheading-line-height: var(--ref-line-height-normal);
 
   /* Body: prose read at length. */
-  --sys-typescale-body-size: var(--ref-font-size-16);
-  --sys-typescale-body-line-height: var(--ref-line-height-150);
+  --sys-typescale-body-size: var(--ref-font-size-md);
+  --sys-typescale-body-line-height: var(--ref-line-height-relaxed);
 
   /* Body small: dense supporting prose. */
-  --sys-typescale-body-sm-size: var(--ref-font-size-13);
-  --sys-typescale-body-sm-line-height: var(--ref-line-height-150);
+  --sys-typescale-body-sm-size: var(--ref-font-size-sm);
+  --sys-typescale-body-sm-line-height: var(--ref-line-height-relaxed);
 
   /* Label: text inside a control. */
-  --sys-typescale-label-size: var(--ref-font-size-13);
-  --sys-typescale-label-line-height: var(--ref-line-height-130);
+  --sys-typescale-label-size: var(--ref-font-size-sm);
+  --sys-typescale-label-line-height: var(--ref-line-height-normal);
 
   /* Label small: chips, counts, and metadata. */
-  --sys-typescale-label-sm-size: var(--ref-font-size-11);
-  --sys-typescale-label-sm-line-height: var(--ref-line-height-130);
+  --sys-typescale-label-sm-size: var(--ref-font-size-xs);
+  --sys-typescale-label-sm-line-height: var(--ref-line-height-normal);
 
   /* Overline: the uppercase eyebrow above a title. */
-  --sys-typescale-overline-size: var(--ref-font-size-11);
-  --sys-typescale-overline-line-height: var(--ref-line-height-130);
-  --sys-typescale-overline-letter-spacing: var(--ref-letter-spacing-wide);
+  --sys-typescale-overline-size: var(--ref-font-size-xs);
+  --sys-typescale-overline-line-height: var(--ref-line-height-normal);
 }

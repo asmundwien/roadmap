@@ -10,12 +10,36 @@ import {
 } from '@roadmap/ui/section'
 import './reference-dimensions.css'
 
-const SPACES = [0, 2, 4, 8, 12, 16, 24, 32, 40, 48, 64] as const
-const CONTROL_SIZES = [32, 36, 40] as const
-const LAYOUT_SIZES = [256, 640, 768, 1200] as const
-const BORDER_WIDTHS = [1, 3] as const
+const SPACES = [
+  ['none', 0],
+  ['3xs', 2],
+  ['2xs', 4],
+  ['xs', 8],
+  ['sm', 12],
+  ['md', 16],
+  ['lg', 24],
+  ['xl', 32],
+  ['2xl', 40],
+  ['3xl', 48],
+  ['4xl', 64],
+] as const
+const CONTROL_SIZES = [
+  ['sm', 32],
+  ['md', 36],
+  ['lg', 40],
+] as const
+const LAYOUT_SIZES = [
+  ['sidebar', 256],
+  ['measure', 640],
+  ['page-narrow', 768],
+  ['page-wide', 1200],
+] as const
+const BORDER_WIDTHS = [
+  ['sm', 1],
+  ['lg', 3],
+] as const
 const RADII = [
-  ['Square', '--ref-radius-0'],
+  ['Square', '--ref-radius-none'],
   ['Round', '--ref-radius-full'],
 ] as const
 
@@ -25,8 +49,8 @@ export function ReferenceDimensionsCatalogSection() {
       <SectionHeader>
         <SectionTitle>Reference dimensions</SectionTitle>
         <SectionDescription>
-          Literal spacing and geometry have no layout or component role. Semantic size tokens assign
-          these measurements to gaps, controls, and content widths.
+          Reference spacing and geometry have no layout or component role. Semantic size tokens
+          assign these measurements to gaps, controls, and content widths.
         </SectionDescription>
       </SectionHeader>
       <SectionBody>
@@ -37,8 +61,8 @@ export function ReferenceDimensionsCatalogSection() {
             keeps gaps and padding proportional when the root font size changes.
           </SectionGroupDescription>
           <div className="catalog-reference-dimension-list">
-            {SPACES.map((space) => {
-              const token = `--ref-space-${space}`
+            {SPACES.map(([name, space]) => {
+              const token = `--ref-space-${name}`
               return (
                 <div className="catalog-reference-dimension-row" key={token}>
                   <strong>{space}px</strong>
@@ -58,8 +82,8 @@ export function ReferenceDimensionsCatalogSection() {
             button or field styles.
           </SectionGroupDescription>
           <div className="catalog-reference-control-sizes">
-            {CONTROL_SIZES.map((size) => {
-              const token = `--ref-size-${size}`
+            {CONTROL_SIZES.map(([name, size]) => {
+              const token = `--ref-size-control-${name}`
               return (
                 <div className="catalog-reference-control-size" key={token}>
                   <span style={{ height: `var(${token})` }} aria-hidden="true" />
@@ -77,8 +101,8 @@ export function ReferenceDimensionsCatalogSection() {
             measurements, not responsive breakpoints.
           </SectionGroupDescription>
           <div className="catalog-reference-layout-widths">
-            {LAYOUT_SIZES.map((size) => {
-              const token = `--ref-size-${size}`
+            {LAYOUT_SIZES.map(([name, size]) => {
+              const token = `--ref-size-${name}`
               return (
                 <div className="catalog-reference-layout-width" key={token}>
                   <span style={{ width: `var(${token})` }} aria-hidden="true" />
@@ -96,8 +120,8 @@ export function ReferenceDimensionsCatalogSection() {
             thickness only, not color.
           </SectionGroupDescription>
           <div className="catalog-reference-dimension-pairs">
-            {BORDER_WIDTHS.map((width) => {
-              const token = `--ref-border-width-${width}`
+            {BORDER_WIDTHS.map(([name, width]) => {
+              const token = `--ref-border-width-${name}`
               return (
                 <div className="catalog-reference-border-sample" key={token}>
                   <span style={{ borderWidth: `var(${token})` }} aria-hidden="true" />

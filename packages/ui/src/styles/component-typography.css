@@ -2,7 +2,7 @@
  * Component typography tokens describe the text of rendered component parts.
  *
  * Fits: one token per component part, named
- * --comp-<component>-<variant>-<part>-<font-family|font-size|font-weight|line-height|letter-spacing>.
+ * --comp-<component>-<variant>-<part>-<font-family|font-size|font-weight|line-height>.
  * Does not fit: literal type values, reference tokens, or tokens shared by several components.
  *
  * Usage:
@@ -33,16 +33,14 @@
   --comp-badge-font-weight: var(--sys-font-weight-bold);
 
   /* Mark. */
-  --comp-mark-glyph-font-weight: var(--sys-font-weight-black);
+  --comp-mark-glyph-font-weight: var(--sys-font-weight-bold);
 
   /* Page. */
   --comp-page-title-font-size: var(--sys-typescale-title-size);
   --comp-page-title-line-height: var(--sys-typescale-title-line-height);
-  --comp-page-title-letter-spacing: var(--sys-typescale-title-letter-spacing);
   --comp-page-eyebrow-font-family: var(--sys-font-family-code);
   --comp-page-eyebrow-font-size: var(--sys-typescale-overline-size);
   --comp-page-eyebrow-line-height: var(--sys-typescale-overline-line-height);
-  --comp-page-eyebrow-letter-spacing: var(--sys-typescale-overline-letter-spacing);
   --comp-page-eyebrow-font-weight: var(--sys-font-weight-bold);
   --comp-page-description-font-size: var(--sys-typescale-body-size);
   --comp-page-description-line-height: var(--sys-typescale-body-line-height);
@@ -50,12 +48,10 @@
   /* Section. */
   --comp-section-title-font-size: var(--sys-typescale-heading-size);
   --comp-section-title-line-height: var(--sys-typescale-heading-line-height);
-  --comp-section-title-letter-spacing: var(--sys-typescale-heading-letter-spacing);
   --comp-section-description-font-size: var(--sys-typescale-body-sm-size);
   --comp-section-description-line-height: var(--sys-typescale-body-sm-line-height);
   --comp-section-group-title-font-size: var(--sys-typescale-subheading-size);
   --comp-section-group-title-line-height: var(--sys-typescale-subheading-line-height);
-  --comp-section-group-title-letter-spacing: var(--sys-typescale-subheading-letter-spacing);
   --comp-section-group-description-font-size: var(--sys-typescale-body-sm-size);
   --comp-section-group-description-line-height: var(--sys-typescale-body-sm-line-height);
 }

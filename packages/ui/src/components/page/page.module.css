@@ -17,7 +17,6 @@
   font-family: var(--comp-page-eyebrow-font-family);
   font-size: var(--comp-page-eyebrow-font-size);
   font-weight: var(--comp-page-eyebrow-font-weight);
-  letter-spacing: var(--comp-page-eyebrow-letter-spacing);
   line-height: var(--comp-page-eyebrow-line-height);
   text-transform: uppercase;
 }
@@ -25,7 +24,6 @@
 .title {
   margin: 0 0 var(--comp-page-title-margin);
   font-size: var(--comp-page-title-font-size);
-  letter-spacing: var(--comp-page-title-letter-spacing);
   line-height: var(--comp-page-title-line-height);
 }
 

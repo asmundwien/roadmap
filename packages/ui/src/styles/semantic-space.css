@@ -22,36 +22,36 @@
  */
 :root {
   /* Steps for gaps, padding, and margins within a component. */
-  --sys-space-none: var(--ref-space-0);
-  --sys-space-2xs: var(--ref-space-2);
-  --sys-space-xs: var(--ref-space-4);
-  --sys-space-sm: var(--ref-space-8);
-  --sys-space-md: var(--ref-space-12);
-  --sys-space-lg: var(--ref-space-16);
-  --sys-space-xl: var(--ref-space-24);
-  --sys-space-2xl: var(--ref-space-32);
+  --sys-space-none: var(--ref-space-none);
+  --sys-space-2xs: var(--ref-space-3xs);
+  --sys-space-xs: var(--ref-space-2xs);
+  --sys-space-sm: var(--ref-space-xs);
+  --sys-space-md: var(--ref-space-sm);
+  --sys-space-lg: var(--ref-space-md);
+  --sys-space-xl: var(--ref-space-lg);
+  --sys-space-2xl: var(--ref-space-xl);
 
   /* Rhythm between the regions of a page. */
-  --sys-space-section-sm: var(--ref-space-40);
-  --sys-space-section-md: var(--ref-space-48);
-  --sys-space-section-lg: var(--ref-space-64);
+  --sys-space-section-sm: var(--ref-space-2xl);
+  --sys-space-section-md: var(--ref-space-3xl);
+  --sys-space-section-lg: var(--ref-space-4xl);
 
   /* Control heights, so buttons, fields, and chips line up on one baseline grid. */
-  --sys-size-control-sm: var(--ref-size-32);
-  --sys-size-control-md: var(--ref-size-36);
-  --sys-size-control-lg: var(--ref-size-40);
+  --sys-size-control-sm: var(--ref-size-control-sm);
+  --sys-size-control-md: var(--ref-size-control-md);
+  --sys-size-control-lg: var(--ref-size-control-lg);
 
   /* Content widths. */
-  --sys-size-sidebar: var(--ref-size-256);
-  --sys-size-measure: var(--ref-size-640);
-  --sys-size-page-narrow: var(--ref-size-768);
-  --sys-size-page-wide: var(--ref-size-1200);
+  --sys-size-sidebar: var(--ref-size-sidebar);
+  --sys-size-measure: var(--ref-size-measure);
+  --sys-size-page-narrow: var(--ref-size-page-narrow);
+  --sys-size-page-wide: var(--ref-size-page-wide);
 
   /* Border weights. */
-  --sys-border-width-thin: var(--ref-border-width-1);
-  --sys-border-width-thick: var(--ref-border-width-3);
+  --sys-border-width-thin: var(--ref-border-width-sm);
+  --sys-border-width-thick: var(--ref-border-width-lg);
 
   /* Corner shapes. */
-  --sys-radius-square: var(--ref-radius-0);
+  --sys-radius-square: var(--ref-radius-none);
   --sys-radius-pill: var(--ref-radius-full);
 }

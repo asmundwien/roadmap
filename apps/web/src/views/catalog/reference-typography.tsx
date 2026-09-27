@@ -14,12 +14,25 @@ const FAMILIES = [
   ['Sans', '--ref-font-family-sans'],
   ['Mono', '--ref-font-family-mono'],
 ] as const
-const SIZES = [11, 13, 16, 32] as const
-const WEIGHTS = [400, 500, 600, 700, 900] as const
-const LINE_HEIGHTS = [110, 130, 150] as const
-const TRACKING = [
-  ['Tight', '--ref-letter-spacing-tight'],
-  ['Wide', '--ref-letter-spacing-wide'],
+const SIZES = [
+  ['xs', 12],
+  ['sm', 14],
+  ['md', 16],
+  ['lg', 18],
+  ['xl', 20],
+  ['2xl', 24],
+  ['3xl', 30],
+  ['jumbo', 48],
+] as const
+const WEIGHTS = [
+  ['normal', 400],
+  ['semibold', 600],
+  ['bold', 700],
+] as const
+const LINE_HEIGHTS = [
+  ['tight', 110],
+  ['normal', 130],
+  ['relaxed', 150],
 ] as const
 
 export function ReferenceTypographyCatalogSection() {
@@ -52,16 +65,16 @@ export function ReferenceTypographyCatalogSection() {
         <SectionGroup>
           <SectionGroupTitle>Font sizes</SectionGroupTitle>
           <SectionGroupDescription>
-            The number is the pixel size at a 16px root. Rem units let the sample grow with the
-            reader's root font setting.
+            The labels name steps in the type scale. Pixel values assume a 16px root; rem units
+            scale with the reader's root font setting.
           </SectionGroupDescription>
           <div className="catalog-reference-type-grid">
-            {SIZES.map((size) => {
-              const token = `--ref-font-size-${size}`
+            {SIZES.map(([name, pixels]) => {
+              const token = `--ref-font-size-${name}`
               return (
                 <div className="catalog-reference-type-sample" key={token}>
                   <span style={{ fontSize: `var(${token})` }}>Aa Roadmap</span>
-                  <strong>{size}px</strong>
+                  <strong>{pixels}px</strong>
                   <code>{token}</code>
                 </div>
               )
@@ -71,11 +84,11 @@ export function ReferenceTypographyCatalogSection() {
         <SectionGroup>
           <SectionGroupTitle>Font weights</SectionGroupTitle>
           <SectionGroupDescription>
-            Hold the size constant to compare strokes from regular (400) to black (900).
+            Hold the size constant to compare normal (400), semibold (600), and bold (700).
           </SectionGroupDescription>
           <div className="catalog-reference-type-grid">
-            {WEIGHTS.map((weight) => {
-              const token = `--ref-font-weight-${weight}`
+            {WEIGHTS.map(([name, weight]) => {
+              const token = `--ref-font-weight-${name}`
               return (
                 <div className="catalog-reference-type-sample" key={token}>
                   <span style={{ fontWeight: `var(${token})` }}>Aa Wayfinder</span>
@@ -93,8 +106,8 @@ export function ReferenceTypographyCatalogSection() {
             follow the font size of their text.
           </SectionGroupDescription>
           <div className="catalog-reference-type-grid">
-            {LINE_HEIGHTS.map((height) => {
-              const token = `--ref-line-height-${height}`
+            {LINE_HEIGHTS.map(([name, height]) => {
+              const token = `--ref-line-height-${name}`
               return (
                 <div className="catalog-reference-type-sample" key={token}>
                   <span style={{ lineHeight: `var(${token})` }}>
@@ -107,21 +120,6 @@ export function ReferenceTypographyCatalogSection() {
                 </div>
               )
             })}
-          </div>
-        </SectionGroup>
-        <SectionGroup>
-          <SectionGroupTitle>Letter spacing</SectionGroupTitle>
-          <SectionGroupDescription>
-            Tight closes the gaps; wide opens them. Em units scale the spacing with the letters.
-          </SectionGroupDescription>
-          <div className="catalog-reference-type-grid">
-            {TRACKING.map(([label, token]) => (
-              <div className="catalog-reference-type-sample" key={token}>
-                <span style={{ letterSpacing: `var(${token})` }}>MAP LABEL</span>
-                <strong>{label}</strong>
-                <code>{token}</code>
-              </div>
-            ))}
           </div>
         </SectionGroup>
       </SectionBody>

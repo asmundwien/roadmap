@@ -14,7 +14,6 @@
 .title {
   margin: 0;
   font-size: var(--comp-section-title-font-size);
-  letter-spacing: var(--comp-section-title-letter-spacing);
   line-height: var(--comp-section-title-line-height);
 }
 
@@ -44,7 +43,6 @@
 .group-title {
   margin: 0;
   font-size: var(--comp-section-group-title-font-size);
-  letter-spacing: var(--comp-section-group-title-letter-spacing);
   line-height: var(--comp-section-group-title-line-height);
 }
 

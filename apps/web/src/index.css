@@ -69,7 +69,6 @@ body {
 .shell h1 {
   margin: 0 0 var(--sys-space-sm);
   font-size: var(--sys-typescale-title-size);
-  letter-spacing: var(--sys-typescale-title-letter-spacing);
   line-height: var(--sys-typescale-title-line-height);
 }
 

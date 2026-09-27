@@ -1,0 +1,54 @@
+/**
+ * Reference space tokens hold dimensions with no layout role or component meaning.
+ *
+ * Fits: the spacing ladder, control heights, layout widths, border widths, and corner radii.
+ * Does not fit: purpose names, component parts, breakpoints, or aliases of other tokens.
+ *
+ * Spacing steps have size names and resolve from a 1rem base. At a 16px root, the ladder runs
+ * from 2px to 64px. Controls and layout widths use rem so they scale with the user's font size.
+ * Border widths and radii use px because they describe outlines and corner geometry.
+ *
+ * Usage, from the semantic layer only:
+ *   --sys-space-sm: var(--ref-space-xs);
+ *
+ * Components and page stylesheets read --sys-* or --comp-*, never --ref-*.
+ * Add a step only when a semantic role needs it.
+ *
+ * @see https://m3.material.io/foundations/layout/understanding-layout/spacing
+ * @see https://primer.style/foundations/primitives/size
+ */
+:root {
+  /* The spacing ladder: gaps, padding, and margins all resolve here. */
+  --ref-space-base: 1rem;
+  --ref-space-none: 0;
+  --ref-space-3xs: calc(var(--ref-space-base) * 0.125); /* 2px at 16px root */
+  --ref-space-2xs: calc(var(--ref-space-base) * 0.25); /* 4px at 16px root */
+  --ref-space-xs: calc(var(--ref-space-base) * 0.5); /* 8px at 16px root */
+  --ref-space-sm: calc(var(--ref-space-base) * 0.75); /* 12px at 16px root */
+  --ref-space-md: calc(var(--ref-space-base) * 1); /* 16px at 16px root */
+  --ref-space-lg: calc(var(--ref-space-base) * 1.5); /* 24px at 16px root */
+  --ref-space-xl: calc(var(--ref-space-base) * 2); /* 32px at 16px root */
+  --ref-space-2xl: calc(var(--ref-space-base) * 2.5); /* 40px at 16px root */
+  --ref-space-3xl: calc(var(--ref-space-base) * 3); /* 48px at 16px root */
+  --ref-space-4xl: calc(var(--ref-space-base) * 4); /* 64px at 16px root */
+
+  /* Control heights. */
+  --ref-size-control-sm: 2rem;
+  --ref-size-control-md: 2.25rem;
+  --ref-size-control-lg: 2.5rem;
+
+  /* Layout widths. */
+  --ref-size-sidebar: 16rem;
+  --ref-size-measure: 40rem;
+  --ref-size-page-narrow: 48rem;
+  --ref-size-page-wide: 75rem;
+
+  /* Border widths. */
+  --ref-border-width-sm: 1px;
+  --ref-border-width-md: 2px;
+  --ref-border-width-lg: 3px;
+
+  /* Corner radii. */
+  --ref-radius-none: 0;
+  --ref-radius-full: 9999px;
+}

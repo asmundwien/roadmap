@@ -6,18 +6,18 @@
  * parts). A stylesheet reads the narrowest layer that fits: components read --comp-*, product
  * views read --sys-*, and only the semantic layer reads --ref-*.
  */
-@import "./reference-colors.css";
+@import "./references/colors.css";
 @import "./semantic-colors.css";
 @import "./component-colors.css";
 
-@import "./reference-space.css";
+@import "./references/spacing.css";
 @import "./semantic-space.css";
 @import "./component-space.css";
 
-@import "./reference-typography.css";
+@import "./references/typography.css";
 @import "./semantic-typography.css";
 @import "./component-typography.css";
 
-@import "./reference-motion.css";
+@import "./references/motion.css";
 @import "./semantic-motion.css";
 @import "./component-motion.css";
