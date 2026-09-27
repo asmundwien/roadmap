@@ -1,20 +1,3 @@
-/**
- * System typography tokens name text roles and alias the reference type values.
- *
- * Fits: typefaces, weights, and typescale roles that pair a size with its line height.
- * Does not fit: literal type values, component parts, or product-specific meanings.
- *
- * Usage:
- *   font-family: var(--sys-font-family-ui);
- *   font-size: var(--sys-typescale-body-size);
- *   line-height: var(--sys-typescale-body-line-height);
- *
- * Keep the members of a typescale role together: a size that is used without its line height
- * breaks the vertical rhythm it was chosen for.
- *
- * @see https://m3.material.io/styles/typography/applying-type
- * @see https://primer.style/foundations/primitives/typography
- */
 :root {
   /* Typefaces. */
   --sys-font-family-ui: var(--ref-font-family-sans);

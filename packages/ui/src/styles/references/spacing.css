@@ -1,22 +1,3 @@
-/**
- * Reference space tokens hold dimensions with no layout role or component meaning.
- *
- * Fits: the spacing ladder, border widths, and corner radii.
- * Does not fit: purpose names, component parts, breakpoints, or aliases of other tokens.
- *
- * Spacing steps have size names and resolve from a 1rem base. At a 16px root, the ladder runs
- * from 2px to 64px. Border widths and radii use px because they describe outlines and
- * corner geometry.
- *
- * Usage, from the semantic layer only:
- *   --sys-space-sm: var(--ref-space-xs);
- *
- * Components and page stylesheets read --sys-*, never --ref-*.
- * Add a step only when a semantic role needs it.
- *
- * @see https://m3.material.io/foundations/layout/understanding-layout/spacing
- * @see https://primer.style/foundations/primitives/size
- */
 :root {
   /* The spacing ladder: gaps, padding, and margins all resolve here. */
   --ref-space-base: 1rem;
