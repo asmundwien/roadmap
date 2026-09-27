@@ -19,16 +19,13 @@ export type Route =
   | { screen: 'project-settings' }
   | { screen: 'connection-settings' }
   | { screen: 'automation-settings' }
-  | { screen: 'components'; tab: CatalogTab }
+  | { screen: 'components' }
   | {
       screen: 'project'
       project: ProjectKey
       selected: string | null
       selection: PanelSelection | null
     }
-
-/** The catalog's two tabs: what `@roadmap/ui` publishes, and what the views encode on top of it. */
-export type CatalogTab = 'design-system' | 'domain'
 
 /**
  * The Panel's pick as the hash carries it. Fog patches and scope entries are title-less body
@@ -56,15 +53,13 @@ export const projectSettingsHash = '#/settings/projects'
 export const connectionSettingsHash = '#/settings/connections'
 export const automationSettingsHash = '#/settings/automation'
 export const componentsHash = '#/components'
-export const domainComponentsHash = '#/components/domain'
 
 /** Anything that doesn't parse falls back to the project list — a bad URL is not an error state. */
 export function parseHash(hash: string): Route {
   if (hash === projectSettingsHash) return { screen: 'project-settings' }
   if (hash === connectionSettingsHash) return { screen: 'connection-settings' }
   if (hash === automationSettingsHash) return { screen: 'automation-settings' }
-  if (hash === componentsHash) return { screen: 'components', tab: 'design-system' }
-  if (hash === domainComponentsHash) return { screen: 'components', tab: 'domain' }
+  if (hash === componentsHash) return { screen: 'components' }
   const bare = /^#\/projects\/([^/]+)\/([^/]+)$/.exec(hash)
   if (bare) {
     const project = parseProjectKey(bare[1], bare[2])

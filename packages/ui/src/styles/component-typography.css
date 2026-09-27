@@ -35,13 +35,6 @@
   /* Mark. */
   --comp-mark-glyph-font-weight: var(--sys-font-weight-black);
 
-  /* Navbar. */
-  --comp-navbar-font-family: var(--sys-font-family-ui);
-  --comp-navbar-font-size: var(--sys-typescale-label-size);
-  --comp-navbar-line-height: var(--sys-typescale-label-line-height);
-  --comp-navbar-font-weight: var(--sys-font-weight-regular);
-  --comp-navbar-current-font-weight: var(--sys-font-weight-strong);
-
   /* Page. */
   --comp-page-title-font-size: var(--sys-typescale-title-size);
   --comp-page-title-line-height: var(--sys-typescale-title-line-height);

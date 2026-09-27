@@ -17,7 +17,7 @@ export function App() {
       {(route.screen === 'project-settings' ||
         route.screen === 'connection-settings' ||
         route.screen === 'automation-settings') && <SettingsPage route={route} />}
-      {route.screen === 'components' && <CatalogPage tab={route.tab} />}
+      {route.screen === 'components' && <CatalogPage />}
     </>
   )
 }

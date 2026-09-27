@@ -4,7 +4,6 @@ import {
   automationSettingsHash,
   componentsHash,
   connectionSettingsHash,
-  domainComponentsHash,
   encodeSelection,
   mapHash,
   type PanelSelection,
@@ -20,8 +19,7 @@ const PROJECT = { integration: 'github' as const, id: 'asmundwien/roadmap' }
 describe('parseHash', () => {
   it.each([
     [automationSettingsHash, { screen: 'automation-settings' }],
-    [componentsHash, { screen: 'components', tab: 'design-system' }],
-    [domainComponentsHash, { screen: 'components', tab: 'domain' }],
+    [componentsHash, { screen: 'components' }],
     [projectSettingsHash, { screen: 'project-settings' }],
     [connectionSettingsHash, { screen: 'connection-settings' }],
   ])('reads the management route %s', (hash, route) => {
