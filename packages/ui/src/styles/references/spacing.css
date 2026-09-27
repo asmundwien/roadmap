@@ -1,12 +1,12 @@
 /**
  * Reference space tokens hold dimensions with no layout role or component meaning.
  *
- * Fits: the spacing ladder, layout widths, border widths, and corner radii.
+ * Fits: the spacing ladder, border widths, and corner radii.
  * Does not fit: purpose names, component parts, breakpoints, or aliases of other tokens.
  *
  * Spacing steps have size names and resolve from a 1rem base. At a 16px root, the ladder runs
- * from 2px to 64px. Layout widths use rem so they scale with the user's font size.
- * Border widths and radii use px because they describe outlines and corner geometry.
+ * from 2px to 64px. Border widths and radii use px because they describe outlines and
+ * corner geometry.
  *
  * Usage, from the semantic layer only:
  *   --sys-space-sm: var(--ref-space-xs);
@@ -31,12 +31,6 @@
   --ref-space-2xl: calc(var(--ref-space-base) * 2.5); /* 40px at 16px root */
   --ref-space-3xl: calc(var(--ref-space-base) * 3); /* 48px at 16px root */
   --ref-space-4xl: calc(var(--ref-space-base) * 4); /* 64px at 16px root */
-
-  /* Layout widths. */
-  --ref-size-sidebar: 16rem;
-  --ref-size-measure: 40rem;
-  --ref-size-page-narrow: 48rem;
-  --ref-size-page-wide: 75rem;
 
   /* Border widths. */
   --ref-border-width-sm: 1px;

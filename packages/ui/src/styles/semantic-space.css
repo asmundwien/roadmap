@@ -1,9 +1,9 @@
 /**
- * System space tokens name what a dimension is for and alias the reference ladder.
+ * System space tokens name what a dimension is for and map spacing steps to the reference ladder.
  *
  * Fits: the step scale a layout draws from, page rhythm, content widths, border weights,
  * and corner shapes.
- * Does not fit: literal dimensions, component parts, or product-specific measurements.
+ * Does not fit: literal spacing steps, component parts, or product-specific measurements.
  *
  * Usage:
  *   gap: var(--sys-space-sm);
@@ -36,11 +36,11 @@
   --sys-space-section-md: var(--ref-space-3xl);
   --sys-space-section-lg: var(--ref-space-4xl);
 
-  /* Content widths. */
-  --sys-size-sidebar: var(--ref-size-sidebar);
-  --sys-size-measure: var(--ref-size-measure);
-  --sys-size-page-narrow: var(--ref-size-page-narrow);
-  --sys-size-page-wide: var(--ref-size-page-wide);
+  /* Layout widths stay here because each value names a layout role, not a reference step. */
+  --sys-size-sidebar: 16rem;
+  --sys-size-measure: 40rem;
+  --sys-size-page-narrow: 48rem;
+  --sys-size-page-wide: 75rem;
 
   /* Border weights. */
   --sys-border-width-thin: var(--ref-border-width-sm);

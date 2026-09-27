@@ -23,12 +23,6 @@ const SPACES = [
   ['3xl', 48],
   ['4xl', 64],
 ] as const
-const LAYOUT_SIZES = [
-  ['sidebar', 256],
-  ['measure', 640],
-  ['page-narrow', 768],
-  ['page-wide', 1200],
-] as const
 const BORDER_WIDTHS = [
   ['sm', 1],
   ['lg', 3],
@@ -44,8 +38,8 @@ export function ReferenceDimensionsCatalogSection() {
       <SectionHeader>
         <SectionTitle>Reference dimensions</SectionTitle>
         <SectionDescription>
-          Reference spacing and geometry have no layout or component role. Semantic size tokens
-          assign these measurements to gaps and content widths.
+          Reference spacing and geometry have no layout or component role. Semantic tokens assign
+          these measurements to gaps, border weights, and corner shapes.
         </SectionDescription>
       </SectionHeader>
       <SectionBody>
@@ -64,25 +58,6 @@ export function ReferenceDimensionsCatalogSection() {
                   <div className="catalog-reference-space-track">
                     <span style={{ width: `var(${token})` }} />
                   </div>
-                  <code>{token}</code>
-                </div>
-              )
-            })}
-          </div>
-        </SectionGroup>
-        <SectionGroup>
-          <SectionGroupTitle>Layout widths</SectionGroupTitle>
-          <SectionGroupDescription>
-            Scroll horizontally to compare the full widths on one scale. These are maximum content
-            measurements, not responsive breakpoints.
-          </SectionGroupDescription>
-          <div className="catalog-reference-layout-widths">
-            {LAYOUT_SIZES.map(([name, size]) => {
-              const token = `--ref-size-${name}`
-              return (
-                <div className="catalog-reference-layout-width" key={token}>
-                  <span style={{ width: `var(${token})` }} aria-hidden="true" />
-                  <strong>{size}px</strong>
                   <code>{token}</code>
                 </div>
               )

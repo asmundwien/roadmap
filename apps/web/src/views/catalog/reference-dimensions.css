@@ -34,25 +34,6 @@
   gap: var(--sys-space-xs);
 }
 
-.catalog-reference-layout-widths {
-  display: grid;
-  gap: var(--sys-space-sm);
-  overflow-x: auto;
-}
-
-.catalog-reference-layout-width {
-  display: grid;
-  justify-items: start;
-  gap: var(--sys-space-xs);
-}
-
-.catalog-reference-layout-width > span {
-  box-sizing: border-box;
-  height: 1rem;
-  border: 1px solid var(--sys-color-outline);
-  background: var(--sys-color-surface-container);
-}
-
 .catalog-reference-border-sample > span,
 .catalog-reference-radius-sample > span {
   box-sizing: border-box;
@@ -66,14 +47,12 @@
 }
 
 .catalog-reference-dimension-row strong,
-.catalog-reference-layout-width strong,
 .catalog-reference-border-sample strong,
 .catalog-reference-radius-sample strong {
   font-size: var(--sys-typescale-body-sm-size);
 }
 
 .catalog-reference-dimension-row code,
-.catalog-reference-layout-width code,
 .catalog-reference-border-sample code,
 .catalog-reference-radius-sample code {
   color: var(--sys-color-on-surface-variant);
