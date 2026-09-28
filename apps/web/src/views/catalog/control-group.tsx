@@ -4,12 +4,10 @@ import {
   Section,
   SectionBody,
   SectionDescription,
-  SectionGroup,
-  SectionGroupDescription,
-  SectionGroupTitle,
   SectionHeader,
   SectionTitle,
 } from '@roadmap/ui/section'
+import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
 import { TextInput } from '@roadmap/ui/text-input'
 
 export function ControlGroupCatalogSection() {
@@ -23,21 +21,21 @@ export function ControlGroupCatalogSection() {
         </SectionDescription>
       </SectionHeader>
       <SectionBody>
-        <SectionGroup>
-          <SectionGroupTitle>Related actions</SectionGroupTitle>
-          <SectionGroupDescription>Adjacent buttons share a border.</SectionGroupDescription>
+        <Surface>
+          <SurfaceTitle>Related actions</SurfaceTitle>
+          <SurfaceDescription>Adjacent buttons share a border.</SurfaceDescription>
           <ControlGroup>
             <Button type="button">Cancel</Button>
             <Button variant="primary" type="button">
               Apply
             </Button>
           </ControlGroup>
-        </SectionGroup>
-        <SectionGroup>
-          <SectionGroupTitle>Input and save button</SectionGroupTitle>
-          <SectionGroupDescription>
+        </Surface>
+        <Surface>
+          <SurfaceTitle>Input and save button</SurfaceTitle>
+          <SurfaceDescription>
             The large group gives the input and save button the same height.
-          </SectionGroupDescription>
+          </SurfaceDescription>
           <label htmlFor="catalog-control-name">Name</label>
           <ControlGroup size="large">
             <TextInput id="catalog-control-name" name="name" placeholder="Name" />
@@ -45,7 +43,7 @@ export function ControlGroupCatalogSection() {
               Save
             </Button>
           </ControlGroup>
-        </SectionGroup>
+        </Surface>
       </SectionBody>
     </Section>
   )

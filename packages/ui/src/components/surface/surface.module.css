@@ -1,0 +1,45 @@
+.surface {
+  display: grid;
+  align-content: start;
+  gap: var(--sys-space-md);
+  min-width: 0;
+  padding: var(--sys-space-lg);
+  border: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
+  background: var(--sys-color-surface-container);
+  color: var(--sys-color-on-surface);
+}
+
+.subtle {
+  background: var(--sys-color-surface-container-low);
+}
+
+.emphasized {
+  border-color: var(--sys-color-outline);
+  border-inline-start: var(--sys-border-width-thick) solid var(--sys-color-on-surface);
+  background: var(--sys-color-surface-container-high);
+}
+
+.danger {
+  border-color: var(--sys-color-error);
+  border-inline-start: var(--sys-border-width-thick) solid var(--sys-color-error);
+  background: var(--sys-color-error-container);
+  color: var(--sys-color-on-error-container);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--sys-typescale-subheading-size);
+  line-height: var(--sys-typescale-subheading-line-height);
+}
+
+.description {
+  max-width: var(--sys-size-measure);
+  margin: 0;
+  color: var(--sys-color-on-surface-variant);
+  font-size: var(--sys-typescale-body-sm-size);
+  line-height: var(--sys-typescale-body-sm-line-height);
+}
+
+.danger .description {
+  color: var(--sys-color-on-error-container);
+}

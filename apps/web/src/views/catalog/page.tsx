@@ -10,6 +10,7 @@ import { ReferenceDimensionsCatalogSection } from './reference-dimensions'
 import { ReferenceMotionCatalogSection } from './reference-motion'
 import { ReferenceTypographyCatalogSection } from './reference-typography'
 import { SemanticPaletteCatalogSection } from './semantic'
+import { StandaloneSurfaceCatalogExample, SurfacesCatalogSection } from './surfaces'
 import { TextInputCatalogSection } from './text-input'
 
 export function CatalogPage() {
@@ -19,7 +20,7 @@ export function CatalogPage() {
         <PageEyebrow>UI inventory</PageEyebrow>
         <PageTitle>Components</PageTitle>
         <PageDescription>
-          Reference values, semantic color roles, the mark primitive, and shared controls. The
+          Reference values, semantic color roles, surfaces, the mark, and shared controls. The
           examples render with the same tokens as the product.
         </PageDescription>
       </PageHeader>
@@ -29,6 +30,8 @@ export function CatalogPage() {
       <ReferenceDimensionsCatalogSection />
       <ReferenceMotionCatalogSection />
       <SemanticPaletteCatalogSection />
+      <SurfacesCatalogSection />
+      <StandaloneSurfaceCatalogExample />
       <MarkCatalogSection />
       <TicketMarkCatalogSection />
       <BadgesCatalogSection />

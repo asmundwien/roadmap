@@ -13,6 +13,7 @@
     "./mark": "./src/components/mark/mark.tsx",
     "./page": "./src/components/page/page.tsx",
     "./section": "./src/components/section/section.tsx",
+    "./surface": "./src/components/surface/surface.tsx",
     "./text-input": "./src/components/text-input/text-input.tsx",
     "./variant": "./src/components/variant.ts",
     "./index.css": "./src/styles/index.css"

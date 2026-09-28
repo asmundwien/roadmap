@@ -4,11 +4,10 @@ import {
   Section,
   SectionBody,
   SectionDescription,
-  SectionGroup,
-  SectionGroupTitle,
   SectionHeader,
   SectionTitle,
 } from '@roadmap/ui/section'
+import { Surface, SurfaceTitle } from '@roadmap/ui/surface'
 import type { Variant } from '@roadmap/ui/variant'
 import type { ReactNode } from 'react'
 import { TicketMark } from '@/views/shared/ticket-mark'
@@ -119,10 +118,10 @@ type MarkGroupProps = { label: string; children: ReactNode }
 
 function MarkGroup({ label, children }: MarkGroupProps) {
   return (
-    <SectionGroup>
-      <SectionGroupTitle>{label}</SectionGroupTitle>
+    <Surface>
+      <SurfaceTitle>{label}</SurfaceTitle>
       <div className="catalog-mark-row">{children}</div>
-    </SectionGroup>
+    </Surface>
   )
 }
 

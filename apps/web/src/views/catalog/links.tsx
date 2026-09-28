@@ -3,12 +3,10 @@ import {
   Section,
   SectionBody,
   SectionDescription,
-  SectionGroup,
-  SectionGroupDescription,
-  SectionGroupTitle,
   SectionHeader,
   SectionTitle,
 } from '@roadmap/ui/section'
+import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
 
 export function LinksCatalogSection() {
   return (
@@ -20,22 +18,22 @@ export function LinksCatalogSection() {
         </SectionDescription>
       </SectionHeader>
       <SectionBody>
-        <SectionGroup>
-          <SectionGroupTitle>Internal</SectionGroupTitle>
-          <SectionGroupDescription>
+        <Surface>
+          <SurfaceTitle>Internal</SurfaceTitle>
+          <SurfaceDescription>
             Underlined text with a right arrow identifies navigation within the application.
-          </SectionGroupDescription>
+          </SurfaceDescription>
           <Link href="#/components">Components</Link>
-        </SectionGroup>
-        <SectionGroup>
-          <SectionGroupTitle>External</SectionGroupTitle>
-          <SectionGroupDescription>
+        </Surface>
+        <Surface>
+          <SurfaceTitle>External</SurfaceTitle>
+          <SurfaceDescription>
             An up-right arrow marks a destination that opens in a new tab.
-          </SectionGroupDescription>
+          </SurfaceDescription>
           <Link href="https://github.com" external>
             GitHub
           </Link>
-        </SectionGroup>
+        </Surface>
       </SectionBody>
     </Section>
   )

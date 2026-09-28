@@ -2,12 +2,10 @@ import {
   Section,
   SectionBody,
   SectionDescription,
-  SectionGroup,
-  SectionGroupDescription,
-  SectionGroupTitle,
   SectionHeader,
   SectionTitle,
 } from '@roadmap/ui/section'
+import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
 import './reference-colors.css'
 
 const REFERENCE_COLOR_STEPS = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950] as const
@@ -38,12 +36,12 @@ export function ReferenceColorsCatalogSection() {
       </SectionHeader>
 
       <SectionBody>
-        <SectionGroup>
-          <SectionGroupTitle>Common</SectionGroupTitle>
-          <SectionGroupDescription>
+        <Surface>
+          <SurfaceTitle>Common</SurfaceTitle>
+          <SurfaceDescription>
             White and black sit outside the tonal ramps. Their names describe the pigment, not a
             surface or text role.
-          </SectionGroupDescription>
+          </SurfaceDescription>
           <div className="catalog-reference-swatches">
             {COMMON_REFERENCE_COLORS.map(([label, token]) => (
               <div className="catalog-reference-swatch" key={token}>
@@ -53,10 +51,10 @@ export function ReferenceColorsCatalogSection() {
               </div>
             ))}
           </div>
-        </SectionGroup>
+        </Surface>
         {REFERENCE_COLOR_FAMILIES.map(([label, family]) => (
-          <SectionGroup key={family}>
-            <SectionGroupTitle>{label}</SectionGroupTitle>
+          <Surface key={family}>
+            <SurfaceTitle>{label}</SurfaceTitle>
             <div className="catalog-reference-swatches">
               {REFERENCE_COLOR_STEPS.map((step) => {
                 const token = `--ref-${family}-${step}`
@@ -69,7 +67,7 @@ export function ReferenceColorsCatalogSection() {
                 )
               })}
             </div>
-          </SectionGroup>
+          </Surface>
         ))}
       </SectionBody>
     </Section>

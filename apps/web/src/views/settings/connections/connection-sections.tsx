@@ -6,12 +6,10 @@ import {
   Section,
   SectionBody,
   SectionDescription,
-  SectionGroup,
-  SectionGroupDescription,
-  SectionGroupTitle,
   SectionHeader,
   SectionTitle,
 } from '@roadmap/ui/section'
+import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
 import { connectionHash, projectHash } from '@/router'
 import { locatorLabel, projectIdentity } from '@/views/shared/settings-shared'
 import { authorizationStatus, connectionAvailability } from './connection-details'
@@ -119,11 +117,11 @@ export function ConnectionStride({ connection, dependents }: ConnectionStridePro
           </Alert>
         )}
         {dependents.map((project) => (
-          <SectionGroup key={projectIdentity(project)}>
-            <SectionGroupTitle>{project.name}</SectionGroupTitle>
-            <SectionGroupDescription>{locatorLabel(project)}</SectionGroupDescription>
+          <Surface key={projectIdentity(project)}>
+            <SurfaceTitle>{project.name}</SurfaceTitle>
+            <SurfaceDescription>{locatorLabel(project)}</SurfaceDescription>
             <Link href={projectHash(project.key)}>Open Project</Link>
-          </SectionGroup>
+          </Surface>
         ))}
         {dependents.length === 0 && <p>No registered Projects use this Connection.</p>}
       </SectionBody>

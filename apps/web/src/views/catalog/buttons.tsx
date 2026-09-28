@@ -3,12 +3,10 @@ import {
   Section,
   SectionBody,
   SectionDescription,
-  SectionGroup,
-  SectionGroupDescription,
-  SectionGroupTitle,
   SectionHeader,
   SectionTitle,
 } from '@roadmap/ui/section'
+import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
 import './buttons.css'
 
 export function ButtonsCatalogSection() {
@@ -22,61 +20,61 @@ export function ButtonsCatalogSection() {
       </SectionHeader>
 
       <SectionBody>
-        <SectionGroup className="catalog-button-example">
-          <SectionGroupTitle>Secondary</SectionGroupTitle>
-          <SectionGroupDescription>
+        <Surface className="catalog-button-example">
+          <SurfaceTitle>Secondary</SurfaceTitle>
+          <SurfaceDescription>
             Use the neutral outline for routine actions. Hover changes the container.
-          </SectionGroupDescription>
+          </SurfaceDescription>
           <Button type="button">Routine action</Button>
-        </SectionGroup>
+        </Surface>
 
-        <SectionGroup className="catalog-button-example">
-          <SectionGroupTitle>Primary</SectionGroupTitle>
-          <SectionGroupDescription>
+        <Surface className="catalog-button-example">
+          <SurfaceTitle>Primary</SurfaceTitle>
+          <SurfaceDescription>
             Use a solid neutral button for the preferred action in a group.
-          </SectionGroupDescription>
+          </SurfaceDescription>
           <Button variant="primary" type="button">
             Continue
           </Button>
-        </SectionGroup>
+        </Surface>
 
-        <SectionGroup className="catalog-button-example">
-          <SectionGroupTitle>Danger</SectionGroupTitle>
-          <SectionGroupDescription>
+        <Surface className="catalog-button-example">
+          <SurfaceTitle>Danger</SurfaceTitle>
+          <SurfaceDescription>
             Use danger only for destructive actions. Keep the initial action outlined.
-          </SectionGroupDescription>
+          </SurfaceDescription>
           <Button variant="danger" type="button">
             Remove
           </Button>
-        </SectionGroup>
+        </Surface>
 
-        <SectionGroup className="catalog-button-example">
-          <SectionGroupTitle>Solid danger</SectionGroupTitle>
-          <SectionGroupDescription>
+        <Surface className="catalog-button-example">
+          <SurfaceTitle>Solid danger</SurfaceTitle>
+          <SurfaceDescription>
             A confirmed destructive action can use the solid appearance.
-          </SectionGroupDescription>
+          </SurfaceDescription>
           <Button variant="danger" appearance="solid" type="button">
             Confirm removal
           </Button>
-        </SectionGroup>
+        </Surface>
 
-        <SectionGroup className="catalog-button-example">
-          <SectionGroupTitle>Unavailable</SectionGroupTitle>
-          <SectionGroupDescription>
+        <Surface className="catalog-button-example">
+          <SurfaceTitle>Unavailable</SurfaceTitle>
+          <SurfaceDescription>
             The native disabled attribute blocks activation. The outline and label use the muted
             pair so the label keeps its contrast.
-          </SectionGroupDescription>
+          </SurfaceDescription>
           <Button type="button" disabled>
             Unavailable
           </Button>
-        </SectionGroup>
+        </Surface>
 
-        <SectionGroup className="catalog-button-example">
-          <SectionGroupTitle>Sizes</SectionGroupTitle>
-          <SectionGroupDescription>
+        <Surface className="catalog-button-example">
+          <SurfaceTitle>Sizes</SurfaceTitle>
+          <SurfaceDescription>
             Small, medium, and large have minimum heights of 32, 40, and 48 pixels. Medium is the
             default and aligns with standard form fields.
-          </SectionGroupDescription>
+          </SurfaceDescription>
           <div className="catalog-button-sizes">
             <Button size="small" type="button">
               Small
@@ -86,7 +84,7 @@ export function ButtonsCatalogSection() {
               Large
             </Button>
           </div>
-        </SectionGroup>
+        </Surface>
       </SectionBody>
     </Section>
   )

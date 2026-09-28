@@ -2,12 +2,10 @@ import {
   Section,
   SectionBody,
   SectionDescription,
-  SectionGroup,
-  SectionGroupDescription,
-  SectionGroupTitle,
   SectionHeader,
   SectionTitle,
 } from '@roadmap/ui/section'
+import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
 import './semantic.css'
 
 const SEMANTIC_SURFACE_PAIRS = [
@@ -50,12 +48,12 @@ export function SemanticPaletteCatalogSection() {
       </SectionHeader>
 
       <SectionBody>
-        <SectionGroup>
-          <SectionGroupTitle>Surfaces</SectionGroupTitle>
-          <SectionGroupDescription>
+        <Surface>
+          <SurfaceTitle>Surfaces</SurfaceTitle>
+          <SurfaceDescription>
             Surface roles establish elevation without naming a pigment. On-surface roles are the
             supported foregrounds for these backgrounds.
-          </SectionGroupDescription>
+          </SurfaceDescription>
           <div className="catalog-semantic-pairs">
             {SEMANTIC_SURFACE_PAIRS.map(([label, background, foreground]) => (
               <SemanticColorPair
@@ -66,14 +64,14 @@ export function SemanticPaletteCatalogSection() {
               />
             ))}
           </div>
-        </SectionGroup>
+        </Surface>
 
-        <SectionGroup>
-          <SectionGroupTitle>Intents</SectionGroupTitle>
-          <SectionGroupDescription>
+        <Surface>
+          <SurfaceTitle>Intents</SurfaceTitle>
+          <SurfaceDescription>
             Each intent has a strong pair and a quieter container pair. An on-color role is valid
             only on its matching background role.
-          </SectionGroupDescription>
+          </SurfaceDescription>
           <div className="catalog-semantic-pairs">
             {SEMANTIC_INTENTS.flatMap(([label, intent]) => [
               <SemanticColorPair
@@ -90,10 +88,10 @@ export function SemanticPaletteCatalogSection() {
               />,
             ])}
           </div>
-        </SectionGroup>
+        </Surface>
 
-        <SectionGroup>
-          <SectionGroupTitle>Supporting roles</SectionGroupTitle>
+        <Surface>
+          <SurfaceTitle>Supporting roles</SurfaceTitle>
           <div className="catalog-semantic-support">
             {SEMANTIC_SUPPORT_ROLES.map(([label, token, description]) => (
               <div key={token}>
@@ -104,7 +102,7 @@ export function SemanticPaletteCatalogSection() {
               </div>
             ))}
           </div>
-        </SectionGroup>
+        </Surface>
       </SectionBody>
     </Section>
   )

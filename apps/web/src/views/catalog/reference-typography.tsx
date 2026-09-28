@@ -2,12 +2,10 @@ import {
   Section,
   SectionBody,
   SectionDescription,
-  SectionGroup,
-  SectionGroupDescription,
-  SectionGroupTitle,
   SectionHeader,
   SectionTitle,
 } from '@roadmap/ui/section'
+import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
 import './reference-typography.css'
 
 const FAMILIES = [
@@ -46,12 +44,12 @@ export function ReferenceTypographyCatalogSection() {
         </SectionDescription>
       </SectionHeader>
       <SectionBody>
-        <SectionGroup>
-          <SectionGroupTitle>Font families</SectionGroupTitle>
-          <SectionGroupDescription>
+        <Surface>
+          <SurfaceTitle>Font families</SurfaceTitle>
+          <SurfaceDescription>
             Compare the system sans stack with the monospace stack using the same letters and
             digits.
-          </SectionGroupDescription>
+          </SurfaceDescription>
           <div className="catalog-reference-type-list">
             {FAMILIES.map(([label, token]) => (
               <div className="catalog-reference-type-row" key={token}>
@@ -61,13 +59,13 @@ export function ReferenceTypographyCatalogSection() {
               </div>
             ))}
           </div>
-        </SectionGroup>
-        <SectionGroup>
-          <SectionGroupTitle>Font sizes</SectionGroupTitle>
-          <SectionGroupDescription>
+        </Surface>
+        <Surface>
+          <SurfaceTitle>Font sizes</SurfaceTitle>
+          <SurfaceDescription>
             The labels name steps in the type scale. Pixel values assume a 16px root; rem units
             scale with the reader's root font setting.
-          </SectionGroupDescription>
+          </SurfaceDescription>
           <div className="catalog-reference-type-list">
             {SIZES.map(([name, pixels]) => {
               const token = `--ref-font-size-${name}`
@@ -80,12 +78,12 @@ export function ReferenceTypographyCatalogSection() {
               )
             })}
           </div>
-        </SectionGroup>
-        <SectionGroup>
-          <SectionGroupTitle>Font weights</SectionGroupTitle>
-          <SectionGroupDescription>
+        </Surface>
+        <Surface>
+          <SurfaceTitle>Font weights</SurfaceTitle>
+          <SurfaceDescription>
             Hold the size constant to compare normal (400), semibold (600), and bold (700).
-          </SectionGroupDescription>
+          </SurfaceDescription>
           <div className="catalog-reference-type-list">
             {WEIGHTS.map(([name, weight]) => {
               const token = `--ref-font-weight-${name}`
@@ -98,13 +96,13 @@ export function ReferenceTypographyCatalogSection() {
               )
             })}
           </div>
-        </SectionGroup>
-        <SectionGroup>
-          <SectionGroupTitle>Line heights</SectionGroupTitle>
-          <SectionGroupDescription>
+        </Surface>
+        <Surface>
+          <SurfaceTitle>Line heights</SurfaceTitle>
+          <SurfaceDescription>
             Compare the distance between two baselines at one font size. These unitless multipliers
             follow the font size of their text.
-          </SectionGroupDescription>
+          </SurfaceDescription>
           <div className="catalog-reference-type-list">
             {LINE_HEIGHTS.map(([name, height]) => {
               const token = `--ref-line-height-${name}`
@@ -121,7 +119,7 @@ export function ReferenceTypographyCatalogSection() {
               )
             })}
           </div>
-        </SectionGroup>
+        </Surface>
       </SectionBody>
     </Section>
   )

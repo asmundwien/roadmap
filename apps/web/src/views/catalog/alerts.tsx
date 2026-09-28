@@ -3,10 +3,10 @@ import {
   Section,
   SectionBody,
   SectionDescription,
-  SectionGroup,
   SectionHeader,
   SectionTitle,
 } from '@roadmap/ui/section'
+import { Surface } from '@roadmap/ui/surface'
 
 export function AlertsCatalogSection() {
   return (
@@ -20,18 +20,18 @@ export function AlertsCatalogSection() {
       </SectionHeader>
 
       <SectionBody>
-        <SectionGroup>
+        <Surface>
           <Alert>
             <strong>Action required.</strong>
             <span>The operation stays blocked until the problem is fixed.</span>
           </Alert>
-        </SectionGroup>
-        <SectionGroup>
+        </Surface>
+        <Surface>
           <Alert variant="info">
             <strong>Change saved.</strong>
             <span>The new configuration is active.</span>
           </Alert>
-        </SectionGroup>
+        </Surface>
       </SectionBody>
     </Section>
   )

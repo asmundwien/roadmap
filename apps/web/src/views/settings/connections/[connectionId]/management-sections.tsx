@@ -8,7 +8,7 @@ import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
 import { ControlGroup } from '@roadmap/ui/control-group'
 import { Link } from '@roadmap/ui/link'
-import { SectionGroup, SectionGroupTitle } from '@roadmap/ui/section'
+import { Surface, SurfaceTitle } from '@roadmap/ui/surface'
 import { useState } from 'react'
 import { connectionSettingsHash } from '@/router'
 
@@ -51,8 +51,8 @@ export function AuthorizationGroup({
   }
 
   return (
-    <SectionGroup>
-      <SectionGroupTitle>GitHub authorization</SectionGroupTitle>
+    <Surface>
+      <SurfaceTitle>GitHub authorization</SurfaceTitle>
       {authorization?.status === 'waiting' ? (
         <>
           <p>Waiting for GitHub. Authorization progress is live server state.</p>
@@ -117,7 +117,7 @@ export function AuthorizationGroup({
           </Button>
         </>
       )}
-    </SectionGroup>
+    </Surface>
   )
 }
 
@@ -147,8 +147,8 @@ export function RemoveConnectionGroup({
   }
 
   return (
-    <SectionGroup>
-      <SectionGroupTitle>Remove connection</SectionGroupTitle>
+    <Surface variant="danger">
+      <SurfaceTitle>Remove connection</SurfaceTitle>
       {dependents.length > 0 ? (
         <>
           <p>
@@ -187,6 +187,6 @@ export function RemoveConnectionGroup({
           Remove connection
         </Button>
       )}
-    </SectionGroup>
+    </Surface>
   )
 }

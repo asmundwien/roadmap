@@ -2,12 +2,10 @@ import {
   Section,
   SectionBody,
   SectionDescription,
-  SectionGroup,
-  SectionGroupDescription,
-  SectionGroupTitle,
   SectionHeader,
   SectionTitle,
 } from '@roadmap/ui/section'
+import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
 import './reference-dimensions.css'
 
 const SPACES = [
@@ -43,12 +41,12 @@ export function ReferenceDimensionsCatalogSection() {
         </SectionDescription>
       </SectionHeader>
       <SectionBody>
-        <SectionGroup>
-          <SectionGroupTitle>Spacing ladder</SectionGroupTitle>
-          <SectionGroupDescription>
+        <Surface>
+          <SurfaceTitle>Spacing ladder</SurfaceTitle>
+          <SurfaceDescription>
             Each bar starts at the same edge. The numbers resolve to pixels at a 16px root; rem
             keeps gaps and padding proportional when the root font size changes.
-          </SectionGroupDescription>
+          </SurfaceDescription>
           <div className="catalog-reference-dimension-list">
             {SPACES.map(([name, space]) => {
               const token = `--ref-space-${name}`
@@ -63,13 +61,13 @@ export function ReferenceDimensionsCatalogSection() {
               )
             })}
           </div>
-        </SectionGroup>
-        <SectionGroup>
-          <SectionGroupTitle>Border widths</SectionGroupTitle>
-          <SectionGroupDescription>
+        </Surface>
+        <Surface>
+          <SurfaceTitle>Border widths</SurfaceTitle>
+          <SurfaceDescription>
             A one-pixel hairline and a three-pixel edge outline the same shape. The tokens specify
             thickness only, not color.
-          </SectionGroupDescription>
+          </SurfaceDescription>
           <div className="catalog-reference-dimension-pairs">
             {BORDER_WIDTHS.map(([name, width]) => {
               const token = `--ref-border-width-${name}`
@@ -82,13 +80,13 @@ export function ReferenceDimensionsCatalogSection() {
               )
             })}
           </div>
-        </SectionGroup>
-        <SectionGroup>
-          <SectionGroupTitle>Corner radii</SectionGroupTitle>
-          <SectionGroupDescription>
+        </Surface>
+        <Surface>
+          <SurfaceTitle>Corner radii</SurfaceTitle>
+          <SurfaceDescription>
             Zero keeps a square corner; full rounds a fixed square into a circle. Radius does not
             select a component shape by itself.
-          </SectionGroupDescription>
+          </SurfaceDescription>
           <div className="catalog-reference-dimension-pairs">
             {RADII.map(([label, token]) => (
               <div className="catalog-reference-radius-sample" key={token}>
@@ -98,7 +96,7 @@ export function ReferenceDimensionsCatalogSection() {
               </div>
             ))}
           </div>
-        </SectionGroup>
+        </Surface>
       </SectionBody>
     </Section>
   )

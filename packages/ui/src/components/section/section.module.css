@@ -24,35 +24,10 @@
   line-height: var(--sys-typescale-body-sm-line-height);
 }
 
-/*
- * The body is the content column beside the header: one stack of groups. A group titles a
- * subdivision of the section; its title is the h3 rank below the section's own h2.
- */
 .body {
   display: grid;
   align-content: start;
   gap: var(--sys-space-2xl);
-}
-
-.group {
-  display: grid;
-  align-content: start;
-  gap: var(--sys-space-md);
-}
-
-.group-title {
-  margin: 0;
-  font-size: var(--sys-typescale-subheading-size);
-  line-height: var(--sys-typescale-subheading-line-height);
-}
-
-/* The group gap already separates the rows, so the paragraph carries no margin of its own. */
-.group-description {
-  max-width: var(--sys-size-measure);
-  margin: 0;
-  color: var(--sys-color-on-surface-variant);
-  font-size: var(--sys-typescale-body-sm-size);
-  line-height: var(--sys-typescale-body-sm-line-height);
 }
 
 @media (max-width: 780px) {

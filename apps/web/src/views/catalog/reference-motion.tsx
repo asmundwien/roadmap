@@ -2,12 +2,10 @@ import {
   Section,
   SectionBody,
   SectionDescription,
-  SectionGroup,
-  SectionGroupDescription,
-  SectionGroupTitle,
   SectionHeader,
   SectionTitle,
 } from '@roadmap/ui/section'
+import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
 import './reference-motion.css'
 
 const DURATIONS = [
@@ -27,12 +25,12 @@ export function ReferenceMotionCatalogSection() {
         </SectionDescription>
       </SectionHeader>
       <SectionBody>
-        <SectionGroup>
-          <SectionGroupTitle>Durations</SectionGroupTitle>
-          <SectionGroupDescription>
+        <Surface>
+          <SurfaceTitle>Durations</SurfaceTitle>
+          <SurfaceDescription>
             Hover or focus the comparison to move both markers the same distance. The short marker
             finishes in half the time of the medium one.
-          </SectionGroupDescription>
+          </SurfaceDescription>
           <div className="catalog-reference-motion-demo">
             <button type="button">Compare durations</button>
             {DURATIONS.map(([label, token]) => (
@@ -51,13 +49,13 @@ export function ReferenceMotionCatalogSection() {
               </div>
             ))}
           </div>
-        </SectionGroup>
-        <SectionGroup>
-          <SectionGroupTitle>Easing</SectionGroupTitle>
-          <SectionGroupDescription>
+        </Surface>
+        <Surface>
+          <SurfaceTitle>Easing</SurfaceTitle>
+          <SurfaceDescription>
             Both markers take 300ms. Linear moves at a constant speed; the standard curve changes
             speed as it approaches the end. Linear is a comparison, not a reference token.
-          </SectionGroupDescription>
+          </SurfaceDescription>
           <div className="catalog-reference-motion-demo">
             <button type="button">Compare easing</button>
             <div className="catalog-reference-motion-row">
@@ -87,7 +85,7 @@ export function ReferenceMotionCatalogSection() {
               <code>--ref-easing-standard</code>
             </div>
           </div>
-        </SectionGroup>
+        </Surface>
       </SectionBody>
     </Section>
   )
