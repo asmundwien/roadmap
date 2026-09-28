@@ -21,40 +21,63 @@ export function ButtonsCatalogSection() {
 
       <SectionBody>
         <Surface className="catalog-button-example">
-          <SurfaceTitle>Secondary</SurfaceTitle>
+          <SurfaceTitle>Variant and appearance</SurfaceTitle>
           <SurfaceDescription>
-            Use the neutral outline for routine actions. Hover changes the container.
+            Use the neutral outline for routine actions. Hover changes the container. Use a solid
+            neutral button for the preferred action in a group. Use danger only for destructive
+            actions. Keep the initial action outlined. A confirmed destructive action can use the
+            solid appearance.
           </SurfaceDescription>
-          <Button type="button">Routine action</Button>
+          <div className="catalog-button-matrix-scroll">
+            <div className="catalog-button-matrix">
+              <span />
+              <strong className="catalog-button-column-label">Secondary</strong>
+              <strong className="catalog-button-column-label">Primary</strong>
+              <strong className="catalog-button-column-label">Danger</strong>
+              <strong className="catalog-button-row-label">Outline</strong>
+              <div className="catalog-button-matrix-example">
+                <Button variant="secondary" appearance="outline" type="button">
+                  Routine action
+                </Button>
+              </div>
+              <div className="catalog-button-matrix-example">
+                <Button variant="primary" appearance="outline" type="button">
+                  Continue
+                </Button>
+              </div>
+              <div className="catalog-button-matrix-example">
+                <Button variant="danger" appearance="outline" type="button">
+                  Remove
+                </Button>
+              </div>
+              <strong className="catalog-button-row-label">Solid</strong>
+              <div className="catalog-button-matrix-example">
+                <Button variant="secondary" appearance="solid" type="button">
+                  Routine action
+                </Button>
+              </div>
+              <div className="catalog-button-matrix-example">
+                <Button variant="primary" appearance="solid" type="button">
+                  Continue
+                </Button>
+              </div>
+              <div className="catalog-button-matrix-example">
+                <Button variant="danger" appearance="solid" type="button">
+                  Confirm removal
+                </Button>
+              </div>
+            </div>
+          </div>
         </Surface>
 
         <Surface className="catalog-button-example">
-          <SurfaceTitle>Primary</SurfaceTitle>
+          <SurfaceTitle>Disabled</SurfaceTitle>
           <SurfaceDescription>
-            Use a solid neutral button for the preferred action in a group.
+            The native disabled attribute blocks activation. The outline and label use the muted
+            pair so the label keeps its contrast.
           </SurfaceDescription>
-          <Button variant="primary" type="button">
-            Continue
-          </Button>
-        </Surface>
-
-        <Surface className="catalog-button-example">
-          <SurfaceTitle>Danger</SurfaceTitle>
-          <SurfaceDescription>
-            Use danger only for destructive actions. Keep the initial action outlined.
-          </SurfaceDescription>
-          <Button variant="danger" type="button">
-            Remove
-          </Button>
-        </Surface>
-
-        <Surface className="catalog-button-example">
-          <SurfaceTitle>Solid danger</SurfaceTitle>
-          <SurfaceDescription>
-            A confirmed destructive action can use the solid appearance.
-          </SurfaceDescription>
-          <Button variant="danger" appearance="solid" type="button">
-            Confirm removal
+          <Button type="button" disabled>
+            Unavailable
           </Button>
         </Surface>
 
@@ -65,17 +88,6 @@ export function ButtonsCatalogSection() {
             link.
           </SurfaceDescription>
           <ButtonLink href="#/settings/connections">Connections</ButtonLink>
-        </Surface>
-
-        <Surface className="catalog-button-example">
-          <SurfaceTitle>Unavailable</SurfaceTitle>
-          <SurfaceDescription>
-            The native disabled attribute blocks activation. The outline and label use the muted
-            pair so the label keeps its contrast.
-          </SurfaceDescription>
-          <Button type="button" disabled>
-            Unavailable
-          </Button>
         </Surface>
 
         <Surface className="catalog-button-example">
