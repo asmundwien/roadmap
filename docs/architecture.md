@@ -21,7 +21,7 @@ WebSocket carries full state replacements. HTTP carries `query` and `execute` re
 
 `apps/web/src/views` groups screens by area. The map area lives in `map/`; `map/ledger.tsx` and `map/geometry.ts` draw titles. Descriptive text lives in the docked Panel rendered by `map/panel.tsx`, not in an overlay. `map/sequence.ts` owns traversal order and decides which out-of-scope items to display. `map/prose.tsx` renders Panel prose as Markdown. `map/project-screen.tsx` owns the map's roving-tabindex keyboard navigation.
 
-Each routable area under `apps/web/src/views` has a `page.tsx` entry point. Page modules select data and compose named sections; section implementation stays in sibling files. `shared/` and `shell/` are support areas, not pages.
+Each routable area under `apps/web/src/views` has a `page.tsx` entry point. `App` renders `settings/connections/page.tsx` directly; `settings/page.tsx` routes Projects and Automation. Connections owns its stylesheet and imports reusable pane styles and helpers from `views/shared/`. Page modules select data and compose named sections; section implementation stays in sibling files. `shared/` and `shell/` are support areas, not pages.
 
 The catalog at `#/components` presents the UI package's components and token layers. Catalog previews can read reference values directly; product views use semantic roles. Web views map domain state to presentational props before passing it to `@roadmap/ui` components. `apps/web/src/main.tsx` loads the package stylesheet before application styles.
 

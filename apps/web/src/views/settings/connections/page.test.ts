@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { RoadmapProvider } from '@/store/roadmap-provider'
 import type { RoadmapStore } from '@/store/roadmap-store'
-import { ConnectionSettings } from './connection-settings'
+import { ConnectionSettings } from './page'
 
 const github = {
   integration: 'github',

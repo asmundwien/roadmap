@@ -17,7 +17,8 @@ import {
   type AutomationTicketPresentation,
   presentAutomation,
 } from '@/views/overview/project-presentation'
-import { ErrorText, projectIdentity, sameProject } from './settings-shared'
+import { ErrorText, projectIdentity, sameProject } from '@/views/shared/settings-shared'
+import '@/views/shared/settings-flow.css'
 import './settings.css'
 
 type AutomationSelection = { kind: 'global' } | { kind: 'project'; project: ProjectKey }

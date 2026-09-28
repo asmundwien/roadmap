@@ -15,7 +15,7 @@ import { Link } from '@roadmap/ui/link'
 import { type FormEvent, useState } from 'react'
 import { projectHash } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
-import { IntegrationBadge } from './integration-badge'
+import { IntegrationBadge } from '@/views/shared/integration-badge'
 import {
   ErrorText,
   locatorLabel,
@@ -25,7 +25,8 @@ import {
   projectIdentity,
   SettingsPane,
   sameProject,
-} from './settings-shared'
+} from '@/views/shared/settings-shared'
+import '@/views/shared/settings-flow.css'
 import './settings.css'
 
 interface ProjectSettingsOperation {

@@ -1,0 +1,152 @@
+/* Styles shared by Settings panes and the Connections page. */
+.settings-eyebrow {
+  margin: 0 0 0.35rem;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.settings-facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.6rem 0.8rem;
+  margin: var(--sys-space-xl) 0;
+  font-size: 0.8rem;
+}
+
+.settings-facts dt {
+  color: var(--muted);
+}
+
+.settings-facts dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.settings-error {
+  color: var(--state-blocked);
+  font-size: 0.76rem;
+  margin: var(--sys-space-md) 0;
+}
+
+.settings-scrim {
+  position: fixed;
+  inset: 53px 0 0;
+  z-index: 50;
+  display: flex;
+  justify-content: flex-end;
+  background: color-mix(in srgb, var(--bg) 22%, transparent);
+}
+
+.settings-flow {
+  position: relative;
+  width: min(34rem, 100%);
+  height: 100%;
+  overflow: auto;
+  padding: var(--sys-space-xl);
+  border-left: 1px solid var(--edge);
+  background: var(--bg);
+  box-shadow: -18px 0 48px rgb(0 0 0 / 18%);
+}
+
+.settings-close {
+  position: absolute;
+  top: var(--sys-space-lg);
+  right: var(--sys-space-lg);
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--edge);
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.settings-close:hover {
+  background: var(--wash);
+  color: var(--fg);
+}
+
+.settings-flow-head {
+  padding-right: 3rem;
+  margin-bottom: var(--sys-space-xl);
+}
+
+.settings-flow-head h2,
+.settings-flow-head p {
+  margin-top: 0;
+}
+
+.settings-flow-head h2 {
+  margin-bottom: 0.25rem;
+  font-size: 1.35rem;
+  letter-spacing: -0.02em;
+}
+
+.settings-flow-head > p:last-child {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sys-space-lg);
+}
+
+.settings-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.settings-form input,
+.settings-form select {
+  width: 100%;
+  min-height: 40px;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--edge);
+  border-radius: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-weight: 400;
+}
+
+.settings-form label > small {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.settings-repair,
+.settings-danger {
+  margin-top: var(--sys-space-2xl);
+  padding-top: var(--sys-space-xl);
+  border-top: 1px solid var(--edge);
+}
+
+.settings-danger > .settings-eyebrow {
+  color: var(--state-blocked);
+}
+
+.settings-danger > p:not(.settings-eyebrow),
+.settings-repair p {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.settings-form-actions {
+  justify-content: flex-end;
+  margin-top: var(--sys-space-sm);
+}

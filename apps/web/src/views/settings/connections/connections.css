@@ -1,0 +1,75 @@
+/* Connections page and authorization details. */
+.device-code {
+  display: grid;
+  gap: var(--sys-space-sm);
+  place-items: center;
+  min-height: 10rem;
+  margin: var(--sys-space-xl) 2px;
+  border: 1px solid var(--edge);
+  outline: 1px solid var(--edge);
+  outline-offset: 2px;
+}
+
+.device-code strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.8rem;
+  letter-spacing: 0.12em;
+}
+
+.device-code small,
+.device-code span {
+  color: var(--muted);
+}
+
+.connection-page-header {
+  display: flex;
+  max-width: none;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sys-space-lg);
+}
+
+.connection-page-header > button {
+  flex-shrink: 0;
+  gap: var(--sys-space-xs);
+}
+
+.connection-group-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--sys-space-md);
+}
+
+.authorization-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sys-space-sm) var(--sys-space-lg);
+}
+
+.settings-operation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sys-space-lg);
+  width: 100%;
+  margin-bottom: var(--sys-space-lg);
+  padding: var(--sys-space-md);
+  border: 1px solid var(--edge);
+  border-left: 3px solid var(--goal);
+  background: var(--wash);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-operation strong,
+.settings-operation small {
+  display: block;
+}
+
+.settings-operation small {
+  color: var(--muted);
+}
