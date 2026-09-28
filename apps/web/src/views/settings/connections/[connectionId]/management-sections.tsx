@@ -12,7 +12,7 @@ import { SectionGroup, SectionGroupTitle } from '@roadmap/ui/section'
 import { useState } from 'react'
 import { connectionSettingsHash } from '@/router'
 
-type RunCommand = (command: Command, success?: string) => Promise<boolean>
+type RunCommand = (command: Command) => Promise<boolean>
 
 type AuthorizationGroupProps = {
   connection: Connection
