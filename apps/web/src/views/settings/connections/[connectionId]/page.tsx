@@ -9,7 +9,7 @@ import { connectionSettingsHash } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
 import { ErrorText, observedLabel } from '@/views/shared/settings-shared'
-import { AuthorizationSection, RemoveConnectionSection } from './management-sections'
+import { AuthorizationGroup, RemoveConnectionGroup } from './management-sections'
 import '@/views/shared/settings-flow.css'
 import './page.css'
 
@@ -151,45 +151,40 @@ export function ConnectionPage({ connectionId }: ConnectionPageProps) {
       </Section>
 
       {!connection.builtIn && (
-        <>
-          <Section>
-            <SectionHeader>
-              <SectionTitle>Manage connection</SectionTitle>
-            </SectionHeader>
-            <SectionBody>
-              <form className="settings-form" onSubmit={rename} key={connection.name}>
-                <label>
-                  Connection name
-                  <input name="name" defaultValue={connection.name} />
-                </label>
-                <ButtonGroup className="settings-form-actions">
-                  <Button variant="primary" type="submit" disabled={blocked}>
-                    Save name
-                  </Button>
-                </ButtonGroup>
-              </form>
-            </SectionBody>
-          </Section>
-          {connection.integration === 'github' && (
-            <AuthorizationSection
-              connection={connection}
-              authorization={authorization}
+        <Section>
+          <SectionHeader>
+            <SectionTitle>Manage connection</SectionTitle>
+          </SectionHeader>
+          <SectionBody>
+            <form className="settings-form" onSubmit={rename} key={connection.name}>
+              <label>
+                Connection name
+                <input name="name" defaultValue={connection.name} />
+              </label>
+              <ButtonGroup className="settings-form-actions">
+                <Button variant="primary" type="submit" disabled={blocked}>
+                  Save name
+                </Button>
+              </ButtonGroup>
+            </form>
+            {connection.integration === 'github' && (
+              <AuthorizationGroup
+                connection={connection}
+                authorization={authorization}
+                configurationVersion={configurationVersion}
+                blocked={blocked}
+                run={run}
+              />
+            )}
+            <RemoveConnectionGroup
+              connectionId={connectionId}
+              dependents={dependents}
               configurationVersion={configurationVersion}
               blocked={blocked}
               run={run}
             />
-          )}
-        </>
-      )}
-
-      {!connection.builtIn && (
-        <RemoveConnectionSection
-          connectionId={connectionId}
-          dependents={dependents}
-          configurationVersion={configurationVersion}
-          blocked={blocked}
-          run={run}
-        />
+          </SectionBody>
+        </Section>
       )}
     </Page>
   )

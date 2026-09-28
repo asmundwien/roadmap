@@ -7,13 +7,13 @@ import type {
 import { Alert } from '@roadmap/ui/alert'
 import { Button, ButtonGroup } from '@roadmap/ui/button'
 import { Link } from '@roadmap/ui/link'
-import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
+import { SectionGroup, SectionGroupTitle } from '@roadmap/ui/section'
 import { useState } from 'react'
 import { connectionSettingsHash } from '@/router'
 
 type RunCommand = (command: Command, success?: string) => Promise<boolean>
 
-type AuthorizationSectionProps = {
+type AuthorizationGroupProps = {
   connection: Connection
   authorization: AuthorizationOperation | undefined
   configurationVersion: number
@@ -21,13 +21,13 @@ type AuthorizationSectionProps = {
   run: RunCommand
 }
 
-export function AuthorizationSection({
+export function AuthorizationGroup({
   connection,
   authorization,
   configurationVersion,
   blocked,
   run,
-}: AuthorizationSectionProps) {
+}: AuthorizationGroupProps) {
   const reauthenticate = () => {
     if (
       authorization &&
@@ -50,81 +50,77 @@ export function AuthorizationSection({
   }
 
   return (
-    <Section>
-      <SectionHeader>
-        <SectionTitle>GitHub authorization</SectionTitle>
-      </SectionHeader>
-      <SectionBody>
-        {authorization?.status === 'waiting' ? (
-          <>
-            <p>Waiting for GitHub. Authorization progress is live server state.</p>
-            <div className="device-code">
-              <small>{authorization.verificationUri}</small>
-              <strong>{authorization.userCode}</strong>
-              <span>
-                {authorization.expiresAt
-                  ? `Expires ${new Date(authorization.expiresAt).toLocaleTimeString()}`
-                  : 'Waiting for GitHub'}
-              </span>
-            </div>
-            <div className="authorization-controls">
-              {authorization.verificationUri && (
-                <Link href={authorization.verificationUri} external>
-                  Open GitHub
-                </Link>
-              )}
-              <ButtonGroup>
-                <Button
-                  type="button"
-                  disabled={!authorization.userCode}
-                  onClick={() => {
-                    if (authorization.userCode)
-                      void navigator.clipboard.writeText(authorization.userCode)
-                  }}
-                >
-                  Copy code
-                </Button>
-                <Button
-                  type="button"
-                  disabled={blocked}
-                  onClick={() =>
-                    void run({
-                      type: 'cancel-github-authorization',
-                      expectedConfigurationVersion: configurationVersion,
-                      operationId: authorization.id,
-                    })
-                  }
-                >
-                  Cancel authorization
-                </Button>
-              </ButtonGroup>
-            </div>
-          </>
-        ) : (
-          <>
+    <SectionGroup>
+      <SectionGroupTitle>GitHub authorization</SectionGroupTitle>
+      {authorization?.status === 'waiting' ? (
+        <>
+          <p>Waiting for GitHub. Authorization progress is live server state.</p>
+          <div className="device-code">
+            <small>{authorization.verificationUri}</small>
+            <strong>{authorization.userCode}</strong>
+            <span>
+              {authorization.expiresAt
+                ? `Expires ${new Date(authorization.expiresAt).toLocaleTimeString()}`
+                : 'Waiting for GitHub'}
+            </span>
+          </div>
+          <div className="authorization-controls">
+            {authorization.verificationUri && (
+              <Link href={authorization.verificationUri} external>
+                Open GitHub
+              </Link>
+            )}
+            <ButtonGroup>
+              <Button
+                type="button"
+                disabled={!authorization.userCode}
+                onClick={() => {
+                  if (authorization.userCode)
+                    void navigator.clipboard.writeText(authorization.userCode)
+                }}
+              >
+                Copy code
+              </Button>
+              <Button
+                type="button"
+                disabled={blocked}
+                onClick={() =>
+                  void run({
+                    type: 'cancel-github-authorization',
+                    expectedConfigurationVersion: configurationVersion,
+                    operationId: authorization.id,
+                  })
+                }
+              >
+                Cancel authorization
+              </Button>
+            </ButtonGroup>
+          </div>
+        </>
+      ) : (
+        <>
+          {authorization &&
+            authorization.status !== 'granted' &&
+            authorization.status !== 'cancelled' && (
+              <Alert>
+                <strong>Authorization {authorization.status}</strong>
+                <span>{authorization.cause}</span>
+              </Alert>
+            )}
+          <Button type="button" disabled={blocked} onClick={reauthenticate}>
             {authorization &&
-              authorization.status !== 'granted' &&
-              authorization.status !== 'cancelled' && (
-                <Alert>
-                  <strong>Authorization {authorization.status}</strong>
-                  <span>{authorization.cause}</span>
-                </Alert>
-              )}
-            <Button type="button" disabled={blocked} onClick={reauthenticate}>
-              {authorization &&
-              authorization.status !== 'granted' &&
-              authorization.status !== 'cancelled'
-                ? 'Retry authorization'
-                : 'Reauthenticate'}
-            </Button>
-          </>
-        )}
-      </SectionBody>
-    </Section>
+            authorization.status !== 'granted' &&
+            authorization.status !== 'cancelled'
+              ? 'Retry authorization'
+              : 'Reauthenticate'}
+          </Button>
+        </>
+      )}
+    </SectionGroup>
   )
 }
 
-type RemoveConnectionSectionProps = {
+type RemoveConnectionGroupProps = {
   connectionId: string
   dependents: RegisteredProject[]
   configurationVersion: number
@@ -132,13 +128,13 @@ type RemoveConnectionSectionProps = {
   run: RunCommand
 }
 
-export function RemoveConnectionSection({
+export function RemoveConnectionGroup({
   connectionId,
   dependents,
   configurationVersion,
   blocked,
   run,
-}: RemoveConnectionSectionProps) {
+}: RemoveConnectionGroupProps) {
   const [confirming, setConfirming] = useState(false)
   const remove = async () => {
     const removed = await run({
@@ -150,50 +146,46 @@ export function RemoveConnectionSection({
   }
 
   return (
-    <Section>
-      <SectionHeader>
-        <SectionTitle>Remove Connection</SectionTitle>
-      </SectionHeader>
-      <SectionBody>
-        {dependents.length > 0 ? (
-          <>
-            <p>
-              Remove every dependent Project registration first. Reassignment and cascade removal
-              are unavailable.
-            </p>
-            <Button variant="danger" type="button" disabled>
-              Remove connection
-            </Button>
-          </>
-        ) : confirming ? (
-          <>
-            <p>External GitHub authorization and repositories remain unchanged.</p>
-            <ButtonGroup>
-              <Button type="button" onClick={() => setConfirming(false)}>
-                Keep connection
-              </Button>
-              <Button
-                variant="danger"
-                appearance="solid"
-                type="button"
-                disabled={blocked}
-                onClick={() => void remove()}
-              >
-                Confirm removal
-              </Button>
-            </ButtonGroup>
-          </>
-        ) : (
-          <Button
-            variant="danger"
-            type="button"
-            disabled={blocked}
-            onClick={() => setConfirming(true)}
-          >
+    <SectionGroup>
+      <SectionGroupTitle>Remove connection</SectionGroupTitle>
+      {dependents.length > 0 ? (
+        <>
+          <p>
+            Remove every dependent Project registration first. Reassignment and cascade removal are
+            unavailable.
+          </p>
+          <Button variant="danger" type="button" disabled>
             Remove connection
           </Button>
-        )}
-      </SectionBody>
-    </Section>
+        </>
+      ) : confirming ? (
+        <>
+          <p>External GitHub authorization and repositories remain unchanged.</p>
+          <ButtonGroup>
+            <Button type="button" onClick={() => setConfirming(false)}>
+              Keep connection
+            </Button>
+            <Button
+              variant="danger"
+              appearance="solid"
+              type="button"
+              disabled={blocked}
+              onClick={() => void remove()}
+            >
+              Confirm removal
+            </Button>
+          </ButtonGroup>
+        </>
+      ) : (
+        <Button
+          variant="danger"
+          type="button"
+          disabled={blocked}
+          onClick={() => setConfirming(true)}
+        >
+          Remove connection
+        </Button>
+      )}
+    </SectionGroup>
   )
 }
