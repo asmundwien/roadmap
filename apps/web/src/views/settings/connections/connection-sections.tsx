@@ -1,6 +1,6 @@
 import type { AuthorizationOperation, Connection, RegisteredProject } from '@roadmap/contracts'
 import { Alert } from '@roadmap/ui/alert'
-import { ButtonLink } from '@roadmap/ui/button'
+import { Button, ButtonLink } from '@roadmap/ui/button'
 import { Link } from '@roadmap/ui/link'
 import {
   Section,
@@ -10,7 +10,9 @@ import {
   SectionTitle,
 } from '@roadmap/ui/section'
 import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
+import { useState } from 'react'
 import { connectionHash, projectHash, projectImportHash, projectRegistrationHash } from '@/router'
+import { useRoadmap } from '@/store/roadmap-provider'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
 import { locatorLabel, projectIdentity } from '@/views/shared/settings-shared'
 import { authorizationStatus, connectionAvailability } from './connection-details'
@@ -115,13 +117,68 @@ export function ConnectionStride({ connection, dependents }: ConnectionStridePro
             <SurfaceTitle>{project.name}</SurfaceTitle>
             <SurfaceDescription>{locatorLabel(project)}</SurfaceDescription>
             <div className="connection-project-links">
-              <Link href={projectHash(project.key)}>Go to roadmap</Link>
               <Link href={projectRegistrationHash(project.key)}>Manage project registration</Link>
             </div>
+            <ProjectLaunchButtons project={project} />
           </Surface>
         ))}
         {dependents.length === 0 && <p>No registered Projects use this Connection.</p>}
       </SectionBody>
     </Section>
+  )
+}
+
+type ProjectLaunchButtonsProps = { project: RegisteredProject }
+
+function ProjectLaunchButtons({ project }: ProjectLaunchButtonsProps) {
+  const { configuration, configurationVersion, command, execute } = useRoadmap()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const launch = async (actionId: string) => {
+    setBusy(true)
+    setError(null)
+    try {
+      const result = await execute({
+        type: 'launch-action',
+        expectedConfigurationVersion: configurationVersion,
+        project: project.key,
+        actionId,
+      })
+      if (!result.ok) setError(result.error.message)
+    } catch {
+      setError('The server did not confirm the operation. Wait for live state before retrying.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <div className="connection-project-actions">
+        <ButtonLink href={projectHash(project.key)} size="small">
+          Go to roadmap
+        </ButtonLink>
+        {project.actions
+          .filter(
+            (action) =>
+              action.kind === 'server-launch' &&
+              (action.id === 'open-workspace' ||
+                action.id === 'reveal-source' ||
+                action.id === 'open-terminal'),
+          )
+          .map((action) => (
+            <Button
+              key={action.id}
+              size="small"
+              disabled={busy || command.inFlight || !configuration.valid}
+              onClick={() => void launch(action.id)}
+            >
+              {action.label}
+            </Button>
+          ))}
+      </div>
+      {error && <Alert>{error}</Alert>}
+    </>
   )
 }

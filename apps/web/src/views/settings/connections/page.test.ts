@@ -163,7 +163,11 @@ describe('ConnectionSettings', () => {
           openMaps: [],
           closedMaps: [],
           warnings: [],
-          actions: [],
+          actions: [
+            { id: 'open-workspace', label: 'Open in VS Code', kind: 'server-launch' },
+            { id: 'reveal-source', label: 'View source folder', kind: 'server-launch' },
+            { id: 'open-terminal', label: 'Open Terminal', kind: 'server-launch' },
+          ],
         },
       ],
     })
@@ -171,6 +175,45 @@ describe('ConnectionSettings', () => {
     expect(markup).toContain('Go to roadmap')
     expect(markup).toContain('href="#/settings/projects/local/my%20workspace"')
     expect(markup).not.toContain('Open Project')
+    expect(markup).toContain('>Open in VS Code</button>')
+    expect(markup).toContain('>View source folder</button>')
+    expect(markup).toContain('>Open Terminal</button>')
+  })
+
+  it('offers source folder controls on GitHub projects as well as local projects', () => {
+    const initial = state([
+      {
+        id: 'github',
+        integration: 'github',
+        name: 'GitHub',
+        builtIn: false,
+        availability: { status: 'available' },
+      },
+    ])
+    const markup = renderConnections({
+      ...initial,
+      projects: [
+        {
+          key: { integration: 'github', id: 'acme/app' },
+          connectionId: 'github',
+          locator: { integration: 'github', repositoryId: '42', nameWithOwner: 'acme/app' },
+          workspace: { path: '/tmp/app', gitIdentity: '42' },
+          name: 'App',
+          availability: { status: 'available', observedAt: 1_000 },
+          openMaps: [],
+          closedMaps: [],
+          warnings: [],
+          actions: [
+            { id: 'open-workspace', label: 'Open in VS Code', kind: 'server-launch' },
+            { id: 'reveal-source', label: 'View source folder', kind: 'server-launch' },
+            { id: 'open-terminal', label: 'Open Terminal', kind: 'server-launch' },
+          ],
+        },
+      ],
+    })
+    expect(markup).toContain('>Open in VS Code</button>')
+    expect(markup).toContain('>View source folder</button>')
+    expect(markup).toContain('>Open Terminal</button>')
   })
 
   it('keeps setup problems and notices inside the setup section even with no connections', () => {

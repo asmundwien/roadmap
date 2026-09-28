@@ -87,9 +87,22 @@ async function launchAction(
           executable: '/usr/bin/open',
           args: ['-a', 'Visual Studio Code', registration.workspace.path],
         }
-      : command.actionId === 'reveal-source' && registration.locator.integration === 'local'
-        ? { executable: '/usr/bin/open', args: ['-R', registration.locator.path] }
-        : null
+      : command.actionId === 'open-terminal'
+        ? {
+            executable: '/usr/bin/open',
+            args: ['-a', 'Terminal', registration.workspace.path],
+          }
+        : command.actionId === 'reveal-source'
+          ? {
+              executable: '/usr/bin/open',
+              args: [
+                '-R',
+                registration.locator.integration === 'local'
+                  ? registration.locator.path
+                  : registration.workspace.path,
+              ],
+            }
+          : null
   if (!launchSpec) return invalid('actionId', 'That action is not available for this Project.')
 
   try {

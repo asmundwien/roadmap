@@ -1304,20 +1304,16 @@ function projectActions(registration: RoadmapConfiguration['projects'][number], 
   const roadmapHref = `#/projects/${registration.key.integration}/${encodeURIComponent(registration.key.id)}`
   const actions: RegisteredProject['actions'] = [
     { id: 'open-roadmap', label: 'Open in Roadmap', kind: 'roadmap', href: roadmapHref },
-    { id: 'open-workspace', label: 'Open Workspace in VS Code', kind: 'server-launch' },
+    { id: 'open-workspace', label: 'Open in VS Code', kind: 'server-launch' },
+    { id: 'open-terminal', label: 'Open Terminal', kind: 'server-launch' },
   ]
+  actions.push({ id: 'reveal-source', label: 'View source folder', kind: 'server-launch' })
   if (registration.locator.integration === 'github') {
     actions.push({
       id: 'open-source',
       label: 'Open on GitHub',
       kind: 'external-link',
       href: known?.sourceUrl ?? `https://github.com/${registration.locator.nameWithOwner}`,
-    })
-  } else {
-    actions.push({
-      id: 'reveal-source',
-      label: 'Reveal source folder',
-      kind: 'server-launch',
     })
   }
   return actions

@@ -8,6 +8,7 @@ import type {
   ConfigurationWrite,
   RoadmapConfiguration,
 } from './configuration.ts'
+import { createApplicationOperations } from './operations.ts'
 
 const EMPTY_SLICE: AdapterSlice = { projects: [], unreachable: [] }
 const LOCAL_CONNECTION: RoadmapConfiguration['connections'][number] = {
@@ -219,8 +220,8 @@ describe('RoadmapApplication', () => {
           observedAt: 25,
         },
         actions: expect.arrayContaining([
-          { id: 'open-workspace', label: 'Open Workspace in VS Code', kind: 'server-launch' },
-          { id: 'reveal-source', label: 'Reveal source folder', kind: 'server-launch' },
+          { id: 'open-workspace', label: 'Open in VS Code', kind: 'server-launch' },
+          { id: 'reveal-source', label: 'View source folder', kind: 'server-launch' },
         ]),
       }),
     ])
@@ -288,6 +289,130 @@ describe('RoadmapApplication', () => {
         },
       ]),
     })
+    await application.stop()
+  })
+
+  it('reveals the registered GitHub workspace as its source folder', async () => {
+    const key = { integration: 'github' as const, id: 'acme/app' }
+    const configuration = memoryConfiguration({
+      ok: true,
+      document: {
+        ...BASE_CONFIGURATION,
+        connections: [
+          LOCAL_CONNECTION,
+          {
+            id: 'github',
+            integration: 'github',
+            name: 'GitHub',
+            builtIn: false,
+            githubIdentity: { id: '7', login: 'octocat' },
+          },
+        ],
+        projects: [
+          {
+            key,
+            connectionId: 'github',
+            locator: {
+              integration: 'github',
+              repositoryId: '42',
+              nameWithOwner: 'acme/app',
+            },
+            workspace: { path: '/committed/source', gitIdentity: '42' },
+          },
+        ],
+      },
+    })
+    const launch = vi.fn(async () => {})
+    const application = createRoadmapApplication({
+      configuration: configuration.document,
+      createAdapters: () => [immediateAdapter().adapter],
+      operations: createApplicationOperations({ launch }),
+      serverEpoch: 'test',
+    })
+    await application.start()
+
+    expect(application.current().projects[0]?.actions).toContainEqual({
+      id: 'reveal-source',
+      label: 'View source folder',
+      kind: 'server-launch',
+    })
+    const result = await application.execute({
+      type: 'launch-action',
+      expectedConfigurationVersion: application.current().configurationVersion,
+      actionId: 'reveal-source',
+      project: key,
+    })
+    expect(result).toMatchObject({ ok: true })
+    expect(launch).toHaveBeenCalledWith('/usr/bin/open', ['-R', '/committed/source'])
+    await application.stop()
+  })
+
+  it('opens Terminal in each committed Project Workspace', async () => {
+    const localKey = { integration: 'local' as const, id: 'local-demo' }
+    const githubKey = { integration: 'github' as const, id: 'acme/app' }
+    const configuration = memoryConfiguration({
+      ok: true,
+      document: {
+        ...BASE_CONFIGURATION,
+        connections: [
+          LOCAL_CONNECTION,
+          {
+            id: 'github',
+            integration: 'github',
+            name: 'GitHub',
+            builtIn: false,
+            githubIdentity: { id: '7', login: 'octocat' },
+          },
+        ],
+        projects: [
+          {
+            key: localKey,
+            connectionId: 'local',
+            locator: { integration: 'local', path: '/committed/local-source' },
+            workspace: { path: '/committed/local-workspace' },
+          },
+          {
+            key: githubKey,
+            connectionId: 'github',
+            locator: {
+              integration: 'github',
+              repositoryId: '42',
+              nameWithOwner: 'acme/app',
+            },
+            workspace: { path: '/committed/github-workspace', gitIdentity: '42' },
+          },
+        ],
+      },
+    })
+    const launch = vi.fn(async () => {})
+    const application = createRoadmapApplication({
+      configuration: configuration.document,
+      createAdapters: () => [immediateAdapter().adapter],
+      operations: createApplicationOperations({ launch }),
+      serverEpoch: 'test',
+    })
+    await application.start()
+
+    for (const project of application.current().projects) {
+      expect(project.actions).toContainEqual({
+        id: 'open-terminal',
+        label: 'Open Terminal',
+        kind: 'server-launch',
+      })
+    }
+    for (const project of [localKey, githubKey]) {
+      const result = await application.execute({
+        type: 'launch-action',
+        expectedConfigurationVersion: application.current().configurationVersion,
+        actionId: 'open-terminal',
+        project,
+      })
+      expect(result).toMatchObject({ ok: true })
+    }
+    expect(launch.mock.calls).toEqual([
+      ['/usr/bin/open', ['-a', 'Terminal', '/committed/local-workspace']],
+      ['/usr/bin/open', ['-a', 'Terminal', '/committed/github-workspace']],
+    ])
     await application.stop()
   })
 
