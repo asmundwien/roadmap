@@ -5,7 +5,8 @@ import type {
   RegisteredProject,
 } from '@roadmap/contracts'
 import { Alert } from '@roadmap/ui/alert'
-import { Button, ButtonGroup } from '@roadmap/ui/button'
+import { Button } from '@roadmap/ui/button'
+import { ControlGroup } from '@roadmap/ui/control-group'
 import { Link } from '@roadmap/ui/link'
 import { SectionGroup, SectionGroupTitle } from '@roadmap/ui/section'
 import { useState } from 'react'
@@ -70,7 +71,7 @@ export function AuthorizationGroup({
                 Open GitHub
               </Link>
             )}
-            <ButtonGroup>
+            <ControlGroup>
               <Button
                 type="button"
                 disabled={!authorization.userCode}
@@ -94,7 +95,7 @@ export function AuthorizationGroup({
               >
                 Cancel authorization
               </Button>
-            </ButtonGroup>
+            </ControlGroup>
           </div>
         </>
       ) : (
@@ -161,7 +162,7 @@ export function RemoveConnectionGroup({
       ) : confirming ? (
         <>
           <p>External GitHub authorization and repositories remain unchanged.</p>
-          <ButtonGroup>
+          <ControlGroup>
             <Button type="button" onClick={() => setConfirming(false)}>
               Keep connection
             </Button>
@@ -174,7 +175,7 @@ export function RemoveConnectionGroup({
             >
               Confirm removal
             </Button>
-          </ButtonGroup>
+          </ControlGroup>
         </>
       ) : (
         <Button

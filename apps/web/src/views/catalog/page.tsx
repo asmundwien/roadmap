@@ -2,6 +2,7 @@ import { Page, PageDescription, PageEyebrow, PageHeader, PageTitle } from '@road
 import { AlertsCatalogSection } from './alerts'
 import { BadgesCatalogSection } from './badges'
 import { ButtonsCatalogSection } from './buttons'
+import { ControlGroupCatalogSection } from './control-group'
 import { LinksCatalogSection } from './links'
 import { MarkCatalogSection, TicketMarkCatalogSection } from './mark'
 import { ReferenceColorsCatalogSection } from './reference-colors'
@@ -33,6 +34,7 @@ export function CatalogPage() {
       <BadgesCatalogSection />
       <AlertsCatalogSection />
       <ButtonsCatalogSection />
+      <ControlGroupCatalogSection />
       <TextInputCatalogSection />
       <LinksCatalogSection />
     </Page>

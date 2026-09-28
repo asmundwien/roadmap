@@ -1,0 +1,17 @@
+.group {
+  display: flex;
+  gap: var(--sys-space-none);
+}
+
+.group > :where(button, input) + :where(button, input) {
+  border-left: 0;
+}
+
+.group > input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.group > button {
+  flex-shrink: 0;
+}

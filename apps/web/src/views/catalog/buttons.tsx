@@ -1,4 +1,4 @@
-import { Button, ButtonGroup } from '@roadmap/ui/button'
+import { Button } from '@roadmap/ui/button'
 import {
   Section,
   SectionBody,
@@ -28,19 +28,6 @@ export function ButtonsCatalogSection() {
             Use the neutral outline for routine actions. Hover changes the container.
           </SectionGroupDescription>
           <Button type="button">Routine action</Button>
-        </SectionGroup>
-
-        <SectionGroup className="catalog-button-example">
-          <SectionGroupTitle>Button group</SectionGroupTitle>
-          <SectionGroupDescription>
-            Group related buttons without including links.
-          </SectionGroupDescription>
-          <ButtonGroup>
-            <Button type="button">Cancel</Button>
-            <Button variant="primary" type="button">
-              Apply
-            </Button>
-          </ButtonGroup>
         </SectionGroup>
 
         <SectionGroup className="catalog-button-example">

@@ -16,11 +16,6 @@
   cursor: pointer;
 }
 
-/* Adjacent buttons share one border only inside a button group. */
-.group > .button + .button {
-  border-left: 0;
-}
-
 .small {
   min-height: var(--sys-size-control-sm);
   padding-inline: var(--sys-space-sm);
@@ -94,12 +89,6 @@
   background: var(--sys-color-surface-container);
   color: var(--sys-color-outline);
   cursor: not-allowed;
-}
-
-.group {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sys-space-none);
 }
 
 @media (prefers-reduced-motion: no-preference) {

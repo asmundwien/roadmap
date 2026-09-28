@@ -1,6 +1,7 @@
 import type { Command, SafeError } from '@roadmap/contracts'
 import { Alert } from '@roadmap/ui/alert'
-import { Button, ButtonGroup } from '@roadmap/ui/button'
+import { Button } from '@roadmap/ui/button'
+import { ControlGroup } from '@roadmap/ui/control-group'
 import { Link } from '@roadmap/ui/link'
 import { Page, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
 import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
@@ -145,11 +146,11 @@ export function ConnectionPage({ connectionId }: ConnectionPageProps) {
                 Connection name
                 <TextInput id="connection-name" name="name" defaultValue={connection.name} />
               </label>
-              <ButtonGroup className="settings-form-actions">
+              <ControlGroup className="settings-form-actions">
                 <Button variant="primary" type="submit" disabled={blocked}>
                   Save name
                 </Button>
-              </ButtonGroup>
+              </ControlGroup>
             </form>
           )}
         </SectionBody>

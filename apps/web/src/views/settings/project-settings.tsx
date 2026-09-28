@@ -11,7 +11,8 @@ import type {
 } from '@roadmap/contracts'
 import { Alert } from '@roadmap/ui/alert'
 import { Badge } from '@roadmap/ui/badge'
-import { Button, ButtonGroup } from '@roadmap/ui/button'
+import { Button } from '@roadmap/ui/button'
+import { ControlGroup } from '@roadmap/ui/control-group'
 import { Link } from '@roadmap/ui/link'
 import { type FormEvent, useState } from 'react'
 import { projectHash } from '@/router'
@@ -341,7 +342,7 @@ function ProjectDetail({
         )}
       </div>
 
-      <ButtonGroup>
+      <ControlGroup>
         <Button type="button" disabled={busy} onClick={onEdit}>
           Edit registration
         </Button>
@@ -361,7 +362,7 @@ function ProjectDetail({
         >
           Refresh now
         </Button>
-      </ButtonGroup>
+      </ControlGroup>
     </aside>
   )
 }
@@ -497,14 +498,14 @@ function AddProjectPane({
           <input name="displayName" placeholder="Optional" />
         </label>
         <ErrorText error={generalError} />
-        <ButtonGroup className="settings-form-actions">
+        <ControlGroup className="settings-form-actions">
           <Button type="button" onClick={onClose}>
             Cancel
           </Button>
           <Button variant="primary" type="submit" disabled={saving}>
             {saving ? 'Validating…' : 'Validate and save'}
           </Button>
-        </ButtonGroup>
+        </ControlGroup>
       </form>
     </SettingsPane>
   )
@@ -612,11 +613,11 @@ function EditProjectPane({
           <input name="name" defaultValue={project.name} />
           <FieldError message={fieldError ?? undefined} />
         </label>
-        <ButtonGroup className="settings-form-actions">
+        <ControlGroup className="settings-form-actions">
           <Button variant="primary" type="submit" disabled={busy}>
             Save name
           </Button>
-        </ButtonGroup>
+        </ControlGroup>
       </form>
 
       {project.availability.status === 'unavailable' && (
@@ -637,11 +638,11 @@ function EditProjectPane({
               setFieldError(null)
             }}
           />
-          <ButtonGroup className="settings-form-actions">
+          <ControlGroup className="settings-form-actions">
             <Button variant="primary" type="submit" disabled={busy}>
               Validate and repair
             </Button>
-          </ButtonGroup>
+          </ControlGroup>
         </form>
       )}
 
@@ -650,7 +651,7 @@ function EditProjectPane({
         <p className="settings-eyebrow">Remove from Roadmap</p>
         <p>The source repository, Wayfinder state, and Workspace remain unchanged.</p>
         {confirmingRemoval ? (
-          <ButtonGroup>
+          <ControlGroup>
             <Button type="button" onClick={() => setConfirmingRemoval(false)}>
               Keep project
             </Button>
@@ -672,7 +673,7 @@ function EditProjectPane({
             >
               Confirm removal
             </Button>
-          </ButtonGroup>
+          </ControlGroup>
         ) : (
           <Button variant="danger" type="button" onClick={() => setConfirmingRemoval(true)}>
             Remove project registration

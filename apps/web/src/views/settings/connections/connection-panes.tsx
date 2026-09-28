@@ -1,6 +1,7 @@
 import type { AuthorizationOperation, Command, SafeError } from '@roadmap/contracts'
 import { Alert } from '@roadmap/ui/alert'
-import { Button, ButtonGroup } from '@roadmap/ui/button'
+import { Button } from '@roadmap/ui/button'
+import { ControlGroup } from '@roadmap/ui/control-group'
 import { Link } from '@roadmap/ui/link'
 import { type FormEvent, useState } from 'react'
 import { ErrorText, SettingsPane } from '@/views/shared/settings-shared'
@@ -70,14 +71,14 @@ export function AddConnectionPane({
           browser.
         </Alert>
         <ErrorText error={error} />
-        <ButtonGroup className="settings-form-actions">
+        <ControlGroup className="settings-form-actions">
           <Button type="button" onClick={onClose}>
             Cancel
           </Button>
           <Button variant="primary" type="submit" disabled={busy}>
             {busy ? 'Starting…' : 'Start authorization'}
           </Button>
-        </ButtonGroup>
+        </ControlGroup>
       </form>
     </SettingsPane>
   )
@@ -141,7 +142,7 @@ export function AuthorizationPane({
                 Open GitHub
               </Link>
             )}
-            <ButtonGroup>
+            <ControlGroup>
               <Button
                 type="button"
                 disabled={!authorization.userCode}
@@ -167,7 +168,7 @@ export function AuthorizationPane({
               >
                 Cancel authorization
               </Button>
-            </ButtonGroup>
+            </ControlGroup>
           </div>
         </>
       )}
@@ -187,7 +188,7 @@ export function AuthorizationPane({
       <ErrorText error={error} />
 
       {authorization.status !== 'waiting' && (
-        <ButtonGroup className="settings-form-actions">
+        <ControlGroup className="settings-form-actions">
           <Button
             type="button"
             onClick={() =>
@@ -215,7 +216,7 @@ export function AuthorizationPane({
               Retry authorization
             </Button>
           )}
-        </ButtonGroup>
+        </ControlGroup>
       )}
     </SettingsPane>
   )
