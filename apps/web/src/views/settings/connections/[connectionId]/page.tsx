@@ -142,11 +142,9 @@ export function ConnectionPage({ connectionId }: ConnectionPageProps) {
           </dl>
           {!connection.builtIn && (
             <form className="settings-form" onSubmit={rename} key={connection.name}>
-              <label htmlFor="connection-name">
-                Connection name
+              <label htmlFor="connection-name">Connection name</label>
+              <ControlGroup size="large">
                 <TextInput id="connection-name" name="name" defaultValue={connection.name} />
-              </label>
-              <ControlGroup className="settings-form-actions">
                 <Button variant="primary" type="submit" disabled={blocked}>
                   Save name
                 </Button>
