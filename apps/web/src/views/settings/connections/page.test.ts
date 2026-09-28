@@ -87,7 +87,7 @@ describe('ConnectionSettings', () => {
     expect(issue).toBeLessThan(personal)
     expect(markup.slice(personal)).not.toContain('Token expired.')
   })
-  it('links each manageable connection to its own route', () => {
+  it('shows integration badges beside both connection names and Manage links below', () => {
     const markup = renderConnections(
       state([
         {
@@ -97,10 +97,58 @@ describe('ConnectionSettings', () => {
           builtIn: false,
           availability: { status: 'available' },
         },
+        {
+          id: 'local',
+          integration: 'local',
+          name: 'Local files',
+          builtIn: true,
+          availability: { status: 'available' },
+        },
       ]),
     )
-    expect(markup).toContain('href="#/settings/connections/github%2Fwork"')
-    expect(markup).toContain('>Manage</a>')
+    const headers = [...markup.matchAll(/<header>.*?<\/header>/g)].map(([header]) => header)
+    expect(headers).toHaveLength(2)
+    expect(headers[0]).toMatch(
+      /<div[^>]*><h2[^>]*>Work<\/h2><span[^>]*>GitHub<\/span><\/div>.*href="#\/settings\/connections\/github%2Fwork"[^>]*>Manage/,
+    )
+    expect(headers[1]).toMatch(
+      /<div[^>]*><h2[^>]*>Local files<\/h2><span[^>]*>Local<\/span><\/div>.*href="#\/settings\/connections\/local"[^>]*>Manage/,
+    )
+    expect(headers.join('')).not.toContain('registered Projects')
+    expect(headers.join('')).not.toContain('Built in')
+  })
+  it('offers separate roadmap and registration destinations for a connection project', () => {
+    const initial = state([
+      {
+        id: 'local',
+        integration: 'local',
+        name: 'Local files',
+        builtIn: true,
+        availability: { status: 'available' },
+      },
+    ])
+    const markup = renderConnections({
+      ...initial,
+      projects: [
+        {
+          key: { integration: 'local', id: 'my workspace' },
+          connectionId: 'local',
+          locator: { integration: 'local', path: '/tmp/my-workspace' },
+          workspace: { path: '/tmp/my-workspace' },
+          name: 'My workspace',
+          availability: { status: 'available', observedAt: 1_000 },
+          openMaps: [],
+          closedMaps: [],
+          warnings: [],
+          actions: [],
+        },
+      ],
+    })
+    expect(markup).toContain('href="#/projects/local/my%20workspace"')
+    expect(markup).toContain('Go to roadmap')
+    expect(markup).toContain('href="#/settings/projects/local/my%20workspace"')
+    expect(markup).toContain('Mange project registration')
+    expect(markup).not.toContain('Open Project')
   })
 
   it('keeps setup problems and notices inside the setup section even with no connections', () => {

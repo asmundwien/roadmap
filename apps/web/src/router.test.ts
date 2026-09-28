@@ -10,6 +10,7 @@ import {
   type PanelSelection,
   parseHash,
   projectHash,
+  projectRegistrationHash,
   projectSettingsHash,
   resolveSelection,
   selectionHash,
@@ -33,6 +34,20 @@ describe('parseHash', () => {
       connectionId: 'github/work',
     })
     expect(parseHash('#/settings/connections/%E0%A4%A')).toEqual({ screen: 'projects' })
+  })
+  it('routes each encoded project key to its registration page', () => {
+    expect(projectRegistrationHash(PROJECT)).toBe('#/settings/projects/github/asmundwien%2Froadmap')
+    expect(parseHash('#/settings/projects/github/asmundwien%2Froadmap')).toEqual({
+      screen: 'project-registration',
+      project: PROJECT,
+    })
+    expect(
+      parseHash(projectRegistrationHash({ integration: 'local', id: 'my workspace' })),
+    ).toEqual({
+      screen: 'project-registration',
+      project: { integration: 'local', id: 'my workspace' },
+    })
+    expect(parseHash('#/settings/projects/github/%E0%A4%A')).toEqual({ screen: 'projects' })
   })
   it('reads a bare project route as the active map', () => {
     expect(parseHash('#/projects/github/asmundwien%2Froadmap')).toEqual({

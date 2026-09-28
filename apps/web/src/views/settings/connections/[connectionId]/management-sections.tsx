@@ -51,7 +51,7 @@ export function AuthorizationGroup({
   }
 
   return (
-    <Surface>
+    <Surface variant="subtle">
       <SurfaceTitle>GitHub authorization</SurfaceTitle>
       {authorization?.status === 'waiting' ? (
         <>

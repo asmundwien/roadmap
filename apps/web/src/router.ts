@@ -3,7 +3,7 @@ import { useMemo, useSyncExternalStore } from 'react'
 import { stripInlineMarkdown } from './views/shared/gist'
 
 /**
- * Hash routing, hand-rolled. Five screens still do not justify a router dependency, and hash URLs
+ * Hash routing, hand-rolled. These screens still do not justify a router dependency, and hash URLs
  * keep `pnpm dev` and `pnpm preview` working with zero server configuration. If the app grows past
  * this, swapping in a real router is contained to this file and the links built from the hash
  * builders below.
@@ -17,6 +17,7 @@ import { stripInlineMarkdown } from './views/shared/gist'
 export type Route =
   | { screen: 'projects' }
   | { screen: 'project-settings' }
+  | { screen: 'project-registration'; project: ProjectKey }
   | { screen: 'connection-settings' }
   | { screen: 'connection'; connectionId: string }
   | { screen: 'automation-settings' }
@@ -51,6 +52,9 @@ export type ResolvedSelection =
 const PROJECTS: Route = { screen: 'projects' }
 export const overviewHash = '#/'
 export const projectSettingsHash = '#/settings/projects'
+export function projectRegistrationHash(project: ProjectKey): string {
+  return `${projectSettingsHash}/${project.integration}/${encodePart(project.id)}`
+}
 export const connectionSettingsHash = '#/settings/connections'
 export function connectionHash(connectionId: string): string {
   return `${connectionSettingsHash}/${encodePart(connectionId)}`
@@ -65,9 +69,18 @@ function parseConnectionRoute(hash: string): Route | null {
   return connectionId === null ? PROJECTS : { screen: 'connection', connectionId }
 }
 
+function parseProjectRegistrationRoute(hash: string): Route | null {
+  const match = /^#\/settings\/projects\/([^/]+)\/([^/]+)$/.exec(hash)
+  if (!match) return null
+  const project = parseProjectKey(match[1], match[2])
+  return project ? { screen: 'project-registration', project } : PROJECTS
+}
+
 /** Anything that doesn't parse falls back to the project list — a bad URL is not an error state. */
 export function parseHash(hash: string): Route {
   if (hash === projectSettingsHash) return { screen: 'project-settings' }
+  const registration = parseProjectRegistrationRoute(hash)
+  if (registration) return registration
   if (hash === connectionSettingsHash) return { screen: 'connection-settings' }
   const connection = parseConnectionRoute(hash)
   if (connection) return connection

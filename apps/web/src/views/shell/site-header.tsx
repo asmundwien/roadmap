@@ -29,7 +29,11 @@ export function SiteHeader({ route }: SiteHeaderProps) {
           Overview
         </a>
         <a
-          className={route.screen === 'project-settings' ? 'is-current' : ''}
+          className={
+            route.screen === 'project-settings' || route.screen === 'project-registration'
+              ? 'is-current'
+              : ''
+          }
           href={projectSettingsHash}
         >
           Projects

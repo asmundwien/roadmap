@@ -1,6 +1,5 @@
 import type { AuthorizationOperation, Connection, RegisteredProject } from '@roadmap/contracts'
 import { Alert } from '@roadmap/ui/alert'
-import { Badge } from '@roadmap/ui/badge'
 import { Link } from '@roadmap/ui/link'
 import {
   Section,
@@ -10,7 +9,8 @@ import {
   SectionTitle,
 } from '@roadmap/ui/section'
 import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
-import { connectionHash, projectHash } from '@/router'
+import { connectionHash, projectHash, projectRegistrationHash } from '@/router'
+import { IntegrationBadge } from '@/views/shared/integration-badge'
 import { locatorLabel, projectIdentity } from '@/views/shared/settings-shared'
 import { authorizationStatus, connectionAvailability } from './connection-details'
 
@@ -89,27 +89,15 @@ export function ConnectionStride({ connection, dependents }: ConnectionStridePro
   return (
     <Section>
       <SectionHeader>
-        <SectionTitle>{connection.name}</SectionTitle>
-        <SectionDescription>
-          {connection.githubIdentity
-            ? `@${connection.githubIdentity.login}`
-            : connection.builtIn
-              ? 'Built in'
-              : 'GitHub'}{' '}
-          · {connectionAvailability(connection)} · {dependents.length} registered{' '}
-          {dependents.length === 1 ? 'Project' : 'Projects'}
-        </SectionDescription>
+        <div className="connection-title-row">
+          <SectionTitle>{connection.name}</SectionTitle>
+          <IntegrationBadge integration={connection.integration} />
+        </div>
+        <div className="connection-manage-link">
+          <Link href={connectionHash(connection.id)}>Manage connection</Link>
+        </div>
       </SectionHeader>
       <SectionBody>
-        <div className="connection-group-header">
-          {connection.builtIn ? (
-            <Badge variant="warning">Built in</Badge>
-          ) : (
-            <a href={connectionHash(connection.id)} className="connection-manage">
-              Manage
-            </a>
-          )}
-        </div>
         {connection.availability.status !== 'available' && (
           <Alert>
             <strong>{connectionAvailability(connection)}</strong>
@@ -120,7 +108,10 @@ export function ConnectionStride({ connection, dependents }: ConnectionStridePro
           <Surface key={projectIdentity(project)}>
             <SurfaceTitle>{project.name}</SurfaceTitle>
             <SurfaceDescription>{locatorLabel(project)}</SurfaceDescription>
-            <Link href={projectHash(project.key)}>Open Project</Link>
+            <div className="connection-project-links">
+              <Link href={projectHash(project.key)}>Go to roadmap</Link>
+              <Link href={projectRegistrationHash(project.key)}>Mange project registration</Link>
+            </div>
           </Surface>
         ))}
         {dependents.length === 0 && <p>No registered Projects use this Connection.</p>}
