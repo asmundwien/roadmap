@@ -18,6 +18,7 @@ export type Route =
   | { screen: 'projects' }
   | { screen: 'project-settings' }
   | { screen: 'connection-settings' }
+  | { screen: 'connection'; connectionId: string }
   | { screen: 'automation-settings' }
   | { screen: 'components' }
   | {
@@ -51,13 +52,25 @@ const PROJECTS: Route = { screen: 'projects' }
 export const overviewHash = '#/'
 export const projectSettingsHash = '#/settings/projects'
 export const connectionSettingsHash = '#/settings/connections'
+export function connectionHash(connectionId: string): string {
+  return `${connectionSettingsHash}/${encodePart(connectionId)}`
+}
 export const automationSettingsHash = '#/settings/automation'
 export const componentsHash = '#/components'
+
+function parseConnectionRoute(hash: string): Route | null {
+  const match = /^#\/settings\/connections\/([^/]+)$/.exec(hash)
+  if (!match) return null
+  const connectionId = decodePart(match[1])
+  return connectionId === null ? PROJECTS : { screen: 'connection', connectionId }
+}
 
 /** Anything that doesn't parse falls back to the project list — a bad URL is not an error state. */
 export function parseHash(hash: string): Route {
   if (hash === projectSettingsHash) return { screen: 'project-settings' }
   if (hash === connectionSettingsHash) return { screen: 'connection-settings' }
+  const connection = parseConnectionRoute(hash)
+  if (connection) return connection
   if (hash === automationSettingsHash) return { screen: 'automation-settings' }
   if (hash === componentsHash) return { screen: 'components' }
   const bare = /^#\/projects\/([^/]+)\/([^/]+)$/.exec(hash)

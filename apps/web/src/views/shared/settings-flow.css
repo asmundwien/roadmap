@@ -1,4 +1,31 @@
 /* Styles shared by Settings panes and the Connections page. */
+.device-code {
+  display: grid;
+  gap: var(--sys-space-sm);
+  place-items: center;
+  min-height: 10rem;
+  margin: var(--sys-space-xl) 2px;
+  border: 1px solid var(--edge);
+  outline: 1px solid var(--edge);
+  outline-offset: 2px;
+}
+
+.device-code strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.8rem;
+  letter-spacing: 0.12em;
+}
+
+.device-code small,
+.device-code span {
+  color: var(--muted);
+}
+.authorization-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sys-space-sm) var(--sys-space-lg);
+}
 .settings-eyebrow {
   margin: 0 0 0.35rem;
   color: var(--muted);

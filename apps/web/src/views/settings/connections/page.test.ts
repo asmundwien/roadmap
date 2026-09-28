@@ -87,6 +87,21 @@ describe('ConnectionSettings', () => {
     expect(issue).toBeLessThan(personal)
     expect(markup.slice(personal)).not.toContain('Token expired.')
   })
+  it('links each manageable connection to its own route', () => {
+    const markup = renderConnections(
+      state([
+        {
+          id: 'github/work',
+          integration: 'github',
+          name: 'Work',
+          builtIn: false,
+          availability: { status: 'available' },
+        },
+      ]),
+    )
+    expect(markup).toContain('href="#/settings/connections/github%2Fwork"')
+    expect(markup).toContain('>Manage</a>')
+  })
 
   it('keeps setup problems and notices inside the setup section even with no connections', () => {
     const initial = state([])

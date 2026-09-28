@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   automationSettingsHash,
   componentsHash,
+  connectionHash,
   connectionSettingsHash,
   encodeSelection,
   mapHash,
@@ -24,6 +25,14 @@ describe('parseHash', () => {
     [connectionSettingsHash, { screen: 'connection-settings' }],
   ])('reads the management route %s', (hash, route) => {
     expect(parseHash(hash)).toEqual(route)
+  })
+  it('routes an encoded connection ID to its management page', () => {
+    expect(connectionHash('github/work')).toBe('#/settings/connections/github%2Fwork')
+    expect(parseHash('#/settings/connections/github%2Fwork')).toEqual({
+      screen: 'connection',
+      connectionId: 'github/work',
+    })
+    expect(parseHash('#/settings/connections/%E0%A4%A')).toEqual({ screen: 'projects' })
   })
   it('reads a bare project route as the active map', () => {
     expect(parseHash('#/projects/github/asmundwien%2Froadmap')).toEqual({

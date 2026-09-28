@@ -35,7 +35,11 @@ export function SiteHeader({ route }: SiteHeaderProps) {
           Projects
         </a>
         <a
-          className={route.screen === 'connection-settings' ? 'is-current' : ''}
+          className={
+            route.screen === 'connection-settings' || route.screen === 'connection'
+              ? 'is-current'
+              : ''
+          }
           href={connectionSettingsHash}
         >
           Connections

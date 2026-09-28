@@ -1,0 +1,31 @@
+.connection-detail {
+  max-width: 62rem;
+}
+
+.connection-detail > a {
+  display: inline-block;
+  margin-bottom: var(--sys-space-xl);
+}
+
+.connection-detail .settings-facts {
+  max-width: 28rem;
+  margin: 0 0 var(--sys-space-lg);
+}
+
+.connection-detail .settings-form {
+  max-width: 28rem;
+}
+
+.connection-dependent {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sys-space-md);
+  padding: var(--sys-space-md) 0;
+  border-bottom: 1px solid var(--edge);
+}
+
+.connection-dependent small {
+  display: block;
+  color: var(--muted);
+}

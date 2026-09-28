@@ -1,25 +1,4 @@
-/* Connections page and authorization details. */
-.device-code {
-  display: grid;
-  gap: var(--sys-space-sm);
-  place-items: center;
-  min-height: 10rem;
-  margin: var(--sys-space-xl) 2px;
-  border: 1px solid var(--edge);
-  outline: 1px solid var(--edge);
-  outline-offset: 2px;
-}
-
-.device-code strong {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 1.8rem;
-  letter-spacing: 0.12em;
-}
-
-.device-code small,
-.device-code span {
-  color: var(--muted);
-}
+/* Connections list and setup. */
 
 .connection-page-header {
   display: flex;
@@ -42,11 +21,25 @@
   gap: var(--sys-space-md);
 }
 
-.authorization-controls {
-  display: flex;
-  flex-wrap: wrap;
+.connection-manage {
+  display: inline-flex;
+  min-height: 40px;
   align-items: center;
-  gap: var(--sys-space-sm) var(--sys-space-lg);
+  padding: 0 var(--sys-space-md);
+  border: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
+  color: var(--sys-color-on-surface-variant);
+  font-size: var(--sys-typescale-label-size);
+  text-decoration: none;
+}
+
+.connection-manage:hover {
+  background: var(--sys-color-surface-container);
+  color: var(--sys-color-on-surface);
+}
+
+.connection-manage:focus-visible {
+  outline: var(--sys-border-width-thick) solid var(--sys-color-primary);
+  outline-offset: 2px;
 }
 
 .settings-operation {

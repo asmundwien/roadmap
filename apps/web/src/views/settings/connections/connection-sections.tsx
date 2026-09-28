@@ -1,13 +1,6 @@
-import type {
-  AuthorizationOperation,
-  Connection,
-  RegisteredProject,
-  SafeError,
-  SupportedIntegration,
-} from '@roadmap/contracts'
+import type { AuthorizationOperation, Connection, RegisteredProject } from '@roadmap/contracts'
 import { Alert } from '@roadmap/ui/alert'
 import { Badge } from '@roadmap/ui/badge'
-import { Button, ButtonGroup } from '@roadmap/ui/button'
 import { Link } from '@roadmap/ui/link'
 import {
   Section,
@@ -19,8 +12,8 @@ import {
   SectionHeader,
   SectionTitle,
 } from '@roadmap/ui/section'
-import { projectHash } from '@/router'
-import { ErrorText, locatorLabel, projectIdentity } from '@/views/shared/settings-shared'
+import { connectionHash, projectHash } from '@/router'
+import { locatorLabel, projectIdentity } from '@/views/shared/settings-shared'
 import { authorizationStatus, connectionAvailability } from './connection-details'
 
 type ConnectionSetupSectionProps = {
@@ -92,28 +85,9 @@ export function ConnectionSetupSection({
 type ConnectionStrideProps = {
   connection: Connection
   dependents: RegisteredProject[]
-  authorization: AuthorizationOperation | undefined
-  blocked: boolean
-  github: Extract<SupportedIntegration, { integration: 'github' }> | undefined
-  notice: string | null
-  error: SafeError | string | null
-  onAuthorize: () => void
-  onEdit: () => void
 }
 
-export function ConnectionStride({
-  connection,
-  dependents,
-  authorization,
-  github,
-  blocked,
-  notice,
-  error,
-  onAuthorize,
-  onEdit,
-}: ConnectionStrideProps) {
-  const reauthenticationAvailable =
-    connection.availability.status !== 'available' || authorization?.status === 'waiting'
+export function ConnectionStride({ connection, dependents }: ConnectionStrideProps) {
   return (
     <Section>
       <SectionHeader>
@@ -133,27 +107,11 @@ export function ConnectionStride({
           {connection.builtIn ? (
             <Badge variant="warning">Built in</Badge>
           ) : (
-            <ButtonGroup>
-              {connection.integration === 'github' && reauthenticationAvailable && (
-                <Button type="button" disabled={blocked} onClick={onAuthorize}>
-                  {authorization?.status === 'waiting'
-                    ? 'Authorization progress'
-                    : 'Reauthenticate'}
-                </Button>
-              )}
-              <Button type="button" disabled={blocked} onClick={onEdit}>
-                Manage
-              </Button>
-            </ButtonGroup>
-          )}
-          {connection.integration === 'github' && github && (
-            <Link href={github.installationsUrl} external>
-              Repository access
-            </Link>
+            <a href={connectionHash(connection.id)} className="connection-manage">
+              Manage
+            </a>
           )}
         </div>
-        {notice && <Alert variant="info">{notice}</Alert>}
-        <ErrorText error={error} />
         {connection.availability.status !== 'available' && (
           <Alert>
             <strong>{connectionAvailability(connection)}</strong>
