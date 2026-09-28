@@ -3,7 +3,7 @@
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  min-height: 40px;
+  min-height: var(--sys-size-control-md);
   padding: 0 var(--sys-space-md);
   border: var(--sys-border-width-thin) solid var(--button-outline);
   border-radius: var(--sys-radius-square);
@@ -22,14 +22,14 @@
 }
 
 .small {
-  min-height: 32px;
+  min-height: var(--sys-size-control-sm);
   padding-inline: var(--sys-space-sm);
   font-size: var(--sys-typescale-label-sm-size);
   line-height: var(--sys-typescale-label-sm-line-height);
 }
 
 .large {
-  min-height: 48px;
+  min-height: var(--sys-size-control-lg);
   padding-inline: var(--sys-space-lg);
 }
 

@@ -14,6 +14,11 @@
   --sys-space-section-md: var(--ref-space-3xl);
   --sys-space-section-lg: var(--ref-space-4xl);
 
+  /* Shared control heights for buttons and text fields. */
+  --sys-size-control-sm: var(--ref-space-xl);
+  --sys-size-control-md: var(--ref-space-2xl);
+  --sys-size-control-lg: var(--ref-space-3xl);
+
   /* Layout widths stay here because each value names a layout role, not a reference step. */
   --sys-size-sidebar: 16rem;
   --sys-size-measure: 40rem;

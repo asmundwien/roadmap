@@ -9,6 +9,7 @@ import { ReferenceDimensionsCatalogSection } from './reference-dimensions'
 import { ReferenceMotionCatalogSection } from './reference-motion'
 import { ReferenceTypographyCatalogSection } from './reference-typography'
 import { SemanticPaletteCatalogSection } from './semantic'
+import { TextInputCatalogSection } from './text-input'
 
 export function CatalogPage() {
   return (
@@ -32,6 +33,7 @@ export function CatalogPage() {
       <BadgesCatalogSection />
       <AlertsCatalogSection />
       <ButtonsCatalogSection />
+      <TextInputCatalogSection />
       <LinksCatalogSection />
     </Page>
   )

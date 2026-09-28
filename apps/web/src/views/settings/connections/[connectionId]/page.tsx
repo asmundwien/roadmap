@@ -4,6 +4,7 @@ import { Button, ButtonGroup } from '@roadmap/ui/button'
 import { Link } from '@roadmap/ui/link'
 import { Page, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
 import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
+import { TextInput } from '@roadmap/ui/text-input'
 import { type FormEvent, useState } from 'react'
 import { connectionSettingsHash } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
@@ -140,9 +141,9 @@ export function ConnectionPage({ connectionId }: ConnectionPageProps) {
           </dl>
           {!connection.builtIn && (
             <form className="settings-form" onSubmit={rename} key={connection.name}>
-              <label>
+              <label htmlFor="connection-name">
                 Connection name
-                <input name="name" defaultValue={connection.name} />
+                <TextInput id="connection-name" name="name" defaultValue={connection.name} />
               </label>
               <ButtonGroup className="settings-form-actions">
                 <Button variant="primary" type="submit" disabled={blocked}>
