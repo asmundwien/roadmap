@@ -2,6 +2,18 @@
   max-width: 62rem;
 }
 
+.connection-detail-header {
+  display: flex;
+  max-width: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sys-space-lg);
+}
+
+.connection-detail-header > a {
+  flex-shrink: 0;
+}
+
 .connection-detail > a {
   display: inline-block;
   margin-bottom: var(--sys-space-xl);

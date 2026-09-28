@@ -98,11 +98,16 @@ export function ConnectionPage({ connectionId }: ConnectionPageProps) {
 
   return (
     <Page className="connection-detail">
-      <PageHeader>
+      <PageHeader className="connection-detail-header">
         <div>
           <PageEyebrow>Settings / Connections</PageEyebrow>
           <PageTitle>{connection.name}</PageTitle>
         </div>
+        {github && (
+          <Link href={github.installationsUrl} external>
+            Repository access
+          </Link>
+        )}
       </PageHeader>
       {!configuration.valid && (
         <Alert>
@@ -133,11 +138,6 @@ export function ConnectionPage({ connectionId }: ConnectionPageProps) {
             <dt>Dependent Projects</dt>
             <dd>{dependents.length}</dd>
           </dl>
-          {github && (
-            <Link href={github.installationsUrl} external>
-              Repository access
-            </Link>
-          )}
         </SectionBody>
       </Section>
 
