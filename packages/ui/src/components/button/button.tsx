@@ -1,5 +1,5 @@
 import classNames from 'classnames/bind'
-import type { ButtonHTMLAttributes } from 'react'
+import type { AnchorHTMLAttributes, ButtonHTMLAttributes } from 'react'
 import styles from './button.module.css'
 
 const cx = classNames.bind(styles)
@@ -23,4 +23,25 @@ export function Button({
   ...props
 }: ButtonProps) {
   return <button type={type} className={cx('button', variant, appearance, size)} {...props} />
+}
+
+/** A native link with button styling for navigation presented as an action. */
+export type ButtonLinkProps = Omit<
+  AnchorHTMLAttributes<HTMLAnchorElement>,
+  'className' | 'href'
+> & {
+  href: string
+  variant?: ButtonProps['variant']
+  appearance?: ButtonProps['appearance']
+  size?: ButtonProps['size']
+}
+
+export function ButtonLink({
+  href,
+  size = 'medium',
+  variant = 'secondary',
+  appearance = variant === 'primary' ? 'solid' : 'outline',
+  ...props
+}: ButtonLinkProps) {
+  return <a href={href} className={cx('button', variant, appearance, size)} {...props} />
 }

@@ -2,6 +2,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: var(--sys-space-xs);
   box-sizing: border-box;
   min-height: var(--sys-size-control-md);
   padding: 0 var(--sys-space-md);
@@ -13,6 +14,7 @@
   font-size: var(--sys-typescale-label-size);
   font-weight: var(--sys-font-weight-regular);
   line-height: var(--sys-typescale-label-line-height);
+  text-decoration: none;
   cursor: pointer;
 }
 

@@ -1,5 +1,6 @@
 import type { AuthorizationOperation, Connection, RegisteredProject } from '@roadmap/contracts'
 import { Alert } from '@roadmap/ui/alert'
+import { ButtonLink } from '@roadmap/ui/button'
 import { Link } from '@roadmap/ui/link'
 import {
   Section,
@@ -97,9 +98,9 @@ export function ConnectionStride({ connection, dependents }: ConnectionStridePro
           <Link href={connectionHash(connection.id)}>Manage connection</Link>
         </div>
         <div className="connection-import-link">
-          <a className="connection-import-button" href={projectImportHash(connection.id)}>
+          <ButtonLink href={projectImportHash(connection.id)}>
             <span aria-hidden="true">+</span> Import project
-          </a>
+          </ButtonLink>
         </div>
       </SectionHeader>
       <SectionBody>

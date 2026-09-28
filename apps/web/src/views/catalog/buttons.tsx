@@ -1,4 +1,4 @@
-import { Button } from '@roadmap/ui/button'
+import { Button, ButtonLink } from '@roadmap/ui/button'
 import {
   Section,
   SectionBody,
@@ -56,6 +56,15 @@ export function ButtonsCatalogSection() {
           <Button variant="danger" appearance="solid" type="button">
             Confirm removal
           </Button>
+        </Surface>
+
+        <Surface className="catalog-button-example">
+          <SurfaceTitle>Navigation</SurfaceTitle>
+          <SurfaceDescription>
+            Use a button-shaped link for navigation presented as an action. It remains a native
+            link.
+          </SurfaceDescription>
+          <ButtonLink href="#/settings/connections">Connections</ButtonLink>
         </Surface>
 
         <Surface className="catalog-button-example">

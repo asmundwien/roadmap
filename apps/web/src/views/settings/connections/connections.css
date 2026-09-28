@@ -28,27 +28,6 @@
   margin-top: var(--sys-space-sm);
 }
 
-.connection-import-button {
-  display: inline-flex;
-  align-items: center;
-  min-height: var(--sys-size-control-md);
-  padding: 0 var(--sys-space-md);
-  border: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
-  color: var(--sys-color-on-surface-variant);
-  font-size: var(--sys-typescale-label-size);
-  text-decoration: none;
-}
-
-.connection-import-button:hover {
-  background: var(--sys-color-surface-container);
-  color: var(--sys-color-on-surface);
-}
-
-.connection-import-button:focus-visible {
-  outline: var(--sys-border-width-thick) solid var(--sys-color-primary);
-  outline-offset: 2px;
-}
-
 .connection-project-links {
   display: flex;
   flex-wrap: wrap;

@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { Button } from './button'
+import { Button, ButtonLink } from './button'
 
 describe('Button', () => {
   it('defaults to a non-submitting button and permits explicit form submission', () => {
@@ -17,5 +17,22 @@ describe('Button', () => {
     expect(
       renderToStaticMarkup(createElement(Button, { disabled: true }, 'Unavailable')),
     ).toContain('disabled=""')
+  })
+})
+
+describe('ButtonLink', () => {
+  it('keeps native link navigation for a button-shaped destination', () => {
+    const markup = renderToStaticMarkup(
+      createElement(
+        ButtonLink,
+        { href: '#/settings/connections/github%2Fwork/import' },
+        'Import project',
+      ),
+    )
+
+    expect(markup).toMatch(
+      /<a [^>]*href="#\/settings\/connections\/github%2Fwork\/import"[^>]*>Import project<\/a>/,
+    )
+    expect(markup).not.toContain('role="button"')
   })
 })

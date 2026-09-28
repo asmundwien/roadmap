@@ -14,7 +14,7 @@ export function LinksCatalogSection() {
       <SectionHeader>
         <SectionTitle>Links</SectionTitle>
         <SectionDescription>
-          Links navigate to a destination and remain separate from buttons.
+          Links navigate to a destination. Button-shaped links remain links, not buttons.
         </SectionDescription>
       </SectionHeader>
       <SectionBody>
