@@ -16,12 +16,11 @@ import { stripInlineMarkdown } from './views/shared/gist'
  */
 export type Route =
   | { screen: 'projects' }
-  | { screen: 'project-settings' }
+  | { screen: 'automation-settings' }
   | { screen: 'project-registration'; project: ProjectKey }
   | { screen: 'connection-settings' }
   | { screen: 'connection'; connectionId: string }
   | { screen: 'project-import'; connectionId: string }
-  | { screen: 'automation-settings' }
   | { screen: 'components' }
   | {
       screen: 'project'
@@ -52,9 +51,8 @@ export type ResolvedSelection =
 
 const PROJECTS: Route = { screen: 'projects' }
 export const overviewHash = '#/'
-export const projectSettingsHash = '#/settings/projects'
 export function projectRegistrationHash(project: ProjectKey): string {
-  return `${projectSettingsHash}/${project.integration}/${encodePart(project.id)}`
+  return `#/settings/projects/${project.integration}/${encodePart(project.id)}`
 }
 export const connectionSettingsHash = '#/settings/connections'
 export function connectionHash(connectionId: string): string {
@@ -88,7 +86,6 @@ function parseProjectRegistrationRoute(hash: string): Route | null {
 
 /** Anything that doesn't parse falls back to the project list — a bad URL is not an error state. */
 export function parseHash(hash: string): Route {
-  if (hash === projectSettingsHash) return { screen: 'project-settings' }
   if (hash === connectionSettingsHash) return { screen: 'connection-settings' }
   const settingsRoute =
     parseProjectRegistrationRoute(hash) ??

@@ -11,7 +11,6 @@ import {
   parseHash,
   projectHash,
   projectRegistrationHash,
-  projectSettingsHash,
   resolveSelection,
   selectionHash,
 } from './router'
@@ -22,10 +21,12 @@ describe('parseHash', () => {
   it.each([
     [automationSettingsHash, { screen: 'automation-settings' }],
     [componentsHash, { screen: 'components' }],
-    [projectSettingsHash, { screen: 'project-settings' }],
     [connectionSettingsHash, { screen: 'connection-settings' }],
   ])('reads the management route %s', (hash, route) => {
     expect(parseHash(hash)).toEqual(route)
+  })
+  it('falls back to Overview for the removed Projects settings list', () => {
+    expect(parseHash('#/settings/projects')).toEqual({ screen: 'projects' })
   })
   it('routes an encoded connection ID to its management page', () => {
     expect(connectionHash('github/work')).toBe('#/settings/connections/github%2Fwork')

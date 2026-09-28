@@ -3,7 +3,6 @@ import {
   componentsHash,
   connectionSettingsHash,
   overviewHash,
-  projectSettingsHash,
   type Route,
 } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
@@ -27,16 +26,6 @@ export function SiteHeader({ route }: SiteHeaderProps) {
       <nav className="site-nav" aria-label="Primary navigation">
         <a className={route.screen === 'projects' ? 'is-current' : ''} href={overviewHash}>
           Overview
-        </a>
-        <a
-          className={
-            route.screen === 'project-settings' || route.screen === 'project-registration'
-              ? 'is-current'
-              : ''
-          }
-          href={projectSettingsHash}
-        >
-          Projects
         </a>
         <a
           className={
