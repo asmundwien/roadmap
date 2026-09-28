@@ -13,6 +13,7 @@ import { ReferenceTypographyCatalogSection } from './reference-typography'
 import { SemanticPaletteCatalogSection } from './semantic'
 import { StandaloneSurfaceCatalogExample, SurfacesCatalogSection } from './surfaces'
 import { TextInputCatalogSection } from './text-input'
+import { ToggleCatalogSection } from './toggle'
 
 export function CatalogPage() {
   return (
@@ -41,6 +42,7 @@ export function CatalogPage() {
       <ControlGroupCatalogSection />
       <ModalCatalogSection />
       <TextInputCatalogSection />
+      <ToggleCatalogSection />
       <LinksCatalogSection />
     </Page>
   )

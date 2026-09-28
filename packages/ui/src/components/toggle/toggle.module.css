@@ -1,0 +1,89 @@
+.toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sys-space-sm);
+  min-height: var(--sys-size-control-md);
+  color: var(--sys-color-on-surface);
+  cursor: pointer;
+}
+
+.input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+}
+
+.track {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  box-sizing: border-box;
+  width: var(--sys-size-control-md);
+  height: var(--sys-space-lg);
+  padding: var(--sys-space-2xs);
+  border: var(--sys-border-width-thin) solid var(--sys-color-outline);
+  border-radius: var(--sys-radius-pill);
+  background: var(--sys-color-surface-container-highest);
+}
+
+.track::before {
+  width: calc(var(--sys-space-lg) - 2 * var(--sys-space-2xs) - 2 * var(--sys-border-width-thin));
+  height: calc(var(--sys-space-lg) - 2 * var(--sys-space-2xs) - 2 * var(--sys-border-width-thin));
+  border-radius: var(--sys-radius-pill);
+  background: var(--sys-color-on-surface);
+  content: "";
+}
+
+.input:checked + .track {
+  border-color: var(--sys-color-primary);
+  background: var(--sys-color-primary);
+}
+
+.input:checked + .track::before {
+  transform: translateX(calc(var(--sys-size-control-md) - var(--sys-space-lg)));
+  background: var(--sys-color-on-primary);
+}
+
+.pending .track::before {
+  transform: translateX(calc((var(--sys-size-control-md) - var(--sys-space-lg)) / 2));
+}
+
+.status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.input:focus-visible + .track {
+  outline: var(--sys-border-width-thick) solid var(--sys-color-on-surface);
+  outline-offset: 2px;
+}
+
+.input:disabled + .track {
+  border-color: var(--sys-color-outline-variant);
+  background: var(--sys-color-surface-container);
+}
+
+.input:disabled + .track::before {
+  background: var(--sys-color-outline);
+}
+
+.toggle:has(.input:disabled) {
+  color: var(--sys-color-outline);
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .track,
+  .track::before {
+    transition:
+      background var(--sys-motion-duration-short) var(--sys-motion-easing-standard),
+      transform var(--sys-motion-duration-short) var(--sys-motion-easing-standard);
+  }
+}
