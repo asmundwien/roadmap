@@ -4,6 +4,7 @@ import { Button } from '@roadmap/ui/button'
 import { ControlGroup } from '@roadmap/ui/control-group'
 import { Link } from '@roadmap/ui/link'
 import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
+import { Surface, SurfaceTitle } from '@roadmap/ui/surface'
 import { TextInput } from '@roadmap/ui/text-input'
 import { type FormEvent, useState } from 'react'
 import { connectionHash } from '@/router'
@@ -17,7 +18,10 @@ import {
   projectIdentity,
 } from '@/views/shared/settings-shared'
 
-type DetailsSectionProps = { project: RegisteredProject; connection: Connection | undefined }
+type DetailsSectionProps = {
+  project: RegisteredProject
+  connection: Connection | undefined
+}
 
 export function DetailsSection({ project, connection }: DetailsSectionProps) {
   const { configuration, configurationVersion, command, execute } = useRoadmap()
@@ -84,15 +88,29 @@ export function DetailsSection({ project, connection }: DetailsSectionProps) {
           <dt>Map state</dt>
           <dd>{mapState(project)}</dd>
         </dl>
-        <form className="settings-form" onSubmit={(event) => void rename(event)} key={project.name}>
-          <label htmlFor="project-name">Display name</label>
-          <ControlGroup>
-            <TextInput id="project-name" name="name" defaultValue={project.name} />
-            <Button variant="primary" type="submit" disabled={blocked}>
-              Save name
-            </Button>
-          </ControlGroup>
-        </form>
+
+        <Surface>
+          <SurfaceTitle>
+            <label htmlFor="project-name">Display name</label>
+          </SurfaceTitle>
+
+          <p>
+            Set a display name for the project. This name will be shown in the Roadmap interface.
+          </p>
+
+          <form
+            className="settings-form"
+            onSubmit={(event) => void rename(event)}
+            key={project.name}
+          >
+            <ControlGroup>
+              <TextInput id="project-name" name="name" defaultValue={project.name} />
+              <Button type="submit" disabled={blocked}>
+                Save name
+              </Button>
+            </ControlGroup>
+          </form>
+        </Surface>
       </SectionBody>
     </Section>
   )

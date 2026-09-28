@@ -2,6 +2,7 @@ import type { Command, RegisteredProject, SafeError } from '@roadmap/contracts'
 import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
 import { ControlGroup } from '@roadmap/ui/control-group'
+import { Modal } from '@roadmap/ui/modal'
 import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
 import { Surface, SurfaceTitle } from '@roadmap/ui/surface'
 import { type FormEvent, useState } from 'react'
@@ -86,28 +87,30 @@ export function ManageSection({ project, connectionExists }: ManageSectionProps)
       <SectionBody>
         {notice && <Alert variant="info">{notice}</Alert>}
         <ErrorText error={error} />
-        <Surface variant="subtle">
+        <Surface>
           <SurfaceTitle>Refresh project</SurfaceTitle>
           <p>Check the Project source for current maps and availability.</p>
-          <Button
-            type="button"
-            disabled={blocked}
-            onClick={() =>
-              void run(
-                {
-                  type: 'refresh-project',
-                  expectedConfigurationVersion: configurationVersion,
-                  project: project.key,
-                },
-                `${project.name} refreshed.`,
-              )
-            }
-          >
-            Refresh now
-          </Button>
+          <ControlGroup>
+            <Button
+              type="button"
+              disabled={blocked}
+              onClick={() =>
+                void run(
+                  {
+                    type: 'refresh-project',
+                    expectedConfigurationVersion: configurationVersion,
+                    project: project.key,
+                  },
+                  `${project.name} refreshed.`,
+                )
+              }
+            >
+              Refresh now
+            </Button>
+          </ControlGroup>
         </Surface>
         {project.availability.status === 'unavailable' && (
-          <Surface variant="subtle">
+          <Surface>
             <SurfaceTitle>Moved Workspace</SurfaceTitle>
             <p>
               Repair requires proof of the same Project identity. Connection and locator stay
@@ -134,25 +137,10 @@ export function ManageSection({ project, connectionExists }: ManageSectionProps)
             </form>
           </Surface>
         )}
-        <Surface variant="danger">
+        <Surface>
           <SurfaceTitle>Remove project registration</SurfaceTitle>
           <p>The source repository, Wayfinder state, and Workspace remain unchanged.</p>
-          {confirming ? (
-            <ControlGroup>
-              <Button type="button" onClick={() => setConfirming(false)}>
-                Keep project
-              </Button>
-              <Button
-                variant="danger"
-                appearance="solid"
-                type="button"
-                disabled={blocked}
-                onClick={() => void remove()}
-              >
-                Confirm removal
-              </Button>
-            </ControlGroup>
-          ) : (
+          <ControlGroup>
             <Button
               variant="danger"
               type="button"
@@ -161,8 +149,22 @@ export function ManageSection({ project, connectionExists }: ManageSectionProps)
             >
               Remove project registration
             </Button>
-          )}
+          </ControlGroup>
         </Surface>
+        <Modal open={confirming} onClose={() => setConfirming(false)} title="Remove project">
+          <p>Remove "{project.name}" from Roadmap?</p>
+          <ControlGroup>
+            <Button
+              variant="danger"
+              appearance="solid"
+              type="button"
+              disabled={blocked}
+              onClick={() => void remove()}
+            >
+              Remove project
+            </Button>
+          </ControlGroup>
+        </Modal>
       </SectionBody>
     </Section>
   )
