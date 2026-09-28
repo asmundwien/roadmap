@@ -121,7 +121,7 @@ export function ConnectionPage({ connectionId }: ConnectionPageProps) {
 
       <Section>
         <SectionHeader>
-          <SectionTitle>Connection details</SectionTitle>
+          <SectionTitle>Details</SectionTitle>
         </SectionHeader>
         <SectionBody>
           <dl className="settings-facts">
@@ -138,15 +138,7 @@ export function ConnectionPage({ connectionId }: ConnectionPageProps) {
             <dt>Dependent Projects</dt>
             <dd>{dependents.length}</dd>
           </dl>
-        </SectionBody>
-      </Section>
-
-      {!connection.builtIn && (
-        <Section>
-          <SectionHeader>
-            <SectionTitle>Manage connection</SectionTitle>
-          </SectionHeader>
-          <SectionBody>
+          {!connection.builtIn && (
             <form className="settings-form" onSubmit={rename} key={connection.name}>
               <label>
                 Connection name
@@ -158,6 +150,16 @@ export function ConnectionPage({ connectionId }: ConnectionPageProps) {
                 </Button>
               </ButtonGroup>
             </form>
+          )}
+        </SectionBody>
+      </Section>
+
+      {!connection.builtIn && (
+        <Section>
+          <SectionHeader>
+            <SectionTitle>Manage connection</SectionTitle>
+          </SectionHeader>
+          <SectionBody>
             {connection.integration === 'github' && (
               <AuthorizationGroup
                 connection={connection}

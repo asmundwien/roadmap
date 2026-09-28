@@ -66,6 +66,14 @@ describe('ConnectionPage', () => {
     expect(markup).toContain('Remove connection')
     expect(markup).not.toContain('Other</h1>')
   })
+  it('places the editable name in Details, separate from management actions', () => {
+    const markup = renderDetail('github/work', [connection])
+    const details = markup.match(/<section[^>]*>.*?<h2[^>]*>Details<\/h2>.*?<\/section>/)?.[0]
+    expect(details).toContain('Connection name')
+    expect(details).toContain('Save name')
+    expect(details).not.toContain('Remove connection')
+    expect(markup).not.toContain('Connection details')
+  })
   it('waits for the first snapshot before reporting an unknown connection', () => {
     const markup = renderDetail('github/work', [], false)
     expect(markup).toContain('Loading connection')
