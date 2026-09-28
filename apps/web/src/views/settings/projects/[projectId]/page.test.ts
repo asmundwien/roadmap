@@ -1,4 +1,4 @@
-import type { ApplicationState, RegisteredProject } from '@roadmap/contracts'
+import type { ApplicationState, Connection, RegisteredProject } from '@roadmap/contracts'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
@@ -19,17 +19,25 @@ const project: RegisteredProject = {
   actions: [],
 }
 
-function renderPage(projects: RegisteredProject[], capturedAt = 0): string {
+const connection: Connection = {
+  id: 'local',
+  integration: 'local',
+  name: 'On this Mac',
+  builtIn: true,
+  availability: { status: 'available', observedAt: 1_000 },
+}
+
+function renderPage(projects: RegisteredProject[], initial = true, valid = true): string {
   const state: ApplicationState = {
     serverEpoch: 'test',
     stateSequence: 1,
     configurationVersion: 1,
     supportedIntegrations: [],
-    connections: [],
+    connections: [connection],
     registrations: [],
     projects,
     authorizationOperations: [],
-    configuration: { valid: true, issues: [], notices: [] },
+    configuration: { valid, issues: [], notices: [] },
     automation: {
       enabled: false,
       enabledProjects: [],
@@ -37,11 +45,15 @@ function renderPage(projects: RegisteredProject[], capturedAt = 0): string {
       evidence: [],
       overrides: [],
     },
-    roadmap: { capturedAt, projects: [], unreachable: [] },
+    roadmap: { capturedAt: 0, projects: [], unreachable: [] },
   }
   const store: RoadmapStore = {
     subscribe: () => () => undefined,
-    getSnapshot: () => ({ transport: 'live', state, command: { inFlight: false, error: null } }),
+    getSnapshot: () => ({
+      transport: 'live',
+      state: initial ? state : null,
+      command: { inFlight: false, error: null },
+    }),
     start: () => () => undefined,
     query: async () => {
       throw new Error('Unexpected query')
@@ -60,15 +72,42 @@ function renderPage(projects: RegisteredProject[], capturedAt = 0): string {
 }
 
 describe('ProjectRegistrationPage', () => {
-  it('names the selected project without showing another project or editing controls', () => {
+  it('shows the selected registration and its management actions without showing another project', () => {
     const markup = renderPage([
       project,
       { ...project, key: { integration: 'github', id: 'other' }, name: 'Other' },
     ])
-    expect(markup).toContain('Settings / Projects')
     expect(markup).toContain('My workspace</h1>')
+    expect(markup).toContain('On this Mac')
+    expect(markup).toContain('/tmp/my-workspace')
+    expect(markup).toContain('Save name')
+    expect(markup).toContain('Refresh now')
+    expect(markup).toContain('Remove project registration')
     expect(markup).not.toContain('Other</h1>')
-    expect(markup).not.toContain('<form')
+  })
+
+  it('offers workspace repair only when the selected project is unavailable', () => {
+    const unavailable = {
+      ...project,
+      availability: { status: 'unavailable', cause: 'Workspace moved.' },
+    } satisfies RegisteredProject
+    const markup = renderPage([unavailable])
+    expect(markup).toContain('Workspace moved.')
+    expect(markup).toContain('Choose folder')
+    expect(markup).toContain('Validate and repair')
+    expect(renderPage([project])).not.toContain('Validate and repair')
+  })
+
+  it('blocks changes when configuration needs repair', () => {
+    const markup = renderPage([project], true, false)
+    expect(markup).toContain('Configuration needs repair.')
+    expect(markup).toMatch(/<button[^>]*disabled=""[^>]*>Save name<\/button>/)
+    expect(markup).toMatch(/<button[^>]*disabled=""[^>]*>Remove project registration<\/button>/)
+  })
+
+  it('waits for a first snapshot before reporting a missing project', () => {
+    expect(renderPage([], false)).toContain('Loading project')
+    expect(renderPage([], false)).not.toContain('Project not found')
   })
 
   it('provides a return link when the project is no longer registered', () => {

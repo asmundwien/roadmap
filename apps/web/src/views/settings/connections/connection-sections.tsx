@@ -110,7 +110,7 @@ export function ConnectionStride({ connection, dependents }: ConnectionStridePro
             <SurfaceDescription>{locatorLabel(project)}</SurfaceDescription>
             <div className="connection-project-links">
               <Link href={projectHash(project.key)}>Go to roadmap</Link>
-              <Link href={projectRegistrationHash(project.key)}>Mange project registration</Link>
+              <Link href={projectRegistrationHash(project.key)}>Manage project registration</Link>
             </div>
           </Surface>
         ))}

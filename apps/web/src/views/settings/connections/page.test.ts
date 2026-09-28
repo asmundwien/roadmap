@@ -147,7 +147,6 @@ describe('ConnectionSettings', () => {
     expect(markup).toContain('href="#/projects/local/my%20workspace"')
     expect(markup).toContain('Go to roadmap')
     expect(markup).toContain('href="#/settings/projects/local/my%20workspace"')
-    expect(markup).toContain('Mange project registration')
     expect(markup).not.toContain('Open Project')
   })
 

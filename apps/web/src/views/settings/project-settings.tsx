@@ -28,6 +28,7 @@ import {
   SettingsPane,
   sameProject,
 } from '@/views/shared/settings-shared'
+import { WorkspaceFolderSelector } from '@/views/shared/workspace-folder-selector'
 import '@/views/shared/settings-flow.css'
 import './settings.css'
 
@@ -463,7 +464,7 @@ function AddProjectPane({
               path={workspacePath}
               error={errors.workspace}
               disabled={saving}
-              operation={operation}
+              query={operation.query}
               onChange={(path) => {
                 setWorkspacePath(path)
                 setErrors({})
@@ -485,7 +486,7 @@ function AddProjectPane({
             path={workspacePath}
             error={errors.folder}
             disabled={saving}
-            operation={operation}
+            query={operation.query}
             onChange={(path) => {
               setWorkspacePath(path)
               setErrors({})
@@ -632,7 +633,7 @@ function EditProjectPane({
             path={workspacePath}
             error={fieldError ?? undefined}
             disabled={busy}
-            operation={operation}
+            query={operation.query}
             onChange={(path) => {
               setWorkspacePath(path)
               setFieldError(null)
@@ -681,66 +682,6 @@ function EditProjectPane({
         )}
       </section>
     </SettingsPane>
-  )
-}
-
-type WorkspaceFolderSelectorProps = {
-  label: string
-  description: string
-  path: string
-  error: string | undefined
-  disabled: boolean
-  operation: ProjectSettingsOperation
-  onChange: (path: string) => void
-}
-
-function WorkspaceFolderSelector({
-  label,
-  description,
-  path,
-  error,
-  disabled,
-  operation,
-  onChange,
-}: WorkspaceFolderSelectorProps) {
-  const [choosing, setChoosing] = useState(false)
-  const [selectionError, setSelectionError] = useState<string | null>(null)
-
-  const choose = async () => {
-    setChoosing(true)
-    setSelectionError(null)
-    try {
-      const result = await operation.query({ type: 'select-workspace' })
-      if (!result.ok) setSelectionError(result.error.message)
-      else if (result.type !== 'workspace-selection')
-        setSelectionError('The server returned an unexpected folder selection result.')
-      else if (result.path) onChange(result.path)
-    } catch {
-      setSelectionError('The server did not return a folder selection.')
-    } finally {
-      setChoosing(false)
-    }
-  }
-
-  return (
-    <fieldset className="settings-folder-field">
-      <legend>{label}</legend>
-      <div className="settings-folder-control">
-        <Button
-          size="medium"
-          type="button"
-          disabled={disabled || choosing}
-          onClick={() => void choose()}
-        >
-          {choosing ? 'Choosing…' : path ? 'Choose another folder' : 'Choose folder'}
-        </Button>
-        <output className={path ? '' : 'is-empty'} aria-live="polite">
-          {path || 'No folder selected'}
-        </output>
-      </div>
-      <small>{description}</small>
-      <FieldError message={selectionError ?? error} />
-    </fieldset>
   )
 }
 

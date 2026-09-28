@@ -1,0 +1,22 @@
+.project-registration-header {
+  display: flex;
+  max-width: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sys-space-lg);
+}
+
+.project-registration-header > a {
+  flex-shrink: 0;
+}
+
+.project-registration .settings-facts {
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  .project-registration-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
