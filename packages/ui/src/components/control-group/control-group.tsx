@@ -6,12 +6,16 @@ import styles from './control-group.module.css'
 
 const cx = classNames.bind(styles)
 
+/** Props for a grouped row of buttons and text inputs. */
 type ControlGroupProps = {
+  /** Direct `Button` and `TextInput` children only; other non-null children throw. */
   children?: ReactNode
   className?: string
+  /** Overrides each child's own size. Defaults to `medium`. */
   size?: NonNullable<ButtonProps['size']>
 }
 
+/** Renders adjacent controls as one group, applying the same size to every child. */
 export function ControlGroup({ children, className, size = 'medium' }: ControlGroupProps) {
   const controls = Children.map(children, (child) => {
     if (child == null) return null

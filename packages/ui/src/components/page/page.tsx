@@ -7,32 +7,27 @@ import styles from './page.module.css'
 // is merged with cn so it is never rewritten by a local name that happens to match.
 const cx = classNames.bind(styles)
 
-export type PageProps = HTMLAttributes<HTMLElement>
-
-export function Page({ className, ...props }: PageProps) {
+/** Sets a centered page width and gutters on the main content landmark. */
+export function Page({ className, ...props }: HTMLAttributes<HTMLElement>) {
   return <main className={cn(cx('page'), className)} {...props} />
 }
 
-export type PageHeaderProps = HTMLAttributes<HTMLElement>
-
-export function PageHeader({ className, ...props }: PageHeaderProps) {
+/** Constrains the page heading group to the reading width. */
+export function PageHeader({ className, ...props }: HTMLAttributes<HTMLElement>) {
   return <header className={cn(cx('header'), className)} {...props} />
 }
 
-export type PageEyebrowProps = HTMLAttributes<HTMLParagraphElement>
-
-export function PageEyebrow({ className, ...props }: PageEyebrowProps) {
+/** Renders a lead-in above the page title. */
+export function PageEyebrow({ className, ...props }: HTMLAttributes<HTMLParagraphElement>) {
   return <p className={cn(cx('eyebrow'), className)} {...props} />
 }
 
-export type PageTitleProps = HTMLAttributes<HTMLHeadingElement>
-
-export function PageTitle({ className, ...props }: PageTitleProps) {
+/** Renders the page's primary heading as an `h1`. */
+export function PageTitle({ className, ...props }: HTMLAttributes<HTMLHeadingElement>) {
   return <h1 className={cn(cx('title'), className)} {...props} />
 }
 
-export type PageDescriptionProps = HTMLAttributes<HTMLParagraphElement>
-
-export function PageDescription({ className, ...props }: PageDescriptionProps) {
+/** Renders introductory text below the page title. */
+export function PageDescription({ className, ...props }: HTMLAttributes<HTMLParagraphElement>) {
   return <p className={cn(cx('description'), className)} {...props} />
 }

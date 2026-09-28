@@ -9,11 +9,17 @@ export type MarkFill = 'solid' | 'half' | 'outline'
 export type MarkCornerCount = 0 | 1 | 2 | 3 | 4
 
 export type MarkProps = {
+  /** Colors corner strokes only; has no effect when corners is 0. By default they match variant. */
   accent?: Variant
+  /** Number of corner strokes, added clockwise from the upper-left; defaults to 0. */
   corners?: MarkCornerCount
+  /** Solid face, outlined face, or a left half filled with the variant color. */
   fill: MarkFill
+  /** Optional centered text inside the diamond; supply a short glyph that fits the mark. */
   glyph?: string
+  /** Required; no default size is applied. */
   size: MarkSize
+  /** Colors the face and outline, independent of the optional corner accent. */
   variant: Variant
 }
 
@@ -32,14 +38,7 @@ export const MEDIUM_MARK_EXTENT = SIZE_ATTRIBUTES.medium.width / 2
 const FACE_PATH = 'M 0 -14.667 L 14.667 0 L 0 14.667 L -14.667 0 Z'
 const HALF_PATH = 'M 0 -14.667 L 0 14.667 L -14.667 0 Z'
 
-/**
- * A diamond mark with a closed presentational vocabulary. The mark owns its coordinate system;
- * SVG consumers translate a wrapper, HTML consumers place it inline. It carries no domain meaning:
- * callers map their own facts onto variant, fill, glyph, corners, and accent.
- *
- * Only the small size and the solid and outline fills change the root: the large and medium sizes
- * differ by attribute alone, and the half fill is drawn by its own path.
- */
+/** Decorative diamond hidden from assistive technology. Convey meaning through accessible text in its context. */
 export function Mark({ accent, corners = 0, fill, glyph, size, variant }: MarkProps) {
   return (
     <svg

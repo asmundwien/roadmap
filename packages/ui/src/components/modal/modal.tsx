@@ -3,14 +3,22 @@ import { type ReactNode, useEffect, useId, useRef } from 'react'
 import { Button } from '../button/button'
 import styles from './modal.module.css'
 
+/** Props for a controlled native modal dialog. */
 export type ModalProps = {
+  /** Whether to show the dialog; the caller must update this after `onClose`. */
   open: boolean
+  /** Called for the Close button, Escape key, or a pointer release on the backdrop. */
   onClose: () => void
+  /** Text displayed as the heading and used to label the dialog for assistive technology. */
   title: string
-  children?: ReactNode
+  children: ReactNode
   className?: string
 }
 
+/**
+ * Shows a native modal dialog while `open` is true. Restores the previously focused element
+ * when it closes, if that element is still connected.
+ */
 export function Modal({ open, onClose, title, children, className }: ModalProps) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const titleId = useId()

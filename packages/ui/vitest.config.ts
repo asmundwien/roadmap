@@ -10,6 +10,6 @@ export default defineConfig({
     // Process CSS so the modules resolve to their real scoped names. Without it every lookup,
     // including a misspelled one, would return a plausible-looking stub and prove nothing.
     css: true,
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.{ts,tsx}'],
   },
 })

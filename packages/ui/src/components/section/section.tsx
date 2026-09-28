@@ -7,33 +7,27 @@ import styles from './section.module.css'
 // is merged with cn so it is never rewritten by a local name that happens to match.
 const cx = classNames.bind(styles)
 
-export type SectionProps = HTMLAttributes<HTMLElement>
-
-export function Section({ className, ...props }: SectionProps) {
+/** Lays out a header beside its content, stacking them at narrower viewport widths. */
+export function Section({ className, ...props }: HTMLAttributes<HTMLElement>) {
   return <section className={cn(cx('section'), className)} {...props} />
 }
 
-export type SectionHeaderProps = HTMLAttributes<HTMLElement>
-
-/** The header is the section grid's first column and carries no styling of its own. */
-export function SectionHeader(props: SectionHeaderProps) {
+/** Renders the unstyled header in the section's first grid column. */
+export function SectionHeader(props: HTMLAttributes<HTMLElement>) {
   return <header {...props} />
 }
 
-export type SectionTitleProps = HTMLAttributes<HTMLHeadingElement>
-
-export function SectionTitle({ className, ...props }: SectionTitleProps) {
+/** Renders the section title as an `h2`. */
+export function SectionTitle({ className, ...props }: HTMLAttributes<HTMLHeadingElement>) {
   return <h2 className={cn(cx('title'), className)} {...props} />
 }
 
-export type SectionDescriptionProps = HTMLAttributes<HTMLParagraphElement>
-
-export function SectionDescription({ className, ...props }: SectionDescriptionProps) {
+/** Renders supporting text beneath the section title. */
+export function SectionDescription({ className, ...props }: HTMLAttributes<HTMLParagraphElement>) {
   return <p className={cn(cx('description'), className)} {...props} />
 }
 
-export type SectionBodyProps = HTMLAttributes<HTMLDivElement>
-
-export function SectionBody({ className, ...props }: SectionBodyProps) {
+/** Arranges section content in a vertical grid with spacing between children. */
+export function SectionBody({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
   return <div className={cn(cx('body'), className)} {...props} />
 }
