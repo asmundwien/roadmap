@@ -1,7 +1,6 @@
-import { Badge } from '@roadmap/ui/badge'
 import type { ReactNode } from 'react'
 import { connectionSettingsHash, projectHash } from '@/router'
-import { integrationLabel } from '@/views/shared/project-meta'
+import { IntegrationBadge } from '../shared/integration-badge'
 import type { AttentionItem, ProjectPortfolio, ProjectPresentation } from './project-presentation'
 import { formatMonth, formatRecency } from './recency'
 
@@ -176,7 +175,7 @@ function ActiveProjectRow({ presentation }: ActiveProjectRowProps) {
       <span className="overview-copy">
         <span className="overview-kicker">
           {project.name}
-          <Badge>{integrationLabel(project.key.integration)}</Badge>
+          <IntegrationBadge integration={project.key.integration} />
           {connection && <span className="overview-connection">{connection.name}</span>}
         </span>
         <strong>{destination}</strong>
@@ -207,7 +206,7 @@ function RestingProjectRow({ presentation }: RestingProjectRowProps) {
       </span>
       <span className="overview-copy">
         <strong>
-          {project.name} <Badge>{integrationLabel(project.key.integration)}</Badge>
+          {project.name} <IntegrationBadge integration={project.key.integration} />
         </strong>
         <span className="overview-detail">
           All {mapCount === 1 ? '1 map' : `${mapCount} maps`} closed · {decisions} decisions
@@ -237,7 +236,7 @@ function WaitingProjectRow({ presentation }: WaitingProjectRowProps) {
       </span>
       <span className="overview-copy">
         <strong>
-          {project.name} <Badge>{integrationLabel(project.key.integration)}</Badge>
+          {project.name} <IntegrationBadge integration={project.key.integration} />
         </strong>
         <span className="overview-detail">
           {unavailableCause !== null

@@ -127,7 +127,7 @@ export function ConnectionPage({ connectionId }: ConnectionPageProps) {
           <dl className="settings-facts">
             <dt>Integration</dt>
             <dd>
-              <IntegrationBadge connection={connection} />
+              <IntegrationBadge integration={connection.integration} />
             </dd>
             <dt>GitHub user</dt>
             <dd>

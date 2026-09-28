@@ -10,6 +10,7 @@ import type {
   SafeError,
 } from '@roadmap/contracts'
 import { Alert } from '@roadmap/ui/alert'
+import { Badge } from '@roadmap/ui/badge'
 import { Button, ButtonGroup } from '@roadmap/ui/button'
 import { Link } from '@roadmap/ui/link'
 import { type FormEvent, useState } from 'react'
@@ -142,7 +143,11 @@ export function ProjectSettings() {
                 </span>
                 <span className="settings-row-meta">
                   <span>
-                    <IntegrationBadge connection={connection} />{' '}
+                    {connection ? (
+                      <IntegrationBadge integration={connection.integration} />
+                    ) : (
+                      <Badge>Unknown</Badge>
+                    )}{' '}
                     {connection?.name ?? 'Unknown Connection'}
                   </span>
                   <span>
@@ -236,7 +241,11 @@ function ProjectDetail({
     <aside className="settings-detail">
       <div className="settings-detail-kicker">
         <span className="settings-eyebrow">Project registration</span>
-        <IntegrationBadge connection={connection} />
+        {connection ? (
+          <IntegrationBadge integration={connection.integration} />
+        ) : (
+          <Badge>Unknown</Badge>
+        )}
       </div>
       <h2>{project.name}</h2>
       {connectionProblem && connection && (

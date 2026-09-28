@@ -1,12 +1,14 @@
-import type { Connection } from '@roadmap/contracts'
+import type { Integration } from '@roadmap/contracts'
 import { Badge } from '@roadmap/ui/badge'
-import { INTEGRATION_META } from '@/views/shared/project-meta'
 
-type IntegrationBadgeProps = { connection: Connection | undefined }
+const INTEGRATION_META = {
+  github: { label: 'GitHub', variant: 'accent' },
+  local: { label: 'Local', variant: 'warning' },
+} as const satisfies Record<Integration, { label: string; variant: string }>
 
-export function IntegrationBadge({ connection }: IntegrationBadgeProps) {
-  if (!connection) return <Badge>Unknown</Badge>
+type IntegrationBadgeProps = { integration: Integration }
 
-  const meta = INTEGRATION_META[connection.integration]
-  return <Badge variant={meta.badgeVariant}>{meta.label}</Badge>
+export function IntegrationBadge({ integration }: IntegrationBadgeProps) {
+  const { variant, label } = INTEGRATION_META[integration]
+  return <Badge variant={variant}>{label}</Badge>
 }

@@ -11,7 +11,7 @@ import {
   resolveSelection,
   selectionHash,
 } from '@/router'
-import { integrationLabel } from '@/views/shared/project-meta'
+import { IntegrationBadge } from '../shared/integration-badge'
 import { activeMapOf } from './active-map'
 import { AUTOMATION_VARIANT } from './automation-presentation'
 import { MapChild, sameSelection } from './map-child'
@@ -311,7 +311,7 @@ function ProjectHead({ project, automationEvidence }: ProjectHeadProps) {
     <header className="project-head">
       <h1>
         {title}
-        <Badge>{integrationLabel(project.key.integration)}</Badge>
+        <IntegrationBadge integration={project.key.integration} />
       </h1>
       <p className="muted small">
         {subtitle ? `${subtitle} · ` : ''}
