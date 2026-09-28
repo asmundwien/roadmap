@@ -2,7 +2,7 @@ import type { Command, SafeError } from '@roadmap/contracts'
 import { Alert } from '@roadmap/ui/alert'
 import { Button, ButtonGroup } from '@roadmap/ui/button'
 import { Link } from '@roadmap/ui/link'
-import { Page, PageDescription, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
+import { Page, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
 import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
 import { type FormEvent, useState } from 'react'
 import { connectionSettingsHash } from '@/router'
@@ -102,7 +102,6 @@ export function ConnectionPage({ connectionId }: ConnectionPageProps) {
         <div>
           <PageEyebrow>Settings / Connections</PageEyebrow>
           <PageTitle>{connection.name}</PageTitle>
-          <PageDescription>{dependents.length === 1 ? 'Project' : 'Projects'}</PageDescription>
         </div>
       </PageHeader>
       {!configuration.valid && (
