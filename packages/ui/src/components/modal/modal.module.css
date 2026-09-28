@@ -1,0 +1,33 @@
+.modal[open] {
+  display: grid;
+  gap: var(--sys-space-lg);
+  box-sizing: border-box;
+  width: min(32rem, calc(100% - 2 * var(--sys-space-lg)));
+  max-height: calc(100dvh - 2 * var(--sys-space-lg));
+  padding: var(--sys-space-xl);
+  border: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
+  background: var(--sys-color-surface-container);
+  color: var(--sys-color-on-surface);
+  box-shadow: 0 var(--sys-space-lg) var(--sys-space-2xl) rgb(0 0 0 / 20%);
+}
+
+:global(body):has(.modal:modal) {
+  overflow: hidden;
+}
+
+.modal::backdrop {
+  background: color-mix(in srgb, var(--sys-color-scrim) 55%, transparent);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sys-space-lg);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--sys-typescale-subheading-size);
+  line-height: var(--sys-typescale-subheading-line-height);
+}

@@ -6,7 +6,7 @@ This workspace package contains presentational React components and shared desig
 
 Load `@roadmap/ui/index.css` once at the application entry, before application styles. It provides shared tokens used by the components.
 
-## Usage
+## Example of usage
 
 Import components exported by [`package.json`](./package.json). For example:
 

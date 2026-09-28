@@ -5,6 +5,7 @@ import { ButtonsCatalogSection } from './buttons'
 import { ControlGroupCatalogSection } from './control-group'
 import { LinksCatalogSection } from './links'
 import { MarkCatalogSection, TicketMarkCatalogSection } from './mark'
+import { ModalCatalogSection } from './modal'
 import { ReferenceColorsCatalogSection } from './reference-colors'
 import { ReferenceDimensionsCatalogSection } from './reference-dimensions'
 import { ReferenceMotionCatalogSection } from './reference-motion'
@@ -38,6 +39,7 @@ export function CatalogPage() {
       <AlertsCatalogSection />
       <ButtonsCatalogSection />
       <ControlGroupCatalogSection />
+      <ModalCatalogSection />
       <TextInputCatalogSection />
       <LinksCatalogSection />
     </Page>
