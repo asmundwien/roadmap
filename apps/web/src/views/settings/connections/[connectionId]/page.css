@@ -16,12 +16,7 @@
 }
 
 .connection-detail .settings-facts {
-  max-width: 28rem;
   margin: 0 0 var(--sys-space-lg);
-}
-
-.connection-detail .settings-form {
-  max-width: 28rem;
 }
 
 .connection-dependent {
