@@ -25,6 +25,8 @@ Each routable area under `apps/web/src/views` has a `page.tsx` entry point. Page
 
 The catalog at `#/components` presents the UI package's components and token layers. Catalog previews can read reference values directly; product views use semantic roles. Web views map domain state to presentational props before passing it to `@roadmap/ui` components. `apps/web/src/main.tsx` loads the package stylesheet before application styles.
 
+The Connections view composes one UI `Section` per Connection and one `SectionGroup` per dependent Project. Connection availability and operation feedback stay in that Connection's section. A conditional setup section holds configuration and new authorization issues when they have no existing Connection. Authorization, rename, and removal remain in settings panes.
+
 React functions use named `...Props` types instead of inline object annotations. Dynamic class composition in `apps/web` uses `classnames` imported as `cn`; modules do not define class-name helper functions.
 
 Web source files use `@/` for imports outside their current directory. The alias maps to `apps/web/src`; sibling imports remain relative. TypeScript imports omit `.ts` and `.tsx` extensions.

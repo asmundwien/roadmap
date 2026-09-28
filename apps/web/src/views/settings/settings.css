@@ -1,4 +1,4 @@
-/* Project, Connection, and Automation settings extend the Overview road and Panel grammar. */
+/* Settings panes and the remaining Project and Automation road layouts. */
 
 .settings-shell {
   max-width: 74rem;
@@ -35,13 +35,11 @@
   align-items: start;
 }
 
-.settings-road,
-.connection-road {
+.settings-road {
   position: relative;
 }
 
-.settings-road::before,
-.connection-road::before {
+.settings-road::before {
   position: absolute;
   z-index: 0;
   top: 1.3rem;
@@ -229,8 +227,7 @@
   font-size: 0.72rem;
 }
 
-.settings-link:disabled,
-.connection-add:disabled {
+.settings-link:disabled {
   cursor: not-allowed;
   opacity: 0.4;
 }
@@ -441,136 +438,25 @@
   margin-top: var(--sys-space-sm);
 }
 
-.connection-stride {
-  position: relative;
-  z-index: 1;
-  padding: 0.7rem 0 1.2rem;
-  border-top: 1px solid var(--edge);
-}
-
-.connection-stride:first-child {
-  border-top: 0;
-}
-
-.connection-main {
-  display: grid;
-  grid-template-columns: 6rem minmax(0, 1fr) auto;
-  gap: 0.85rem;
-  align-items: center;
-  min-height: 70px;
-  padding-right: 0.8rem;
-}
-
-.connection-actions {
+.connection-page-header {
   display: flex;
-  align-items: center;
+  max-width: none;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sys-space-lg);
 }
 
-.settings-copy > .settings-kicker {
-  margin-bottom: 0.2rem;
-  color: var(--goal);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.05em;
+.connection-page-header > button {
+  flex-shrink: 0;
+  gap: var(--sys-space-xs);
 }
 
-.connection-dependent {
-  position: relative;
-  display: grid;
-  grid-template-columns: 2rem minmax(0, 1fr) auto;
-  gap: var(--sys-space-md);
-  align-items: center;
-  width: calc(100% - 9rem);
-  min-height: 50px;
-  margin-left: 9rem;
-  padding: 0.4rem 0.8rem 0.4rem 0;
-  border-bottom: 1px solid var(--edge);
-  color: inherit;
-  font-size: 0.76rem;
-  text-decoration: none;
-}
-
-.connection-dependent:hover,
-.connection-dependent:focus-visible {
-  background: var(--wash);
-  outline: 1px solid var(--edge);
-  outline-offset: 0;
-}
-
-.connection-dependent strong,
-.connection-dependent small {
-  display: block;
-}
-
-.connection-branch {
-  position: relative;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--state-claimed);
-}
-
-.connection-branch::before {
-  position: absolute;
-  right: 50%;
-  bottom: 50%;
-  width: 3rem;
-  height: 1.5rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--state-claimed) 60%, var(--edge));
-  border-left: 1px solid color-mix(in srgb, var(--state-claimed) 60%, var(--edge));
-  content: "";
-}
-
-.connection-empty {
-  margin-left: 9rem;
-}
-
-.connection-add {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  grid-template-columns: 6rem 1fr;
-  gap: 0.85rem;
-  align-items: center;
-  width: 100%;
-  min-height: 70px;
-  padding: 0.6rem 0;
-  border: 0;
-  border-top: 1px solid var(--edge);
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.connection-add:hover:not(:disabled) {
-  background: var(--wash);
-}
-
-.connection-inline-links {
-  margin: var(--sys-space-md) 0 0 9rem;
-  font-size: 0.76rem;
-}
-
-.connection-inline-links a,
-.connection-resource-band a {
-  color: var(--muted);
-}
-
-.connection-resource-band {
+.connection-group-header {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--sys-space-sm) var(--sys-space-lg);
-  margin-top: var(--sys-space-2xl);
-  padding: var(--sys-space-lg) 0;
-  border-top: 1px solid var(--edge);
-  border-bottom: 1px solid var(--edge);
-  font-size: 0.78rem;
-}
-
-.connection-resource-band .settings-eyebrow {
-  flex-basis: 100%;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--sys-space-md);
 }
 
 .authorization-controls {
@@ -602,38 +488,6 @@
 }
 
 .settings-operation small {
-  color: var(--muted);
-}
-
-.settings-dependent-list {
-  display: flex;
-  flex-direction: column;
-  margin: var(--sys-space-lg) 0;
-  border-top: 1px solid var(--edge);
-  border-bottom: 1px solid var(--edge);
-}
-
-.settings-dependent-list a {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sys-space-lg);
-  padding: var(--sys-space-sm);
-  color: inherit;
-  font-size: 0.78rem;
-  text-decoration: none;
-}
-
-.settings-dependent-list a + a {
-  border-top: 1px solid var(--edge);
-}
-
-.settings-dependent-list strong,
-.settings-dependent-list small {
-  display: block;
-}
-
-.settings-dependent-list small {
   color: var(--muted);
 }
 
@@ -942,36 +796,18 @@
     flex-direction: column;
   }
 
-  .settings-road::before,
-  .connection-road::before {
+  .settings-road::before {
     left: 1.9rem;
   }
 
-  .settings-row,
-  .connection-main {
+  .settings-row {
     grid-template-columns: 3.8rem minmax(0, 1fr);
-  }
-
-  .connection-actions {
-    grid-column: 2;
-    align-items: flex-start;
-    justify-content: flex-start;
   }
 
   .settings-row-meta {
     grid-column: 2;
     align-items: flex-start;
     justify-content: flex-start;
-  }
-
-  .connection-dependent {
-    width: calc(100% - 4.6rem);
-    margin-left: 4.6rem;
-  }
-
-  .connection-empty,
-  .connection-inline-links {
-    margin-left: 4.6rem;
   }
 
   .automation-road::before {
@@ -992,9 +828,6 @@
 
   .automation-empty {
     margin-left: 3.8rem;
-  }
-  .connection-add {
-    grid-template-columns: 3.8rem 1fr;
   }
 
   .settings-copy strong,

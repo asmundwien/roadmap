@@ -11,6 +11,17 @@ import { Alert } from '@roadmap/ui/alert'
 import { Badge } from '@roadmap/ui/badge'
 import { Button, ButtonGroup } from '@roadmap/ui/button'
 import { Link } from '@roadmap/ui/link'
+import { Page, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
+import {
+  Section,
+  SectionBody,
+  SectionDescription,
+  SectionGroup,
+  SectionGroupDescription,
+  SectionGroupTitle,
+  SectionHeader,
+  SectionTitle,
+} from '@roadmap/ui/section'
 import { type FormEvent, useState } from 'react'
 import { projectHash } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
@@ -45,8 +56,13 @@ export function ConnectionSettings() {
     execute,
   } = useRoadmap()
   const [pane, setPane] = useState<ConnectionPane | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
-  const [operationError, setOperationError] = useState<SafeError | string | null>(null)
+  const [notice, setNotice] = useState<{ connectionId: string | null; message: string } | null>(
+    null,
+  )
+  const [operationError, setOperationError] = useState<{
+    connectionId: string
+    error: SafeError | string
+  } | null>(null)
   const github = supportedIntegrations.find(
     (integration): integration is Extract<SupportedIntegration, { integration: 'github' }> =>
       integration.integration === 'github',
@@ -61,12 +77,11 @@ export function ConnectionSettings() {
   )
 
   return (
-    <main className="shell settings-shell">
-      <header className="settings-head">
+    <Page>
+      <PageHeader className="connection-page-header">
         <div>
-          <p className="settings-eyebrow">Settings</p>
-          <h1>Connections</h1>
-          <p className="muted">{connections.length} configured</p>
+          <PageEyebrow>Settings</PageEyebrow>
+          <PageTitle>Connections</PageTitle>
         </div>
         <Button
           variant="primary"
@@ -74,105 +89,91 @@ export function ConnectionSettings() {
           disabled={blocked || !github}
           onClick={() => setPane({ kind: 'add' })}
         >
+          <span aria-hidden="true">+</span>
           Add connection
         </Button>
-      </header>
-
-      {!github && (
-        <Alert>
-          <strong>GitHub Connections are unavailable.</strong>
-          <span>Configure the Roadmap GitHub App to authorize GitHub accounts.</span>
-        </Alert>
+      </PageHeader>
+      {(!github ||
+        !configuration.valid ||
+        configuration.notices.length > 0 ||
+        (notice && notice.connectionId === null) ||
+        looseOperations.length > 0 ||
+        connections.length === 0) && (
+        <Section>
+          <SectionHeader>
+            <SectionTitle>Connection setup</SectionTitle>
+            <SectionDescription>
+              Authorization and configuration for new Connections.
+            </SectionDescription>
+          </SectionHeader>
+          <SectionBody>
+            {!github && (
+              <Alert>
+                <strong>GitHub Connections are unavailable.</strong>
+                <span>Configure the Roadmap GitHub App to authorize GitHub accounts.</span>
+              </Alert>
+            )}
+            {!configuration.valid && (
+              <Alert>
+                <strong>Configuration needs repair.</strong>
+                <span>In-app changes stay blocked until roadmap.config.json is valid.</span>
+              </Alert>
+            )}
+            {configuration.notices.map((message) => (
+              <Alert variant="info" key={message}>
+                {message}
+              </Alert>
+            ))}
+            {notice?.connectionId === null && <Alert variant="info">{notice.message}</Alert>}
+            {looseOperations.map((authorization) => (
+              <button
+                className="settings-operation"
+                type="button"
+                key={authorization.id}
+                onClick={() => setPane({ kind: 'authorization', operationId: authorization.id })}
+              >
+                <span>
+                  <strong>GitHub authorization · {authorizationStatus(authorization)}</strong>
+                  <small>{authorization.cause ?? 'Open the device authorization progress.'}</small>
+                </span>
+                <span aria-hidden="true">›</span>
+              </button>
+            ))}
+            {connections.length === 0 && <p>No Connections configured.</p>}
+          </SectionBody>
+        </Section>
       )}
-      {!configuration.valid && (
-        <Alert>
-          <strong>Configuration needs repair.</strong>
-          <span>In-app changes stay blocked until roadmap.config.json is valid.</span>
-        </Alert>
-      )}
-      {configuration.notices.map((message) => (
-        <Alert variant="info" key={message}>
-          {message}
-        </Alert>
-      ))}
-      {notice && <Alert variant="info">{notice}</Alert>}
-      <ErrorText error={operationError} />
-
-      {looseOperations.map((authorization) => (
-        <button
-          className="settings-operation"
-          type="button"
-          key={authorization.id}
-          onClick={() => setPane({ kind: 'authorization', operationId: authorization.id })}
-        >
-          <span>
-            <strong>GitHub authorization · {authorizationStatus(authorization)}</strong>
-            <small>{authorization.cause ?? 'Open the device authorization progress.'}</small>
-          </span>
-          <span aria-hidden="true">›</span>
-        </button>
-      ))}
-
-      <div className="connection-road">
-        {connections.map((connection) => {
-          const dependents = projects.filter((project) => project.connectionId === connection.id)
-          const authorization = connectionAuthorization(authorizationOperations, connection.id)
-          return (
-            <ConnectionStride
-              key={connection.id}
-              connection={connection}
-              dependents={dependents}
-              authorization={authorization}
-              github={github}
-              blocked={blocked}
-              onAuthorize={() => {
-                if (authorization) {
-                  setPane({ kind: 'authorization', operationId: authorization.id })
-                } else {
-                  void beginAuthorization({
-                    connection,
-                    configurationVersion,
-                    operation,
-                    setError: setOperationError,
-                    onStarted: (operationId) => setPane({ kind: 'authorization', operationId }),
-                  })
-                }
-              }}
-              onEdit={() => setPane({ kind: 'edit', connectionId: connection.id })}
-            />
-          )
-        })}
-
-        <button
-          className="connection-add"
-          type="button"
-          disabled={blocked || !github}
-          onClick={() => setPane({ kind: 'add' })}
-        >
-          <span className="settings-node is-open" aria-hidden="true">
-            +
-          </span>
-          <span className="settings-copy">
-            <strong>Add GitHub Connection</strong>
-            <span>Authorize repositories selected for the Roadmap GitHub App.</span>
-          </span>
-        </button>
-      </div>
-
-      {github && (
-        <div className="connection-resource-band">
-          <p className="settings-eyebrow">GitHub access</p>
-          <a href={github.newInstallationUrl} target="_blank" rel="noreferrer">
-            Install Roadmap on repositories ↗
-          </a>
-          <a href={github.installationsUrl} target="_blank" rel="noreferrer">
-            Manage repository access ↗
-          </a>
-          <a href={github.authorizationsUrl} target="_blank" rel="noreferrer">
-            Manage GitHub authorizations ↗
-          </a>
-        </div>
-      )}
+      {connections.map((connection) => {
+        const dependents = projects.filter((project) => project.connectionId === connection.id)
+        const authorization = connectionAuthorization(authorizationOperations, connection.id)
+        return (
+          <ConnectionStride
+            key={connection.id}
+            connection={connection}
+            dependents={dependents}
+            authorization={authorization}
+            github={github}
+            blocked={blocked}
+            notice={notice?.connectionId === connection.id ? notice.message : null}
+            onAuthorize={() => {
+              if (authorization) {
+                setPane({ kind: 'authorization', operationId: authorization.id })
+              } else {
+                void beginAuthorization({
+                  connection,
+                  configurationVersion,
+                  operation,
+                  setError: (error) =>
+                    setOperationError(error ? { connectionId: connection.id, error } : null),
+                  onStarted: (operationId) => setPane({ kind: 'authorization', operationId }),
+                })
+              }
+            }}
+            error={operationError?.connectionId === connection.id ? operationError.error : null}
+            onEdit={() => setPane({ kind: 'edit', connectionId: connection.id })}
+          />
+        )
+      })}
 
       {pane?.kind === 'add' && github && (
         <AddConnectionPane
@@ -196,7 +197,7 @@ export function ConnectionSettings() {
               onClose={() => setPane(null)}
               onFinished={(message) => {
                 setPane(null)
-                setNotice(message)
+                setNotice({ connectionId: authorization.connectionId ?? null, message })
               }}
             />
           )
@@ -212,14 +213,14 @@ export function ConnectionSettings() {
               operation={operation}
               configurationVersion={configurationVersion}
               onClose={() => setPane(null)}
-              onChanged={(message) => {
+              onChanged={(message, removed) => {
                 setPane(null)
-                setNotice(message)
+                setNotice({ connectionId: removed ? null : connection.id, message })
               }}
             />
           )
         })()}
-    </main>
+    </Page>
   )
 }
 
@@ -227,8 +228,10 @@ type ConnectionStrideProps = {
   connection: Connection
   dependents: RegisteredProject[]
   authorization: AuthorizationOperation | undefined
-  github: Extract<SupportedIntegration, { integration: 'github' }> | undefined
   blocked: boolean
+  github: Extract<SupportedIntegration, { integration: 'github' }> | undefined
+  notice: string | null
+  error: SafeError | string | null
   onAuthorize: () => void
   onEdit: () => void
 }
@@ -239,36 +242,29 @@ function ConnectionStride({
   authorization,
   github,
   blocked,
+  notice,
+  error,
   onAuthorize,
   onEdit,
 }: ConnectionStrideProps) {
-  const healthy = connection.availability.status === 'available'
   const reauthenticationAvailable =
     connection.availability.status !== 'available' || authorization?.status === 'waiting'
   return (
-    <section className="connection-stride">
-      <div className="connection-main">
-        <span
-          className={`settings-node ${healthy ? 'is-active' : 'is-blocked'}`}
-          aria-hidden="true"
-        >
-          {connection.integration === 'github' ? 'G' : 'L'}
-        </span>
-        <span className="settings-copy">
-          <span className="settings-kicker">
-            {connection.githubIdentity
-              ? `@${connection.githubIdentity.login}`
-              : connection.builtIn
-                ? 'Built in'
-                : 'GitHub'}
-          </span>
-          <strong>{connection.name}</strong>
-          <span>
-            {connectionAvailability(connection)} · {dependents.length} registered{' '}
-            {dependents.length === 1 ? 'Project' : 'Projects'}
-          </span>
-        </span>
-        <div className="connection-actions">
+    <Section>
+      <SectionHeader>
+        <SectionTitle>{connection.name}</SectionTitle>
+        <SectionDescription>
+          {connection.githubIdentity
+            ? `@${connection.githubIdentity.login}`
+            : connection.builtIn
+              ? 'Built in'
+              : 'GitHub'}{' '}
+          · {connectionAvailability(connection)} · {dependents.length} registered{' '}
+          {dependents.length === 1 ? 'Project' : 'Projects'}
+        </SectionDescription>
+      </SectionHeader>
+      <SectionBody>
+        <div className="connection-group-header">
           {connection.builtIn ? (
             <Badge variant="warning">Built in</Badge>
           ) : (
@@ -285,41 +281,30 @@ function ConnectionStride({
               </Button>
             </ButtonGroup>
           )}
+          {connection.integration === 'github' && github && (
+            <Link href={github.installationsUrl} external>
+              Repository access
+            </Link>
+          )}
         </div>
-      </div>
-
-      {connection.availability.status !== 'available' && (
-        <Alert>
-          <strong>{connectionAvailability(connection)}</strong>
-          <span>{connection.availability.cause}</span>
-        </Alert>
-      )}
-
-      {dependents.map((project) => (
-        <a
-          className="connection-dependent"
-          href={projectHash(project.key)}
-          key={projectIdentity(project)}
-        >
-          <span className="connection-branch" aria-hidden="true" />
-          <span>
-            <strong>{project.name}</strong>
-            <small>{locatorLabel(project)}</small>
-          </span>
-          <span>{project.availability.status === 'available' ? 'Project ›' : 'Unavailable ›'}</span>
-        </a>
-      ))}
-      {dependents.length === 0 && (
-        <p className="connection-empty">No registered Projects use this Connection.</p>
-      )}
-      {connection.integration === 'github' && github && (
-        <div className="connection-inline-links">
-          <a href={github.installationsUrl} target="_blank" rel="noreferrer">
-            Repository access ↗
-          </a>
-        </div>
-      )}
-    </section>
+        {notice && <Alert variant="info">{notice}</Alert>}
+        <ErrorText error={error} />
+        {connection.availability.status !== 'available' && (
+          <Alert>
+            <strong>{connectionAvailability(connection)}</strong>
+            <span>{connection.availability.cause}</span>
+          </Alert>
+        )}
+        {dependents.map((project) => (
+          <SectionGroup key={projectIdentity(project)}>
+            <SectionGroupTitle>{project.name}</SectionGroupTitle>
+            <SectionGroupDescription>{locatorLabel(project)}</SectionGroupDescription>
+            <Link href={projectHash(project.key)}>Open Project</Link>
+          </SectionGroup>
+        ))}
+        {dependents.length === 0 && <p>No registered Projects use this Connection.</p>}
+      </SectionBody>
+    </Section>
   )
 }
 
@@ -545,7 +530,7 @@ type EditConnectionPaneProps = {
   operation: ConnectionOperation
   configurationVersion: number
   onClose: () => void
-  onChanged: (message: string) => void
+  onChanged: (message: string, removed: boolean) => void
 }
 
 function EditConnectionPane({
@@ -569,7 +554,7 @@ function EditConnectionPane({
         setError(outcome.error)
         return
       }
-      onChanged(success)
+      onChanged(success, command.type === 'remove-connection')
     } catch {
       setError('The server did not confirm the change. Wait for live state before retrying.')
     } finally {

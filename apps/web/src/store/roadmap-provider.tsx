@@ -32,7 +32,7 @@ export interface RoadmapViewState {
 }
 
 type RoadmapProviderProps = {
-  children: ReactNode
+  children?: ReactNode
   store?: RoadmapStore
 }
 
@@ -47,7 +47,7 @@ export function useRoadmap(): RoadmapViewState {
   const store = useContext(RoadmapContext)
   if (!store) throw new Error('useRoadmap must be used inside a <RoadmapProvider>')
 
-  const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot)
+  const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
   useEffect(() => store.start(), [store])
   const state = snapshot.state
   const roadmap = state?.roadmap ?? EMPTY_ROADMAP
