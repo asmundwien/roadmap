@@ -1,4 +1,4 @@
-import type { Command, Connection, SafeError } from '@roadmap/contracts'
+import type { Command, SafeError } from '@roadmap/contracts'
 import { Alert } from '@roadmap/ui/alert'
 import { Button, ButtonGroup } from '@roadmap/ui/button'
 import { Link } from '@roadmap/ui/link'
@@ -9,6 +9,7 @@ import { connectionSettingsHash } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
 import { ErrorText, observedLabel } from '@/views/shared/settings-shared'
+import { AvailabilityLabel } from './availability-label'
 import { AuthorizationGroup, RemoveConnectionGroup } from './management-sections'
 import '@/views/shared/settings-flow.css'
 import './page.css'
@@ -101,13 +102,9 @@ export function ConnectionPage({ connectionId }: ConnectionPageProps) {
         <div>
           <PageEyebrow>Settings / Connections</PageEyebrow>
           <PageTitle>{connection.name}</PageTitle>
-          <PageDescription>
-            {availabilityLabel(connection)} · {dependents.length} registered{' '}
-            {dependents.length === 1 ? 'Project' : 'Projects'}
-          </PageDescription>
+          <PageDescription>{dependents.length === 1 ? 'Project' : 'Projects'}</PageDescription>
         </div>
       </PageHeader>
-      <Link href={connectionSettingsHash}>Back to Connections</Link>
       {!configuration.valid && (
         <Alert>
           <strong>Configuration needs repair.</strong>
@@ -116,12 +113,7 @@ export function ConnectionPage({ connectionId }: ConnectionPageProps) {
       )}
       {notice && <Alert variant="info">{notice}</Alert>}
       <ErrorText error={error} />
-      {connection.availability.status !== 'available' && (
-        <Alert>
-          <strong>{availabilityLabel(connection)}</strong>
-          <span>{connection.availability.cause}</span>
-        </Alert>
-      )}
+      <AvailabilityLabel connection={connection} />
 
       <Section>
         <SectionHeader>
@@ -188,17 +180,4 @@ export function ConnectionPage({ connectionId }: ConnectionPageProps) {
       )}
     </Page>
   )
-}
-
-function availabilityLabel(connection: Connection): string {
-  switch (connection.availability.status) {
-    case 'available':
-      return 'Available'
-    case 'degraded':
-      return 'Observation degraded'
-    case 'authorization-required':
-      return 'Authorization required'
-    case 'unavailable':
-      return 'Unavailable'
-  }
 }
