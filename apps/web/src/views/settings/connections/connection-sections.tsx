@@ -9,7 +9,7 @@ import {
   SectionTitle,
 } from '@roadmap/ui/section'
 import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
-import { connectionHash, projectHash, projectRegistrationHash } from '@/router'
+import { connectionHash, projectHash, projectImportHash, projectRegistrationHash } from '@/router'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
 import { locatorLabel, projectIdentity } from '@/views/shared/settings-shared'
 import { authorizationStatus, connectionAvailability } from './connection-details'
@@ -95,6 +95,11 @@ export function ConnectionStride({ connection, dependents }: ConnectionStridePro
         </div>
         <div className="connection-manage-link">
           <Link href={connectionHash(connection.id)}>Manage connection</Link>
+        </div>
+        <div className="connection-import-link">
+          <a className="connection-import-button" href={projectImportHash(connection.id)}>
+            <span aria-hidden="true">+</span> Import project
+          </a>
         </div>
       </SectionHeader>
       <SectionBody>

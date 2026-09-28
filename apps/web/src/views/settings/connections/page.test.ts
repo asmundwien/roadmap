@@ -117,6 +117,29 @@ describe('ConnectionSettings', () => {
     expect(headers.join('')).not.toContain('registered Projects')
     expect(headers.join('')).not.toContain('Built in')
   })
+  it('offers project import for each connection, including built-in local connections', () => {
+    const markup = renderConnections(
+      state([
+        {
+          id: 'github/work',
+          integration: 'github',
+          name: 'Work',
+          builtIn: false,
+          availability: { status: 'available' },
+        },
+        {
+          id: 'local',
+          integration: 'local',
+          name: 'Local files',
+          builtIn: true,
+          availability: { status: 'available' },
+        },
+      ]),
+    )
+    expect(markup).toContain('href="#/settings/connections/github%2Fwork/import"')
+    expect(markup).toContain('href="#/settings/connections/local/import"')
+    expect(markup.match(/Import project/g)).toHaveLength(2)
+  })
   it('offers separate roadmap and registration destinations for a connection project', () => {
     const initial = state([
       {

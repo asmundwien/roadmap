@@ -20,6 +20,7 @@ export type Route =
   | { screen: 'project-registration'; project: ProjectKey }
   | { screen: 'connection-settings' }
   | { screen: 'connection'; connectionId: string }
+  | { screen: 'project-import'; connectionId: string }
   | { screen: 'automation-settings' }
   | { screen: 'components' }
   | {
@@ -59,6 +60,9 @@ export const connectionSettingsHash = '#/settings/connections'
 export function connectionHash(connectionId: string): string {
   return `${connectionSettingsHash}/${encodePart(connectionId)}`
 }
+export function projectImportHash(connectionId: string): string {
+  return `${connectionHash(connectionId)}/import`
+}
 export const automationSettingsHash = '#/settings/automation'
 export const componentsHash = '#/components'
 
@@ -67,6 +71,12 @@ function parseConnectionRoute(hash: string): Route | null {
   if (!match) return null
   const connectionId = decodePart(match[1])
   return connectionId === null ? PROJECTS : { screen: 'connection', connectionId }
+}
+function parseProjectImportRoute(hash: string): Route | null {
+  const match = /^#\/settings\/connections\/([^/]+)\/import$/.exec(hash)
+  if (!match) return null
+  const connectionId = decodePart(match[1])
+  return connectionId === null ? PROJECTS : { screen: 'project-import', connectionId }
 }
 
 function parseProjectRegistrationRoute(hash: string): Route | null {
@@ -79,11 +89,12 @@ function parseProjectRegistrationRoute(hash: string): Route | null {
 /** Anything that doesn't parse falls back to the project list — a bad URL is not an error state. */
 export function parseHash(hash: string): Route {
   if (hash === projectSettingsHash) return { screen: 'project-settings' }
-  const registration = parseProjectRegistrationRoute(hash)
-  if (registration) return registration
   if (hash === connectionSettingsHash) return { screen: 'connection-settings' }
-  const connection = parseConnectionRoute(hash)
-  if (connection) return connection
+  const settingsRoute =
+    parseProjectRegistrationRoute(hash) ??
+    parseProjectImportRoute(hash) ??
+    parseConnectionRoute(hash)
+  if (settingsRoute) return settingsRoute
   if (hash === automationSettingsHash) return { screen: 'automation-settings' }
   if (hash === componentsHash) return { screen: 'components' }
   const bare = /^#\/projects\/([^/]+)\/([^/]+)$/.exec(hash)

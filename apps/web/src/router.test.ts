@@ -35,6 +35,13 @@ describe('parseHash', () => {
     })
     expect(parseHash('#/settings/connections/%E0%A4%A')).toEqual({ screen: 'projects' })
   })
+  it('routes a connection-scoped project import without treating it as connection management', () => {
+    expect(parseHash('#/settings/connections/github%2Fwork/import')).toEqual({
+      screen: 'project-import',
+      connectionId: 'github/work',
+    })
+    expect(parseHash('#/settings/connections/%E0%A4%A/import')).toEqual({ screen: 'projects' })
+  })
   it('routes each encoded project key to its registration page', () => {
     expect(projectRegistrationHash(PROJECT)).toBe('#/settings/projects/github/asmundwien%2Froadmap')
     expect(parseHash('#/settings/projects/github/asmundwien%2Froadmap')).toEqual({

@@ -3,7 +3,6 @@ import type {
   CommandOutcome,
   Connection,
   ProjectKey,
-  ProjectRegistrationCandidate,
   Query,
   QueryResult,
   RegisteredProject,
@@ -18,6 +17,11 @@ import { type FormEvent, useState } from 'react'
 import { projectHash } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
+import {
+  admittedProjectKey,
+  projectRegistrationDraft,
+  projectRegistrationError,
+} from '@/views/shared/project-registration'
 import {
   ErrorText,
   locatorLabel,
@@ -419,7 +423,9 @@ function AddProjectPane({
         onSaved(admittedProjectKey(outcome.state.projects, draft.candidate))
         return
       }
-      applyProjectError(outcome.error, setErrors, setGeneralError)
+      const { fields, general } = projectRegistrationError(outcome.error)
+      setErrors(fields)
+      setGeneralError(general)
     } catch {
       setGeneralError(
         'The server did not confirm registration. Wait for live state before retrying.',
@@ -689,55 +695,4 @@ type FieldErrorProps = { message: string | undefined }
 
 function FieldError({ message }: FieldErrorProps) {
   return message ? <span className="settings-field-error">{message}</span> : null
-}
-
-function applyProjectError(
-  error: SafeError,
-  setErrors: (value: Record<string, string>) => void,
-  setGeneral: (value: string | null) => void,
-) {
-  const field = error.field ?? ''
-  if (field === 'connectionId') setErrors({ connection: error.message })
-  else if (field.startsWith('workspace'))
-    setErrors({ workspace: error.message, folder: error.message })
-  else setGeneral(error.message)
-}
-interface ProjectRegistrationDraft {
-  candidate: ProjectRegistrationCandidate | null
-  errors: Record<string, string>
-}
-
-function projectRegistrationDraft(
-  data: FormData,
-  connection: Connection | undefined,
-  workspacePath: string,
-): ProjectRegistrationDraft {
-  if (!connection) return { candidate: null, errors: { connection: 'Choose a Connection.' } }
-  const path = workspacePath.trim()
-  if (!path) {
-    const field = connection.integration === 'github' ? 'workspace' : 'folder'
-    return { candidate: null, errors: { [field]: 'Choose a readable Workspace folder.' } }
-  }
-  const displayName = String(data.get('displayName') ?? '').trim()
-  return {
-    errors: {},
-    candidate: {
-      integration: connection.integration,
-      connectionId: connection.id,
-      workspace: { path },
-      ...(displayName ? { displayName } : {}),
-    },
-  }
-}
-
-function admittedProjectKey(
-  projects: RegisteredProject[],
-  candidate: ProjectRegistrationCandidate,
-): ProjectKey | undefined {
-  return projects.find(
-    (project) =>
-      project.key.integration === candidate.integration &&
-      project.connectionId === candidate.connectionId &&
-      project.workspace.path === candidate.workspace.path,
-  )?.key
 }

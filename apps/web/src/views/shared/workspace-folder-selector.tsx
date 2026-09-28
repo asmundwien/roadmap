@@ -43,6 +43,7 @@ export function WorkspaceFolderSelector({
   return (
     <fieldset className="settings-folder-field">
       <legend>{label}</legend>
+      <small>{description}</small>
       <div className="settings-folder-control">
         <Button
           size="medium"
@@ -56,7 +57,6 @@ export function WorkspaceFolderSelector({
           {path || 'No folder selected'}
         </output>
       </div>
-      <small>{description}</small>
       {(selectionError ?? error) && (
         <span className="settings-field-error">{selectionError ?? error}</span>
       )}

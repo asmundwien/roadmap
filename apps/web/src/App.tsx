@@ -2,6 +2,7 @@ import { useRoute } from './router'
 import { CatalogPage } from './views/catalog/page'
 import { MapPage } from './views/map/page'
 import { OverviewPage } from './views/overview/page'
+import { ProjectImportPage } from './views/settings/connections/[connectionId]/import/page'
 import { ConnectionPage } from './views/settings/connections/[connectionId]/page'
 import { ConnectionSettings } from './views/settings/connections/page'
 import { SettingsPage } from './views/settings/page'
@@ -22,6 +23,7 @@ export function App() {
       )}
       {route.screen === 'connection-settings' && <ConnectionSettings />}
       {route.screen === 'connection' && <ConnectionPage connectionId={route.connectionId} />}
+      {route.screen === 'project-import' && <ProjectImportPage connectionId={route.connectionId} />}
       {route.screen === 'project-registration' && (
         <ProjectRegistrationPage projectKey={route.project} />
       )}
