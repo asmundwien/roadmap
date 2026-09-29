@@ -1,5 +1,6 @@
 import type { AutomationEvidence, Project, WayfinderMap } from '@roadmap/contracts'
 import { Badge } from '@roadmap/ui/badge'
+import { Icon, icon } from '@roadmap/ui/icon'
 import { Mark } from '@roadmap/ui/mark'
 import { useEffect, useRef, useState } from 'react'
 import {
@@ -32,7 +33,10 @@ export function MissingProjectSection({
   return (
     <main className="shell map-shell">
       <p>
-        <a href="#/">← All projects</a>
+        <a className="map-back-link" href="#/">
+          <Icon icon={icon.arrowLeft} />
+          All projects
+        </a>
       </p>
       {disconnected && (
         <p className="banner" role="alert">
@@ -220,7 +224,10 @@ export function ProjectMapSections({
     <div ref={screenRef} className={`panel-screen${kbNav ? ' is-kbnav' : ''}`}>
       <main className="shell map-shell">
         <p>
-          <a href="#/">← All projects</a>
+          <a className="map-back-link" href="#/">
+            <Icon icon={icon.arrowLeft} />
+            All projects
+          </a>
         </p>
 
         <ProjectStateNotices

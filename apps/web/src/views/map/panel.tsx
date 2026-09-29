@@ -20,6 +20,7 @@ import type { ResolvedSelection } from '@/router'
 import { stripInlineMarkdown } from '@/views/shared/gist'
 import './map.css'
 import { Badge } from '@roadmap/ui/badge'
+import { Icon, icon } from '@roadmap/ui/icon'
 import { TicketMark } from '@/views/shared/ticket-mark'
 import { TICKET_STATE_META } from '@/views/shared/ticket-presentation'
 import { automationEvidenceFor } from './automation-presentation'
@@ -71,7 +72,7 @@ export function Panel({
           disabled={!hasPrev}
           onClick={() => onStep(-1)}
         >
-          <Chevron up />
+          <Icon icon={icon.chevronUp} />
         </button>
         <button
           type="button"
@@ -81,7 +82,7 @@ export function Panel({
           disabled={!hasNext}
           onClick={() => onStep(1)}
         >
-          <Chevron />
+          <Icon icon={icon.chevronDown} />
         </button>
         <button
           type="button"
@@ -91,45 +92,13 @@ export function Panel({
           aria-label="close the panel"
           onClick={onClose}
         >
-          <ChevronsRight />
+          <Icon icon={icon.chevronsRight} />
         </button>
       </div>
       <div className="panel-body">
         <PanelBody map={map} selection={item} onSelect={onSelect} automation={automation} />
       </div>
     </>
-  )
-}
-
-type ChevronProps = { up?: boolean }
-
-function Chevron({ up = false }: ChevronProps) {
-  return (
-    <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
-      <path
-        d={up ? 'M3 10l5-5 5 5' : 'M3 6l5 5 5-5'}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.75"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
-}
-
-function ChevronsRight() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
-      <path
-        d="M3.5 4l4 4-4 4M8.5 4l4 4-4 4"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.75"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
   )
 }
 
@@ -679,7 +648,9 @@ function DecisionLink({ title, gist, target, onSelect }: DecisionLinkProps) {
   if (target?.kind === 'href') {
     return (
       <a className="item-link" href={target.href} target="_blank" rel="noreferrer">
-        <span className="item-link-title">{title} ↗</span>
+        <span className="item-link-title">
+          {title} <Icon icon={icon.externalLink} />
+        </span>
         {gistNode}
       </a>
     )
@@ -727,7 +698,9 @@ export function ItemLink({ map, itemRef, onSelect }: ItemLinkProps) {
   if (itemRef.url) {
     return (
       <a className="item-link" href={itemRef.url} target="_blank" rel="noreferrer">
-        <span className="item-link-title">{itemRef.title} ↗</span>
+        <span className="item-link-title">
+          {itemRef.title} <Icon icon={icon.externalLink} />
+        </span>
         <span className="item-link-state">{itemRef.state} · source</span>
       </a>
     )
@@ -797,7 +770,7 @@ function SourceButton({ url, label }: SourceButtonProps) {
   return (
     <p className="gh-row">
       <a className="gh-link" href={url} target="_blank" rel="noreferrer">
-        {label} ↗
+        {label} <Icon icon={icon.externalLink} />
       </a>
     </p>
   )

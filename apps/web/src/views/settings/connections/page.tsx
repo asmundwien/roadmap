@@ -1,5 +1,6 @@
 import type { SupportedIntegration } from '@roadmap/contracts'
 import { Button } from '@roadmap/ui/button'
+import { Icon, icon } from '@roadmap/ui/icon'
 import { Page, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
 import { useState } from 'react'
 import { useRoadmap } from '@/store/roadmap-provider'
@@ -50,7 +51,7 @@ export function ConnectionSettings() {
           disabled={blocked || !github}
           onClick={() => setPane({ kind: 'add' })}
         >
-          <span aria-hidden="true">+</span>
+          <Icon icon={icon.plus} />
           Add connection
         </Button>
       </PageHeader>

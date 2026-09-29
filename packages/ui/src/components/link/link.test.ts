@@ -9,7 +9,9 @@ describe('Link', () => {
 
     expect(markup).toContain('href="#/components"')
     expect(markup).not.toContain('target="_blank"')
-    expect(markup).toContain('<path d="M2.5 8h10m-4-4 4 4-4 4"')
+    expect(markup).toContain('Internal%20link')
+    expect(markup).toContain('aria-hidden="true"')
+    expect(markup).not.toContain('<svg')
   })
 
   it('opens external destinations in a new tab with an up-right arrow', () => {
@@ -20,7 +22,9 @@ describe('Link', () => {
     expect(markup).toContain('href="https://github.com/settings"')
     expect(markup).toContain('target="_blank"')
     expect(markup).toContain('rel="noopener noreferrer"')
-    expect(markup).toContain('<path d="M4 12 12 4M5 4h7v7"')
+    expect(markup).toContain('External%20link')
+    expect(markup).toContain('aria-hidden="true"')
+    expect(markup).not.toContain('<svg')
     expect(markup).not.toContain('external=')
   })
 })

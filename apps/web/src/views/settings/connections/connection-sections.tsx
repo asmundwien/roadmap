@@ -75,7 +75,7 @@ export function ConnectionSetupSection({
               <strong>GitHub authorization · {authorizationStatus(authorization)}</strong>
               <small>{authorization.cause ?? 'Open the device authorization progress.'}</small>
             </span>
-            <span aria-hidden="true">›</span>
+            <Icon icon={icon.internalLink} />
           </button>
         ))}
         {!hasConnections && <p>No Connections configured.</p>}
@@ -102,7 +102,7 @@ export function ConnectionStride({ connection, dependents }: ConnectionStridePro
         </div>
         <div className="connection-import-link">
           <ButtonLink href={projectImportHash(connection.id)}>
-            <span aria-hidden="true">+</span> Import project
+            <Icon icon={icon.plus} /> Import project
           </ButtonLink>
         </div>
       </SectionHeader>

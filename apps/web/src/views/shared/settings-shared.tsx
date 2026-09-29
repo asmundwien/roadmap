@@ -1,4 +1,5 @@
 import type { ProjectKey, RegisteredProject, SafeError } from '@roadmap/contracts'
+import { Icon, icon } from '@roadmap/ui/icon'
 import { type ReactNode, useEffect, useRef } from 'react'
 
 type SettingsPaneProps = {
@@ -38,7 +39,7 @@ export function SettingsPane({ children, label, onClose }: SettingsPaneProps) {
         aria-label={label}
       >
         <button className="settings-close" type="button" onClick={onClose} aria-label="Close">
-          ×
+          <Icon icon={icon.close} />
         </button>
         {children}
       </section>

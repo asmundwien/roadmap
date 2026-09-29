@@ -1,4 +1,9 @@
 import styles from './icon.module.css'
+import arrowLeft from './icons/arrow-left.svg'
+import chevronDown from './icons/chevron-down.svg'
+import chevronUp from './icons/chevron-up.svg'
+import chevronsRight from './icons/chevrons-right.svg'
+import close from './icons/close.svg'
 import codeBranch from './icons/code-branch.svg'
 import externalLink from './icons/external-link.svg'
 import folderOpen from './icons/folder-open.svg'
@@ -9,8 +14,13 @@ import terminal from './icons/terminal.svg'
 import trash from './icons/trash.svg'
 import vscode from './icons/vscode.svg'
 
-/** Available symbols and brands for `Icon`. Each SVG's license is beside it in `./icons/`. */
+/** Available symbols and brands for `Icon`. Third-party SVG licenses are beside their assets. */
 export const icon = {
+  arrowLeft: 'arrow-left',
+  chevronDown: 'chevron-down',
+  chevronUp: 'chevron-up',
+  chevronsRight: 'chevrons-right',
+  close: 'close',
   codeBranch: 'code-branch',
   externalLink: 'external-link',
   folderOpen: 'folder-open',
@@ -23,6 +33,11 @@ export const icon = {
 } as const
 
 const sources = {
+  [icon.arrowLeft]: arrowLeft,
+  [icon.chevronDown]: chevronDown,
+  [icon.chevronUp]: chevronUp,
+  [icon.chevronsRight]: chevronsRight,
+  [icon.close]: close,
   [icon.codeBranch]: codeBranch,
   [icon.externalLink]: externalLink,
   [icon.folderOpen]: folderOpen,

@@ -5,6 +5,11 @@
 .shell.map-shell {
   max-width: 74rem;
 }
+.map-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+}
 
 .legend-item i {
   font-style: normal;
@@ -568,8 +573,8 @@
   overflow-y: auto;
 }
 
-/* The Panel's own navbar: two equal prev/next buttons, then the square » dismiss at the far
- * right — all ruled with the sidebar's border. Sticky, so long content scrolls under. */
+/* The Panel's own navbar: two equal prev/next buttons, then the square
+ * dismiss button at the far right. Sticky, so long content scrolls under. */
 .panel-nav {
   position: sticky;
   top: 0;
@@ -589,6 +594,7 @@
   background: none;
   border: none;
   font: inherit;
+  font-size: 14px;
   color: var(--muted);
   cursor: pointer;
 }
@@ -881,6 +887,11 @@
 
 .item-link-title {
   font-weight: 500;
+}
+.item-link-title > span,
+.gh-link > span {
+  margin-inline-start: 0.3em;
+  vertical-align: -0.1em;
 }
 
 .item-link-state {
