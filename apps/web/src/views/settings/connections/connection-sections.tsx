@@ -1,6 +1,7 @@
 import type { AuthorizationOperation, Connection, RegisteredProject } from '@roadmap/contracts'
 import { Alert } from '@roadmap/ui/alert'
 import { Button, ButtonLink } from '@roadmap/ui/button'
+import { Icon, icon } from '@roadmap/ui/icon'
 import { Link } from '@roadmap/ui/link'
 import {
   Section,
@@ -157,8 +158,26 @@ function ProjectLaunchButtons({ project }: ProjectLaunchButtonsProps) {
     <>
       <div className="connection-project-actions">
         <ButtonLink href={projectHash(project.key)} size="small">
+          <Icon icon={icon.codeBranch} />
           Go to roadmap
         </ButtonLink>
+        {project.actions.map(
+          (action) =>
+            action.id === 'open-source' &&
+            action.kind === 'external-link' &&
+            action.href && (
+              <ButtonLink
+                key={action.id}
+                href={action.href}
+                size="small"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Icon icon={icon.github} />
+                {action.label}
+              </ButtonLink>
+            ),
+        )}
         {project.actions
           .filter(
             (action) =>
@@ -174,6 +193,9 @@ function ProjectLaunchButtons({ project }: ProjectLaunchButtonsProps) {
               disabled={busy || command.inFlight || !configuration.valid}
               onClick={() => void launch(action.id)}
             >
+              {action.id === 'open-workspace' && <Icon icon={icon.vscode} />}
+              {action.id === 'reveal-source' && <Icon icon={icon.folderOpen} />}
+              {action.id === 'open-terminal' && <Icon icon={icon.terminal} />}
               {action.label}
             </Button>
           ))}

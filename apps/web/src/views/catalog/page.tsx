@@ -3,6 +3,7 @@ import { AlertsCatalogSection } from './alerts'
 import { BadgesCatalogSection } from './badges'
 import { ButtonsCatalogSection } from './buttons'
 import { ControlGroupCatalogSection } from './control-group'
+import { IconsCatalogSection } from './icons'
 import { LinksCatalogSection } from './links'
 import { MarkCatalogSection, TicketMarkCatalogSection } from './mark'
 import { ModalCatalogSection } from './modal'
@@ -38,6 +39,7 @@ export function CatalogPage() {
       <TicketMarkCatalogSection />
       <BadgesCatalogSection />
       <AlertsCatalogSection />
+      <IconsCatalogSection />
       <ButtonsCatalogSection />
       <ControlGroupCatalogSection />
       <ModalCatalogSection />

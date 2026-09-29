@@ -175,9 +175,9 @@ describe('ConnectionSettings', () => {
     expect(markup).toContain('Go to roadmap')
     expect(markup).toContain('href="#/settings/projects/local/my%20workspace"')
     expect(markup).not.toContain('Open Project')
-    expect(markup).toContain('>Open in VS Code</button>')
-    expect(markup).toContain('>View source folder</button>')
-    expect(markup).toContain('>Open Terminal</button>')
+    expect(markup).toContain('Open in VS Code</button>')
+    expect(markup).toContain('View source folder</button>')
+    expect(markup).toContain('Open Terminal</button>')
   })
 
   it('offers source folder controls on GitHub projects as well as local projects', () => {
@@ -207,13 +207,21 @@ describe('ConnectionSettings', () => {
             { id: 'open-workspace', label: 'Open in VS Code', kind: 'server-launch' },
             { id: 'reveal-source', label: 'View source folder', kind: 'server-launch' },
             { id: 'open-terminal', label: 'Open Terminal', kind: 'server-launch' },
+            {
+              id: 'open-source',
+              label: 'Open on GitHub',
+              kind: 'external-link',
+              href: 'https://github.com/acme/app',
+            },
           ],
         },
       ],
     })
-    expect(markup).toContain('>Open in VS Code</button>')
-    expect(markup).toContain('>View source folder</button>')
-    expect(markup).toContain('>Open Terminal</button>')
+    expect(markup).toContain('Open in VS Code</button>')
+    expect(markup).toContain('View source folder</button>')
+    expect(markup).toContain('Open Terminal</button>')
+    expect(markup).toContain('href="https://github.com/acme/app"')
+    expect(markup).toContain('Open on GitHub')
   })
 
   it('keeps setup problems and notices inside the setup section even with no connections', () => {

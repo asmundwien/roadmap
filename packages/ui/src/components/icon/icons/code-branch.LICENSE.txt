@@ -1,0 +1,5 @@
+Code branch icon from Font Awesome Free 7.3.1 by Fonticons, Inc.
+Source: https://github.com/FortAwesome/Font-Awesome/blob/7.x/svgs/solid/code-branch.svg
+License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+https://creativecommons.org/licenses/by/4.0/
+Changes: added an SVG title.
