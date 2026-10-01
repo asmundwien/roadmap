@@ -25,5 +25,5 @@
 
 .input:focus-visible {
   outline: var(--sys-border-width-thick) solid var(--sys-color-on-surface);
-  outline-offset: 2px;
+  outline-offset: var(--sys-space-2xs);
 }

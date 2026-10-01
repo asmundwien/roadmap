@@ -8,7 +8,8 @@
   border: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
   background: var(--sys-color-surface-container);
   color: var(--sys-color-on-surface);
-  box-shadow: 0 var(--sys-space-lg) var(--sys-space-2xl) rgb(0 0 0 / 20%);
+  box-shadow: 0 var(--sys-space-lg) var(--sys-space-2xl)
+    color-mix(in srgb, var(--sys-color-shadow) 20%, transparent);
 }
 
 :global(body):has(.modal:modal) {
