@@ -13,6 +13,7 @@
     "./link": "./src/components/link/link.tsx",
     "./mark": "./src/components/mark/mark.tsx",
     "./modal": "./src/components/modal/modal.tsx",
+    "./navbar": "./src/components/navbar/navbar.tsx",
     "./page": "./src/components/page/page.tsx",
     "./section": "./src/components/section/section.tsx",
     "./surface": "./src/components/surface/surface.tsx",
