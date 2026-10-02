@@ -1,6 +1,12 @@
+import { Alert } from '@roadmap/ui/alert'
+import { Badge } from '@roadmap/ui/badge'
+import { Link } from '@roadmap/ui/link'
+import { PageDescription, PageHeader, PageTitle } from '@roadmap/ui/page'
+import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
+import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
 import type { ReactNode } from 'react'
 import { connectionSettingsHash, projectHash } from '@/router'
-import { IntegrationBadge } from '../shared/integration-badge'
+import { IntegrationBadge } from '@/views/shared/integration-badge'
 import type { AttentionItem, ProjectPortfolio, ProjectPresentation } from './project-presentation'
 import { formatMonth, formatRecency } from './recency'
 
@@ -11,19 +17,17 @@ type OverviewHeaderProps = {
 
 export function OverviewHeader({ capturedAt, portfolio }: OverviewHeaderProps) {
   return (
-    <header className="overview-head">
-      <h1>Roadmap</h1>
-      <p className="muted">
+    <PageHeader>
+      <PageTitle>Roadmap</PageTitle>
+      <PageDescription>
         The whole of things
         {capturedAt !== null && ` · updated ${formatClock(capturedAt)}`}
-      </p>
-      <div className="overview-legend">
-        <OverviewCount tone="decided" count={portfolio.projects.length} label="projects" />
-        <OverviewCount tone="active" count={portfolio.active.length} label="active" />
-        <OverviewCount tone="resting" count={portfolio.resting.length} label="at rest" />
-        <OverviewCount tone="attention" count={portfolio.attention.length} label="need attention" />
-      </div>
-    </header>
+      </PageDescription>
+      <PageDescription>
+        {portfolio.projects.length} projects · {portfolio.active.length} active ·{' '}
+        {portfolio.resting.length} at rest · {portfolio.attention.length} need attention
+      </PageDescription>
+    </PageHeader>
   )
 }
 
@@ -36,14 +40,14 @@ export function OverviewConnectionStatus({ capturedAt, transport }: OverviewConn
   return (
     <>
       {transport === 'disconnected' && (
-        <p className="banner" role="alert">
-          Server unreachable — reconnecting.
+        <Alert>
+          Server unreachable, reconnecting.
           {capturedAt !== null && ` Showing the snapshot from ${formatClock(capturedAt)}.`}
-        </p>
+        </Alert>
       )}
 
       {transport === 'connecting' && capturedAt === null && (
-        <p className="muted">Waiting for the server…</p>
+        <Alert variant="info">Waiting for the server…</Alert>
       )}
     </>
   )
@@ -53,7 +57,7 @@ type ProjectOverviewSectionsProps = { portfolio: ProjectPortfolio }
 
 export function ProjectOverviewSections({ portfolio }: ProjectOverviewSectionsProps) {
   return (
-    <div className="overview-road">
+    <>
       {portfolio.attention.length > 0 && (
         <OverviewSection label="Needs attention">
           {portfolio.attention.map((item) => (
@@ -66,18 +70,14 @@ export function ProjectOverviewSections({ portfolio }: ProjectOverviewSectionsPr
         {portfolio.active.map((project) => (
           <ActiveProjectRow key={projectKey(project)} presentation={project} />
         ))}
-        {portfolio.active.length === 0 && (
-          <p className="overview-empty">No Projects have an open map.</p>
-        )}
+        {portfolio.active.length === 0 && <p>No Projects have an open map.</p>}
       </OverviewSection>
 
       <OverviewSection label="Projects at rest">
         {portfolio.resting.map((project) => (
           <RestingProjectRow key={projectKey(project)} presentation={project} />
         ))}
-        {portfolio.resting.length === 0 && (
-          <p className="overview-empty">No Projects are at rest.</p>
-        )}
+        {portfolio.resting.length === 0 && <p>No Projects are at rest.</p>}
       </OverviewSection>
 
       <OverviewSection label="Waiting for a first map">
@@ -85,29 +85,14 @@ export function ProjectOverviewSections({ portfolio }: ProjectOverviewSectionsPr
           <WaitingProjectRow key={projectKey(project)} presentation={project} />
         ))}
         {portfolio.waiting.length === 0 && (
-          <p className="overview-empty">
+          <p>
             {portfolio.projects.length === 0
               ? 'No Projects registered yet.'
               : 'Every Project has a Wayfinder map.'}
           </p>
         )}
       </OverviewSection>
-    </div>
-  )
-}
-
-type OverviewCountProps = {
-  tone: 'decided' | 'active' | 'resting' | 'attention'
-  count: number
-  label: string
-}
-
-function OverviewCount({ tone, count, label }: OverviewCountProps) {
-  return (
-    <span>
-      <i className={`overview-dot is-${tone}`} aria-hidden="true" />
-      {count} {label}
-    </span>
+    </>
   )
 }
 
@@ -115,50 +100,26 @@ type OverviewSectionProps = { children: ReactNode; label: string }
 
 function OverviewSection({ children, label }: OverviewSectionProps) {
   return (
-    <section className="overview-section">
-      <h2 className="overview-section-label">{label}</h2>
-      {children}
-    </section>
+    <Section>
+      <SectionHeader>
+        <SectionTitle>{label}</SectionTitle>
+      </SectionHeader>
+      <SectionBody>{children}</SectionBody>
+    </Section>
   )
 }
 
 type AttentionRowProps = { item: AttentionItem }
 
 function AttentionRow({ item }: AttentionRowProps) {
-  const content = (
-    <>
-      <span className="overview-node is-attention" aria-hidden="true">
-        ×
-      </span>
-      <span className="overview-copy">
-        <strong>{item.title}</strong>
-        <span className="overview-detail">{item.detail}</span>
-      </span>
-      <span className="overview-tail">
-        {item.kind === 'project'
-          ? 'Project ›'
-          : item.kind === 'connection'
-            ? 'Connection'
-            : 'Configuration'}
-      </span>
-    </>
+  return (
+    <Alert>
+      <strong>{item.title}</strong>
+      <span>{item.detail}</span>
+      {item.kind === 'project' && <Link href={projectHash(item.project)}>Open project</Link>}
+      {item.kind === 'connection' && <Link href={connectionSettingsHash}>Connections</Link>}
+    </Alert>
   )
-
-  if (item.kind === 'project') {
-    return (
-      <a className="overview-row" href={projectHash(item.project)}>
-        {content}
-      </a>
-    )
-  }
-  if (item.kind === 'connection') {
-    return (
-      <a className="overview-row" href={connectionSettingsHash}>
-        {content}
-      </a>
-    )
-  }
-  return <div className="overview-row">{content}</div>
 }
 
 type ActiveProjectRowProps = { presentation: ProjectPresentation }
@@ -168,30 +129,27 @@ function ActiveProjectRow({ presentation }: ActiveProjectRowProps) {
     presentation
   const unavailable = project.availability.status === 'unavailable'
   return (
-    <a className="overview-row is-map" href={projectHash(project.key)}>
-      <span className="overview-node is-flag" aria-hidden="true">
-        ⚑
-      </span>
-      <span className="overview-copy">
-        <span className="overview-kicker">
-          {project.name}
-          <IntegrationBadge integration={project.key.integration} />
-          {connection && <span className="overview-connection">{connection.name}</span>}
-        </span>
-        <strong>{destination}</strong>
-        <span className="overview-detail">
-          {decisions} decided · {openTickets} open{hasFog ? ' · fog ahead' : ''}
-        </span>
-        {priorities.length > 0 && (
-          <span className="overview-priority">Priority · {priorities.join(' · ')}</span>
-        )}
-      </span>
-      <span className={`overview-tail${unavailable ? ' is-unavailable' : ' is-active'}`}>
-        {unavailable
-          ? 'Unavailable'
-          : `Active · ${formatRecency(presentation.activityAt ?? 0, Date.now())}`}
-      </span>
-    </a>
+    <Surface>
+      <SurfaceTitle>
+        <Link href={projectHash(project.key)}>{project.name}</Link>{' '}
+        <IntegrationBadge integration={project.key.integration} />
+      </SurfaceTitle>
+      {connection && <SurfaceDescription>{connection.name}</SurfaceDescription>}
+      <SurfaceDescription>{destination}</SurfaceDescription>
+      <SurfaceDescription>
+        {decisions} decided · {openTickets} open{hasFog ? ' · fog ahead' : ''}
+      </SurfaceDescription>
+      {priorities.length > 0 && (
+        <SurfaceDescription>Priority · {priorities.join(' · ')}</SurfaceDescription>
+      )}
+      <div>
+        <Badge variant={unavailable ? 'danger' : 'info'}>
+          {unavailable
+            ? 'Unavailable'
+            : `Active · ${formatRecency(presentation.activityAt ?? 0, Date.now())}`}
+        </Badge>
+      </div>
+    </Surface>
   )
 }
 
@@ -200,23 +158,18 @@ type RestingProjectRowProps = { presentation: ProjectPresentation }
 function RestingProjectRow({ presentation }: RestingProjectRowProps) {
   const { project, mapCount, decisions, activityAt } = presentation
   return (
-    <a className="overview-row" href={projectHash(project.key)}>
-      <span className="overview-node is-closed" aria-hidden="true">
-        ✓
-      </span>
-      <span className="overview-copy">
-        <strong>
-          {project.name} <IntegrationBadge integration={project.key.integration} />
-        </strong>
-        <span className="overview-detail">
-          All {mapCount === 1 ? '1 map' : `${mapCount} maps`} closed · {decisions} decisions
-          recorded
-        </span>
-      </span>
-      <span className="overview-tail">
+    <Surface>
+      <SurfaceTitle>
+        <Link href={projectHash(project.key)}>{project.name}</Link>{' '}
+        <IntegrationBadge integration={project.key.integration} />
+      </SurfaceTitle>
+      <SurfaceDescription>
+        All {mapCount === 1 ? '1 map' : `${mapCount} maps`} closed · {decisions} decisions recorded
+      </SurfaceDescription>
+      <SurfaceDescription>
         At rest{activityAt === undefined ? '' : ` · ${formatMonth(activityAt)}`}
-      </span>
-    </a>
+      </SurfaceDescription>
+    </Surface>
   )
 }
 
@@ -227,27 +180,22 @@ function WaitingProjectRow({ presentation }: WaitingProjectRowProps) {
   const unavailableCause =
     project.availability.status === 'unavailable' ? project.availability.cause : null
   return (
-    <a className="overview-row" href={projectHash(project.key)}>
-      <span
-        className={`overview-node ${unavailableCause !== null ? 'is-attention' : 'is-open'}`}
-        aria-hidden="true"
-      >
-        {unavailableCause !== null ? '×' : '○'}
-      </span>
-      <span className="overview-copy">
-        <strong>
-          {project.name} <IntegrationBadge integration={project.key.integration} />
-        </strong>
-        <span className="overview-detail">
-          {unavailableCause !== null
-            ? unavailableCause
-            : `Registered${connection ? ` through ${connection.name}` : ''} · no Wayfinder maps yet`}
-        </span>
-      </span>
-      <span className={`overview-tail${unavailableCause !== null ? ' is-unavailable' : ''}`}>
-        {unavailableCause !== null ? 'Unavailable' : 'Waiting'}
-      </span>
-    </a>
+    <Surface>
+      <SurfaceTitle>
+        <Link href={projectHash(project.key)}>{project.name}</Link>{' '}
+        <IntegrationBadge integration={project.key.integration} />
+      </SurfaceTitle>
+      <SurfaceDescription>
+        {unavailableCause !== null
+          ? unavailableCause
+          : `Registered${connection ? ` through ${connection.name}` : ''} · no Wayfinder maps yet`}
+      </SurfaceDescription>
+      <div>
+        <Badge variant={unavailableCause !== null ? 'danger' : 'neutral'}>
+          {unavailableCause !== null ? 'Unavailable' : 'Waiting'}
+        </Badge>
+      </div>
+    </Surface>
   )
 }
 
