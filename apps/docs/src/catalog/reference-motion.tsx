@@ -1,12 +1,10 @@
-import {
-  Section,
-  SectionBody,
-  SectionDescription,
-  SectionHeader,
-  SectionTitle,
-} from '@roadmap/ui/section'
+import { PageTitle } from '@roadmap/ui/page'
+import { Section, SectionBody, SectionDescription, SectionHeader } from '@roadmap/ui/section'
 import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
-import './reference-motion.css'
+import classNames from 'classnames/bind'
+import styles from './reference-motion.module.css'
+
+const cx = classNames.bind(styles)
 
 const DURATIONS = [
   ['150ms', '--ref-duration-150'],
@@ -17,7 +15,7 @@ export function ReferenceMotionCatalogSection() {
   return (
     <Section>
       <SectionHeader>
-        <SectionTitle>Reference motion</SectionTitle>
+        <PageTitle>Reference motion</PageTitle>
         <SectionDescription>
           Durations and easing curves describe movement, not an interaction. Semantic motion tokens
           choose which transition uses them. The samples stay still when reduced motion is
@@ -31,14 +29,14 @@ export function ReferenceMotionCatalogSection() {
             Hover or focus the comparison to move both markers the same distance. The short marker
             finishes in half the time of the medium one.
           </SurfaceDescription>
-          <div className="catalog-reference-motion-demo">
+          <div className={cx('catalog-reference-motion-demo')}>
             <button type="button">Compare durations</button>
             {DURATIONS.map(([label, token]) => (
-              <div className="catalog-reference-motion-row" key={token}>
+              <div className={cx('catalog-reference-motion-row')} key={token}>
                 <strong>{label}</strong>
-                <span className="catalog-reference-motion-track">
+                <span className={cx('catalog-reference-motion-track')}>
                   <span
-                    className="catalog-reference-motion-marker"
+                    className={cx('catalog-reference-motion-marker')}
                     style={{
                       transitionDuration: `var(${token})`,
                       transitionTimingFunction: 'var(--ref-easing-standard)',
@@ -56,13 +54,13 @@ export function ReferenceMotionCatalogSection() {
             Both markers take 300ms. Linear moves at a constant speed; the standard curve changes
             speed as it approaches the end. Linear is a comparison, not a reference token.
           </SurfaceDescription>
-          <div className="catalog-reference-motion-demo">
+          <div className={cx('catalog-reference-motion-demo')}>
             <button type="button">Compare easing</button>
-            <div className="catalog-reference-motion-row">
+            <div className={cx('catalog-reference-motion-row')}>
               <strong>Linear</strong>
-              <span className="catalog-reference-motion-track">
+              <span className={cx('catalog-reference-motion-track')}>
                 <span
-                  className="catalog-reference-motion-marker"
+                  className={cx('catalog-reference-motion-marker')}
                   style={{
                     transitionDuration: 'var(--ref-duration-300)',
                     transitionTimingFunction: 'linear',
@@ -71,11 +69,11 @@ export function ReferenceMotionCatalogSection() {
               </span>
               <code>linear (baseline)</code>
             </div>
-            <div className="catalog-reference-motion-row">
+            <div className={cx('catalog-reference-motion-row')}>
               <strong>Standard</strong>
-              <span className="catalog-reference-motion-track">
+              <span className={cx('catalog-reference-motion-track')}>
                 <span
-                  className="catalog-reference-motion-marker"
+                  className={cx('catalog-reference-motion-marker')}
                   style={{
                     transitionDuration: 'var(--ref-duration-300)',
                     transitionTimingFunction: 'var(--ref-easing-standard)',

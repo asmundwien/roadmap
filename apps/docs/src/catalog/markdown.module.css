@@ -1,0 +1,103 @@
+.markdown {
+  min-width: 0;
+  color: var(--sys-color-on-surface);
+  font-size: var(--sys-typescale-body-size);
+  line-height: var(--sys-typescale-body-line-height);
+  overflow-wrap: anywhere;
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown h1 {
+  margin-block: var(--sys-space-xl);
+  font-size: var(--sys-typescale-title-size);
+  line-height: var(--sys-typescale-title-line-height);
+  font-weight: var(--sys-font-weight-bold);
+}
+
+.markdown h2 {
+  margin-block: var(--sys-space-xl) var(--sys-space-md);
+  font-size: var(--sys-typescale-heading-size);
+  line-height: var(--sys-typescale-heading-line-height);
+  font-weight: var(--sys-font-weight-strong);
+}
+
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  margin-block: var(--sys-space-lg) var(--sys-space-sm);
+  font-size: var(--sys-typescale-subheading-size);
+  line-height: var(--sys-typescale-subheading-line-height);
+  font-weight: var(--sys-font-weight-strong);
+}
+
+.markdown p,
+.markdown ul,
+.markdown ol {
+  margin-block: var(--sys-space-md);
+}
+
+.markdown ul,
+.markdown ol {
+  padding-inline-start: var(--sys-space-2xl);
+}
+
+.markdown a {
+  color: var(--sys-color-primary);
+  text-underline-offset: var(--sys-space-2xs);
+}
+
+.markdown a:focus-visible {
+  outline: var(--sys-border-width-thick) solid var(--sys-color-primary);
+  outline-offset: var(--sys-space-2xs);
+}
+
+.markdown code,
+.markdown pre {
+  font-family: var(--sys-font-family-code);
+  font-size: var(--sys-typescale-body-sm-size);
+}
+
+.markdown pre {
+  max-width: 100%;
+  overflow-x: auto;
+  padding: var(--sys-space-lg);
+  border: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
+  background: var(--sys-color-surface-container);
+  line-height: var(--sys-typescale-body-sm-line-height);
+}
+
+.markdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin-block: var(--sys-space-lg);
+  font-size: var(--sys-typescale-body-sm-size);
+}
+
+.markdown th,
+.markdown td {
+  padding: var(--sys-space-sm) var(--sys-space-md);
+  border: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
+  text-align: left;
+}
+
+.markdown th {
+  background: var(--sys-color-surface-container);
+  font-weight: var(--sys-font-weight-strong);
+}
+
+.markdown blockquote {
+  margin-inline: 0;
+  padding-inline-start: var(--sys-space-lg);
+  border-inline-start: var(--sys-border-width-thick) solid var(--sys-color-outline);
+  color: var(--sys-color-on-surface-variant);
+}

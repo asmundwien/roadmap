@@ -1,51 +1,19 @@
 import { Page, PageDescription, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
-import { AlertsCatalogSection } from './alerts'
-import { BadgesCatalogSection } from './badges'
-import { ButtonsCatalogSection } from './buttons'
-import { ControlGroupCatalogSection } from './control-group'
-import { IconsCatalogSection } from './icons'
-import { LinksCatalogSection } from './links'
-import { MarkCatalogSection, TicketMarkCatalogSection } from './mark'
-import { ModalCatalogSection } from './modal'
-import { ReferenceColorsCatalogSection } from './reference-colors'
-import { ReferenceDimensionsCatalogSection } from './reference-dimensions'
-import { ReferenceMotionCatalogSection } from './reference-motion'
-import { ReferenceTypographyCatalogSection } from './reference-typography'
-import { SemanticPaletteCatalogSection } from './semantic'
-import { StandaloneSurfaceCatalogExample, SurfacesCatalogSection } from './surfaces'
-import { TextInputCatalogSection } from './text-input'
-import { ToggleCatalogSection } from './toggle'
+import { TicketMarkCatalogSection } from './mark'
 
 export function CatalogPage() {
   return (
     <Page>
       <PageHeader>
-        <PageEyebrow>UI inventory</PageEyebrow>
+        <PageEyebrow>Roadmap presentation</PageEyebrow>
         <PageTitle>Components</PageTitle>
         <PageDescription>
-          Reference values, semantic color roles, surfaces, the mark, and shared controls. The
-          examples render with the same tokens as the product.
+          The ticket mark maps Roadmap state and type to the shared Mark primitive. Shared
+          components and design tokens are documented in the separate documentation app.
         </PageDescription>
       </PageHeader>
 
-      <ReferenceColorsCatalogSection />
-      <ReferenceTypographyCatalogSection />
-      <ReferenceDimensionsCatalogSection />
-      <ReferenceMotionCatalogSection />
-      <SemanticPaletteCatalogSection />
-      <SurfacesCatalogSection />
-      <StandaloneSurfaceCatalogExample />
-      <MarkCatalogSection />
       <TicketMarkCatalogSection />
-      <BadgesCatalogSection />
-      <AlertsCatalogSection />
-      <IconsCatalogSection />
-      <ButtonsCatalogSection />
-      <ControlGroupCatalogSection />
-      <ModalCatalogSection />
-      <TextInputCatalogSection />
-      <ToggleCatalogSection />
-      <LinksCatalogSection />
     </Page>
   )
 }

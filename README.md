@@ -8,6 +8,7 @@ Roadmap is a pnpm workspace:
 
 - `apps/web` is the Vite and React SPA.
 - `apps/server` maintains the single `ApplicationState` and owns all external integrations.
+- [apps/docs](apps/docs/README.md) is the standalone catalog for shared components and design tokens.
 - `packages/contracts` defines shared domain types and runtime codecs for transport messages.
 - `packages/ui` is the design system: tokens and presentational components, with no domain knowledge.
 
@@ -19,11 +20,17 @@ See [docs/architecture.md](docs/architecture.md) for the implementation map and 
 
 Roadmap requires Node.js 22 or newer. pnpm is provided through Corepack.
 
-Copy `.env.example` to the repository-root `.env.local`, then start both applications:
+Copy `.env.example` to the repository-root `.env.local`, then start all development apps:
 
 ```sh
 pnpm dev
 ```
+
+`pnpm dev` starts all apps:
+
+- apps/server: `http://localhost:8790`
+- apps/web: `http://localhost:5173`
+- apps/docs: `http://localhost:5174`
 
 GitHub support uses the public `ROADMAP_GITHUB_APP_CLIENT_ID` and `ROADMAP_GITHUB_APP_SLUG` values. macOS Keychain stores device-flow credentials; environment files do not contain them. Local projects work without the GitHub App values.
 

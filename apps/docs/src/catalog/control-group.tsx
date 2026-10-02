@@ -1,12 +1,7 @@
 import { Button } from '@roadmap/ui/button'
 import { ControlGroup } from '@roadmap/ui/control-group'
-import {
-  Section,
-  SectionBody,
-  SectionDescription,
-  SectionHeader,
-  SectionTitle,
-} from '@roadmap/ui/section'
+import { PageTitle } from '@roadmap/ui/page'
+import { Section, SectionBody, SectionDescription, SectionHeader } from '@roadmap/ui/section'
 import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
 import { TextInput } from '@roadmap/ui/text-input'
 
@@ -14,7 +9,7 @@ export function ControlGroupCatalogSection() {
   return (
     <Section>
       <SectionHeader>
-        <SectionTitle>Control group</SectionTitle>
+        <PageTitle>Control group</PageTitle>
         <SectionDescription>
           Group buttons or combine a text input with a button. The group size applies to every
           control, overriding child sizes.

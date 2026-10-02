@@ -1,12 +1,10 @@
-import {
-  Section,
-  SectionBody,
-  SectionDescription,
-  SectionHeader,
-  SectionTitle,
-} from '@roadmap/ui/section'
+import { PageTitle } from '@roadmap/ui/page'
+import { Section, SectionBody, SectionDescription, SectionHeader } from '@roadmap/ui/section'
 import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
-import './reference-dimensions.css'
+import classNames from 'classnames/bind'
+import styles from './reference-dimensions.module.css'
+
+const cx = classNames.bind(styles)
 
 const SPACES = [
   ['none', 0],
@@ -34,7 +32,7 @@ export function ReferenceDimensionsCatalogSection() {
   return (
     <Section>
       <SectionHeader>
-        <SectionTitle>Reference dimensions</SectionTitle>
+        <PageTitle>Reference dimensions</PageTitle>
         <SectionDescription>
           Reference spacing and geometry have no layout or component role. Semantic tokens assign
           these measurements to gaps, border weights, and corner shapes.
@@ -47,13 +45,13 @@ export function ReferenceDimensionsCatalogSection() {
             Each bar starts at the same edge. The numbers resolve to pixels at a 16px root; rem
             keeps gaps and padding proportional when the root font size changes.
           </SurfaceDescription>
-          <div className="catalog-reference-dimension-list">
+          <div className={cx('catalog-reference-dimension-list')}>
             {SPACES.map(([name, space]) => {
               const token = `--ref-space-${name}`
               return (
-                <div className="catalog-reference-dimension-row" key={token}>
+                <div className={cx('catalog-reference-dimension-row')} key={token}>
                   <strong>{space}px</strong>
-                  <div className="catalog-reference-space-track">
+                  <div className={cx('catalog-reference-space-track')}>
                     <span style={{ width: `var(${token})` }} />
                   </div>
                   <code>{token}</code>
@@ -68,11 +66,11 @@ export function ReferenceDimensionsCatalogSection() {
             A one-pixel hairline and a three-pixel edge outline the same shape. The tokens specify
             thickness only, not color.
           </SurfaceDescription>
-          <div className="catalog-reference-dimension-pairs">
+          <div className={cx('catalog-reference-dimension-pairs')}>
             {BORDER_WIDTHS.map(([name, width]) => {
               const token = `--ref-border-width-${name}`
               return (
-                <div className="catalog-reference-border-sample" key={token}>
+                <div className={cx('catalog-reference-border-sample')} key={token}>
                   <span style={{ borderWidth: `var(${token})` }} aria-hidden="true" />
                   <strong>{width}px</strong>
                   <code>{token}</code>
@@ -87,9 +85,9 @@ export function ReferenceDimensionsCatalogSection() {
             Zero keeps a square corner; full rounds a fixed square into a circle. Radius does not
             select a component shape by itself.
           </SurfaceDescription>
-          <div className="catalog-reference-dimension-pairs">
+          <div className={cx('catalog-reference-dimension-pairs')}>
             {RADII.map(([label, token]) => (
-              <div className="catalog-reference-radius-sample" key={token}>
+              <div className={cx('catalog-reference-radius-sample')} key={token}>
                 <span style={{ borderRadius: `var(${token})` }} aria-hidden="true" />
                 <strong>{label}</strong>
                 <code>{token}</code>

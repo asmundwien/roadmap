@@ -2,13 +2,13 @@
   display: grid;
   gap: var(--sys-space-sm);
   padding: var(--sys-space-md);
-  border: 1px solid var(--sys-color-outline-variant);
+  border: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
 }
 
 .catalog-reference-motion-demo button {
   justify-self: start;
   padding: var(--sys-space-xs) var(--sys-space-md);
-  border: 1px solid var(--sys-color-outline);
+  border: var(--sys-border-width-thin) solid var(--sys-color-outline);
   border-radius: var(--sys-radius-pill);
   background: var(--sys-color-surface-container);
   color: var(--sys-color-on-surface);
@@ -24,10 +24,12 @@
 
 .catalog-reference-motion-row strong,
 .catalog-reference-motion-row code {
+  font-family: var(--sys-font-family-code);
   font-size: var(--sys-typescale-body-sm-size);
 }
 
 .catalog-reference-motion-row code {
+  font-family: var(--sys-font-family-code);
   overflow-wrap: anywhere;
   color: var(--sys-color-on-surface-variant);
 }
@@ -67,6 +69,7 @@
   }
 
   .catalog-reference-motion-row code {
+    font-family: var(--sys-font-family-code);
     grid-column: 2;
   }
 }

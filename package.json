@@ -9,8 +9,8 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "pnpm --parallel --filter @roadmap/web --filter @roadmap/server dev",
-    "build:web": "pnpm --filter @roadmap/web build",
+    "dev": "pnpm --parallel dev",
+    "build": "pnpm build",
     "typecheck": "tsc -b --noEmit",
     "test": "pnpm -r test",
     "check": "biome check .",

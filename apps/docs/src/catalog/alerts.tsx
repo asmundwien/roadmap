@@ -1,18 +1,13 @@
 import { Alert } from '@roadmap/ui/alert'
-import {
-  Section,
-  SectionBody,
-  SectionDescription,
-  SectionHeader,
-  SectionTitle,
-} from '@roadmap/ui/section'
+import { PageTitle } from '@roadmap/ui/page'
+import { Section, SectionBody, SectionDescription, SectionHeader } from '@roadmap/ui/section'
 import { Surface } from '@roadmap/ui/surface'
 
 export function AlertsCatalogSection() {
   return (
     <Section>
       <SectionHeader>
-        <SectionTitle>Alerts</SectionTitle>
+        <PageTitle>Alerts</PageTitle>
         <SectionDescription>
           Persistent messages. Error alerts use role="alert" and announce immediately; informational
           alerts do not interrupt assistive technology.

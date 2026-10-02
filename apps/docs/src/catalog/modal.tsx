@@ -1,12 +1,7 @@
 import { Button } from '@roadmap/ui/button'
 import { Modal } from '@roadmap/ui/modal'
-import {
-  Section,
-  SectionBody,
-  SectionDescription,
-  SectionHeader,
-  SectionTitle,
-} from '@roadmap/ui/section'
+import { PageTitle } from '@roadmap/ui/page'
+import { Section, SectionBody, SectionDescription, SectionHeader } from '@roadmap/ui/section'
 import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
 import { useState } from 'react'
 
@@ -16,7 +11,7 @@ export function ModalCatalogSection() {
   return (
     <Section>
       <SectionHeader>
-        <SectionTitle>Modal</SectionTitle>
+        <PageTitle>Modal</PageTitle>
         <SectionDescription>
           A native dialog keeps focus inside and stops background scrolling while open. Escape, the
           close button, and the backdrop request dismissal.

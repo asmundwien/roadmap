@@ -20,6 +20,7 @@
 }
 
 .catalog-reference-type-row code {
+  font-family: var(--sys-font-family-code);
   overflow-wrap: anywhere;
   color: var(--sys-color-on-surface-variant);
   font-size: var(--sys-typescale-body-sm-size);
@@ -31,6 +32,7 @@
   }
 
   .catalog-reference-type-row code {
+    font-family: var(--sys-font-family-code);
     grid-column: 2;
   }
 }

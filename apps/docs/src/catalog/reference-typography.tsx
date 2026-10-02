@@ -1,12 +1,10 @@
-import {
-  Section,
-  SectionBody,
-  SectionDescription,
-  SectionHeader,
-  SectionTitle,
-} from '@roadmap/ui/section'
+import { PageTitle } from '@roadmap/ui/page'
+import { Section, SectionBody, SectionDescription, SectionHeader } from '@roadmap/ui/section'
 import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
-import './reference-typography.css'
+import classNames from 'classnames/bind'
+import styles from './reference-typography.module.css'
+
+const cx = classNames.bind(styles)
 
 const FAMILIES = [
   ['Sans', '--ref-font-family-sans'],
@@ -37,7 +35,7 @@ export function ReferenceTypographyCatalogSection() {
   return (
     <Section>
       <SectionHeader>
-        <SectionTitle>Reference typography</SectionTitle>
+        <PageTitle>Reference typography</PageTitle>
         <SectionDescription>
           Font values describe the type itself, not where it appears. Semantic type roles combine
           these values into titles, body copy, labels, and code.
@@ -50,9 +48,9 @@ export function ReferenceTypographyCatalogSection() {
             Compare the system sans stack with the monospace stack using the same letters and
             digits.
           </SurfaceDescription>
-          <div className="catalog-reference-type-list">
+          <div className={cx('catalog-reference-type-list')}>
             {FAMILIES.map(([label, token]) => (
-              <div className="catalog-reference-type-row" key={token}>
+              <div className={cx('catalog-reference-type-row')} key={token}>
                 <strong>{label}</strong>
                 <span style={{ fontFamily: `var(${token})` }}>Aa Wayfinder 0123</span>
                 <code>{token}</code>
@@ -66,11 +64,11 @@ export function ReferenceTypographyCatalogSection() {
             The labels name steps in the type scale. Pixel values assume a 16px root; rem units
             scale with the reader's root font setting.
           </SurfaceDescription>
-          <div className="catalog-reference-type-list">
+          <div className={cx('catalog-reference-type-list')}>
             {SIZES.map(([name, pixels]) => {
               const token = `--ref-font-size-${name}`
               return (
-                <div className="catalog-reference-type-row" key={token}>
+                <div className={cx('catalog-reference-type-row')} key={token}>
                   <strong>{pixels}px</strong>
                   <span style={{ fontSize: `var(${token})` }}>Aa Roadmap</span>
                   <code>{token}</code>
@@ -84,11 +82,11 @@ export function ReferenceTypographyCatalogSection() {
           <SurfaceDescription>
             Hold the size constant to compare normal (400), semibold (600), and bold (700).
           </SurfaceDescription>
-          <div className="catalog-reference-type-list">
+          <div className={cx('catalog-reference-type-list')}>
             {WEIGHTS.map(([name, weight]) => {
               const token = `--ref-font-weight-${name}`
               return (
-                <div className="catalog-reference-type-row" key={token}>
+                <div className={cx('catalog-reference-type-row')} key={token}>
                   <strong>{weight}</strong>
                   <span style={{ fontWeight: `var(${token})` }}>Aa Wayfinder</span>
                   <code>{token}</code>
@@ -103,11 +101,11 @@ export function ReferenceTypographyCatalogSection() {
             Compare the distance between two baselines at one font size. These unitless multipliers
             follow the font size of their text.
           </SurfaceDescription>
-          <div className="catalog-reference-type-list">
+          <div className={cx('catalog-reference-type-list')}>
             {LINE_HEIGHTS.map(([name, height]) => {
               const token = `--ref-line-height-${name}`
               return (
-                <div className="catalog-reference-type-row" key={token}>
+                <div className={cx('catalog-reference-type-row')} key={token}>
                   <strong>{height}%</strong>
                   <span style={{ lineHeight: `var(${token})` }}>
                     First line

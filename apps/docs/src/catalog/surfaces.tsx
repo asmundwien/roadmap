@@ -1,18 +1,16 @@
-import {
-  Section,
-  SectionBody,
-  SectionDescription,
-  SectionHeader,
-  SectionTitle,
-} from '@roadmap/ui/section'
+import { PageTitle } from '@roadmap/ui/page'
+import { Section, SectionBody, SectionDescription, SectionHeader } from '@roadmap/ui/section'
 import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
-import './surfaces.css'
+import classNames from 'classnames/bind'
+import styles from './surfaces.module.css'
+
+const cx = classNames.bind(styles)
 
 export function SurfacesCatalogSection() {
   return (
     <Section>
       <SectionHeader>
-        <SectionTitle>Surfaces</SectionTitle>
+        <PageTitle>Surfaces</PageTitle>
         <SectionDescription>
           Subtle, default, and emphasized set visual priority. Danger marks destructive content.
           None announces an error; use Alert for errors or notices. SectionBody spaces surfaces
@@ -59,12 +57,21 @@ export function SurfacesCatalogSection() {
 
 export function StandaloneSurfaceCatalogExample() {
   return (
-    <Surface variant="subtle" className="catalog-standalone-surface">
+    <Surface variant="subtle" className={cx('catalog-standalone-surface')}>
       <h2>Standalone surface</h2>
       <SurfaceDescription>
         Surface also works directly inside Page, without Section or SectionBody. It groups content
         without announcing a status or creating a section landmark.
       </SurfaceDescription>
     </Surface>
+  )
+}
+
+export function SurfacesCatalogPage() {
+  return (
+    <>
+      <SurfacesCatalogSection />
+      <StandaloneSurfaceCatalogExample />
+    </>
   )
 }

@@ -16,18 +16,19 @@
   grid-row: span 2;
   width: 2rem;
   height: 2rem;
-  border: 1px solid var(--edge);
-  border-radius: 50%;
+  border: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
+  border-radius: var(--sys-radius-pill);
 }
 
 .catalog-reference-swatch strong {
-  font-size: 0.75rem;
+  font-size: var(--sys-typescale-body-sm-size);
 }
 
 .catalog-reference-swatch code {
+  font-family: var(--sys-font-family-code);
   overflow: hidden;
-  color: var(--muted);
-  font-size: 0.66rem;
+  color: var(--sys-color-on-surface-variant);
+  font-size: var(--sys-typescale-label-sm-size);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

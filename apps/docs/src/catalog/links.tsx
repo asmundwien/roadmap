@@ -1,18 +1,13 @@
 import { Link } from '@roadmap/ui/link'
-import {
-  Section,
-  SectionBody,
-  SectionDescription,
-  SectionHeader,
-  SectionTitle,
-} from '@roadmap/ui/section'
+import { PageTitle } from '@roadmap/ui/page'
+import { Section, SectionBody, SectionDescription, SectionHeader } from '@roadmap/ui/section'
 import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
 
 export function LinksCatalogSection() {
   return (
     <Section>
       <SectionHeader>
-        <SectionTitle>Links</SectionTitle>
+        <PageTitle>Links</PageTitle>
         <SectionDescription>
           Links navigate to a destination. Button-shaped links remain links, not buttons.
         </SectionDescription>
@@ -23,7 +18,7 @@ export function LinksCatalogSection() {
           <SurfaceDescription>
             Underlined text with a right arrow identifies navigation within the application.
           </SurfaceDescription>
-          <Link href="#/components">Components</Link>
+          <Link href="/components/buttons">Buttons</Link>
         </Surface>
         <Surface>
           <SurfaceTitle>External</SurfaceTitle>

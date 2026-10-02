@@ -11,7 +11,7 @@
 }
 
 .catalog-reference-space-track {
-  border-left: 1px solid var(--sys-color-outline);
+  border-left: var(--sys-border-width-thin) solid var(--sys-color-outline);
 }
 
 .catalog-reference-space-track span {
@@ -39,7 +39,7 @@
   box-sizing: border-box;
   width: 3rem;
   height: 3rem;
-  border: 1px solid var(--sys-color-outline);
+  border: var(--sys-border-width-thin) solid var(--sys-color-outline);
 }
 
 .catalog-reference-radius-sample > span {
@@ -55,6 +55,7 @@
 .catalog-reference-dimension-row code,
 .catalog-reference-border-sample code,
 .catalog-reference-radius-sample code {
+  font-family: var(--sys-font-family-code);
   color: var(--sys-color-on-surface-variant);
   font-size: var(--sys-typescale-body-sm-size);
 }
@@ -65,6 +66,7 @@
   }
 
   .catalog-reference-dimension-row code {
+    font-family: var(--sys-font-family-code);
     grid-column: 2;
   }
 }

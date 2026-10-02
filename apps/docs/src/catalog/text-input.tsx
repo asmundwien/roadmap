@@ -1,11 +1,12 @@
-import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
+import { PageTitle } from '@roadmap/ui/page'
+import { Section, SectionBody, SectionHeader } from '@roadmap/ui/section'
 import { TextInput } from '@roadmap/ui/text-input'
 
 export function TextInputCatalogSection() {
   return (
     <Section>
       <SectionHeader>
-        <SectionTitle>Text input</SectionTitle>
+        <PageTitle>Text input</PageTitle>
       </SectionHeader>
       <SectionBody>
         <label htmlFor="catalog-text-input-small">Small</label>

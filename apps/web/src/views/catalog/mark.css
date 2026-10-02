@@ -7,10 +7,10 @@
 
 .catalog-column-label,
 .catalog-row-label {
-  color: var(--muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.66rem;
-  font-weight: 700;
+  color: var(--sys-color-on-surface-variant);
+  font-family: var(--sys-font-family-code);
+  font-size: var(--sys-typescale-label-sm-size);
+  font-weight: var(--sys-font-weight-bold);
   text-transform: uppercase;
 }
 
@@ -20,25 +20,8 @@
 
 .catalog-mark-example {
   display: grid;
-  min-height: 3rem;
+  min-height: var(--sys-size-control-lg);
   place-items: center;
-}
-
-.catalog-mark-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: end;
-  gap: var(--sys-space-xl);
-}
-
-.catalog-mark-cell {
-  display: grid;
-  justify-items: center;
-  gap: var(--sys-space-sm);
-}
-
-.catalog-mark-cell code {
-  font-size: 0.66rem;
 }
 
 @media (max-width: 780px) {

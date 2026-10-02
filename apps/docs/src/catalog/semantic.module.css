@@ -8,21 +8,22 @@
   display: grid;
   min-height: 8rem;
   padding: var(--sys-space-md);
-  border: 1px solid var(--sys-color-outline);
+  border: var(--sys-border-width-thin) solid var(--sys-color-outline);
 }
 
 .catalog-semantic-pair strong {
-  font-size: 0.8rem;
+  font-size: var(--sys-typescale-body-sm-size);
 }
 
 .catalog-semantic-pair span {
   margin-bottom: auto;
-  font-size: 0.72rem;
+  font-size: var(--sys-typescale-body-sm-size);
 }
 
 .catalog-semantic-pair code {
+  font-family: var(--sys-font-family-code);
   overflow: hidden;
-  font-size: 0.66rem;
+  font-size: var(--sys-typescale-label-sm-size);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -30,7 +31,7 @@
 .catalog-semantic-support {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  border: 1px solid var(--sys-color-outline-variant);
+  border: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
 }
 
 .catalog-semantic-support > div {
@@ -41,37 +42,38 @@
 }
 
 .catalog-semantic-support > div:nth-child(even) {
-  border-left: 1px solid var(--sys-color-outline-variant);
+  border-left: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
 }
 
 .catalog-semantic-support > div:nth-child(n + 3) {
-  border-top: 1px solid var(--sys-color-outline-variant);
+  border-top: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
 }
 
 .catalog-semantic-support span {
   grid-row: span 3;
   width: 2rem;
   height: 2rem;
-  border: 1px solid var(--sys-color-outline);
-  border-radius: 50%;
+  border: var(--sys-border-width-thin) solid var(--sys-color-outline);
+  border-radius: var(--sys-radius-pill);
 }
 
 .catalog-semantic-support strong {
-  font-size: 0.75rem;
+  font-size: var(--sys-typescale-body-sm-size);
 }
 
 .catalog-semantic-support code {
+  font-family: var(--sys-font-family-code);
   overflow: hidden;
-  color: var(--muted);
-  font-size: 0.66rem;
+  color: var(--sys-color-on-surface-variant);
+  font-size: var(--sys-typescale-label-sm-size);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .catalog-semantic-support p {
   margin-top: var(--sys-space-xs);
-  color: var(--muted);
-  font-size: 0.7rem;
+  color: var(--sys-color-on-surface-variant);
+  font-size: var(--sys-typescale-label-sm-size);
 }
 
 @media (max-width: 780px) {
@@ -84,6 +86,6 @@
   }
 
   .catalog-semantic-support > div + div {
-    border-top: 1px solid var(--sys-color-outline-variant);
+    border-top: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
   }
 }

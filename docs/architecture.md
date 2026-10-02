@@ -2,12 +2,13 @@
 
 ## System shape
 
-Roadmap is a local-first, read-only application for one user. The code is split across four workspace areas:
+Roadmap is a local-first, read-only application for one user. The repository has five workspace areas:
 
 - `packages/contracts` defines domain types such as `Project`, `WayfinderMap`, `Ticket`, and `ApplicationState`. It also provides runtime codecs for transport messages through `@roadmap/contracts/codecs`.
 - `packages/ui` provides domain-independent presentational components and design tokens through the `@roadmap/ui` workspace package.
 - `apps/server` owns application state, persistence, integrations, and network access.
 - `apps/web` renders application state and sends queries and commands.
+- `apps/docs` owns the standalone catalog for public `@roadmap/ui` components and tokens.
 
 WebSocket carries full state replacements. HTTP carries `query` and `execute` requests.
 
@@ -23,11 +24,15 @@ WebSocket carries full state replacements. HTTP carries `query` and `execute` re
 
 Each routable area under `apps/web/src/views` has a `page.tsx` entry point except Automation settings. `App` routes the Connections list, `settings/connections/[connectionId]/page.tsx`, and its connection-scoped `import/page.tsx` independently. The detail page selects the Connection and composes sibling Details and Manage connection sections. Each section reads its own live state and owns its own commands, busy state, and errors; the list owns only setup and new-connection authorization. The import page registers a Project through the selected Connection. Project registration details remain at `settings/projects/[projectId]/page.tsx`. `shared/` and `shell/` are support areas, not pages.
 
-The catalog at `#/components` presents the UI package's components and token layers. Catalog previews can read reference values directly; product views use semantic roles. Web views map domain state to presentational props before passing it to `@roadmap/ui` components. `apps/web/src/main.tsx` loads the package stylesheet before application styles.
+The web catalog at `#/components` documents components that are tightly coupled to the domain. These components map domain state to presentational props, and builds on agnostic content from `@roadmap/ui`.
 
 React functions use named `...Props` types instead of inline object annotations. Dynamic class composition in `apps/web` uses `classnames` imported as `cn`; modules do not define class-name helper functions.
 
 Web source files use `@/` for imports outside their current directory. The alias maps to `apps/web/src`; sibling imports remain relative. TypeScript imports omit `.ts` and `.tsx` extensions.
+
+## Documentation application
+
+`apps/docs` consumes the public `@roadmap/ui` exports and token-layer guides. It owns catalog composition, navigation, and presentation behind a standalone static site, with no dependency on web source, domain contracts, application providers, or server configuration. Product encodings remain in `apps/web`.
 
 ## Server
 

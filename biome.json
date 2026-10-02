@@ -61,6 +61,7 @@
     {
       "includes": [
         "apps/web/vite.config.ts",
+        "apps/docs/vite.config.ts",
         "apps/server/vitest.config.ts",
         "packages/ui/vitest.config.ts"
       ],

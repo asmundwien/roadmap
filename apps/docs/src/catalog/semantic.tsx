@@ -1,12 +1,11 @@
-import {
-  Section,
-  SectionBody,
-  SectionDescription,
-  SectionHeader,
-  SectionTitle,
-} from '@roadmap/ui/section'
+import { Section, SectionBody } from '@roadmap/ui/section'
 import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
-import './semantic.css'
+import classNames from 'classnames/bind'
+import semanticSource from '../../../../packages/ui/src/styles/semantic/README.md?raw'
+import { Markdown } from './markdown'
+import styles from './semantic.module.css'
+
+const cx = classNames.bind(styles)
 
 const SEMANTIC_SURFACE_PAIRS = [
   ['Surface', '--sys-color-surface', '--sys-color-on-surface'],
@@ -39,13 +38,7 @@ const SEMANTIC_SUPPORT_ROLES = [
 export function SemanticPaletteCatalogSection() {
   return (
     <Section>
-      <SectionHeader>
-        <SectionTitle>Semantic role layer</SectionTitle>
-        <SectionDescription>
-          System tokens name a color's purpose. Components consume these roles; only this layer
-          refers to reference colors.
-        </SectionDescription>
-      </SectionHeader>
+      <Markdown source={semanticSource} />
 
       <SectionBody>
         <Surface>
@@ -54,7 +47,7 @@ export function SemanticPaletteCatalogSection() {
             Surface roles establish elevation without naming a pigment. On-surface roles are the
             supported foregrounds for these backgrounds.
           </SurfaceDescription>
-          <div className="catalog-semantic-pairs">
+          <div className={cx('catalog-semantic-pairs')}>
             {SEMANTIC_SURFACE_PAIRS.map(([label, background, foreground]) => (
               <SemanticColorPair
                 background={background}
@@ -72,7 +65,7 @@ export function SemanticPaletteCatalogSection() {
             Each intent has a strong pair and a quieter container pair. An on-color role is valid
             only on its matching background role.
           </SurfaceDescription>
-          <div className="catalog-semantic-pairs">
+          <div className={cx('catalog-semantic-pairs')}>
             {SEMANTIC_INTENTS.flatMap(([label, intent]) => [
               <SemanticColorPair
                 background={`--sys-color-${intent}`}
@@ -92,7 +85,7 @@ export function SemanticPaletteCatalogSection() {
 
         <Surface>
           <SurfaceTitle>Supporting roles</SurfaceTitle>
-          <div className="catalog-semantic-support">
+          <div className={cx('catalog-semantic-support')}>
             {SEMANTIC_SUPPORT_ROLES.map(([label, token, description]) => (
               <div key={token}>
                 <span style={{ backgroundColor: `var(${token})` }} aria-hidden="true" />
@@ -117,7 +110,7 @@ type SemanticColorPairProps = {
 function SemanticColorPair({ label, background, foreground }: SemanticColorPairProps) {
   return (
     <div
-      className="catalog-semantic-pair"
+      className={cx('catalog-semantic-pair')}
       style={{ backgroundColor: `var(${background})`, color: `var(${foreground})` }}
     >
       <strong>{label}</strong>

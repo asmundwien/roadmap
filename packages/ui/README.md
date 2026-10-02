@@ -6,6 +6,10 @@ This workspace package contains presentational React components and shared desig
 
 Load `@roadmap/ui/index.css` once at the application entry, before application styles. It provides shared tokens used by the components.
 
+## Documentation
+
+The standalone [docs app](../../apps/docs/README.md) previews this package's public exports. Component contracts live in their types and JSDoc; token-layer guides live beside the tokens.
+
 ## Example of usage
 
 Import components exported by [`package.json`](./package.json). For example:

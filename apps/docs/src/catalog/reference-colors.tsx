@@ -1,12 +1,10 @@
-import {
-  Section,
-  SectionBody,
-  SectionDescription,
-  SectionHeader,
-  SectionTitle,
-} from '@roadmap/ui/section'
+import { PageTitle } from '@roadmap/ui/page'
+import { Section, SectionBody, SectionDescription, SectionHeader } from '@roadmap/ui/section'
 import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
-import './reference-colors.css'
+import classNames from 'classnames/bind'
+import styles from './reference-colors.module.css'
+
+const cx = classNames.bind(styles)
 
 const REFERENCE_COLOR_STEPS = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950] as const
 const REFERENCE_COLOR_FAMILIES = [
@@ -27,7 +25,7 @@ export function ReferenceColorsCatalogSection() {
   return (
     <Section>
       <SectionHeader>
-        <SectionTitle>Reference colors</SectionTitle>
+        <PageTitle>Reference colors</PageTitle>
         <SectionDescription>
           Literal pigments, not foreground and background pairs. The ramps run from 50 (lightest) to
           950 (darkest); a step alone does not promise readable text. Product styles use semantic
@@ -42,9 +40,9 @@ export function ReferenceColorsCatalogSection() {
             White and black sit outside the tonal ramps. Their names describe the pigment, not a
             surface or text role.
           </SurfaceDescription>
-          <div className="catalog-reference-swatches">
+          <div className={cx('catalog-reference-swatches')}>
             {COMMON_REFERENCE_COLORS.map(([label, token]) => (
-              <div className="catalog-reference-swatch" key={token}>
+              <div className={cx('catalog-reference-swatch')} key={token}>
                 <span style={{ background: `var(${token})` }} aria-hidden="true" />
                 <strong>{label}</strong>
                 <code>{token}</code>
@@ -55,11 +53,11 @@ export function ReferenceColorsCatalogSection() {
         {REFERENCE_COLOR_FAMILIES.map(([label, family]) => (
           <Surface key={family}>
             <SurfaceTitle>{label}</SurfaceTitle>
-            <div className="catalog-reference-swatches">
+            <div className={cx('catalog-reference-swatches')}>
               {REFERENCE_COLOR_STEPS.map((step) => {
                 const token = `--ref-${family}-${step}`
                 return (
-                  <div className="catalog-reference-swatch" key={token}>
+                  <div className={cx('catalog-reference-swatch')} key={token}>
                     <span style={{ background: `var(${token})` }} aria-hidden="true" />
                     <strong>{step}</strong>
                     <code>{token}</code>

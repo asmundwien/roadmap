@@ -1,10 +1,5 @@
-import {
-  Section,
-  SectionBody,
-  SectionDescription,
-  SectionHeader,
-  SectionTitle,
-} from '@roadmap/ui/section'
+import { PageTitle } from '@roadmap/ui/page'
+import { Section, SectionBody, SectionDescription, SectionHeader } from '@roadmap/ui/section'
 import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
 import { Toggle, type ToggleProps } from '@roadmap/ui/toggle'
 import { useState } from 'react'
@@ -33,7 +28,7 @@ export function ToggleCatalogSection() {
   return (
     <Section>
       <SectionHeader>
-        <SectionTitle>Toggle</SectionTitle>
+        <PageTitle>Toggle</PageTitle>
         <SectionDescription>
           Set a controlled state to off, on, or pending. Pending places the thumb in the middle and
           announces that the action is busy; it does not claim a confirmed on value. Disable any
