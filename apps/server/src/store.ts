@@ -40,7 +40,14 @@ export function createSnapshotStore(adapters: readonly WayfinderAdapter[]): Snap
 
   function publish(): void {
     if (slices.size !== adapters.length) return
-    const projects = [...slices.values()].flatMap((slice) => slice.projects).sort(compareProjects)
+    const projects = [...slices.values()]
+      .flatMap((slice) => slice.projects)
+      .map((project) =>
+        project.openMaps.length === 0 && project.closedMaps.length === 0
+          ? { ...project, warnings: [...project.warnings, 'No maps found for this project.'] }
+          : project,
+      )
+      .sort(compareProjects)
     const unreachable = [...slices.values()]
       .flatMap((slice) => slice.unreachable)
       .sort(compareUnreachable)

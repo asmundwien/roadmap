@@ -58,7 +58,7 @@ describe('createSnapshotStore', () => {
 
     releaseLocal()
     await starting
-    expect(store.snapshot().projects).toEqual([githubProject])
+    expect(store.snapshot().projects.map((project) => project.key)).toEqual([githubProject.key])
   })
 
   it('merges every adapter slice into one source-blind snapshot', async () => {
@@ -107,7 +107,7 @@ describe('createSnapshotStore', () => {
     const late = vi.fn()
     store.onChange(late)
     expect(late).toHaveBeenCalledOnce()
-    expect(late.mock.calls[0]?.[0].projects).toEqual([githubProject])
+    expect(late.mock.calls[0]?.[0]).toEqual(store.snapshot())
   })
 
   it('stays silent when an adapter republishes an identical slice', async () => {

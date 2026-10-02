@@ -146,6 +146,53 @@ function snapshotProjectIds(snapshot: Snapshot): string[] {
 }
 
 describe('RoadmapApplication', () => {
+  it('adds an empty-map warning across integrations without mutating adapter diagnostics', async () => {
+    const local = localProject('empty')
+    const github: Project = {
+      ...localProject('owner/repo'),
+      key: { integration: 'github', id: 'owner/repo' },
+      warnings: ['Source diagnostic'],
+    }
+    const adapter = immediateAdapter({ projects: [local], unreachable: [] })
+    const application = createRoadmapApplication({
+      configuration: memoryConfiguration({ ok: true, document: BASE_CONFIGURATION }).document,
+      createAdapters: () => [
+        adapter.adapter,
+        {
+          type: 'github',
+          start(host) {
+            host.update({ projects: [github], unreachable: [] })
+          },
+          stop() {},
+        },
+      ],
+      serverEpoch: 'test',
+    })
+    try {
+      await application.start()
+      const projects = application.current().roadmap.projects
+      expect(
+        projects.find((project) => project.key.integration === 'local')?.warnings,
+      ).toHaveLength(1)
+      expect(
+        projects.find((project) => project.key.integration === 'github')?.warnings,
+      ).toHaveLength(2)
+      expect(projects.find((project) => project.key.integration === 'github')?.warnings).toContain(
+        'Source diagnostic',
+      )
+      expect(local.warnings).toEqual([])
+      expect(github.warnings).toEqual(['Source diagnostic'])
+      adapter.push({ projects: [local], unreachable: [] })
+      expect(
+        application
+          .current()
+          .roadmap.projects.find((project) => project.key.integration === 'local')?.warnings,
+      ).toHaveLength(1)
+    } finally {
+      await application.stop()
+    }
+  })
+
   it('publishes only after the complete Adapter baseline is ready', async () => {
     const configuration = memoryConfiguration({ ok: true, document: BASE_CONFIGURATION })
     const adapter = deferredAdapter()

@@ -112,7 +112,7 @@ describe('createLocalAdapter', () => {
         name: 'Empty',
         openMaps: [],
         closedMaps: [],
-        warnings: ['No local maps found under .wayfinder/.'],
+        warnings: [],
         sourcePath: '/tmp/empty',
       }),
       logger: silentLogger(),

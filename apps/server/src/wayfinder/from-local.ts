@@ -63,13 +63,9 @@ export async function readLocalProject(input: LocalProjectInput): Promise<Projec
       .map((entry) => join(wayfinderPath, entry.name, 'map.md'))
       .sort((a, b) => a.localeCompare(b))
   } catch (error) {
-    project.warnings.push('Missing local maps directory: .wayfinder/.')
-    void error
-    return project
-  }
-
-  if (mapPaths.length === 0) {
-    project.warnings.push('No local maps found under .wayfinder/.')
+    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
+      project.warnings.push('Cannot read local maps directory: .wayfinder/.')
+    }
     return project
   }
 
