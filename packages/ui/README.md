@@ -6,8 +6,6 @@ This workspace package contains presentational React components and shared desig
 
 Load `@roadmap/ui/index.css` once at the application entry, before application styles. It provides shared tokens used by the components.
 
-`Icon` uses SVG assets as CSS masks. Its SVG imports use `?url` so Vite and Astro both return asset URLs; bare SVG imports become components in Astro.
-
 ## Documentation
 
 The standalone [docs app](../../apps/docs/README.md) previews this package's public exports. Component contracts live in their types and JSDoc; token-layer guides live beside the tokens.
