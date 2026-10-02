@@ -4,52 +4,34 @@ import {
   connectionHash,
   connectionSettingsHash,
   mapHash,
-  mapV2Hash,
-  type PanelSelection,
   parseHash,
   projectHash,
   projectRegistrationHash,
-  projectV2Hash,
   selectionHash,
-  ticketV2Hash,
 } from './router'
 
 const PROJECT = { integration: 'github' as const, id: 'asmundwien/roadmap' }
 
 describe('parseHash', () => {
-  it('reads a bare v2 project without stealing the legacy project route', () => {
-    expect(parseHash('#/v2/projects/github/asmundwien%2Froadmap')).toEqual({
-      screen: 'project-v2',
-      project: PROJECT,
-      selected: null,
-      selection: null,
-    })
-    expect(parseHash('#/projects/github/asmundwien%2Froadmap')).toEqual({
-      screen: 'project',
-      project: PROJECT,
-      selected: null,
-      selection: null,
-    })
-  })
-
-  it('preserves encoded local project, map path, and ticket IDs in v2 links', () => {
+  it('preserves encoded local project, map path, and ticket IDs', () => {
     const project = { integration: 'local' as const, id: 'work / café#1' }
     const map = { project, id: '.wayfinder/release 2/map.md' }
-    expect(projectV2Hash(project)).toBe('#/v2/projects/local/work%20%2F%20caf%C3%A9%231')
-    expect(mapV2Hash(map)).toBe(
-      '#/v2/projects/local/work%20%2F%20caf%C3%A9%231/maps/.wayfinder%2Frelease%202%2Fmap.md',
+    const selection = { kind: 'ticket' as const, id: 'tickets/a b#2.md' }
+    expect(projectHash(project)).toBe('#/projects/local/work%20%2F%20caf%C3%A9%231')
+    expect(mapHash(map)).toBe(
+      '#/projects/local/work%20%2F%20caf%C3%A9%231/maps/.wayfinder%2Frelease%202%2Fmap.md',
     )
-    expect(ticketV2Hash(map, 'tickets/a b#2.md')).toBe(
-      '#/v2/projects/local/work%20%2F%20caf%C3%A9%231/maps/.wayfinder%2Frelease%202%2Fmap.md/ticket/tickets%2Fa%20b%232.md',
+    expect(selectionHash(map, selection)).toBe(
+      '#/projects/local/work%20%2F%20caf%C3%A9%231/maps/.wayfinder%2Frelease%202%2Fmap.md/ticket/tickets%2Fa%20b%232.md',
     )
-    expect(parseHash(ticketV2Hash(map, 'tickets/a b#2.md'))).toEqual({
-      screen: 'project-v2',
+    expect(parseHash(selectionHash(map, selection))).toEqual({
+      screen: 'project',
       project,
       selected: map.id,
-      selection: { kind: 'ticket', id: 'tickets/a b#2.md' },
+      selection,
     })
-    expect(parseHash(mapV2Hash(map))).toEqual({
-      screen: 'project-v2',
+    expect(parseHash(mapHash(map))).toEqual({
+      screen: 'project',
       project,
       selected: map.id,
       selection: null,
@@ -57,17 +39,22 @@ describe('parseHash', () => {
   })
 
   it.each([
-    '#/v2/projects/local/%',
-    '#/v2/projects/unknown/project',
-    '#/v2/projects/local/project/maps/%E0%A4%A',
-    '#/v2/projects/local/project/maps/map/ticket/%',
-    '#/v2/projects/local/project/maps/map/ticket/',
-    '#/v2/projects/local/project/maps/map/ticket/id/extra',
-    '#/v2/projects/local/project/maps/map/map',
-    '#/v2/projects/local/project/maps/map/fog/0',
-    '#/v2/projects/local/project/maps/map/',
-    '#/v2/projects/local/project/ticket/id',
-  ])('rejects malformed or unsupported v2 selection %s', (hash) => {
+    '#/projects/local/%',
+    '#/projects/unknown/project',
+    '#/projects/local/project/maps/%E0%A4%A',
+    '#/projects/local/project/maps/map/ticket/%',
+    '#/projects/local/project/maps/map/ticket/',
+    '#/projects/local/project/maps/map/ticket/id/extra',
+    '#/projects/local/project/maps/map/map',
+    '#/projects/local/project/maps/map/fog/0',
+    '#/projects/local/project/maps/map/scope/0',
+    '#/projects/local/project/maps/map/scope-all',
+    '#/projects/local/project/maps/map/',
+    '#/projects/local/project/ticket/id',
+    '#/v2/projects/local/project',
+    '#/v2/projects/local/project/maps/map',
+    '#/v2/projects/local/project/maps/map/ticket/id',
+  ])('rejects malformed or retired routes %s', (hash) => {
     expect(parseHash(hash)).toEqual({ screen: 'projects' })
   })
 
@@ -128,16 +115,12 @@ describe('parseHash', () => {
   })
 
   it.each([
-    ['#/projects/github/me%2Frepo/maps/11/map', { kind: 'map' }],
-    ['#/projects/github/me%2Frepo/maps/11/scope-all', { kind: 'scope-all' }],
     ['#/projects/github/me%2Frepo/maps/11/ticket/42', { kind: 'ticket', id: '42' }],
-    ['#/projects/github/me%2Frepo/maps/11/fog/0', { kind: 'fog', index: 0 }],
-    ['#/projects/github/me%2Frepo/maps/11/scope/3', { kind: 'scope', index: 3 }],
     [
       '#/projects/local/microsoft-risiko/maps/.wayfinder%2Fazure-strategy-leadership-deck%2Fmap.md/ticket/T-17',
       { kind: 'ticket', id: 'T-17' },
     ],
-  ])('reads the panel selection segment %s', (hash, selection) => {
+  ])('reads the ticket selection segment %s', (hash, selection) => {
     expect(parseHash(hash)).toEqual({
       screen: 'project',
       project:
@@ -203,13 +186,8 @@ describe('parseHash', () => {
     })
   })
 
-  it.each<PanelSelection>([
-    { kind: 'map' },
-    { kind: 'scope-all' },
-    { kind: 'ticket', id: '7' },
-    { kind: 'fog', index: 2 },
-    { kind: 'scope', index: 0 },
-  ])('round-trips what selectionHash builds for %o', (selection) => {
+  it('round-trips the ticket modal route', () => {
+    const selection = { kind: 'ticket' as const, id: '7' }
     const ref = { project: { integration: 'github' as const, id: 'someone/a-repo' }, id: '42' }
     expect(parseHash(selectionHash(ref, selection))).toEqual({
       screen: 'project',

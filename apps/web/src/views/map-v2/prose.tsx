@@ -3,8 +3,7 @@ import classNames from 'classnames/bind'
 import { type ReactNode, useMemo } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { type ProseLinkTarget, resolveProseLink } from '@/views/map/link-targets'
-import type { ResolvedSelection } from '@/views/map/selection'
+import { type ProseLinkTarget, resolveProseLink } from './link-targets'
 import styles from './prose.module.css'
 
 const cx = classNames.bind(styles)
@@ -89,7 +88,7 @@ export function Prose({ map, sourcePath, markdown, onOpenTicket, onOpenMap }: Pr
 }
 
 type SelectionLinkProps = Pick<ProseProps, 'onOpenTicket' | 'onOpenMap'> & {
-  selection: ResolvedSelection
+  selection: Extract<ProseLinkTarget, { kind: 'selection' }>['selection']
   className?: string
   children: ReactNode
 }
@@ -101,31 +100,16 @@ function SelectionLink({
   onOpenTicket,
   onOpenMap,
 }: SelectionLinkProps) {
-  if (selection.kind === 'map' || selection.kind === 'ticket') {
-    return (
-      <button
-        type="button"
-        className={cx('link', 'link-button', className)}
-        onClick={() => {
-          if (selection.kind === 'ticket') onOpenTicket(selection.id)
-          else onOpenMap()
-        }}
-      >
-        {children}
-      </button>
-    )
-  }
   return (
-    <span
-      className={cx('link', 'link-disabled', className)}
-      aria-disabled="true"
-      title="This local reference cannot be opened from Roadmap."
+    <button
+      type="button"
+      className={cx('link', 'link-button', className)}
+      onClick={() => {
+        if (selection.kind === 'ticket') onOpenTicket(selection.id)
+        else onOpenMap()
+      }}
     >
       {children}
-      <span className={cx('link-reason')}>
-        {' '}
-        (This local reference cannot be opened from Roadmap.)
-      </span>
-    </span>
+    </button>
   )
 }

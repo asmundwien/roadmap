@@ -8,9 +8,8 @@ import { ConnectionSettings } from './views/settings/connections/page'
 import { ProjectRegistrationPage } from './views/settings/projects/[projectId]/page'
 import { SiteHeader } from './views/shell/site-header'
 
-const MapPage = lazy(() => import('./views/map/page').then(({ MapPage }) => ({ default: MapPage })))
-const MapV2Page = lazy(() =>
-  import('@/views/map-v2/page').then(({ MapV2Page }) => ({ default: MapV2Page })),
+const MapPage = lazy(() =>
+  import('@/views/map-v2/page').then(({ MapPage }) => ({ default: MapPage })),
 )
 
 /** The persistent header frames Overview, settings, and existing Project/map routes. */
@@ -23,11 +22,6 @@ export function App() {
       {route.screen === 'project' && (
         <Suspense fallback={null}>
           <MapPage route={route} />
-        </Suspense>
-      )}
-      {route.screen === 'project-v2' && (
-        <Suspense fallback={null}>
-          <MapV2Page route={route} />
         </Suspense>
       )}
       {route.screen === 'projects' && <OverviewPage />}

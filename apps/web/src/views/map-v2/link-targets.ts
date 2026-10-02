@@ -1,8 +1,7 @@
 import type { Ticket, WayfinderMap } from '@roadmap/contracts'
-import type { ResolvedSelection } from './selection'
 
 export type ProseLinkTarget =
-  | { kind: 'selection'; selection: ResolvedSelection }
+  | { kind: 'selection'; selection: { kind: 'map' } | { kind: 'ticket'; id: string } }
   | { kind: 'href'; href: string }
   | { kind: 'disabled'; reason: string }
 
@@ -12,8 +11,8 @@ const LOCAL_LINK_DISABLED =
 /**
  * Resolves one markdown href in the context of a specific map file or ticket file.
  *
- * Local same-map links become panel selections; all other local relative links are visibly inert,
- * by ticket decision. GitHub and absolute links keep their real URL.
+ * Local same-map links open the map or a ticket; other local relative links are visibly inert.
+ * GitHub and absolute links keep their real URL.
  */
 export function resolveProseLink(
   map: WayfinderMap,

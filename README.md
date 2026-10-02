@@ -40,11 +40,12 @@ Available scripts are defined in the root and package-level `package.json` files
 pnpm check
 pnpm typecheck
 pnpm test
+pnpm knip
 ```
 
 Vitest runs in Node. DOM tests need jsdom and Testing Library.
 
-The new live dependency map is available at `#/v2/projects/<integration>/<project-id>`. It uses React Flow viewport controls and opens tickets in the shared Modal. Grouped navigation includes live maps and closed history, followed by the complete map prose. The current project page remains available while the replacement is completed.
+The project map is available at `#/projects/<integration>/<project-id>`. Choose a live map or closed history in the grouped navigation. The dependency graph includes closed tickets and has pan, zoom, and fit controls. Select a ticket to open its details and Automation controls in the shared Modal; the URL preserves the selected map and ticket. Complete map prose appears inline below the graph, with a structured fallback when raw Markdown is unavailable. Partial and unavailable data remain explicit.
 
 ## Stack
 

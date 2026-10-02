@@ -9,9 +9,8 @@ import { useMemo, useSyncExternalStore } from 'react'
  *
  * The project is the unit of navigation: `#/projects/<integration>/<project-id>` opens a project
  * on its active map, and `.../maps/<map-id>` pins a specific map so the selection survives a
- * refresh. The pinned map may carry one more segment naming the Panel's item — `/map`,
- * `/ticket/<id>`, `/fog/<i>`, `/scope/<i>`, or `/scope-all` — so the hash is the ONLY store of
- * what the Panel shows.
+ * refresh. A pinned map may carry `/ticket/<id>` so the hash is the only store of
+ * which ticket modal is open. Map prose stays inline.
  */
 export type Route =
   | { screen: 'projects' }
@@ -24,25 +23,8 @@ export type Route =
       screen: 'project'
       project: ProjectKey
       selected: string | null
-      selection: PanelSelection | null
+      selection: { kind: 'ticket'; id: string } | null
     }
-  | {
-      screen: 'project-v2'
-      project: ProjectKey
-      selected: string | null
-      selection: PanelSelection | null
-    }
-
-/**
- * The Panel's pick as the hash carries it. Fog patches and scope entries travel as list indices.
- * The map screen resolves those indices against the live snapshot on every render.
- */
-export type PanelSelection =
-  | { kind: 'map' }
-  | { kind: 'ticket'; id: string }
-  | { kind: 'fog'; index: number }
-  | { kind: 'scope'; index: number }
-  | { kind: 'scope-all' }
 
 const PROJECTS: Route = { screen: 'projects' }
 export const overviewHash = '#/'
@@ -87,7 +69,6 @@ export function parseHash(hash: string): Route {
     parseConnectionRoute(hash)
   if (settingsRoute) return settingsRoute
   if (hash === componentsHash) return { screen: 'components' }
-  if (hash.startsWith('#/v2/projects/')) return parseProjectV2Route(hash)
   const bare = /^#\/projects\/([^/]+)\/([^/]+)$/.exec(hash)
   if (bare) {
     const project = parseProjectKey(bare[1], bare[2])
@@ -125,21 +106,6 @@ export function parseHash(hash: string): Route {
   }
 }
 
-function parseProjectV2Route(hash: string): Route {
-  const match = /^#\/v2\/projects\/([^/]+)\/([^/]+)(?:\/maps\/([^/]+)(\/ticket\/[^/]+)?)?$/.exec(
-    hash,
-  )
-  if (!match) return PROJECTS
-  const [, integration, projectId, mapId, rest] = match
-  const project = parseProjectKey(integration, projectId)
-  if (!project) return PROJECTS
-  const selected = mapId === undefined ? null : decodePart(mapId)
-  if (mapId !== undefined && selected === null) return PROJECTS
-  const selection = rest === undefined ? null : parseSelection(rest)
-  if (rest !== undefined && selection === null) return PROJECTS
-  return { screen: 'project-v2', project, selected, selection }
-}
-
 function parseProjectKey(
   integration: string | undefined,
   encodedId: string | undefined,
@@ -149,16 +115,7 @@ function parseProjectKey(
   return id === null ? null : { integration, id }
 }
 
-function parseSelection(rest: string): PanelSelection | null {
-  if (rest === '/map') return { kind: 'map' }
-  if (rest === '/scope-all') return { kind: 'scope-all' }
-  const indexed = /^\/(fog|scope)\/(\d+)$/.exec(rest)
-  if (indexed) {
-    const [, kind, digits] = indexed
-    if (!kind || !digits) return null
-    const value = Number(digits)
-    return kind === 'fog' ? { kind: 'fog', index: value } : { kind: 'scope', index: value }
-  }
+function parseSelection(rest: string): Extract<Route, { screen: 'project' }>['selection'] {
   const ticket = /^\/ticket\/([^/]+)$/.exec(rest)
   if (!ticket) return null
   const decoded = decodePart(ticket[1])
@@ -175,36 +132,12 @@ export function mapHash(map: Pick<WayfinderMap, 'project' | 'id'>): string {
   return `${projectHash(map.project)}/maps/${encodePart(map.id)}`
 }
 
-export function projectV2Hash(project: ProjectKey): string {
-  return `#/v2/projects/${project.integration}/${encodePart(project.id)}`
-}
-
-export function mapV2Hash(map: Pick<WayfinderMap, 'project' | 'id'>): string {
-  return `${projectV2Hash(map.project)}/maps/${encodePart(map.id)}`
-}
-
-export function ticketV2Hash(map: Pick<WayfinderMap, 'project' | 'id'>, id: string): string {
-  return `${mapV2Hash(map)}/ticket/${encodePart(id)}`
-}
-
-/** The pinned map with one item picked open in the Panel. */
+/** The pinned map with one ticket open in the modal. */
 export function selectionHash(
   map: Pick<WayfinderMap, 'project' | 'id'>,
-  selection: PanelSelection,
+  selection: NonNullable<Extract<Route, { screen: 'project' }>['selection']>,
 ): string {
-  const base = mapHash(map)
-  switch (selection.kind) {
-    case 'map':
-      return `${base}/map`
-    case 'scope-all':
-      return `${base}/scope-all`
-    case 'ticket':
-      return `${base}/ticket/${encodePart(selection.id)}`
-    case 'fog':
-      return `${base}/fog/${selection.index}`
-    case 'scope':
-      return `${base}/scope/${selection.index}`
-  }
+  return `${mapHash(map)}/ticket/${encodePart(selection.id)}`
 }
 
 function subscribe(onChange: () => void): () => void {

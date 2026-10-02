@@ -1,7 +1,7 @@
 import type { Blocker } from '@roadmap/contracts'
 import { describe, expect, it } from 'vitest'
-import { blocker, makeMap, ticket } from '@/views/map/test-fixtures'
 import { mapGraph } from './graph'
+import { blocker, makeMap, ticket } from './test-fixtures'
 
 function dependencyPairs(graph: ReturnType<typeof mapGraph>) {
   return graph.edges.map((edge) => {

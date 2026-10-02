@@ -51,7 +51,11 @@ function NodeHandles() {
   )
 }
 
-function BlockerCard({ data }: { data: Extract<MapNode['data'], { kind: 'blocker' }> }) {
+type BlockerCardProps = {
+  data: Extract<MapNode['data'], { kind: 'blocker' }>
+}
+
+function BlockerCard({ data }: BlockerCardProps) {
   const { blocker, scope } = data
   const identity = blocker.displayId ?? blocker.ticketId
   const title = stripInlineMarkdown(blocker.title ?? '').trim() || 'Blocker title unavailable'
@@ -109,7 +113,11 @@ function BlockerCard({ data }: { data: Extract<MapNode['data'], { kind: 'blocker
   )
 }
 
-function TicketCard({ ticket }: { ticket: Ticket }) {
+type TicketCardProps = {
+  ticket: Ticket
+}
+
+function TicketCard({ ticket }: TicketCardProps) {
   const onOpenTicket = useContext(TicketOpenContext)
   const identity = ticket.displayId ?? ticket.id
   const title = stripInlineMarkdown(ticket.title ?? '').trim() || 'Untitled ticket'

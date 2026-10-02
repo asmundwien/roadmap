@@ -115,6 +115,20 @@ function hasSameTopology(
   )
 }
 
+function populateDependencies(
+  map: WayfinderMap,
+  nodes: Map<string, MapNode>,
+  edges: Map<string, Edge>,
+): void {
+  for (const ticket of map.tickets) {
+    const target = scopedTicketId(map.project, ticket.id)
+    for (const blocker of ticket.blockedBy) {
+      const source = addBlockerNode(nodes, map.project, blocker)
+      addBlockerEdge(edges, source, target, blocker, ticket)
+    }
+  }
+}
+
 /** Project only real blocked-by relationships; never infer a target from an unscoped ticket ID. */
 export function mapGraph(map: WayfinderMap, previous?: MapGraph): MapGraph {
   const nodes = new Map<string, MapNode>()
@@ -124,14 +138,7 @@ export function mapGraph(map: WayfinderMap, previous?: MapGraph): MapGraph {
     const id = scopedTicketId(map.project, ticket.id)
     nodes.set(id, ticketNode(id, { kind: 'ticket', ticket }))
   }
-
-  for (const ticket of map.tickets) {
-    const target = scopedTicketId(map.project, ticket.id)
-    for (const blocker of ticket.blockedBy) {
-      const source = addBlockerNode(nodes, map.project, blocker)
-      addBlockerEdge(edges, source, target, blocker, ticket)
-    }
-  }
+  populateDependencies(map, nodes, edges)
 
   if (previous && hasSameTopology(previous, nodes, edges)) {
     // Fixed card dimensions mean content changes do not require another Dagre pass.

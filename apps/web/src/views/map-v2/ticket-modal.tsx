@@ -20,13 +20,26 @@ import { Surface, SurfaceTitle } from '@roadmap/ui/surface'
 import classNames from 'classnames/bind'
 import { useState } from 'react'
 import { type RoadmapViewState, useRoadmap } from '@/store/roadmap-provider'
-import { automationEvidenceFor } from '@/views/map/automation-presentation'
 import { TicketMark } from '@/views/shared/ticket-mark'
 import { TICKET_STATE_META } from '@/views/shared/ticket-presentation'
 import { Prose } from './prose'
 import styles from './ticket-modal.module.css'
 
 const cx = classNames.bind(styles)
+
+function automationEvidenceFor(
+  map: WayfinderMap,
+  ticket: Ticket,
+  evidence: readonly AutomationEvidence[],
+): AutomationEvidence | undefined {
+  return evidence.find(
+    (candidate) =>
+      candidate.target.project.integration === map.project.integration &&
+      candidate.target.project.id === map.project.id &&
+      candidate.target.mapId === map.id &&
+      candidate.target.ticketId === ticket.id,
+  )
+}
 
 export type TicketModalProps = {
   map: WayfinderMap

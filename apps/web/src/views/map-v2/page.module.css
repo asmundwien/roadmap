@@ -63,6 +63,10 @@
   font-weight: 600;
 }
 
+.map-group small {
+  font-weight: 400;
+}
+
 .map-group a > span:first-child,
 .map-group a > small {
   grid-column: 1;
@@ -71,10 +75,6 @@
 .map-group a > span:last-child {
   grid-column: 2;
   grid-row: 1 / span 2;
-}
-
-.map-group small {
-  font-weight: 400;
 }
 
 .map-main {

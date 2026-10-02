@@ -4,15 +4,7 @@ import { Link } from '@roadmap/ui/link'
 import { Page, PageDescription, PageHeader, PageTitle } from '@roadmap/ui/page'
 import { Surface, SurfaceDescription } from '@roadmap/ui/surface'
 import classNames from 'classnames/bind'
-import {
-  mapHash,
-  mapV2Hash,
-  overviewHash,
-  projectHash,
-  projectRegistrationHash,
-  type Route,
-  ticketV2Hash,
-} from '@/router'
+import { mapHash, overviewHash, projectRegistrationHash, type Route, selectionHash } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
 import { MapContainer } from './map-container'
@@ -23,9 +15,9 @@ import { TicketModal } from './ticket-modal'
 
 const cx = classNames.bind(styles)
 
-type MapV2PageProps = { route: Extract<Route, { screen: 'project-v2' }> }
+type MapPageProps = { route: Extract<Route, { screen: 'project' }> }
 
-export function MapV2Page({ route }: MapV2PageProps) {
+export function MapPage({ route }: MapPageProps) {
   const { transport, projects, roadmapProjects, capturedAt, unreachable } = useRoadmap()
   const registration = projects.find((candidate) => sameProject(candidate.key, route.project))
   const source = roadmapProjects.find((candidate) => sameProject(candidate.key, route.project))
@@ -37,20 +29,15 @@ export function MapV2Page({ route }: MapV2PageProps) {
     sameProject(candidate.project, route.project),
   )
   const onOpenTicket = (id: string) => {
-    if (map) window.location.hash = ticketV2Hash(map, id)
+    if (map) window.location.hash = selectionHash(map, { kind: 'ticket', id })
   }
   const onOpenMap = () => {
-    if (map) window.location.hash = mapV2Hash(map)
+    if (map) window.location.hash = mapHash(map)
   }
 
   return (
     <Page>
-      <ProjectHeading
-        projectKey={route.project}
-        project={project}
-        registration={registration}
-        map={map}
-      />
+      <ProjectHeading projectKey={route.project} project={project} registration={registration} />
       <ProjectNotices
         transport={transport}
         capturedAt={capturedAt}
@@ -89,12 +76,10 @@ function ProjectHeading({
   projectKey,
   project,
   registration,
-  map,
 }: {
   projectKey: ProjectKey
   project: Project | undefined
   registration: ReturnType<typeof useRoadmap>['projects'][number] | undefined
-  map: WayfinderMap | undefined
 }) {
   return (
     <PageHeader>
@@ -110,7 +95,6 @@ function ProjectHeading({
         {project?.sourceUrl && <Link href={project.sourceUrl}>Project source</Link>}
       </div>
       {project?.sourcePath && <p className={cx('source-path')}>{project.sourcePath}</p>}
-      <Link href={map ? mapHash(map) : projectHash(projectKey)}>Open legacy project page</Link>
     </PageHeader>
   )
 }
@@ -232,7 +216,7 @@ function findMap(
   project:
     | Pick<ReturnType<typeof useRoadmap>['projects'][number], 'openMaps' | 'closedMaps'>
     | undefined,
-  selected: MapV2PageProps['route']['selected'],
+  selected: MapPageProps['route']['selected'],
 ) {
   return selected === null
     ? (project?.openMaps[0] ?? project?.closedMaps[0])

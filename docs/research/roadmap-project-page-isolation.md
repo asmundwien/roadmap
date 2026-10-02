@@ -1,5 +1,7 @@
 # Roadmap project page isolation
 
+> Historical audit, 2026-10-02. The canonical replacement map page supersedes the production descriptions below. See [the current architecture](../architecture.md#web-application). This audit retains the original isolation findings and disposable experiment evidence; its deletion plan is not the cutover plan. Maps, canonical Project/map/ticket routes, and the server/domain/store remain in place.
+
 ## Finding and scope
 
 The Project/map implementation can be removed without breaking the remaining page implementations. It is not fully isolated today. Its CSS loads on every route and has unscoped selectors; remaining settings still consume legacy global colors; Overview and settings build links into the page. A clean removal requires navigation cleanup, not a redesign of the application.
