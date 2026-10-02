@@ -1,25 +1,25 @@
-.catalog-reference-type-list {
+.reference-type-list {
   display: grid;
   gap: var(--sys-space-xs);
 }
 
-.catalog-reference-type-row {
+.reference-type-row {
   display: grid;
   grid-template-columns: 5rem minmax(0, 1fr) minmax(9rem, auto);
   align-items: center;
   gap: var(--sys-space-sm);
 }
 
-.catalog-reference-type-row > span {
+.reference-type-row > span {
   overflow-wrap: anywhere;
   color: var(--sys-color-on-surface);
 }
 
-.catalog-reference-type-row strong {
+.reference-type-row strong {
   font-size: var(--sys-typescale-body-sm-size);
 }
 
-.catalog-reference-type-row code {
+.reference-type-row code {
   font-family: var(--sys-font-family-code);
   overflow-wrap: anywhere;
   color: var(--sys-color-on-surface-variant);
@@ -27,11 +27,11 @@
 }
 
 @media (max-width: 600px) {
-  .catalog-reference-type-row {
+  .reference-type-row {
     grid-template-columns: 5rem minmax(0, 1fr);
   }
 
-  .catalog-reference-type-row code {
+  .reference-type-row code {
     font-family: var(--sys-font-family-code);
     grid-column: 2;
   }

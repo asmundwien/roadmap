@@ -1,6 +1,5 @@
 import { Badge } from '@roadmap/ui/badge'
-import { PageTitle } from '@roadmap/ui/page'
-import { Section, SectionDescription, SectionHeader } from '@roadmap/ui/section'
+import { PageDescription, PageHeader, PageTitle } from '@roadmap/ui/page'
 import type { Variant } from '@roadmap/ui/variant'
 import classNames from 'classnames/bind'
 import styles from './badges.module.css'
@@ -18,24 +17,24 @@ const BADGE_VARIANTS = [
   ['Muted', 'muted'],
 ] as const satisfies readonly (readonly [string, Variant])[]
 
-export function BadgesCatalogSection() {
+export function BadgesPage() {
   return (
-    <Section>
-      <SectionHeader>
+    <>
+      <PageHeader>
         <PageTitle>Badges</PageTitle>
-        <SectionDescription>
+        <PageDescription>
           Compact status and metadata labels. Text states the meaning; color supports it. Every
           supported variant appears here.
-        </SectionDescription>
-      </SectionHeader>
+        </PageDescription>
+      </PageHeader>
 
-      <div className={cx('catalog-component-examples')}>
+      <div className={cx('component-examples')}>
         {BADGE_VARIANTS.map(([label, variant]) => (
-          <div className={cx('catalog-component-example')} key={variant}>
+          <div className={cx('component-example')} key={variant}>
             <Badge variant={variant}>{label}</Badge>
           </div>
         ))}
       </div>
-    </Section>
+    </>
   )
 }

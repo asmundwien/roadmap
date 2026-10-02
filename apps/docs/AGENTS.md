@@ -4,8 +4,8 @@
 
 - Keep this app independent of Roadmap runtime state. Do not import web source, domain contracts, application providers, or server configuration.
 - Preview components through public `@roadmap/ui` exports. Product encodings stay in `apps/web`; do not duplicate them here.
-- Keep component contracts in their types and JSDoc, and token guides beside their token layers. Use catalog pages for live examples and consumer guidance, not duplicate specifications.
-- Keep docs-app implementation and development details in this app's README. Root architecture describes module ownership and dependencies, not catalog internals.
+- Keep component contracts in their types and JSDoc, and token guides beside their token layers. Use documentation pages for live examples and consumer guidance, not duplicate specifications.
+- Keep docs-app implementation and development details in this app's README. Root architecture describes module ownership and dependencies, not documentation internals.
 
 ## Navigation
 

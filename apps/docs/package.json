@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "Standalone catalog for @roadmap/ui components and design tokens, independent of Roadmap domain and runtime state.",
+  "description": "Standalone documentation for @roadmap/ui components and design tokens, independent of Roadmap domain and runtime state.",
   "scripts": {
     "dev": "astro dev",
     "build": "astro check && astro build",

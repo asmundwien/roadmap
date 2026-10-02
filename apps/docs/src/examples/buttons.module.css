@@ -1,13 +1,13 @@
-.catalog-button-example {
+.button-example {
   justify-items: start;
 }
 
-.catalog-button-matrix-scroll {
+.button-matrix-scroll {
   max-width: 100%;
   overflow-x: auto;
 }
 
-.catalog-button-matrix {
+.button-matrix {
   display: grid;
   grid-template-columns: minmax(4rem, 6rem) repeat(3, minmax(8rem, 1fr));
   align-items: center;
@@ -16,8 +16,8 @@
   width: 100%;
 }
 
-.catalog-button-column-label,
-.catalog-button-row-label {
+.button-column-label,
+.button-row-label {
   color: var(--sys-color-on-surface-variant);
   font-family: var(--sys-font-family-code);
   font-size: var(--sys-typescale-label-sm-size);
@@ -25,24 +25,24 @@
   text-transform: uppercase;
 }
 
-.catalog-button-column-label {
+.button-column-label {
   text-align: center;
 }
 
-.catalog-button-matrix-example {
+.button-matrix-example {
   display: grid;
   min-height: var(--sys-size-control-lg);
   place-items: center;
 }
 
 @media (max-width: 600px) {
-  .catalog-button-matrix {
+  .button-matrix {
     grid-template-columns: minmax(3.5rem, 4rem) repeat(3, minmax(5rem, 1fr));
     gap: var(--sys-space-xs);
   }
 }
 
-.catalog-button-sizes {
+.button-sizes {
   display: flex;
   flex-wrap: wrap;
   align-items: center;

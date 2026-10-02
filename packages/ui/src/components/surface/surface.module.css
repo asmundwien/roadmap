@@ -7,6 +7,7 @@
   border: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
   background: var(--sys-color-surface-container);
   color: var(--sys-color-on-surface);
+  margin-bottom: var(--sys-space-xl);
 }
 
 .subtle {

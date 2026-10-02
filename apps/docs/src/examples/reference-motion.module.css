@@ -1,11 +1,11 @@
-.catalog-reference-motion-demo {
+.reference-motion-demo {
   display: grid;
   gap: var(--sys-space-sm);
   padding: var(--sys-space-md);
   border: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
 }
 
-.catalog-reference-motion-demo button {
+.reference-motion-demo button {
   justify-self: start;
   padding: var(--sys-space-xs) var(--sys-space-md);
   border: var(--sys-border-width-thin) solid var(--sys-color-outline);
@@ -15,26 +15,26 @@
   cursor: pointer;
 }
 
-.catalog-reference-motion-row {
+.reference-motion-row {
   display: grid;
   grid-template-columns: 5rem minmax(0, 1fr) minmax(10rem, auto);
   align-items: center;
   gap: var(--sys-space-sm);
 }
 
-.catalog-reference-motion-row strong,
-.catalog-reference-motion-row code {
+.reference-motion-row strong,
+.reference-motion-row code {
   font-family: var(--sys-font-family-code);
   font-size: var(--sys-typescale-body-sm-size);
 }
 
-.catalog-reference-motion-row code {
+.reference-motion-row code {
   font-family: var(--sys-font-family-code);
   overflow-wrap: anywhere;
   color: var(--sys-color-on-surface-variant);
 }
 
-.catalog-reference-motion-track {
+.reference-motion-track {
   position: relative;
   display: block;
   height: 1rem;
@@ -42,7 +42,7 @@
   background: var(--sys-color-surface-container-high);
 }
 
-.catalog-reference-motion-marker {
+.reference-motion-marker {
   position: absolute;
   top: 0;
   left: 0;
@@ -53,22 +53,22 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .catalog-reference-motion-marker {
+  .reference-motion-marker {
     transition-property: left;
   }
 
-  .catalog-reference-motion-demo:hover .catalog-reference-motion-marker,
-  .catalog-reference-motion-demo:focus-within .catalog-reference-motion-marker {
+  .reference-motion-demo:hover .reference-motion-marker,
+  .reference-motion-demo:focus-within .reference-motion-marker {
     left: calc(100% - 1rem);
   }
 }
 
 @media (max-width: 600px) {
-  .catalog-reference-motion-row {
+  .reference-motion-row {
     grid-template-columns: 5rem minmax(0, 1fr);
   }
 
-  .catalog-reference-motion-row code {
+  .reference-motion-row code {
     font-family: var(--sys-font-family-code);
     grid-column: 2;
   }

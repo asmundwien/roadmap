@@ -1,10 +1,10 @@
-.catalog-reference-swatches {
+.reference-swatches {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
   gap: var(--sys-space-md);
 }
 
-.catalog-reference-swatch {
+.reference-swatch {
   display: grid;
   grid-template-columns: 2rem minmax(0, 1fr);
   align-items: center;
@@ -12,7 +12,7 @@
   column-gap: var(--sys-space-sm);
 }
 
-.catalog-reference-swatch > span {
+.reference-swatch > span {
   grid-row: span 2;
   width: 2rem;
   height: 2rem;
@@ -20,11 +20,11 @@
   border-radius: var(--sys-radius-pill);
 }
 
-.catalog-reference-swatch strong {
+.reference-swatch strong {
   font-size: var(--sys-typescale-body-sm-size);
 }
 
-.catalog-reference-swatch code {
+.reference-swatch code {
   font-family: var(--sys-font-family-code);
   overflow: hidden;
   color: var(--sys-color-on-surface-variant);
@@ -34,7 +34,7 @@
 }
 
 @media (max-width: 780px) {
-  .catalog-reference-swatches {
+  .reference-swatches {
     grid-template-columns: repeat(2, minmax(7rem, 1fr));
   }
 }

@@ -1,26 +1,26 @@
-.catalog-semantic-pairs {
+.semantic-pairs {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
   gap: var(--sys-space-md);
 }
 
-.catalog-semantic-pair {
+.semantic-pair {
   display: grid;
   min-height: 8rem;
   padding: var(--sys-space-md);
   border: var(--sys-border-width-thin) solid var(--sys-color-outline);
 }
 
-.catalog-semantic-pair strong {
+.semantic-pair strong {
   font-size: var(--sys-typescale-body-sm-size);
 }
 
-.catalog-semantic-pair span {
+.semantic-pair span {
   margin-bottom: auto;
   font-size: var(--sys-typescale-body-sm-size);
 }
 
-.catalog-semantic-pair code {
+.semantic-pair code {
   font-family: var(--sys-font-family-code);
   overflow: hidden;
   font-size: var(--sys-typescale-label-sm-size);
@@ -28,28 +28,28 @@
   white-space: nowrap;
 }
 
-.catalog-semantic-support {
+.semantic-support {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   border: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
 }
 
-.catalog-semantic-support > div {
+.semantic-support > div {
   display: grid;
   grid-template-columns: 2rem minmax(0, 1fr);
   gap: 0 var(--sys-space-sm);
   padding: var(--sys-space-md);
 }
 
-.catalog-semantic-support > div:nth-child(even) {
+.semantic-support > div:nth-child(even) {
   border-left: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
 }
 
-.catalog-semantic-support > div:nth-child(n + 3) {
+.semantic-support > div:nth-child(n + 3) {
   border-top: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
 }
 
-.catalog-semantic-support span {
+.semantic-support span {
   grid-row: span 3;
   width: 2rem;
   height: 2rem;
@@ -57,11 +57,11 @@
   border-radius: var(--sys-radius-pill);
 }
 
-.catalog-semantic-support strong {
+.semantic-support strong {
   font-size: var(--sys-typescale-body-sm-size);
 }
 
-.catalog-semantic-support code {
+.semantic-support code {
   font-family: var(--sys-font-family-code);
   overflow: hidden;
   color: var(--sys-color-on-surface-variant);
@@ -70,22 +70,22 @@
   white-space: nowrap;
 }
 
-.catalog-semantic-support p {
+.semantic-support p {
   margin-top: var(--sys-space-xs);
   color: var(--sys-color-on-surface-variant);
   font-size: var(--sys-typescale-label-sm-size);
 }
 
 @media (max-width: 780px) {
-  .catalog-semantic-support {
+  .semantic-support {
     grid-template-columns: 1fr;
   }
 
-  .catalog-semantic-support > div:nth-child(even) {
+  .semantic-support > div:nth-child(even) {
     border-left: 0;
   }
 
-  .catalog-semantic-support > div + div {
+  .semantic-support > div + div {
     border-top: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
   }
 }

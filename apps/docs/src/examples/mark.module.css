@@ -1,17 +1,17 @@
-.catalog-mark-row {
+.mark-row {
   display: flex;
   flex-wrap: wrap;
   align-items: end;
   gap: var(--sys-space-xl);
 }
 
-.catalog-mark-cell {
+.mark-cell {
   display: grid;
   justify-items: center;
   gap: var(--sys-space-sm);
 }
 
-.catalog-mark-cell code {
+.mark-cell code {
   font-family: var(--sys-font-family-code);
   font-size: var(--sys-typescale-label-sm-size);
 }

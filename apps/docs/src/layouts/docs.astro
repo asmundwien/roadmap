@@ -47,7 +47,7 @@ const navigation = {
     <title>{title} | Roadmap UI docs</title>
   </head>
   <body class:list={[document.body, styles.shell]}>
-    <a class={styles.skipLink} href="#catalog-content">Skip to content</a>
+    <a class={styles.skipLink} href="#content">Skip to content</a>
     <header class={styles.header}>
       <a class={styles.brand} href="/">Roadmap <span class={styles.brandDetail}>UI docs</span></a>
       <p class={styles.headerDescription}>Design tokens and shared components</p>
@@ -69,7 +69,7 @@ const navigation = {
           </div>
         ))}
       </nav>
-      <Page className={styles.content} id="catalog-content" tabIndex={-1}>
+      <Page className={styles.content} id="content" tabIndex={-1}>
         <slot />
       </Page>
     </div>
