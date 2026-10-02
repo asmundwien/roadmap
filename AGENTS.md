@@ -11,7 +11,7 @@
 
 ## Verification
 
-Before completion, run `pnpm check`, `pnpm typecheck`, and `pnpm test`. Also run the command that exercises the changed runtime behavior.
+Before completion, run `pnpm check`, `pnpm typecheck`, `pnpm test`, and `pnpm knip`. Also run the command that exercises the changed runtime behavior.
 
 See `package.json` for available scripts.
 

@@ -1,3 +1,4 @@
+import cn from 'classnames'
 import classNames from 'classnames/bind'
 import { Children, cloneElement, isValidElement, type ReactNode } from 'react'
 import { Button, type ButtonProps } from '../button/button'
@@ -28,5 +29,5 @@ export function ControlGroup({ children, className, size = 'medium' }: ControlGr
     return cloneElement(child, { size })
   })
 
-  return <div className={cx('group', className)}>{controls}</div>
+  return <div className={cn(cx('group'), className)}>{controls}</div>
 }

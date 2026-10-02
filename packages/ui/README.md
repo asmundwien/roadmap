@@ -22,6 +22,8 @@ import { Badge } from "@roadmap/ui/badge";
 
 `Button`s and `Link`s should be used appropriately, but for navigation styled as a button, import `ButtonLink` from `@roadmap/ui/button`.
 
+Components that accept `className` preserve caller classes even when they match a local CSS Module key.
+
 ## Organization
 
 Components, their CSS Modules, and their tests live together in `src/components/`. Component-specific styles stay with the component. Shared values and roles live under `src/styles/`; see the [reference](./src/styles/references/README.md) and [semantic](./src/styles/semantic/README.md) layer guides.

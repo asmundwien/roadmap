@@ -1,10 +1,7 @@
 import { Badge } from '@roadmap/ui/badge'
 import { PageDescription, PageHeader, PageTitle } from '@roadmap/ui/page'
 import type { Variant } from '@roadmap/ui/variant'
-import classNames from 'classnames/bind'
-import styles from './badges.module.css'
-
-const cx = classNames.bind(styles)
+import { ComponentExample, ComponentExamples } from './component-examples'
 
 const BADGE_VARIANTS = [
   ['Neutral', 'neutral'],
@@ -28,13 +25,13 @@ export function BadgesPage() {
         </PageDescription>
       </PageHeader>
 
-      <div className={cx('component-examples')}>
+      <ComponentExamples>
         {BADGE_VARIANTS.map(([label, variant]) => (
-          <div className={cx('component-example')} key={variant}>
+          <ComponentExample key={variant}>
             <Badge variant={variant}>{label}</Badge>
-          </div>
+          </ComponentExample>
         ))}
-      </div>
+      </ComponentExamples>
     </>
   )
 }

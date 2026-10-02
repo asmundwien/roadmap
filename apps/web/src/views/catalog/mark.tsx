@@ -32,17 +32,19 @@ export function TicketMarkCatalogSection() {
         </SectionDescription>
       </SectionHeader>
 
-      <div className={cx('catalog-mark-matrix')}>
-        <span />
-        {TICKET_TYPES.map(([label, type]) => (
-          <strong className={cx('catalog-column-label')} key={type}>
-            {label}
-          </strong>
-        ))}
-        {TICKET_STATES.map(([label, state]) => (
-          <TicketMarkStateRow key={state} label={label} state={state} />
-        ))}
-      </div>
+      <section className={cx('catalog-mark-scroll')} aria-label="Ticket mark matrix">
+        <div className={cx('catalog-mark-matrix')}>
+          <span />
+          {TICKET_TYPES.map(([label, type]) => (
+            <strong className={cx('catalog-column-label')} key={type}>
+              {label}
+            </strong>
+          ))}
+          {TICKET_STATES.map(([label, state]) => (
+            <TicketMarkStateRow key={state} label={label} state={state} />
+          ))}
+        </div>
+      </section>
     </Section>
   )
 }

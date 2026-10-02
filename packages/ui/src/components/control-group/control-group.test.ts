@@ -6,6 +6,14 @@ import { TextInput } from '../text-input/text-input'
 import { ControlGroup } from './control-group'
 
 describe('ControlGroup', () => {
+  it('preserves caller classes that collide with a local CSS Module name', () => {
+    const markup = renderToStaticMarkup(
+      createElement(ControlGroup, { className: 'group' }, createElement(Button, null, 'Save')),
+    )
+    const classes = markup.match(/^<div class="([^"]+)"/)?.[1]?.split(/\s+/)
+    expect(classes).toContain('group')
+  })
+
   it('accepts conditional buttons without including empty slots', () => {
     const markup = renderToStaticMarkup(
       createElement(ControlGroup, null, false, createElement(Button, null, 'Continue')),

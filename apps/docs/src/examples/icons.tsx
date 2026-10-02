@@ -1,9 +1,6 @@
 import { Icon, icon } from '@roadmap/ui/icon'
 import { PageDescription, PageHeader, PageTitle } from '@roadmap/ui/page'
-import classNames from 'classnames/bind'
-import styles from './badges.module.css'
-
-const cx = classNames.bind(styles)
+import { ComponentExample, ComponentExamples } from './component-examples'
 
 const ICONS = Object.values(icon)
 
@@ -16,14 +13,14 @@ export function IconsPage() {
           Decorative symbols inherit text color. Pair each icon with a text label.
         </PageDescription>
       </PageHeader>
-      <div className={cx('component-examples')}>
+      <ComponentExamples>
         {ICONS.map((iconName) => (
-          <div className={cx('component-example')} key={iconName}>
+          <ComponentExample key={iconName}>
             <Icon icon={iconName} />
             <span>{iconName}</span>
-          </div>
+          </ComponentExample>
         ))}
-      </div>
+      </ComponentExamples>
     </>
   )
 }

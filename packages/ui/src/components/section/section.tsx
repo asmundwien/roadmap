@@ -27,7 +27,7 @@ export function SectionDescription({ className, ...props }: HTMLAttributes<HTMLP
   return <p className={cn(cx('description'), className)} {...props} />
 }
 
-/** Arranges section content in a vertical grid with spacing between children. */
+/** Renders an unstyled container for section content. */
 export function SectionBody({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
   return <div className={cn(className)} {...props} />
 }
