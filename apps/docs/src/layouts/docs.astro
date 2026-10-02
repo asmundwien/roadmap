@@ -1,0 +1,77 @@
+---
+import '@roadmap/ui/index.css'
+import { Page } from '@roadmap/ui/page'
+import document from './document.module.css'
+import styles from './shell.module.css'
+
+interface Props {
+  title: string
+}
+
+const { title } = Astro.props
+const pathname = Astro.url.pathname.replace(/\/$/, '') || '/tokens/reference'
+const navigation = {
+  Tokens: [
+    ['/tokens/reference', 'Reference tokens'],
+    ['/tokens/reference-colors', 'Reference colors'],
+    ['/tokens/reference-typography', 'Reference typography'],
+    ['/tokens/reference-dimensions', 'Reference dimensions'],
+    ['/tokens/reference-motion', 'Reference motion'],
+    ['/tokens/semantic', 'Semantic tokens'],
+  ],
+  Components: [
+    ['/components/surfaces', 'Surfaces'],
+    ['/components/mark', 'Mark'],
+    ['/components/badges', 'Badges'],
+    ['/components/alerts', 'Alerts'],
+    ['/components/icons', 'Icons'],
+    ['/components/buttons', 'Buttons'],
+    ['/components/control-group', 'Control group'],
+    ['/components/modal', 'Modal'],
+    ['/components/text-input', 'Text input'],
+    ['/components/toggle', 'Toggle'],
+    ['/components/links', 'Links'],
+  ],
+}
+---
+
+<!doctype html>
+<html lang="en" class={document.document}>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta
+      name="description"
+      content="Roadmap UI components, design tokens, and interactive examples."
+    >
+    <title>{title} | Roadmap UI docs</title>
+  </head>
+  <body class:list={[document.body, styles.shell]}>
+    <a class={styles.skipLink} href="#catalog-content">Skip to content</a>
+    <header class={styles.header}>
+      <a class={styles.brand} href="/">Roadmap <span class={styles.brandDetail}>UI docs</span></a>
+      <p class={styles.headerDescription}>Design tokens and shared components</p>
+    </header>
+    <div class={styles.layout}>
+      <nav class={styles.navigation} aria-label="Documentation">
+        {Object.entries(navigation).map(([group, links]) => (
+          <div>
+            <h2 class={styles.groupTitle} id={`navigation-${group}`}>{group}</h2>
+            <ul class={styles.navigationList} aria-labelledby={`navigation-${group}`}>
+              {links.map(([href, label]) => (
+                <li>
+                  <a class={styles.navigationLink} href={href} aria-current={pathname === href ? 'page' : undefined}>
+                    {label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </nav>
+      <Page className={styles.content} id="catalog-content" tabIndex={-1}>
+        <slot />
+      </Page>
+    </div>
+  </body>
+</html>

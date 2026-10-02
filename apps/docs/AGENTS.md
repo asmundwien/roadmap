@@ -9,14 +9,12 @@
 
 ## Navigation
 
-- Define explicit pathname cases and navigation links in `src/App.tsx`. Do not generate routes from a catalog registry.
 - Use ordinary links for page navigation. Keep the URL as the only navigation state; preserve direct loads, refresh, and browser history. Hashes are only for anchors within a page.
+- Render documentation and previews at build time. Add hydration only for React examples that need event handlers or state; keep provider-dependent examples within one React island.
 
 ## Styling
 
 - Use colocated CSS Modules for every docs-owned stylesheet. Do not add global selectors, reset stylesheets, or `:global` rules.
-- Import `@roadmap/ui/index.css` once at the application entry. It is the only global stylesheet import.
-- Attach document-default classes explicitly to `html` and `body` through `src/main.tsx`.
 - Use semantic `--sys-*` tokens for the shell, prose, and component previews. Only reference-value previews may read `--ref-*` directly.
 
 ## Verification

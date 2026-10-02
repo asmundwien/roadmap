@@ -5,12 +5,15 @@
   "type": "module",
   "description": "Standalone catalog for @roadmap/ui components and design tokens, independent of Roadmap domain and runtime state.",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "dev": "astro dev",
+    "build": "astro check && astro build",
+    "preview": "astro preview --port 4174",
+    "typecheck": "astro check"
   },
   "dependencies": {
+    "@astrojs/react": "^7.0.0",
     "@roadmap/ui": "workspace:*",
+    "astro": "^7.3.5",
     "classnames": "^2.5.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
@@ -18,11 +21,10 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@astrojs/check": "^0.9.10",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.4",
-    "typescript": "~6.0.2",
-    "vite": "^8.2.0"
+    "typescript": "~6.0.2"
   }
 }

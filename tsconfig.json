@@ -3,8 +3,6 @@
   "references": [
     { "path": "./apps/web/tsconfig.app.json" },
     { "path": "./apps/web/tsconfig.node.json" },
-    { "path": "./apps/docs/tsconfig.app.json" },
-    { "path": "./apps/docs/tsconfig.node.json" },
     { "path": "./apps/server" },
     { "path": "./packages/contracts" },
     { "path": "./packages/ui" }

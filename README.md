@@ -18,7 +18,7 @@ See [docs/architecture.md](docs/architecture.md) for the implementation map and 
 
 ## Development
 
-Roadmap requires Node.js 22 or newer. pnpm is provided through Corepack.
+Roadmap requires Node.js 22.12.0 or newer. pnpm is provided through Corepack.
 
 Copy `.env.example` to the repository-root `.env.local`, then start all development apps:
 
@@ -46,4 +46,4 @@ Vitest runs in Node. DOM tests need jsdom and Testing Library.
 
 ## Stack
 
-Vite, React 19, TypeScript, pnpm workspaces, Biome, and Vitest.
+Vite, Astro, React 19, TypeScript, pnpm workspaces, Biome, and Vitest.

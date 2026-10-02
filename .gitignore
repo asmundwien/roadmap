@@ -8,6 +8,7 @@ node_modules
 dist
 dist-ssr
 *.local
+apps/docs/.astro
 
 # Server-local environment and credentials
 .env

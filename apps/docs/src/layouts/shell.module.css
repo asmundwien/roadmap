@@ -100,7 +100,7 @@
   color: var(--sys-color-on-surface);
 }
 
-.navigationLink.selected {
+.navigationLink[aria-current="page"] {
   border-inline-start-color: var(--sys-color-primary);
   background: var(--sys-color-primary-container);
   color: var(--sys-color-on-primary-container);
