@@ -1,0 +1,24 @@
+.settings-operation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sys-space-lg);
+  width: 100%;
+  margin-bottom: var(--sys-space-lg);
+  padding: var(--sys-space-md);
+  border: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
+  border-left: var(--sys-border-width-thick) solid var(--sys-color-primary);
+  background: var(--sys-color-surface-container);
+  color: var(--sys-color-on-surface);
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-operation strong,
+.settings-operation small {
+  display: block;
+}
+
+.settings-operation small {
+  color: var(--sys-color-on-surface-variant);
+}

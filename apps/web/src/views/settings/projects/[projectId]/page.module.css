@@ -6,10 +6,6 @@
   gap: var(--sys-space-lg);
 }
 
-.facts {
-  margin: 0;
-}
-
 @media (max-width: 640px) {
   .project-registration-header {
     align-items: flex-start;

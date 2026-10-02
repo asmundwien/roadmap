@@ -1,7 +1,10 @@
 import type { TicketState, TicketType } from '@roadmap/contracts'
 import { Section, SectionDescription, SectionHeader, SectionTitle } from '@roadmap/ui/section'
+import classNames from 'classnames/bind'
 import { TicketMark } from '@/views/shared/ticket-mark'
-import './mark.css'
+import styles from './mark.module.css'
+
+const cx = classNames.bind(styles)
 
 const TICKET_STATES = [
   ['Blocked', 'blocked'],
@@ -29,10 +32,10 @@ export function TicketMarkCatalogSection() {
         </SectionDescription>
       </SectionHeader>
 
-      <div className="catalog-mark-matrix">
+      <div className={cx('catalog-mark-matrix')}>
         <span />
         {TICKET_TYPES.map(([label, type]) => (
-          <strong className="catalog-column-label" key={type}>
+          <strong className={cx('catalog-column-label')} key={type}>
             {label}
           </strong>
         ))}
@@ -49,9 +52,9 @@ type TicketMarkStateRowProps = { label: string; state: TicketState }
 function TicketMarkStateRow({ label, state }: TicketMarkStateRowProps) {
   return (
     <>
-      <strong className="catalog-row-label">{label}</strong>
+      <strong className={cx('catalog-row-label')}>{label}</strong>
       {TICKET_TYPES.map(([typeLabel, type]) => (
-        <div className="catalog-mark-example" key={type} title={`${label} ${typeLabel}`}>
+        <div className={cx('catalog-mark-example')} key={type} title={`${label} ${typeLabel}`}>
           <TicketMark size="large" state={state} type={type} />
         </div>
       ))}

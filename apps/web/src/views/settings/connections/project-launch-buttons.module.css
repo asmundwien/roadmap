@@ -1,0 +1,6 @@
+.connection-project-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sys-space-sm);
+  margin-top: var(--sys-space-md);
+}

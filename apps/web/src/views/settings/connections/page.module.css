@@ -1,0 +1,12 @@
+.connection-page-header {
+  display: flex;
+  max-width: none;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sys-space-lg);
+}
+
+.connection-page-header > button {
+  flex-shrink: 0;
+  gap: var(--sys-space-xs);
+}

@@ -5,10 +5,16 @@ import { ControlGroup } from '@roadmap/ui/control-group'
 import { Link } from '@roadmap/ui/link'
 import { Modal } from '@roadmap/ui/modal'
 import { TextInput } from '@roadmap/ui/text-input'
+import classNames from 'classnames/bind'
 import { type FormEvent, useState } from 'react'
-import styles from '@/views/shared/settings-flow.module.css'
+import { AuthorizationControls, DeviceCode } from '@/views/shared/authorization-presentation'
+import { SettingsForm } from '@/views/shared/settings-form'
+import { SettingsFormActions } from '@/views/shared/settings-form-actions'
 import { ErrorText } from '@/views/shared/settings-shared'
 import { authorizationStatus, type ConnectionOperation } from './connection-details'
+import styles from './connection-panes.module.css'
+
+const cx = classNames.bind(styles)
 
 type AddConnectionPaneProps = {
   operation: ConnectionOperation
@@ -59,12 +65,12 @@ export function AddConnectionPane({
 
   return (
     <Modal open title="Add GitHub Connection" onClose={onClose}>
-      <header className={styles['settings-flow-head']}>
-        <p className={styles['settings-eyebrow']}>GitHub Connection</p>
+      <header className={cx('settings-flow-head')}>
+        <p className={cx('settings-eyebrow')}>GitHub Connection</p>
         <h2>Authorize GitHub</h2>
         <p>Use a name that distinguishes this account from other GitHub Connections.</p>
       </header>
-      <form className={styles['settings-form']} onSubmit={(event) => void submit(event)}>
+      <SettingsForm onSubmit={(event) => void submit(event)}>
         <label htmlFor="connection-name">
           Connection name
           <TextInput id="connection-name" name="name" placeholder="Personal GitHub" />
@@ -74,15 +80,15 @@ export function AddConnectionPane({
           browser.
         </Alert>
         <ErrorText error={error} />
-        <ControlGroup className={styles['settings-form-actions']}>
+        <SettingsFormActions>
           <Button type="button" onClick={onClose}>
             Cancel
           </Button>
           <Button variant="primary" type="submit" disabled={busy}>
             {busy ? 'Starting…' : 'Start authorization'}
           </Button>
-        </ControlGroup>
-      </form>
+        </SettingsFormActions>
+      </SettingsForm>
     </Modal>
   )
 }
@@ -120,8 +126,8 @@ export function AuthorizationPane({
 
   return (
     <Modal open title="GitHub authorization" onClose={onClose}>
-      <header className={styles['settings-flow-head']}>
-        <p className={styles['settings-eyebrow']}>Device authorization</p>
+      <header className={cx('settings-flow-head')}>
+        <p className={cx('settings-eyebrow')}>Device authorization</p>
         <h2>{authorizationStatus(authorization)}</h2>
         <p>
           GitHub authorization progress is live server state. Closing this pane does not cancel it.
@@ -130,7 +136,7 @@ export function AuthorizationPane({
 
       {authorization.status === 'waiting' && (
         <>
-          <div className={styles['device-code']}>
+          <DeviceCode>
             <small>{authorization.verificationUri}</small>
             <strong>{authorization.userCode}</strong>
             <span>
@@ -138,8 +144,8 @@ export function AuthorizationPane({
                 ? `Expires ${new Date(authorization.expiresAt).toLocaleTimeString()}`
                 : 'Waiting for GitHub'}
             </span>
-          </div>
-          <div className={styles['authorization-controls']}>
+          </DeviceCode>
+          <AuthorizationControls>
             {authorization.verificationUri && (
               <Link href={authorization.verificationUri} external>
                 Open GitHub
@@ -172,7 +178,7 @@ export function AuthorizationPane({
                 Cancel authorization
               </Button>
             </ControlGroup>
-          </div>
+          </AuthorizationControls>
         </>
       )}
 
@@ -191,7 +197,7 @@ export function AuthorizationPane({
       <ErrorText error={error} />
 
       {authorization.status !== 'waiting' && (
-        <ControlGroup className={styles['settings-form-actions']}>
+        <SettingsFormActions>
           <Button
             type="button"
             onClick={() =>
@@ -219,7 +225,7 @@ export function AuthorizationPane({
               Retry authorization
             </Button>
           )}
-        </ControlGroup>
+        </SettingsFormActions>
       )}
     </Modal>
   )

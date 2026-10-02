@@ -1,0 +1,41 @@
+.settings-folder-field {
+  display: grid;
+  gap: var(--sys-space-sm);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-size: var(--sys-typescale-label-size);
+}
+
+.settings-folder-field legend {
+  padding: 0;
+  font-weight: var(--sys-font-weight-bold);
+}
+
+.settings-folder-field > small {
+  color: var(--sys-color-on-surface-variant);
+}
+
+.settings-folder-control {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.settings-folder-control output {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: var(--sys-size-control-md);
+  padding: var(--sys-space-sm) var(--sys-space-md);
+  overflow-wrap: anywhere;
+  border: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
+  border-left: 0;
+  font-family: var(--sys-font-family-code);
+  font-size: var(--sys-typescale-label-sm-size);
+}
+
+.settings-folder-control output.is-empty {
+  color: var(--sys-color-on-surface-variant);
+  font-family: inherit;
+}

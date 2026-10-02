@@ -4,12 +4,16 @@ import { Button } from '@roadmap/ui/button'
 import { ControlGroup } from '@roadmap/ui/control-group'
 import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
 import { TextInput } from '@roadmap/ui/text-input'
+import classNames from 'classnames/bind'
 import { type FormEvent, useState } from 'react'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
-import styles from '@/views/shared/settings-flow.module.css'
+import { SettingsFacts } from '@/views/shared/settings-facts'
+import { SettingsForm } from '@/views/shared/settings-form'
 import { ErrorText, observedLabel } from '@/views/shared/settings-shared'
-import pageStyles from './page.module.css'
+import styles from './details-section.module.css'
+
+const cx = classNames.bind(styles)
 
 type DetailsSectionProps = { connection: Connection }
 
@@ -58,7 +62,7 @@ export function DetailsSection({ connection }: DetailsSectionProps) {
       <SectionBody>
         {notice && <Alert variant="info">{notice}</Alert>}
         <ErrorText error={error} />
-        <dl className={`${styles['settings-facts']} ${pageStyles.facts}`}>
+        <SettingsFacts className={cx('facts')}>
           <dt>Integration</dt>
           <dd>
             <IntegrationBadge integration={connection.integration} />
@@ -71,9 +75,9 @@ export function DetailsSection({ connection }: DetailsSectionProps) {
           <dd>{observedLabel(connection.availability.observedAt)}</dd>
           <dt>Dependent Projects</dt>
           <dd>{dependents.length}</dd>
-        </dl>
+        </SettingsFacts>
         {!connection.builtIn && (
-          <form className={styles['settings-form']} onSubmit={rename} key={connection.name}>
+          <SettingsForm onSubmit={rename} key={connection.name}>
             <label htmlFor="connection-name">Connection name</label>
             <ControlGroup>
               <TextInput id="connection-name" name="name" defaultValue={connection.name} />
@@ -81,7 +85,7 @@ export function DetailsSection({ connection }: DetailsSectionProps) {
                 Save name
               </Button>
             </ControlGroup>
-          </form>
+          </SettingsForm>
         )}
       </SectionBody>
     </Section>

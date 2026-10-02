@@ -1,0 +1,28 @@
+.settings-eyebrow {
+  margin: 0 0 var(--sys-space-sm);
+  color: var(--sys-color-on-surface-variant);
+  font-family: var(--sys-font-family-code);
+  font-size: var(--sys-typescale-overline-size);
+  font-weight: var(--sys-font-weight-bold);
+  line-height: var(--sys-typescale-overline-line-height);
+  text-transform: uppercase;
+}
+
+.settings-flow-head {
+  margin-bottom: var(--sys-space-xl);
+}
+
+.settings-flow-head h2,
+.settings-flow-head p {
+  margin-top: 0;
+}
+
+.settings-flow-head h2 {
+  margin-bottom: var(--sys-space-xs);
+  font-size: var(--sys-typescale-heading-size);
+}
+
+.settings-flow-head > p:last-child {
+  color: var(--sys-color-on-surface-variant);
+  font-size: var(--sys-typescale-body-sm-size);
+}

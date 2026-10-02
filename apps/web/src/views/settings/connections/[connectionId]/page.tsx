@@ -1,12 +1,15 @@
 import { Alert } from '@roadmap/ui/alert'
 import { Link } from '@roadmap/ui/link'
 import { Page, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
+import classNames from 'classnames/bind'
 import { connectionSettingsHash } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { AvailabilityLabel } from './availability-label'
 import { DetailsSection } from './details-section'
 import { ManageSection } from './manage-section'
 import pageStyles from './page.module.css'
+
+const cx = classNames.bind(pageStyles)
 
 type ConnectionPageProps = { connectionId: string }
 
@@ -34,7 +37,7 @@ export function ConnectionPage({ connectionId }: ConnectionPageProps) {
 
   return (
     <Page>
-      <PageHeader className={pageStyles['connection-detail-header']}>
+      <PageHeader className={cx('connection-detail-header')}>
         <div>
           <PageEyebrow>Settings / Connections</PageEyebrow>
           <PageTitle>{connection.name}</PageTitle>

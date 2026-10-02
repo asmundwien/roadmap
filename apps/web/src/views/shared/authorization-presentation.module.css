@@ -1,0 +1,27 @@
+.device-code {
+  display: grid;
+  gap: var(--sys-space-sm);
+  place-items: center;
+  padding: var(--sys-space-xl);
+  margin: var(--sys-space-xl) var(--sys-space-2xs);
+  border: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
+  outline: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
+  outline-offset: var(--sys-space-2xs);
+}
+
+.device-code strong {
+  font-family: var(--sys-font-family-code);
+  font-size: var(--sys-typescale-title-size);
+}
+
+.device-code small,
+.device-code span {
+  color: var(--sys-color-on-surface-variant);
+}
+
+.authorization-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sys-space-sm) var(--sys-space-lg);
+}

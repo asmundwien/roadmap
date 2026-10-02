@@ -2,13 +2,17 @@ import type { SupportedIntegration } from '@roadmap/contracts'
 import { Button } from '@roadmap/ui/button'
 import { Icon, icon } from '@roadmap/ui/icon'
 import { Page, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
+import classNames from 'classnames/bind'
 import { useState } from 'react'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { AutomationSection } from './automation-section'
 import type { ConnectionOperation } from './connection-details'
 import { AddConnectionPane, AuthorizationPane } from './connection-panes'
-import { ConnectionSetupSection, ConnectionStride } from './connection-sections'
-import pageStyles from './connections.module.css'
+import { ConnectionSetupSection } from './connection-sections'
+import { ConnectionStride } from './connection-stride'
+import pageStyles from './page.module.css'
+
+const cx = classNames.bind(pageStyles)
 
 type ConnectionPane = { kind: 'add' } | { kind: 'authorization'; operationId: string }
 
@@ -40,7 +44,7 @@ export function ConnectionSettings() {
 
   return (
     <Page>
-      <PageHeader className={pageStyles['connection-page-header']}>
+      <PageHeader className={cx('connection-page-header')}>
         <div>
           <PageEyebrow>Settings</PageEyebrow>
           <PageTitle>Connections</PageTitle>

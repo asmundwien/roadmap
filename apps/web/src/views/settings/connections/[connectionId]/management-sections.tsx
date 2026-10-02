@@ -11,7 +11,7 @@ import { Link } from '@roadmap/ui/link'
 import { Surface, SurfaceTitle } from '@roadmap/ui/surface'
 import { useState } from 'react'
 import { connectionSettingsHash } from '@/router'
-import styles from '@/views/shared/settings-flow.module.css'
+import { AuthorizationControls, DeviceCode } from '@/views/shared/authorization-presentation'
 
 type RunCommand = (command: Command) => Promise<boolean>
 
@@ -57,7 +57,7 @@ export function AuthorizationGroup({
       {authorization?.status === 'waiting' ? (
         <>
           <p>Waiting for GitHub. Authorization progress is live server state.</p>
-          <div className={styles['device-code']}>
+          <DeviceCode>
             <small>{authorization.verificationUri}</small>
             <strong>{authorization.userCode}</strong>
             <span>
@@ -65,8 +65,8 @@ export function AuthorizationGroup({
                 ? `Expires ${new Date(authorization.expiresAt).toLocaleTimeString()}`
                 : 'Waiting for GitHub'}
             </span>
-          </div>
-          <div className={styles['authorization-controls']}>
+          </DeviceCode>
+          <AuthorizationControls>
             {authorization.verificationUri && (
               <Link href={authorization.verificationUri} external>
                 Open GitHub
@@ -97,7 +97,7 @@ export function AuthorizationGroup({
                 Cancel authorization
               </Button>
             </ControlGroup>
-          </div>
+          </AuthorizationControls>
         </>
       ) : (
         <>

@@ -1,7 +1,6 @@
 import type { Connection, ProjectKey } from '@roadmap/contracts'
 import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
-import { ControlGroup } from '@roadmap/ui/control-group'
 import { Link } from '@roadmap/ui/link'
 import { Page, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
 import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
@@ -15,7 +14,8 @@ import {
   projectRegistrationDraft,
   projectRegistrationError,
 } from '@/views/shared/project-registration'
-import styles from '@/views/shared/settings-flow.module.css'
+import { SettingsForm } from '@/views/shared/settings-form'
+import { SettingsFormActions } from '@/views/shared/settings-form-actions'
 import { ErrorText } from '@/views/shared/settings-shared'
 import { WorkspaceFolderSelector } from '@/views/shared/workspace-folder-selector'
 
@@ -144,7 +144,7 @@ function ProjectImportForm({
               )}
             </Alert>
           ) : (
-            <form className={styles['settings-form']} onSubmit={(event) => void submit(event)}>
+            <SettingsForm onSubmit={(event) => void submit(event)}>
               {connection.integration === 'github' ? (
                 <>
                   <WorkspaceFolderSelector
@@ -193,12 +193,12 @@ function ProjectImportForm({
                 />
               </label>
               <ErrorText error={generalError ?? errors.connection ?? null} />
-              <ControlGroup className={styles['settings-form-actions']}>
+              <SettingsFormActions>
                 <Button variant="primary" type="submit" disabled={blocked}>
                   {saving ? 'Validating…' : 'Validate and save'}
                 </Button>
-              </ControlGroup>
-            </form>
+              </SettingsFormActions>
+            </SettingsForm>
           )}
         </SectionBody>
       </Section>

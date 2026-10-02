@@ -1,8 +1,11 @@
 import type { Query, QueryResult } from '@roadmap/contracts'
 import { Button } from '@roadmap/ui/button'
+import classNames from 'classnames/bind'
 import { useState } from 'react'
-import styles from '@/views/shared/settings-flow.module.css'
 import { ErrorText } from './settings-shared'
+import styles from './workspace-folder-selector.module.css'
+
+const cx = classNames.bind(styles)
 
 type WorkspaceFolderSelectorProps = {
   label: string
@@ -43,10 +46,10 @@ export function WorkspaceFolderSelector({
   }
 
   return (
-    <fieldset className={styles['settings-folder-field']}>
+    <fieldset className={cx('settings-folder-field')}>
       <legend>{label}</legend>
       <small>{description}</small>
-      <div className={styles['settings-folder-control']}>
+      <div className={cx('settings-folder-control')}>
         <Button
           size="medium"
           type="button"
@@ -55,7 +58,7 @@ export function WorkspaceFolderSelector({
         >
           {choosing ? 'Choosing…' : path ? 'Choose another folder' : 'Choose folder'}
         </Button>
-        <output className={path ? undefined : styles['is-empty']} aria-live="polite">
+        <output className={cx({ 'is-empty': !path })} aria-live="polite">
           {path || 'No folder selected'}
         </output>
       </div>

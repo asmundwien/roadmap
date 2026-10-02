@@ -10,7 +10,8 @@ import { type FormEvent, useState } from 'react'
 import { connectionHash } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
-import styles from '@/views/shared/settings-flow.module.css'
+import { SettingsFacts } from '@/views/shared/settings-facts'
+import { SettingsForm } from '@/views/shared/settings-form'
 import {
   ErrorText,
   locatorLabel,
@@ -18,7 +19,6 @@ import {
   observedLabel,
   projectIdentity,
 } from '@/views/shared/settings-shared'
-import pageStyles from './page.module.css'
 
 type DetailsSectionProps = {
   project: RegisteredProject
@@ -66,7 +66,7 @@ export function DetailsSection({ project, connection }: DetailsSectionProps) {
       <SectionBody>
         {notice && <Alert variant="info">{notice}</Alert>}
         <ErrorText error={error} />
-        <dl className={`${styles['settings-facts']} ${pageStyles.facts}`}>
+        <SettingsFacts>
           <dt>Integration</dt>
           <dd>
             <IntegrationBadge integration={project.key.integration} />
@@ -89,7 +89,7 @@ export function DetailsSection({ project, connection }: DetailsSectionProps) {
           <dd>{observedLabel(project.availability.observedAt)}</dd>
           <dt>Map state</dt>
           <dd>{mapState(project)}</dd>
-        </dl>
+        </SettingsFacts>
 
         <Surface>
           <SurfaceTitle>
@@ -100,18 +100,14 @@ export function DetailsSection({ project, connection }: DetailsSectionProps) {
             Set a display name for the project. This name will be shown in the Roadmap interface.
           </p>
 
-          <form
-            className={styles['settings-form']}
-            onSubmit={(event) => void rename(event)}
-            key={project.name}
-          >
+          <SettingsForm onSubmit={(event) => void rename(event)} key={project.name}>
             <ControlGroup>
               <TextInput id="project-name" name="name" defaultValue={project.name} />
               <Button type="submit" disabled={blocked}>
                 Save name
               </Button>
             </ControlGroup>
-          </form>
+          </SettingsForm>
         </Surface>
       </SectionBody>
     </Section>

@@ -2,6 +2,7 @@ import type { ProjectKey } from '@roadmap/contracts'
 import { Alert } from '@roadmap/ui/alert'
 import { Link } from '@roadmap/ui/link'
 import { Page, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
+import classNames from 'classnames/bind'
 import { connectionSettingsHash } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { sameProject } from '@/views/shared/settings-shared'
@@ -9,6 +10,8 @@ import { AutomationSection } from './automation-section'
 import { DetailsSection } from './details-section'
 import { ManageSection } from './manage-section'
 import pageStyles from './page.module.css'
+
+const cx = classNames.bind(pageStyles)
 
 type ProjectRegistrationPageProps = { projectKey: ProjectKey }
 
@@ -34,7 +37,7 @@ export function ProjectRegistrationPage({ projectKey }: ProjectRegistrationPageP
 
   return (
     <Page>
-      <PageHeader className={pageStyles['project-registration-header']}>
+      <PageHeader className={cx('project-registration-header')}>
         <div>
           <PageEyebrow>Settings / Projects</PageEyebrow>
           <PageTitle>{project.name}</PageTitle>
