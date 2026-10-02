@@ -1,0 +1,11 @@
+.brandIcon {
+  margin-inline-end: var(--sys-space-sm);
+  vertical-align: text-bottom;
+}
+
+.navigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sys-space-sm) var(--sys-space-lg);
+  margin-inline-end: auto;
+}

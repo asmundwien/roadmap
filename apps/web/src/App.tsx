@@ -15,7 +15,7 @@ export function App() {
 
   return (
     <>
-      <SiteHeader route={route} />
+      <SiteHeader />
       {route.screen === 'project' && <MapPage route={route} />}
       {route.screen === 'projects' && <OverviewPage />}
       {route.screen === 'automation-settings' && <AutomationSettings />}
