@@ -1,0 +1,101 @@
+.project-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+}
+
+.source-path {
+  overflow-wrap: anywhere;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(12rem, 17rem) minmax(0, 1fr);
+  align-items: start;
+  gap: 1.5rem;
+}
+
+.navigation {
+  padding: 1rem;
+  border: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
+  border-radius: 0.5rem;
+}
+
+.navigation summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.navigation nav {
+  padding-top: 1rem;
+}
+
+.map-group {
+  margin-top: 1.5rem;
+}
+
+.map-group h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.map-group ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.map-group a {
+  display: grid;
+  padding: 0.5rem;
+  overflow-wrap: anywhere;
+  border: 1px solid transparent;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border-radius: 0.25rem;
+}
+
+.map-group a[aria-current="page"] {
+  border-color: currentColor;
+  font-weight: 600;
+}
+
+.map-group a > span:first-child,
+.map-group a > small {
+  grid-column: 1;
+}
+
+.map-group a > span:last-child {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.map-group small {
+  font-weight: 400;
+}
+
+.map-main {
+  display: grid;
+  min-width: 0;
+  gap: 1.5rem;
+}
+
+.map-heading {
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.map-heading h2 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 48rem) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -44,7 +44,7 @@ pnpm test
 
 Vitest runs in Node. DOM tests need jsdom and Testing Library.
 
-The new live dependency map is available at `#/v2/projects/<integration>/<project-id>`. It uses React Flow viewport controls and opens tickets in the shared Modal. The current project page remains available while the replacement is completed.
+The new live dependency map is available at `#/v2/projects/<integration>/<project-id>`. It uses React Flow viewport controls and opens tickets in the shared Modal. Grouped navigation includes live maps and closed history, followed by the complete map prose. The current project page remains available while the replacement is completed.
 
 ## Stack
 

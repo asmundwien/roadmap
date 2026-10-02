@@ -3,7 +3,7 @@ import classNames from 'classnames/bind'
 import { type ReactNode, useMemo } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { resolveProseLink } from '@/views/map/link-targets'
+import { type ProseLinkTarget, resolveProseLink } from '@/views/map/link-targets'
 import type { ResolvedSelection } from '@/views/map/selection'
 import styles from './prose.module.css'
 
@@ -28,7 +28,17 @@ export function Prose({ map, sourcePath, markdown, onOpenTicket, onOpenMap }: Pr
       h5: 'h6',
       h6: 'h6',
       a: ({ node: _node, href, className, children, ...props }) => {
-        const target = resolveProseLink(map, sourcePath, href)
+        const resolved = resolveProseLink(map, sourcePath, href)
+        const target: ProseLinkTarget | null =
+          resolved === null &&
+          map.project.integration === 'local' &&
+          href &&
+          !/^(?:[a-zA-Z][a-zA-Z\d+.-]*:|\/\/)/.test(href)
+            ? {
+                kind: 'disabled',
+                reason: 'The source path for this local reference is unavailable.',
+              }
+            : resolved
         if (target?.kind === 'selection') {
           return (
             <SelectionLink
@@ -49,6 +59,7 @@ export function Prose({ map, sourcePath, markdown, onOpenTicket, onOpenMap }: Pr
               title={target.reason}
             >
               {children}
+              <span className={cx('link-reason')}> ({target.reason})</span>
             </span>
           )
         }
@@ -111,6 +122,10 @@ function SelectionLink({
       title="This local reference cannot be opened from Roadmap."
     >
       {children}
+      <span className={cx('link-reason')}>
+        {' '}
+        (This local reference cannot be opened from Roadmap.)
+      </span>
     </span>
   )
 }

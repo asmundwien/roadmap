@@ -1,12 +1,27 @@
-import type { ProjectKey, Unreachable } from '@roadmap/contracts'
+import type { Project, ProjectKey, Unreachable, WayfinderMap } from '@roadmap/contracts'
 import { Alert } from '@roadmap/ui/alert'
 import { Link } from '@roadmap/ui/link'
 import { Page, PageDescription, PageHeader, PageTitle } from '@roadmap/ui/page'
 import { Surface, SurfaceDescription } from '@roadmap/ui/surface'
-import { mapHash, mapV2Hash, overviewHash, projectHash, type Route, ticketV2Hash } from '@/router'
+import classNames from 'classnames/bind'
+import {
+  mapHash,
+  mapV2Hash,
+  overviewHash,
+  projectHash,
+  projectRegistrationHash,
+  type Route,
+  ticketV2Hash,
+} from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
+import { IntegrationBadge } from '@/views/shared/integration-badge'
 import { MapContainer } from './map-container'
+import { MapContent } from './map-content'
+import { MapNavigation } from './map-navigation'
+import styles from './page.module.css'
 import { TicketModal } from './ticket-modal'
+
+const cx = classNames.bind(styles)
 
 type MapV2PageProps = { route: Extract<Route, { screen: 'project-v2' }> }
 
@@ -14,12 +29,7 @@ export function MapV2Page({ route }: MapV2PageProps) {
   const { transport, projects, roadmapProjects, capturedAt, unreachable } = useRoadmap()
   const registration = projects.find((candidate) => sameProject(candidate.key, route.project))
   const source = roadmapProjects.find((candidate) => sameProject(candidate.key, route.project))
-  const project = registration
-    ? {
-        ...registration,
-        ...(source?.sourcePath === undefined ? {} : { sourcePath: source.sourcePath }),
-      }
-    : source
+  const project = projectWithSource(registration, source)
   const map = findMap(project, route.selected)
   const unavailable =
     registration?.availability.status === 'unavailable' ? registration.availability.cause : null
@@ -35,12 +45,12 @@ export function MapV2Page({ route }: MapV2PageProps) {
 
   return (
     <Page>
-      <PageHeader>
-        <Link href={overviewHash}>Back to projects</Link>
-        <PageTitle>{project?.name ?? route.project.id}</PageTitle>
-        <PageDescription>Project map</PageDescription>
-        <Link href={map ? mapHash(map) : projectHash(route.project)}>Open legacy project page</Link>
-      </PageHeader>
+      <ProjectHeading
+        projectKey={route.project}
+        project={project}
+        registration={registration}
+        map={map}
+      />
       <ProjectNotices
         transport={transport}
         capturedAt={capturedAt}
@@ -51,32 +61,116 @@ export function MapV2Page({ route }: MapV2PageProps) {
       {capturedAt !== null && !project && (
         <Alert>This project is not present in the current roadmap snapshot.</Alert>
       )}
-      {project && !map && (
-        <Surface>
-          <SurfaceDescription>
-            {route.selected !== null
-              ? `The requested map "${route.selected}" is not available in this project. No other map has been selected.`
-              : 'This project has no available open or closed maps.'}
-          </SurfaceDescription>
-        </Surface>
-      )}
-      {map && (
-        <>
-          <Surface>
-            <h2>{map.title ?? map.displayId ?? map.id}</h2>
-            {!map.isOpen && <SurfaceDescription>This map is closed.</SurfaceDescription>}
-            <MapContainer map={map} onOpenTicket={onOpenTicket} />
-          </Surface>
-          <TicketModal
-            map={map}
-            ticketId={route.selection?.kind === 'ticket' ? route.selection.id : null}
-            onClose={onOpenMap}
-            onOpenTicket={onOpenTicket}
-            onOpenMap={onOpenMap}
-          />
-        </>
+      {project && (
+        <div className={cx('layout')}>
+          <MapNavigation project={project} selectedMap={map} />
+          <div className={cx('map-main')}>
+            {map ? (
+              <SelectedMap
+                map={map}
+                activeMapId={project.openMaps[0]?.id}
+                ticketId={route.selection?.kind === 'ticket' ? route.selection.id : null}
+                onOpenTicket={onOpenTicket}
+                onOpenMap={onOpenMap}
+              />
+            ) : (
+              <Surface>
+                <SurfaceDescription>{missingMapDescription(route.selected)}</SurfaceDescription>
+              </Surface>
+            )}
+          </div>
+        </div>
       )}
     </Page>
+  )
+}
+
+function ProjectHeading({
+  projectKey,
+  project,
+  registration,
+  map,
+}: {
+  projectKey: ProjectKey
+  project: Project | undefined
+  registration: ReturnType<typeof useRoadmap>['projects'][number] | undefined
+  map: WayfinderMap | undefined
+}) {
+  return (
+    <PageHeader>
+      <Link href={overviewHash}>Back to projects</Link>
+      <PageTitle>{project?.name ?? projectKey.id}</PageTitle>
+      <PageDescription>{projectDescription(project)}</PageDescription>
+      <div className={cx('project-context')}>
+        <IntegrationBadge integration={projectKey.integration} />
+        <span className={cx('source-path')}>{projectKey.id}</span>
+        {registration && (
+          <Link href={projectRegistrationHash(registration.key)}>Project settings</Link>
+        )}
+        {project?.sourceUrl && <Link href={project.sourceUrl}>Project source</Link>}
+      </div>
+      {project?.sourcePath && <p className={cx('source-path')}>{project.sourcePath}</p>}
+      <Link href={map ? mapHash(map) : projectHash(projectKey)}>Open legacy project page</Link>
+    </PageHeader>
+  )
+}
+
+function projectWithSource(
+  registration: ReturnType<typeof useRoadmap>['projects'][number] | undefined,
+  source: Project | undefined,
+): Project | undefined {
+  if (!registration) return source
+  return {
+    ...registration,
+    ...(source?.sourcePath === undefined ? {} : { sourcePath: source.sourcePath }),
+    ...(source?.sourceUrl === undefined ? {} : { sourceUrl: source.sourceUrl }),
+  }
+}
+
+function projectDescription(project: Project | undefined): string {
+  if (!project) return 'Project map'
+  const state = project.openMaps.length > 0 ? 'Travelling' : 'Resting'
+  return `${state} · ${project.openMaps.length} live maps · ${project.closedMaps.length} closed maps`
+}
+
+function missingMapDescription(selected: string | null): string {
+  return selected !== null
+    ? `The requested map "${selected}" is not available in this project. No other map has been selected.`
+    : 'This project has no available open or closed maps.'
+}
+
+type SelectedMapProps = {
+  map: WayfinderMap
+  activeMapId: string | undefined
+  ticketId: string | null
+  onOpenTicket: (id: string) => void
+  onOpenMap: () => void
+}
+
+function SelectedMap({ map, activeMapId, ticketId, onOpenTicket, onOpenMap }: SelectedMapProps) {
+  const status = map.isOpen ? (map.id === activeMapId ? 'Active map' : 'Open map') : 'Closed map'
+  return (
+    <>
+      <Surface>
+        <header className={cx('map-heading')}>
+          <h2>{map.title ?? map.displayId ?? map.id}</h2>
+          <SurfaceDescription>
+            {map.displayId ?? map.id} · {status} · {map.progress.completed} closed tickets
+          </SurfaceDescription>
+          {map.url && <Link href={map.url}>Map source</Link>}
+          {map.sourcePath && <span className={cx('source-path')}>{map.sourcePath}</span>}
+        </header>
+        <MapContainer map={map} onOpenTicket={onOpenTicket} />
+      </Surface>
+      <MapContent map={map} onOpenTicket={onOpenTicket} onOpenMap={onOpenMap} />
+      <TicketModal
+        map={map}
+        ticketId={ticketId}
+        onClose={onOpenMap}
+        onOpenTicket={onOpenTicket}
+        onOpenMap={onOpenMap}
+      />
+    </>
   )
 }
 

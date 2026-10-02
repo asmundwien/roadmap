@@ -86,3 +86,9 @@
   text-decoration-style: dotted;
   cursor: not-allowed;
 }
+
+.link-reason {
+  font-size: var(--sys-typescale-body-sm-size);
+  color: var(--sys-color-on-surface-variant);
+  text-decoration: none;
+}
