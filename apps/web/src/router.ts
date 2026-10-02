@@ -26,6 +26,12 @@ export type Route =
       selected: string | null
       selection: PanelSelection | null
     }
+  | {
+      screen: 'project-v2'
+      project: ProjectKey
+      selected: string | null
+      selection: PanelSelection | null
+    }
 
 /**
  * The Panel's pick as the hash carries it. Fog patches and scope entries travel as list indices.
@@ -81,6 +87,7 @@ export function parseHash(hash: string): Route {
     parseConnectionRoute(hash)
   if (settingsRoute) return settingsRoute
   if (hash === componentsHash) return { screen: 'components' }
+  if (hash.startsWith('#/v2/projects/')) return parseProjectV2Route(hash)
   const bare = /^#\/projects\/([^/]+)\/([^/]+)$/.exec(hash)
   if (bare) {
     const project = parseProjectKey(bare[1], bare[2])
@@ -118,6 +125,21 @@ export function parseHash(hash: string): Route {
   }
 }
 
+function parseProjectV2Route(hash: string): Route {
+  const match = /^#\/v2\/projects\/([^/]+)\/([^/]+)(?:\/maps\/([^/]+)(\/ticket\/[^/]+)?)?$/.exec(
+    hash,
+  )
+  if (!match) return PROJECTS
+  const [, integration, projectId, mapId, rest] = match
+  const project = parseProjectKey(integration, projectId)
+  if (!project) return PROJECTS
+  const selected = mapId === undefined ? null : decodePart(mapId)
+  if (mapId !== undefined && selected === null) return PROJECTS
+  const selection = rest === undefined ? null : parseSelection(rest)
+  if (rest !== undefined && selection === null) return PROJECTS
+  return { screen: 'project-v2', project, selected, selection }
+}
+
 function parseProjectKey(
   integration: string | undefined,
   encodedId: string | undefined,
@@ -151,6 +173,18 @@ export function projectHash(project: ProjectKey): string {
 /** The project with one map pinned open, so the selection survives a refresh. */
 export function mapHash(map: Pick<WayfinderMap, 'project' | 'id'>): string {
   return `${projectHash(map.project)}/maps/${encodePart(map.id)}`
+}
+
+export function projectV2Hash(project: ProjectKey): string {
+  return `#/v2/projects/${project.integration}/${encodePart(project.id)}`
+}
+
+export function mapV2Hash(map: Pick<WayfinderMap, 'project' | 'id'>): string {
+  return `${projectV2Hash(map.project)}/maps/${encodePart(map.id)}`
+}
+
+export function ticketV2Hash(map: Pick<WayfinderMap, 'project' | 'id'>, id: string): string {
+  return `${mapV2Hash(map)}/ticket/${encodePart(id)}`
 }
 
 /** The pinned map with one item picked open in the Panel. */

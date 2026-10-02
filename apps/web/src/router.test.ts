@@ -4,16 +4,73 @@ import {
   connectionHash,
   connectionSettingsHash,
   mapHash,
+  mapV2Hash,
   type PanelSelection,
   parseHash,
   projectHash,
   projectRegistrationHash,
+  projectV2Hash,
   selectionHash,
+  ticketV2Hash,
 } from './router'
 
 const PROJECT = { integration: 'github' as const, id: 'asmundwien/roadmap' }
 
 describe('parseHash', () => {
+  it('reads a bare v2 project without stealing the legacy project route', () => {
+    expect(parseHash('#/v2/projects/github/asmundwien%2Froadmap')).toEqual({
+      screen: 'project-v2',
+      project: PROJECT,
+      selected: null,
+      selection: null,
+    })
+    expect(parseHash('#/projects/github/asmundwien%2Froadmap')).toEqual({
+      screen: 'project',
+      project: PROJECT,
+      selected: null,
+      selection: null,
+    })
+  })
+
+  it('preserves encoded local project, map path, and ticket IDs in v2 links', () => {
+    const project = { integration: 'local' as const, id: 'work / café#1' }
+    const map = { project, id: '.wayfinder/release 2/map.md' }
+    expect(projectV2Hash(project)).toBe('#/v2/projects/local/work%20%2F%20caf%C3%A9%231')
+    expect(mapV2Hash(map)).toBe(
+      '#/v2/projects/local/work%20%2F%20caf%C3%A9%231/maps/.wayfinder%2Frelease%202%2Fmap.md',
+    )
+    expect(ticketV2Hash(map, 'tickets/a b#2.md')).toBe(
+      '#/v2/projects/local/work%20%2F%20caf%C3%A9%231/maps/.wayfinder%2Frelease%202%2Fmap.md/ticket/tickets%2Fa%20b%232.md',
+    )
+    expect(parseHash(ticketV2Hash(map, 'tickets/a b#2.md'))).toEqual({
+      screen: 'project-v2',
+      project,
+      selected: map.id,
+      selection: { kind: 'ticket', id: 'tickets/a b#2.md' },
+    })
+    expect(parseHash(mapV2Hash(map))).toEqual({
+      screen: 'project-v2',
+      project,
+      selected: map.id,
+      selection: null,
+    })
+  })
+
+  it.each([
+    '#/v2/projects/local/%',
+    '#/v2/projects/unknown/project',
+    '#/v2/projects/local/project/maps/%E0%A4%A',
+    '#/v2/projects/local/project/maps/map/ticket/%',
+    '#/v2/projects/local/project/maps/map/ticket/',
+    '#/v2/projects/local/project/maps/map/ticket/id/extra',
+    '#/v2/projects/local/project/maps/map/map',
+    '#/v2/projects/local/project/maps/map/fog/0',
+    '#/v2/projects/local/project/maps/map/',
+    '#/v2/projects/local/project/ticket/id',
+  ])('rejects malformed or unsupported v2 selection %s', (hash) => {
+    expect(parseHash(hash)).toEqual({ screen: 'projects' })
+  })
+
   it.each([
     [componentsHash, { screen: 'components' }],
     [connectionSettingsHash, { screen: 'connection-settings' }],

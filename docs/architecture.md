@@ -22,6 +22,8 @@ WebSocket carries full state replacements. HTTP carries `query` and `execute` re
 
 `apps/web/src/views` groups screens by area. The map area lives in `map/`; `map/ledger.tsx` and `map/geometry.ts` draw titles. Descriptive text lives in the docked Panel rendered by `map/panel.tsx`, not in an overlay. `map/sequence.ts` owns traversal order and decides which out-of-scope items to display. `map/prose.tsx` renders Panel prose as Markdown. `map/project-screen.tsx` owns the map's roving-tabindex keyboard navigation.
 
+The separate `#/v2/projects/<integration>/<project-id>` page lives in `apps/web/src/views/map-v2`. It reads the same live application state, renders actual ticket dependencies with React Flow and Dagre, and opens ticket bodies, blockers, and Automation controls in the shared native Modal. Map and ticket selections remain in the URL hash. Closed tickets and unavailable data remain visible. The current project/map page remains available during development.
+
 All styling are component styles as CSS Modules. Components resolve local class names with `classnames/bind`. Reusable styling belongs to shared components, not shared stylesheet imports.
 
 Each routable area under `apps/web/src/views` has a `page.tsx` entry point. `App` routes the Connections list, `settings/connections/[connectionId]/page.tsx`, and its connection-scoped `import/page.tsx` independently. The detail page selects the Connection and composes sibling Details and Manage connection sections. Each section reads its own live state and owns its own commands, busy state, and errors. The import page registers a Project through the selected Connection. `shared/` and `shell/` are support areas, not pages.

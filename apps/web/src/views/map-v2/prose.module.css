@@ -1,0 +1,88 @@
+.prose {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: var(--sys-typescale-body-line-height);
+}
+
+.prose > :first-child {
+  margin-top: 0;
+}
+
+.prose > :last-child {
+  margin-bottom: 0;
+}
+
+.prose :is(h3, h4, h5, h6) {
+  margin-block: var(--sys-space-lg) var(--sys-space-sm);
+}
+
+.prose :is(p, ul, ol, blockquote, pre, table) {
+  margin-block: var(--sys-space-sm);
+}
+
+.prose :is(ul, ol) {
+  padding-inline-start: var(--sys-space-xl);
+}
+
+.prose blockquote {
+  margin-inline: 0;
+  padding-inline-start: var(--sys-space-md);
+  border-inline-start: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
+  color: var(--sys-color-on-surface-variant);
+}
+
+.prose :is(code, pre) {
+  font-family: var(--sys-font-family-code);
+}
+
+.prose pre {
+  overflow-x: auto;
+  padding: var(--sys-space-md);
+  background: var(--sys-color-surface-container);
+  white-space: pre;
+}
+
+.prose table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.prose :is(th, td) {
+  padding: var(--sys-space-xs) var(--sys-space-sm);
+  border: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
+  text-align: start;
+}
+
+.prose img {
+  max-width: 100%;
+  height: auto;
+}
+
+.link {
+  color: var(--sys-color-primary);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.link-button {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+
+.link-button:focus-visible {
+  outline: var(--sys-border-width-thin) solid var(--sys-color-primary);
+  outline-offset: var(--sys-space-2xs);
+}
+
+.link-disabled {
+  color: var(--sys-color-on-surface-variant);
+  text-decoration-style: dotted;
+  cursor: not-allowed;
+}
