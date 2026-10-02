@@ -24,12 +24,6 @@
   line-height: var(--sys-typescale-body-sm-line-height);
 }
 
-.body {
-  display: grid;
-  align-content: start;
-  gap: var(--sys-space-2xl);
-}
-
 @media (max-width: 780px) {
   .section {
     grid-template-columns: minmax(0, 1fr);

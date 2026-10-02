@@ -29,5 +29,5 @@ export function SectionDescription({ className, ...props }: HTMLAttributes<HTMLP
 
 /** Arranges section content in a vertical grid with spacing between children. */
 export function SectionBody({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn(cx('body'), className)} {...props} />
+  return <div className={cn(className)} {...props} />
 }
