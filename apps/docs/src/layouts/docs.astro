@@ -1,6 +1,8 @@
 ---
 import '@roadmap/ui/index.css'
+import { Link } from '@roadmap/ui/link'
 import { Page } from '@roadmap/ui/page'
+import { Navbar, NavbarBrand, NavbarBrandDetail } from '@/components/navbar/navbar'
 import document from './document.module.css'
 import styles from './shell.module.css'
 
@@ -40,6 +42,7 @@ const navigation = {
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <meta
       name="description"
       content="Roadmap UI components, design tokens, and interactive examples."
@@ -48,10 +51,13 @@ const navigation = {
   </head>
   <body class:list={[document.body, styles.shell]}>
     <a class={styles.skipLink} href="#content">Skip to content</a>
-    <header class={styles.header}>
-      <a class={styles.brand} href="/">Roadmap <span class={styles.brandDetail}>UI docs</span></a>
-      <p class={styles.headerDescription}>Design tokens and shared components</p>
-    </header>
+    <Navbar>
+      <NavbarBrand href="/">
+        <img class={styles.brandIcon} src="/favicon.svg" alt="" width="20" height="20">
+        Roadmap <NavbarBrandDetail>UI docs</NavbarBrandDetail>
+      </NavbarBrand>
+      <Link href="http://localhost:5173" external>Open Roadmap</Link>
+    </Navbar>
     <div class={styles.layout}>
       <nav class={styles.navigation} aria-label="Documentation">
         {Object.entries(navigation).map(([group, links]) => (

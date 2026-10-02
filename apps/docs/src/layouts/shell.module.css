@@ -2,6 +2,11 @@
   min-height: 100dvh;
 }
 
+.brandIcon {
+  margin-inline-end: var(--sys-space-sm);
+  vertical-align: text-bottom;
+}
+
 .skipLink {
   position: fixed;
   inset-block-start: var(--sys-space-sm);
@@ -16,38 +21,6 @@
 
 .skipLink:focus {
   transform: none;
-}
-
-.header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--sys-space-sm) var(--sys-space-xl);
-  padding: var(--sys-space-lg) var(--sys-space-xl);
-  border-block-end: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
-  background: var(--sys-color-surface-container-lowest);
-}
-
-.brand {
-  color: var(--sys-color-on-surface);
-  font-size: var(--sys-typescale-heading-size);
-  font-weight: var(--sys-font-weight-bold);
-  line-height: var(--sys-typescale-heading-line-height);
-  text-decoration: none;
-}
-
-.brandDetail {
-  margin-inline-start: var(--sys-space-sm);
-  color: var(--sys-color-on-surface-variant);
-  font-weight: var(--sys-font-weight-regular);
-}
-
-.headerDescription {
-  margin: 0;
-  color: var(--sys-color-on-surface-variant);
-  font-size: var(--sys-typescale-body-sm-size);
-  line-height: var(--sys-typescale-body-sm-line-height);
 }
 
 .layout {
@@ -108,7 +81,6 @@
 }
 
 .navigationLink:focus-visible,
-.brand:focus-visible,
 .skipLink:focus-visible {
   outline: var(--sys-border-width-thick) solid var(--sys-color-primary);
   outline-offset: var(--sys-space-2xs);
