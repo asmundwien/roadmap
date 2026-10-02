@@ -1,52 +1,8 @@
-/*
- * The application base. Design tokens come from '@roadmap/ui/index.css', loaded first in
- * main.tsx; nothing here defines a dimension, a type value, or a duration of its own.
- *
- * The colors below are the last legacy layer: views that have not moved onto --sys-color-* still
- * read them, and they are removed as each view migrates.
- */
+/* Document baseline. Product styling belongs to its view or the UI package. */
 :root {
-  --bg: #fbfbfa;
-  --fg: #1c1b1a;
-  --muted: #6b6a67;
-  --edge: rgba(28, 27, 26, 0.12);
-
-  /* Domain aliases keep presentation mappings explicit at the view seam. */
-  --signal-decided: var(--sys-color-info);
-  --signal-open: #86b6ef;
-  --signal-fog: #a9a7a0;
-  --state-closed: var(--sys-color-outline);
-  --state-frontier: var(--sys-color-success);
-  --state-claimed: var(--sys-color-info);
-  --state-blocked: var(--sys-color-error);
-  --type-research: var(--sys-color-success);
-  --type-prototype: var(--sys-color-warning);
-  --type-grilling: var(--sys-color-error);
-  --type-task: var(--sys-color-primary);
-  --goal: #a87c10;
-
-  /*
-   * --wash and --trunk are pre-mixed opaque against the surface so overlapping strokes never
-   * darken at the joints; the mixes re-resolve per color scheme.
-   */
-  --wash: color-mix(in srgb, var(--fg) 4.5%, transparent);
-  --trunk: color-mix(in srgb, var(--fg) 55%, var(--bg));
-
   color-scheme: light dark;
   font-family: var(--sys-font-family-ui);
   line-height: var(--sys-typescale-body-line-height);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #121211;
-    --fg: #eeedeb;
-    --muted: #9a9894;
-    --edge: rgba(238, 237, 235, 0.14);
-    --signal-open: #184f95;
-    --signal-fog: #4c4b47;
-    --goal: #dcaf3f;
-  }
 }
 
 * {
@@ -56,22 +12,6 @@
 body {
   margin: 0;
   min-height: 100dvh;
-  background: var(--bg);
-  color: var(--fg);
-}
-
-.shell {
-  max-width: var(--sys-size-page-narrow);
-  margin: 0 auto;
-  padding: var(--sys-space-section-sm) var(--sys-space-xl) var(--sys-space-section-lg);
-}
-
-.shell h1 {
-  margin: 0 0 var(--sys-space-sm);
-  font-size: var(--sys-typescale-title-size);
-  line-height: var(--sys-typescale-title-line-height);
-}
-
-.muted {
-  color: var(--muted);
+  background: var(--sys-color-surface);
+  color: var(--sys-color-on-surface);
 }

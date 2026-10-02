@@ -18,15 +18,17 @@ WebSocket carries full state replacements. HTTP carries `query` and `execute` re
 
 `RoadmapProvider` and `useRoadmap` expose the current roadmap to views. Views never fetch directly.
 
-`apps/web/src/router.ts` owns navigation in the URL hash. `#/owner/repo/<map>` identifies the open map; another segment identifies the Panel selection. `PanelSelection` resolves against each live snapshot into `ResolvedSelection`. Components do not mirror URL state in `useState`.
+`apps/web/src/router.ts` owns navigation in the URL hash. `#/projects/<integration>/<project-id>/maps/<map-id>` pins the open map; another segment identifies the Panel selection. Shared route parsing and link builders remain in the router. `map/selection.ts` resolves `PanelSelection` against each live snapshot into `ResolvedSelection` and encodes selections back into the hash.
 
 `apps/web/src/views` groups screens by area. The map area lives in `map/`; `map/ledger.tsx` and `map/geometry.ts` draw titles. Descriptive text lives in the docked Panel rendered by `map/panel.tsx`, not in an overlay. `map/sequence.ts` owns traversal order and decides which out-of-scope items to display. `map/prose.tsx` renders Panel prose as Markdown. `map/project-screen.tsx` owns the map's roving-tabindex keyboard navigation.
+
+Web `index.css` contains only the document baseline and consumes semantic UI tokens.
 
 Each routable area under `apps/web/src/views` has a `page.tsx` entry point. `App` routes the Connections list, `settings/connections/[connectionId]/page.tsx`, and its connection-scoped `import/page.tsx` independently. The detail page selects the Connection and composes sibling Details and Manage connection sections. Each section reads its own live state and owns its own commands, busy state, and errors. The import page registers a Project through the selected Connection. `shared/` and `shell/` are support areas, not pages.
 
 The web catalog at `#/components` documents components that are tightly coupled to the domain. These components map domain state to presentational props, and builds on agnostic content from `@roadmap/ui`.
 
-React functions use named `...Props` types instead of inline object annotations. Dynamic class composition in `apps/web` uses `classnames` imported as `cn`; modules do not define class-name helper functions.
+React functions use named `...Props` types instead of inline object annotations.
 
 Web source files use `@/` for imports outside their current directory. The alias maps to `apps/web/src`; sibling imports remain relative. TypeScript imports omit `.ts` and `.tsx` extensions.
 

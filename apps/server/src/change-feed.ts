@@ -14,7 +14,7 @@ export interface EventTicket {
 }
 
 /** A map named by an event. */
-export interface EventMap {
+interface EventMap {
   project: ProjectKey
   projectName: string
   id: string

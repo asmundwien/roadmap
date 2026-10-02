@@ -10,7 +10,7 @@ import type {
 } from '@roadmap/contracts'
 import type { Variant } from '@roadmap/ui/variant'
 
-export type AutomationTagSlot =
+type AutomationTagSlot =
   | 'classification'
   | 'classification-process'
   | 'wayfinder'

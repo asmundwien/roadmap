@@ -1,11 +1,10 @@
 import type { AutomationEvidence, WayfinderMap } from '@roadmap/contracts'
 import { type ReactNode, useMemo } from 'react'
-import type { ResolvedSelection } from '@/router'
-import { DestinationMark } from '@/views/shared/destination-mark'
 import { stripInlineMarkdown } from '@/views/shared/gist'
+import { DestinationMark } from './destination-mark'
 import { buildLedger, LEDGER_SCALE } from './geometry'
 import { MapLedger } from './ledger'
-import './map.css'
+import type { ResolvedSelection } from './selection'
 import type { LedgerSelection } from './sequence'
 
 type MapChildProps = {

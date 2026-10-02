@@ -112,7 +112,7 @@ export function createMacOsCredentialVault(
   }
 }
 
-export function createSecurityKeychain(): KeychainPort {
+function createSecurityKeychain(): KeychainPort {
   return {
     async read(service, account) {
       try {

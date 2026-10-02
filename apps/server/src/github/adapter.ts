@@ -64,7 +64,7 @@ export interface GitHubAdapterOptions {
   logger?: Logger
 }
 
-export interface GitHubDiagnostics {
+interface GitHubDiagnostics {
   rateLimit: RateLimit | null
 }
 

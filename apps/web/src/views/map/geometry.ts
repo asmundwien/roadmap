@@ -47,19 +47,19 @@ const PAD_BOTTOM = 44
 const BEND = 40
 const DEST_LINE_H = 21
 
-export interface LedgerRow {
+interface LedgerRow {
   ticket: Ticket
   x: number
   y: number
 }
 
-export interface ClosedRow {
+interface ClosedRow {
   ticket: Ticket
   x: number
   y: number
 }
 
-export interface FogRow {
+interface FogRow {
   item: string
   x: number
   y: number
@@ -146,7 +146,7 @@ function openInMapBlockers(ticket: Ticket, home: ProjectKey, openIds: Set<string
  * now. Closed blockers count for nothing — that route is walked. A cross-project open blocker
  * counts one step (the ticket is blocked) but is never followed.
  */
-export function openDepth(ticket: Ticket, byId: Map<string, Ticket>, home: ProjectKey): number {
+function openDepth(ticket: Ticket, byId: Map<string, Ticket>, home: ProjectKey): number {
   const seen = new Set<string>()
   const walk = (current: Ticket): number => {
     if (seen.has(current.id)) return 0

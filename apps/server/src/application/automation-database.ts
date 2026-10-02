@@ -82,7 +82,7 @@ export interface AutomationAppend {
   readonly events: readonly AutomationEvent[]
 }
 
-export type ProjectedWayfinderSession =
+type ProjectedWayfinderSession =
   | { readonly status: 'queued' }
   | { readonly status: 'launching'; readonly admission: AutomationAdmission }
   | { readonly status: 'running'; readonly admission: AutomationAdmission }

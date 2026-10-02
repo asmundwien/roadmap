@@ -40,7 +40,7 @@ export interface HarnessCommand extends LegacyHarnessCommand {
   promptTemplate: string
 }
 
-export interface LegacyClassificationConfiguration {
+interface LegacyClassificationConfiguration {
   command?: LegacyHarnessCommand
   enabledProjects: ProjectKey[]
 }
@@ -53,7 +53,7 @@ export interface LegacyRoadmapConfigurationV3 {
   classification: LegacyClassificationConfiguration
 }
 
-export interface LegacyAutomationConfiguration {
+interface LegacyAutomationConfiguration {
   enabled: boolean
   classificationCommand?: LegacyHarnessCommand
   wayfinderCommand?: LegacyHarnessCommand
@@ -68,7 +68,7 @@ export interface LegacyRoadmapConfigurationV4 {
   automation: LegacyAutomationConfiguration
 }
 
-export interface AutomationConfiguration {
+interface AutomationConfiguration {
   enabled: boolean
   classificationCommand?: HarnessCommand
   wayfinderCommand?: HarnessCommand

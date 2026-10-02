@@ -3,7 +3,7 @@
 export const DEFAULT_PORT = 8790
 export const DEFAULT_WEB_ORIGIN = 'http://localhost:5173'
 
-export interface ServerConfig {
+interface ServerConfig {
   githubApp: { clientId: string; slug: string } | null
   port: number
   allowedOrigin: string

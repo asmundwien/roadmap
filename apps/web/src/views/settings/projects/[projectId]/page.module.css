@@ -6,11 +6,7 @@
   gap: var(--sys-space-lg);
 }
 
-.project-registration-header > a {
-  flex-shrink: 0;
-}
-
-.project-registration .settings-facts {
+.facts {
   margin: 0;
 }
 

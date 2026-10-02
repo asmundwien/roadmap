@@ -21,15 +21,15 @@ const MAX_BLOCKED_BY = 50
 const MAX_LABELS = 20
 const MAX_ASSIGNEES = 10
 
-export type IssueState = 'OPEN' | 'CLOSED'
+type IssueState = 'OPEN' | 'CLOSED'
 
-export interface RawAssignee {
+interface RawAssignee {
   login: string
   avatarUrl: string
   url: string
 }
 
-export interface RawBlocker {
+interface RawBlocker {
   number: number
   title: string
   url: string

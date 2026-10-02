@@ -15,23 +15,22 @@ import type {
   WayfinderSession,
 } from '@roadmap/contracts'
 import { ticketTypeOf } from '@roadmap/contracts'
-import { useState } from 'react'
-import type { ResolvedSelection } from '@/router'
-import { stripInlineMarkdown } from '@/views/shared/gist'
-import './map.css'
 import { Badge } from '@roadmap/ui/badge'
 import { Icon, icon } from '@roadmap/ui/icon'
+import { useState } from 'react'
+import { stripInlineMarkdown } from '@/views/shared/gist'
 import { TicketMark } from '@/views/shared/ticket-mark'
 import { TICKET_STATE_META } from '@/views/shared/ticket-presentation'
 import { automationEvidenceFor } from './automation-presentation'
 import { type ProseLinkTarget, resolveProseLink } from './link-targets'
 import { Prose } from './prose'
+import type { ResolvedSelection } from './selection'
 
 /**
  * The docked Panel — the one detail layer of the map view. NOT an overlay: it docks beside the
  * page and eats its width, so the map stays clickable and item after item opens without closing
  * anything in between. One Panel per screen, fed by every map; what it shows is the hash's
- * selection, resolved by the router (`ResolvedSelection`).
+ * selection, resolved within the map (`ResolvedSelection`).
  */
 export interface PanelAutomation {
   state: AutomationState
@@ -670,7 +669,7 @@ type ItemLinkProps = {
   onSelect: (item: ResolvedSelection) => void
 }
 
-export function ItemLink({ map, itemRef, onSelect }: ItemLinkProps) {
+function ItemLink({ map, itemRef, onSelect }: ItemLinkProps) {
   const local = sameProject(itemRef.project, map.project)
     ? map.tickets.find((t) => t.id === itemRef.ticketId)
     : undefined

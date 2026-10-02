@@ -7,15 +7,14 @@ import {
   type WayfinderMap,
 } from '@roadmap/contracts'
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
-import { DestinationMark } from '@/views/shared/destination-mark'
 import { TICKET_STATE_META } from '@/views/shared/ticket-presentation'
 import {
   type AutomationTag,
   automationEvidenceFor,
   automationTags,
 } from './automation-presentation'
+import { DestinationMark } from './destination-mark'
 import { buildLedger, type Ledger, type LedgerEdge } from './geometry'
-import './map.css'
 import { type LedgerSelection, scopePlan } from './sequence'
 import { TicketNode, ticketNodeTextX } from './ticket-node'
 

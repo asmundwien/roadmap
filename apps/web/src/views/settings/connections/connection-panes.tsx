@@ -3,8 +3,11 @@ import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
 import { ControlGroup } from '@roadmap/ui/control-group'
 import { Link } from '@roadmap/ui/link'
+import { Modal } from '@roadmap/ui/modal'
+import { TextInput } from '@roadmap/ui/text-input'
 import { type FormEvent, useState } from 'react'
-import { ErrorText, SettingsPane } from '@/views/shared/settings-shared'
+import styles from '@/views/shared/settings-flow.module.css'
+import { ErrorText } from '@/views/shared/settings-shared'
 import { authorizationStatus, type ConnectionOperation } from './connection-details'
 
 type AddConnectionPaneProps = {
@@ -55,23 +58,23 @@ export function AddConnectionPane({
   }
 
   return (
-    <SettingsPane label="Add GitHub Connection" onClose={onClose}>
-      <header className="settings-flow-head">
-        <p className="settings-eyebrow">GitHub Connection</p>
+    <Modal open title="Add GitHub Connection" onClose={onClose}>
+      <header className={styles['settings-flow-head']}>
+        <p className={styles['settings-eyebrow']}>GitHub Connection</p>
         <h2>Authorize GitHub</h2>
         <p>Use a name that distinguishes this account from other GitHub Connections.</p>
       </header>
-      <form className="settings-form" onSubmit={(event) => void submit(event)}>
-        <label>
+      <form className={styles['settings-form']} onSubmit={(event) => void submit(event)}>
+        <label htmlFor="connection-name">
           Connection name
-          <input name="name" placeholder="Personal GitHub" />
+          <TextInput id="connection-name" name="name" placeholder="Personal GitHub" />
         </label>
         <Alert variant="info">
           Credentials are saved in macOS Keychain. They never enter roadmap.config.json or the
           browser.
         </Alert>
         <ErrorText error={error} />
-        <ControlGroup className="settings-form-actions">
+        <ControlGroup className={styles['settings-form-actions']}>
           <Button type="button" onClick={onClose}>
             Cancel
           </Button>
@@ -80,7 +83,7 @@ export function AddConnectionPane({
           </Button>
         </ControlGroup>
       </form>
-    </SettingsPane>
+    </Modal>
   )
 }
 type AuthorizationPaneProps = {
@@ -116,9 +119,9 @@ export function AuthorizationPane({
   }
 
   return (
-    <SettingsPane label="GitHub authorization" onClose={onClose}>
-      <header className="settings-flow-head">
-        <p className="settings-eyebrow">Device authorization</p>
+    <Modal open title="GitHub authorization" onClose={onClose}>
+      <header className={styles['settings-flow-head']}>
+        <p className={styles['settings-eyebrow']}>Device authorization</p>
         <h2>{authorizationStatus(authorization)}</h2>
         <p>
           GitHub authorization progress is live server state. Closing this pane does not cancel it.
@@ -127,7 +130,7 @@ export function AuthorizationPane({
 
       {authorization.status === 'waiting' && (
         <>
-          <div className="device-code">
+          <div className={styles['device-code']}>
             <small>{authorization.verificationUri}</small>
             <strong>{authorization.userCode}</strong>
             <span>
@@ -136,7 +139,7 @@ export function AuthorizationPane({
                 : 'Waiting for GitHub'}
             </span>
           </div>
-          <div className="authorization-controls">
+          <div className={styles['authorization-controls']}>
             {authorization.verificationUri && (
               <Link href={authorization.verificationUri} external>
                 Open GitHub
@@ -188,7 +191,7 @@ export function AuthorizationPane({
       <ErrorText error={error} />
 
       {authorization.status !== 'waiting' && (
-        <ControlGroup className="settings-form-actions">
+        <ControlGroup className={styles['settings-form-actions']}>
           <Button
             type="button"
             onClick={() =>
@@ -218,6 +221,6 @@ export function AuthorizationPane({
           )}
         </ControlGroup>
       )}
-    </SettingsPane>
+    </Modal>
   )
 }

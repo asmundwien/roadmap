@@ -1,0 +1,11 @@
+.connection-detail-header {
+  display: flex;
+  max-width: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sys-space-lg);
+}
+
+.facts {
+  margin: 0 0 var(--sys-space-lg);
+}

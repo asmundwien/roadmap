@@ -19,6 +19,7 @@ import { unacknowledgedInterruption } from '@/views/settings/project-automation'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
 import { locatorLabel, projectIdentity, sameProject } from '@/views/shared/settings-shared'
 import { authorizationStatus, connectionAvailability } from './connection-details'
+import connectionStyles from './connections.module.css'
 
 type ConnectionSetupSectionProps = {
   githubAvailable: boolean
@@ -68,7 +69,7 @@ export function ConnectionSetupSection({
         {notice && <Alert variant="info">{notice}</Alert>}
         {authorizations.map((authorization) => (
           <button
-            className="settings-operation"
+            className={connectionStyles['settings-operation']}
             type="button"
             key={authorization.id}
             onClick={() => onOpenAuthorization(authorization.id)}
@@ -96,14 +97,14 @@ export function ConnectionStride({ connection, dependents }: ConnectionStridePro
   return (
     <Section>
       <SectionHeader>
-        <div className="connection-title-row">
+        <div className={connectionStyles['connection-title-row']}>
           <SectionTitle>{connection.name}</SectionTitle>
           <IntegrationBadge integration={connection.integration} />
         </div>
-        <div className="connection-manage-link">
+        <div className={connectionStyles['connection-manage-link']}>
           <Link href={connectionHash(connection.id)}>Manage connection</Link>
         </div>
-        <div className="connection-import-link">
+        <div className={connectionStyles['connection-import-link']}>
           <ButtonLink href={projectImportHash(connection.id)}>
             <Icon icon={icon.plus} /> Import project
           </ButtonLink>
@@ -122,10 +123,10 @@ export function ConnectionStride({ connection, dependents }: ConnectionStridePro
           const unavailable = automation.availability.status === 'unavailable'
           return (
             <Surface key={projectIdentity(project)}>
-              <div className="connection-project-title">
+              <div className={connectionStyles['connection-project-title']}>
                 <SurfaceTitle>{project.name}</SurfaceTitle>
                 {interrupted ? (
-                  <strong className="connection-project-review">
+                  <strong className={connectionStyles['connection-project-review']}>
                     <Link href={projectRegistrationHash(project.key)}>Automation needs review</Link>
                   </strong>
                 ) : preferred ? (
@@ -139,7 +140,7 @@ export function ConnectionStride({ connection, dependents }: ConnectionStridePro
                 ) : null}
               </div>
               <SurfaceDescription>{locatorLabel(project)}</SurfaceDescription>
-              <div className="connection-project-links">
+              <div className={connectionStyles['connection-project-links']}>
                 <Link href={projectRegistrationHash(project.key)}>Project settings</Link>
               </div>
               <ProjectLaunchButtons project={project} />
@@ -179,7 +180,7 @@ function ProjectLaunchButtons({ project }: ProjectLaunchButtonsProps) {
 
   return (
     <>
-      <div className="connection-project-actions">
+      <div className={connectionStyles['connection-project-actions']}>
         <ButtonLink href={projectHash(project.key)} size="small">
           <Icon icon={icon.codeBranch} />
           Go to roadmap

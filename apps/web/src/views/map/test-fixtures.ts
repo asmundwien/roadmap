@@ -9,8 +9,8 @@ import type {
 
 /** Map-view test fixtures — the one place tests build snapshot-shaped maps from shorthand. */
 
-export const HOME = 'me/repo'
-export const HOME_PROJECT = { integration: 'github' as const, id: HOME }
+const HOME = 'me/repo'
+const HOME_PROJECT = { integration: 'github' as const, id: HOME }
 export function blocker(id: number | string, open: boolean = true, projectId = HOME): Blocker {
   const value = String(id)
   return {
@@ -54,7 +54,7 @@ export function ticket(
   }
 }
 
-export function body(overrides: Partial<MapBody> = {}): MapBody {
+function body(overrides: Partial<MapBody> = {}): MapBody {
   return {
     raw: '',
     destination: 'The destination.',

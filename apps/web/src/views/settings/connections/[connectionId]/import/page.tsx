@@ -5,6 +5,7 @@ import { ControlGroup } from '@roadmap/ui/control-group'
 import { Link } from '@roadmap/ui/link'
 import { Page, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
 import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
+import { TextInput } from '@roadmap/ui/text-input'
 import { type FormEvent, useState } from 'react'
 import { connectionSettingsHash, projectRegistrationHash } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
@@ -14,10 +15,9 @@ import {
   projectRegistrationDraft,
   projectRegistrationError,
 } from '@/views/shared/project-registration'
+import styles from '@/views/shared/settings-flow.module.css'
 import { ErrorText } from '@/views/shared/settings-shared'
 import { WorkspaceFolderSelector } from '@/views/shared/workspace-folder-selector'
-import '@/views/shared/settings-flow.css'
-import './page.css'
 
 type ProjectImportPageProps = { connectionId: string }
 
@@ -144,7 +144,7 @@ function ProjectImportForm({
               )}
             </Alert>
           ) : (
-            <form className="settings-form" onSubmit={(event) => void submit(event)}>
+            <form className={styles['settings-form']} onSubmit={(event) => void submit(event)}>
               {connection.integration === 'github' ? (
                 <>
                   <WorkspaceFolderSelector
@@ -184,12 +184,16 @@ function ProjectImportForm({
                   }}
                 />
               )}
-              <label>
+              <label htmlFor="project-import-display-name">
                 Display name
-                <input name="displayName" placeholder="Optional" />
+                <TextInput
+                  id="project-import-display-name"
+                  name="displayName"
+                  placeholder="Optional"
+                />
               </label>
               <ErrorText error={generalError ?? errors.connection ?? null} />
-              <ControlGroup className="settings-form-actions">
+              <ControlGroup className={styles['settings-form-actions']}>
                 <Button variant="primary" type="submit" disabled={blocked}>
                   {saving ? 'Validating…' : 'Validate and save'}
                 </Button>

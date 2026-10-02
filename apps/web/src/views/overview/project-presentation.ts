@@ -7,7 +7,7 @@ import type {
 } from '@roadmap/contracts'
 import { stripInlineMarkdown } from '@/views/shared/gist'
 
-export type ProjectJourney = 'active' | 'resting' | 'waiting'
+type ProjectJourney = 'active' | 'resting' | 'waiting'
 
 export interface ProjectPresentation {
   project: RegisteredProject

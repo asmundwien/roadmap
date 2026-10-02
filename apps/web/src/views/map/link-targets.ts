@@ -1,5 +1,5 @@
 import type { Ticket, WayfinderMap } from '@roadmap/contracts'
-import type { ResolvedSelection } from '@/router'
+import type { ResolvedSelection } from './selection'
 
 export type ProseLinkTarget =
   | { kind: 'selection'; selection: ResolvedSelection }

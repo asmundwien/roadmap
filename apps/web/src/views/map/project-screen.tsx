@@ -3,20 +3,13 @@ import { Badge } from '@roadmap/ui/badge'
 import { Icon, icon } from '@roadmap/ui/icon'
 import { Mark } from '@roadmap/ui/mark'
 import { useEffect, useRef, useState } from 'react'
-import {
-  encodeSelection,
-  mapHash,
-  type PanelSelection,
-  type ResolvedSelection,
-  replaceHash,
-  resolveSelection,
-  selectionHash,
-} from '@/router'
+import { mapHash, type PanelSelection, selectionHash } from '@/router'
 import { IntegrationBadge } from '../shared/integration-badge'
 import { activeMapOf } from './active-map'
 import { AUTOMATION_VARIANT } from './automation-presentation'
 import { MapChild, sameSelection } from './map-child'
 import { Panel, type PanelAutomation } from './panel'
+import { encodeSelection, type ResolvedSelection, replaceHash, resolveSelection } from './selection'
 import { ledgerSequence } from './sequence'
 
 type MissingProjectSectionProps = {

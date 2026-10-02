@@ -7,7 +7,9 @@ import { TextInput } from '@roadmap/ui/text-input'
 import { type FormEvent, useState } from 'react'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
+import styles from '@/views/shared/settings-flow.module.css'
 import { ErrorText, observedLabel } from '@/views/shared/settings-shared'
+import pageStyles from './page.module.css'
 
 type DetailsSectionProps = { connection: Connection }
 
@@ -56,7 +58,7 @@ export function DetailsSection({ connection }: DetailsSectionProps) {
       <SectionBody>
         {notice && <Alert variant="info">{notice}</Alert>}
         <ErrorText error={error} />
-        <dl className="settings-facts">
+        <dl className={`${styles['settings-facts']} ${pageStyles.facts}`}>
           <dt>Integration</dt>
           <dd>
             <IntegrationBadge integration={connection.integration} />
@@ -71,7 +73,7 @@ export function DetailsSection({ connection }: DetailsSectionProps) {
           <dd>{dependents.length}</dd>
         </dl>
         {!connection.builtIn && (
-          <form className="settings-form" onSubmit={rename} key={connection.name}>
+          <form className={styles['settings-form']} onSubmit={rename} key={connection.name}>
             <label htmlFor="connection-name">Connection name</label>
             <ControlGroup>
               <TextInput id="connection-name" name="name" defaultValue={connection.name} />

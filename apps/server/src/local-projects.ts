@@ -10,7 +10,7 @@ export const LOCAL_PROJECTS_PATH = fileURLToPath(
 
 /** Legacy v1 Registry input. Runtime Adapters never read this file. */
 
-export interface LocalProjectRegistration {
+interface LocalProjectRegistration {
   id: string
   rootPath: string
   rootExists: boolean

@@ -1,6 +1,5 @@
 import type { ProjectKey, WayfinderMap } from '@roadmap/contracts'
 import { useMemo, useSyncExternalStore } from 'react'
-import { stripInlineMarkdown } from './views/shared/gist'
 
 /**
  * Hash routing, hand-rolled. These screens still do not justify a router dependency, and hash URLs
@@ -29,23 +28,14 @@ export type Route =
     }
 
 /**
- * The Panel's pick as the hash carries it. Fog patches and scope entries are title-less body
- * bullets, so they travel as list indices and resolve back to text against the live snapshot on
- * every render (`resolveSelection`) — never a stored object.
+ * The Panel's pick as the hash carries it. Fog patches and scope entries travel as list indices.
+ * The map screen resolves those indices against the live snapshot on every render.
  */
 export type PanelSelection =
   | { kind: 'map' }
   | { kind: 'ticket'; id: string }
   | { kind: 'fog'; index: number }
   | { kind: 'scope'; index: number }
-  | { kind: 'scope-all' }
-
-/** The pick resolved against a live map: fog and scope entries carry their text. */
-export type ResolvedSelection =
-  | { kind: 'map' }
-  | { kind: 'ticket'; id: string }
-  | { kind: 'fog'; text: string }
-  | { kind: 'scope'; text: string }
   | { kind: 'scope-all' }
 
 const PROJECTS: Route = { screen: 'projects' }
@@ -181,64 +171,6 @@ export function selectionHash(
     case 'scope':
       return `${base}/scope/${selection.index}`
   }
-}
-
-/**
- * Resolve the hash's pick against the live map. Anything that doesn't resolve — a vanished
- * ticket, an index past the list's end — is no selection, not an error: a snapshot replace may
- * legitimately have pulled the item out from under the URL.
- */
-export function resolveSelection(
-  map: WayfinderMap,
-  selection: PanelSelection,
-): ResolvedSelection | null {
-  switch (selection.kind) {
-    case 'map':
-    case 'scope-all':
-      return selection
-    case 'ticket':
-      return map.tickets.some((ticket) => ticket.id === selection.id) ? selection : null
-    case 'fog': {
-      const text = map.body.notYetSpecified.map(stripInlineMarkdown)[selection.index]
-      return text !== undefined ? { kind: 'fog', text } : null
-    }
-    case 'scope': {
-      const text = map.body.outOfScope.map(stripInlineMarkdown)[selection.index]
-      return text !== undefined ? { kind: 'scope', text } : null
-    }
-  }
-}
-
-/**
- * The inverse of `resolveSelection`: a clicked item back into the index form the hash carries.
- * Null when the item's text is no longer on the map — a snapshot replace can race a click, and a
- * pick that can't be named honestly is not written at all.
- */
-export function encodeSelection(map: WayfinderMap, item: ResolvedSelection): PanelSelection | null {
-  switch (item.kind) {
-    case 'map':
-    case 'scope-all':
-    case 'ticket':
-      return item
-    case 'fog': {
-      const index = map.body.notYetSpecified.map(stripInlineMarkdown).indexOf(item.text)
-      return index !== -1 ? { kind: 'fog', index } : null
-    }
-    case 'scope': {
-      const index = map.body.outOfScope.map(stripInlineMarkdown).indexOf(item.text)
-      return index !== -1 ? { kind: 'scope', index } : null
-    }
-  }
-}
-
-/**
- * Swap the current hash without growing history — the accordion re-pins its selection on every
- * toggle, and stepping back through each fold would make the back button useless. replaceState
- * fires no hashchange, so the event is dispatched by hand to keep `useRoute` subscribers live.
- */
-export function replaceHash(hash: string): void {
-  window.history.replaceState(null, '', hash)
-  window.dispatchEvent(new HashChangeEvent('hashchange'))
 }
 
 function subscribe(onChange: () => void): () => void {

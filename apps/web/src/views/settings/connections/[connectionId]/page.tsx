@@ -6,8 +6,7 @@ import { useRoadmap } from '@/store/roadmap-provider'
 import { AvailabilityLabel } from './availability-label'
 import { DetailsSection } from './details-section'
 import { ManageSection } from './manage-section'
-import '@/views/shared/settings-flow.css'
-import './page.css'
+import pageStyles from './page.module.css'
 
 type ConnectionPageProps = { connectionId: string }
 
@@ -34,8 +33,8 @@ export function ConnectionPage({ connectionId }: ConnectionPageProps) {
   const github = supportedIntegrations.find((integration) => integration.integration === 'github')
 
   return (
-    <Page className="connection-detail">
-      <PageHeader className="connection-detail-header">
+    <Page>
+      <PageHeader className={pageStyles['connection-detail-header']}>
         <div>
           <PageEyebrow>Settings / Connections</PageEyebrow>
           <PageTitle>{connection.name}</PageTitle>

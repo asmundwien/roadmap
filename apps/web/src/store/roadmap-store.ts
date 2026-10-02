@@ -23,7 +23,7 @@ export interface CommandActivity {
   error: SafeError | null
 }
 
-export interface RoadmapStoreSnapshot {
+interface RoadmapStoreSnapshot {
   transport: TransportLiveness
   /** Last authoritative replacement; retained while disconnected. */
   state: ApplicationState | null

@@ -27,16 +27,13 @@ import {
 import { createSnapshotStore, type SnapshotStore, type WayfinderAdapter } from '../store.ts'
 import { type AutomationLauncher, type AutomationLoop, createAutomationLoop } from './automation.ts'
 import type { AutomationDatabaseDocument } from './automation-database.ts'
-import { type CredentialVault, CredentialVaultError } from './credential-vault.ts'
-
-export type { CredentialVault } from './credential-vault.ts'
-
 import type {
   ConfigurationDocument,
   ConfigurationRead,
   RoadmapConfiguration,
 } from './configuration.ts'
 import { roadmapConfigurationCodec } from './configuration.ts'
+import { type CredentialVault, CredentialVaultError } from './credential-vault.ts'
 
 export interface RoadmapApplication {
   start(): Promise<void>
@@ -50,7 +47,7 @@ export interface RoadmapApplication {
 const REFRESH_LEEWAY_MS = 5 * 60_000
 const SLOW_DOWN_MS = 5_000
 
-export interface AdmissionRuntime {
+interface AdmissionRuntime {
   accessToken(connectionId: string): Promise<string>
 }
 

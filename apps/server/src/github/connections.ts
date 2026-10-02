@@ -11,7 +11,7 @@ export interface CredentialBundle {
   refreshTokenExpiresAt: number
 }
 
-export interface DeviceAuthorization {
+interface DeviceAuthorization {
   deviceCode: string
   userCode: string
   verificationUri: string

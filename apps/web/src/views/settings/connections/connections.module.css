@@ -61,10 +61,10 @@
   width: 100%;
   margin-bottom: var(--sys-space-lg);
   padding: var(--sys-space-md);
-  border: 1px solid var(--edge);
-  border-left: 3px solid var(--goal);
-  background: var(--wash);
-  color: inherit;
+  border: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
+  border-left: var(--sys-border-width-thick) solid var(--sys-color-primary);
+  background: var(--sys-color-surface-container);
+  color: var(--sys-color-on-surface);
   text-align: left;
   cursor: pointer;
 }
@@ -75,5 +75,5 @@
 }
 
 .settings-operation small {
-  color: var(--muted);
+  color: var(--sys-color-on-surface-variant);
 }

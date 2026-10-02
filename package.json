@@ -14,10 +14,12 @@
     "typecheck": "tsc -b --noEmit && pnpm --filter @roadmap/docs typecheck",
     "test": "pnpm -r test",
     "check": "biome check .",
+    "knip": "knip",
     "fix": "biome check --write ."
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.7",
+    "knip": "^6.39.0",
     "typescript": "~6.0.2"
   }
 }

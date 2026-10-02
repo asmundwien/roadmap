@@ -9,14 +9,6 @@ export interface ConnectionOperation {
   execute(command: Command): Promise<CommandOutcome>
 }
 
-export function connectionAuthorization(
-  operations: AuthorizationOperation[],
-  connectionId: string,
-): AuthorizationOperation | undefined {
-  const related = operations.filter((operation) => operation.connectionId === connectionId)
-  return related.findLast((operation) => operation.status === 'waiting') ?? related.at(-1)
-}
-
 export function connectionAvailability(connection: Connection): string {
   switch (connection.availability.status) {
     case 'available':

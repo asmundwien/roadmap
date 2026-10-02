@@ -1,0 +1,44 @@
+/* Page-level Project presentation is isolated from the rest of the application. */
+
+.project-map-screen {
+  .small {
+    font-size: 0.85rem;
+  }
+
+  .banner {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--muted);
+    border-radius: 6px;
+  }
+
+  /* The project screen's page-level header: the project's own details, nothing map-specific. */
+
+  .project-head {
+    margin-bottom: 2rem;
+  }
+
+  /* The badge sits beside the title on one baseline; the heading owns that gap, not the badge. */
+  .project-head h1 {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--sys-space-sm);
+    margin: 0;
+  }
+
+  .project-head p {
+    margin: 0.25rem 0 0;
+  }
+
+  .project-automation-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sys-space-xs) var(--sys-space-md);
+  }
+
+  .project-empty {
+    padding: var(--sys-space-lg) 0;
+    border-top: 1px solid var(--edge);
+    border-bottom: 1px solid var(--edge);
+  }
+}

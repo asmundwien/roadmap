@@ -8,6 +8,7 @@ import { Surface, SurfaceTitle } from '@roadmap/ui/surface'
 import { type FormEvent, useState } from 'react'
 import { connectionHash, connectionSettingsHash } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
+import styles from '@/views/shared/settings-flow.module.css'
 import { ErrorText } from '@/views/shared/settings-shared'
 import { WorkspaceFolderSelector } from '@/views/shared/workspace-folder-selector'
 
@@ -116,7 +117,7 @@ export function ManageSection({ project, connectionExists }: ManageSectionProps)
               Repair requires proof of the same Project identity. Connection and locator stay
               unchanged.
             </p>
-            <form className="settings-form" onSubmit={repair}>
+            <form className={styles['settings-form']} onSubmit={repair}>
               <WorkspaceFolderSelector
                 label="New Workspace"
                 description="Choose the moved folder that contains the same Project."

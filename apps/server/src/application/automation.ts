@@ -59,11 +59,11 @@ export type ClassificationProcessResult =
 
 export type WayfinderProcessResult = FinishedProcessResult
 
-export interface ClassificationProcess {
+interface ClassificationProcess {
   completed: Promise<ClassificationProcessResult>
   stop(): Promise<void>
 }
-export interface WayfinderProcess {
+interface WayfinderProcess {
   completed: Promise<WayfinderProcessResult>
 }
 

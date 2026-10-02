@@ -1,7 +1,7 @@
 import type { WayfinderMap } from '@roadmap/contracts'
-import type { ResolvedSelection } from '@/router'
 import { stripInlineMarkdown } from '@/views/shared/gist'
 import { buildLedger } from './geometry'
+import type { ResolvedSelection } from './selection'
 
 /** What a click on the map means — everything the Panel can show except the map's own prose. */
 export type LedgerSelection = Exclude<ResolvedSelection, { kind: 'map' }>

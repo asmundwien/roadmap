@@ -8,8 +8,7 @@ import { AutomationSection } from './automation-section'
 import type { ConnectionOperation } from './connection-details'
 import { AddConnectionPane, AuthorizationPane } from './connection-panes'
 import { ConnectionSetupSection, ConnectionStride } from './connection-sections'
-import '@/views/shared/settings-flow.css'
-import './connections.css'
+import pageStyles from './connections.module.css'
 
 type ConnectionPane = { kind: 'add' } | { kind: 'authorization'; operationId: string }
 
@@ -41,7 +40,7 @@ export function ConnectionSettings() {
 
   return (
     <Page>
-      <PageHeader className="connection-page-header">
+      <PageHeader className={pageStyles['connection-page-header']}>
         <div>
           <PageEyebrow>Settings</PageEyebrow>
           <PageTitle>Connections</PageTitle>

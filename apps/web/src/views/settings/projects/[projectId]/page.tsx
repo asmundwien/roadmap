@@ -8,8 +8,7 @@ import { sameProject } from '@/views/shared/settings-shared'
 import { AutomationSection } from './automation-section'
 import { DetailsSection } from './details-section'
 import { ManageSection } from './manage-section'
-import '@/views/shared/settings-flow.css'
-import './page.css'
+import pageStyles from './page.module.css'
 
 type ProjectRegistrationPageProps = { projectKey: ProjectKey }
 
@@ -34,8 +33,8 @@ export function ProjectRegistrationPage({ projectKey }: ProjectRegistrationPageP
   const connection = connections.find((candidate) => candidate.id === project.connectionId)
 
   return (
-    <Page className="project-registration">
-      <PageHeader className="project-registration-header">
+    <Page>
+      <PageHeader className={pageStyles['project-registration-header']}>
         <div>
           <PageEyebrow>Settings / Projects</PageEyebrow>
           <PageTitle>{project.name}</PageTitle>

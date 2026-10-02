@@ -1,6 +1,8 @@
 import type { Query, QueryResult } from '@roadmap/contracts'
 import { Button } from '@roadmap/ui/button'
 import { useState } from 'react'
+import styles from '@/views/shared/settings-flow.module.css'
+import { ErrorText } from './settings-shared'
 
 type WorkspaceFolderSelectorProps = {
   label: string
@@ -41,10 +43,10 @@ export function WorkspaceFolderSelector({
   }
 
   return (
-    <fieldset className="settings-folder-field">
+    <fieldset className={styles['settings-folder-field']}>
       <legend>{label}</legend>
       <small>{description}</small>
-      <div className="settings-folder-control">
+      <div className={styles['settings-folder-control']}>
         <Button
           size="medium"
           type="button"
@@ -53,13 +55,11 @@ export function WorkspaceFolderSelector({
         >
           {choosing ? 'Choosing…' : path ? 'Choose another folder' : 'Choose folder'}
         </Button>
-        <output className={path ? '' : 'is-empty'} aria-live="polite">
+        <output className={path ? undefined : styles['is-empty']} aria-live="polite">
           {path || 'No folder selected'}
         </output>
       </div>
-      {(selectionError ?? error) && (
-        <span className="settings-field-error">{selectionError ?? error}</span>
-      )}
+      {(selectionError ?? error) && <ErrorText error={selectionError ?? error ?? null} />}
     </fieldset>
   )
 }

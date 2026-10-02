@@ -2,7 +2,9 @@ import type { ProjectKey } from '@roadmap/contracts'
 import type { Route } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { MissingProjectSection, ProjectMapSections } from './project-screen'
-import '@/views/shared/views.css'
+import './map.css'
+import './views.css'
+import './destination-mark.css'
 
 type MapPageProps = { route: Extract<Route, { screen: 'project' }> }
 
@@ -28,31 +30,37 @@ export function MapPage({ route }: MapPageProps) {
 
   if (!project) {
     return (
-      <MissingProjectSection
-        capturedAt={capturedAt}
-        disconnected={transport === 'disconnected'}
-        projectId={route.project.id}
-      />
+      <div className="project-map-screen">
+        <MissingProjectSection
+          capturedAt={capturedAt}
+          disconnected={transport === 'disconnected'}
+          projectId={route.project.id}
+        />
+      </div>
     )
   }
 
   return (
-    <ProjectMapSections
-      key={`${project.key.integration}:${project.key.id}`}
-      project={project}
-      selected={route.selected}
-      selection={route.selection}
-      disconnected={transport === 'disconnected'}
-      unavailable={
-        registration?.availability.status === 'unavailable' ? registration.availability.cause : null
-      }
-      automation={{
-        state: automation,
-        configurationVersion,
-        commandInFlight: command.inFlight,
-        execute,
-      }}
-    />
+    <div className="project-map-screen">
+      <ProjectMapSections
+        key={`${project.key.integration}:${project.key.id}`}
+        project={project}
+        selected={route.selected}
+        selection={route.selection}
+        disconnected={transport === 'disconnected'}
+        unavailable={
+          registration?.availability.status === 'unavailable'
+            ? registration.availability.cause
+            : null
+        }
+        automation={{
+          state: automation,
+          configurationVersion,
+          commandInFlight: command.inFlight,
+          execute,
+        }}
+      />
+    </div>
   )
 }
 

@@ -1,5 +1,3 @@
-import './destination-mark.css'
-
 type DestinationMarkProps = { variant: 'plot'; x: number; y: number } | { variant: 'header' }
 
 /** The destination halo and flag at plot coordinates or wrapped for HTML contexts. */
