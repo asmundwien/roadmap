@@ -1,7 +1,6 @@
 import type { MapBody, Ticket, WayfinderMap } from '@roadmap/contracts'
 import { describe, expect, it } from 'vitest'
 import {
-  automationSettingsHash,
   componentsHash,
   connectionHash,
   connectionSettingsHash,
@@ -19,7 +18,6 @@ const PROJECT = { integration: 'github' as const, id: 'asmundwien/roadmap' }
 
 describe('parseHash', () => {
   it.each([
-    [automationSettingsHash, { screen: 'automation-settings' }],
     [componentsHash, { screen: 'components' }],
     [connectionSettingsHash, { screen: 'connection-settings' }],
   ])('reads the management route %s', (hash, route) => {

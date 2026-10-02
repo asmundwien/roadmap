@@ -16,7 +16,6 @@ import { stripInlineMarkdown } from './views/shared/gist'
  */
 export type Route =
   | { screen: 'projects' }
-  | { screen: 'automation-settings' }
   | { screen: 'project-registration'; project: ProjectKey }
   | { screen: 'connection-settings' }
   | { screen: 'connection'; connectionId: string }
@@ -61,7 +60,6 @@ export function connectionHash(connectionId: string): string {
 export function projectImportHash(connectionId: string): string {
   return `${connectionHash(connectionId)}/import`
 }
-export const automationSettingsHash = '#/settings/automation'
 export const componentsHash = '#/components'
 
 function parseConnectionRoute(hash: string): Route | null {
@@ -92,7 +90,6 @@ export function parseHash(hash: string): Route {
     parseProjectImportRoute(hash) ??
     parseConnectionRoute(hash)
   if (settingsRoute) return settingsRoute
-  if (hash === automationSettingsHash) return { screen: 'automation-settings' }
   if (hash === componentsHash) return { screen: 'components' }
   const bare = /^#\/projects\/([^/]+)\/([^/]+)$/.exec(hash)
   if (bare) {

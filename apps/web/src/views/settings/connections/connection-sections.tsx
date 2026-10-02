@@ -1,5 +1,6 @@
 import type { AuthorizationOperation, Connection, RegisteredProject } from '@roadmap/contracts'
 import { Alert } from '@roadmap/ui/alert'
+import { Badge } from '@roadmap/ui/badge'
 import { Button, ButtonLink } from '@roadmap/ui/button'
 import { Icon, icon } from '@roadmap/ui/icon'
 import { Link } from '@roadmap/ui/link'
@@ -14,8 +15,9 @@ import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
 import { useState } from 'react'
 import { connectionHash, projectHash, projectImportHash, projectRegistrationHash } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
+import { unacknowledgedInterruption } from '@/views/settings/project-automation'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
-import { locatorLabel, projectIdentity } from '@/views/shared/settings-shared'
+import { locatorLabel, projectIdentity, sameProject } from '@/views/shared/settings-shared'
 import { authorizationStatus, connectionAvailability } from './connection-details'
 
 type ConnectionSetupSectionProps = {
@@ -90,6 +92,7 @@ type ConnectionStrideProps = {
 }
 
 export function ConnectionStride({ connection, dependents }: ConnectionStrideProps) {
+  const { automation } = useRoadmap()
   return (
     <Section>
       <SectionHeader>
@@ -113,16 +116,36 @@ export function ConnectionStride({ connection, dependents }: ConnectionStridePro
             <span>{connection.availability.cause}</span>
           </Alert>
         )}
-        {dependents.map((project) => (
-          <Surface key={projectIdentity(project)}>
-            <SurfaceTitle>{project.name}</SurfaceTitle>
-            <SurfaceDescription>{locatorLabel(project)}</SurfaceDescription>
-            <div className="connection-project-links">
-              <Link href={projectRegistrationHash(project.key)}>Manage project registration</Link>
-            </div>
-            <ProjectLaunchButtons project={project} />
-          </Surface>
-        ))}
+        {dependents.map((project) => {
+          const interrupted = unacknowledgedInterruption(project.key, automation.evidence)
+          const preferred = automation.enabledProjects.some((key) => sameProject(key, project.key))
+          const unavailable = automation.availability.status === 'unavailable'
+          return (
+            <Surface key={projectIdentity(project)}>
+              <div className="connection-project-title">
+                <SurfaceTitle>{project.name}</SurfaceTitle>
+                {interrupted ? (
+                  <strong className="connection-project-review">
+                    <Link href={projectRegistrationHash(project.key)}>Automation needs review</Link>
+                  </strong>
+                ) : preferred ? (
+                  <Badge>
+                    {unavailable
+                      ? 'Automation enabled · unavailable'
+                      : !automation.enabled
+                        ? 'Automation enabled · paused'
+                        : 'Automation enabled'}
+                  </Badge>
+                ) : null}
+              </div>
+              <SurfaceDescription>{locatorLabel(project)}</SurfaceDescription>
+              <div className="connection-project-links">
+                <Link href={projectRegistrationHash(project.key)}>Project settings</Link>
+              </div>
+              <ProjectLaunchButtons project={project} />
+            </Surface>
+          )
+        })}
         {dependents.length === 0 && <p>No registered Projects use this Connection.</p>}
       </SectionBody>
     </Section>

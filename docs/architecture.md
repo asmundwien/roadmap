@@ -22,7 +22,7 @@ WebSocket carries full state replacements. HTTP carries `query` and `execute` re
 
 `apps/web/src/views` groups screens by area. The map area lives in `map/`; `map/ledger.tsx` and `map/geometry.ts` draw titles. Descriptive text lives in the docked Panel rendered by `map/panel.tsx`, not in an overlay. `map/sequence.ts` owns traversal order and decides which out-of-scope items to display. `map/prose.tsx` renders Panel prose as Markdown. `map/project-screen.tsx` owns the map's roving-tabindex keyboard navigation.
 
-Each routable area under `apps/web/src/views` has a `page.tsx` entry point except Automation settings. `App` routes the Connections list, `settings/connections/[connectionId]/page.tsx`, and its connection-scoped `import/page.tsx` independently. The detail page selects the Connection and composes sibling Details and Manage connection sections. Each section reads its own live state and owns its own commands, busy state, and errors; the list owns only setup and new-connection authorization. The import page registers a Project through the selected Connection. Project registration details remain at `settings/projects/[projectId]/page.tsx`. `shared/` and `shell/` are support areas, not pages.
+Each routable area under `apps/web/src/views` has a `page.tsx` entry point. `App` routes the Connections list, `settings/connections/[connectionId]/page.tsx`, and its connection-scoped `import/page.tsx` independently. The detail page selects the Connection and composes sibling Details and Manage connection sections. Each section reads its own live state and owns its own commands, busy state, and errors. The import page registers a Project through the selected Connection. `shared/` and `shell/` are support areas, not pages.
 
 The web catalog at `#/components` documents components that are tightly coupled to the domain. These components map domain state to presentational props, and builds on agnostic content from `@roadmap/ui`.
 
@@ -53,9 +53,11 @@ Automation. Reconciliation chooses a currently eligible Session without exposing
 ordering promise. Every transition is appended before its process side effect.
 
 An unacknowledged interrupted Session blocks only its Project. Roadmap removes that Project from
-Automation enablement. The web switch therefore renders off; turning it on appends acknowledgement
-of each specific unknown event before persisting enablement, so either persistence failure remains
-fail-closed. Public Automation evidence distinguishes queued, launching, running, terminal, and
+Automation enablement. Project settings render the ordinary switch off and disabled, with an explicit
+acknowledgement-and-enable action and a ticket link when the target resolves in live state. The
+existing enable command appends acknowledgement of each specific unknown event before persisting
+enablement, so either persistence failure remains fail-closed. Acknowledgement does not change the
+unknown outcome. Public Automation evidence distinguishes queued, launching, running, terminal, and
 outcome-unknown states, preserves each admitted stage's `automatic` or `override` reason, and marks
 whether an unknown Session outcome has been acknowledged.
 

@@ -5,6 +5,7 @@ import { Page, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
 import { connectionSettingsHash } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { sameProject } from '@/views/shared/settings-shared'
+import { AutomationSection } from './automation-section'
 import { DetailsSection } from './details-section'
 import { ManageSection } from './manage-section'
 import '@/views/shared/settings-flow.css'
@@ -71,6 +72,10 @@ export function ProjectRegistrationPage({ projectKey }: ProjectRegistrationPageP
         key={`details:${project.key.integration}:${project.key.id}`}
         project={project}
         connection={connection}
+      />
+      <AutomationSection
+        key={`automation:${project.key.integration}:${project.key.id}`}
+        project={project}
       />
       <ManageSection
         key={`manage:${project.key.integration}:${project.key.id}`}

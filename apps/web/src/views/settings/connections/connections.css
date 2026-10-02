@@ -28,6 +28,18 @@
   margin-top: var(--sys-space-sm);
 }
 
+.connection-project-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sys-space-sm);
+}
+
+.connection-project-review a {
+  color: var(--sys-color-error);
+  font-weight: 700;
+}
+
 .connection-project-links {
   display: flex;
   flex-wrap: wrap;

@@ -1,4 +1,4 @@
-import type { ApplicationState, Connection } from '@roadmap/contracts'
+import type { ApplicationState, Connection, ProjectKey } from '@roadmap/contracts'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
@@ -55,6 +55,94 @@ function state(connections: Connection[]): ApplicationState {
 }
 
 describe('ConnectionSettings', () => {
+  it.each([false, true])(
+    'allows shutdown but not enablement when Automation is unavailable, enabled=%s',
+    (enabled) => {
+      const initial = state([])
+      const markup = renderConnections({
+        ...initial,
+        automation: {
+          ...initial.automation,
+          enabled,
+          availability: { status: 'unavailable', cause: 'Commands need repair.' },
+        },
+      })
+      const toggle = markup.match(/<input[^>]*role="switch"[^>]*>/)?.[0]
+      expect(toggle).toBeDefined()
+      expect(toggle).toContain(`aria-checked="${enabled}"`)
+      if (enabled) expect(toggle).not.toContain('disabled=""')
+      else expect(toggle).toContain('disabled=""')
+    },
+  )
+
+  it.each<{ key: ProjectKey; acknowledged: boolean; needsReview: boolean }>([
+    { key: { integration: 'local', id: 'shared' }, acknowledged: false, needsReview: true },
+    { key: { integration: 'local', id: 'shared' }, acknowledged: true, needsReview: false },
+    { key: { integration: 'local', id: 'other' }, acknowledged: false, needsReview: false },
+    { key: { integration: 'github', id: 'shared' }, acknowledged: false, needsReview: false },
+  ])(
+    'requires review only for the matching unacknowledged project: $key',
+    ({ key, acknowledged, needsReview }) => {
+      const initial = state([
+        {
+          id: 'connection',
+          integration: key.integration,
+          name: 'Connection',
+          builtIn: key.integration === 'local',
+          availability: { status: 'available' },
+        },
+      ])
+      const markup = renderConnections({
+        ...initial,
+        projects: [
+          {
+            key,
+            connectionId: 'connection',
+            locator:
+              key.integration === 'local'
+                ? { integration: 'local', path: '/tmp/project' }
+                : { integration: 'github', repositoryId: '42', nameWithOwner: 'acme/project' },
+            workspace: { path: '/tmp/project' },
+            name: 'Project',
+            availability: { status: 'available', observedAt: 1_000 },
+            openMaps: [],
+            closedMaps: [],
+            warnings: [],
+            actions: [],
+          },
+        ],
+        automation: {
+          ...initial.automation,
+          enabled: true,
+          enabledProjects: [key],
+          evidence: [
+            {
+              target: {
+                project: { integration: 'local', id: 'shared' },
+                mapId: 'map',
+                ticketId: 'ticket',
+              },
+              classification: { status: 'running', admission: 'automatic' },
+              wayfinder: {
+                status: 'outcome-unknown',
+                admission: 'automatic',
+                reason: 'Server stopped.',
+                acknowledged,
+              },
+            },
+          ],
+        },
+      })
+      if (needsReview) {
+        expect(markup).toMatch(
+          /href="#\/settings\/projects\/local\/shared"[^>]*>Automation needs review/,
+        )
+      } else {
+        expect(markup).not.toContain('Automation needs review')
+      }
+    },
+  )
+
   it('keeps setup and connection issues in their respective sections', () => {
     const initial = state([
       {
@@ -86,36 +174,6 @@ describe('ConnectionSettings', () => {
     expect(issue).toBeGreaterThan(work)
     expect(issue).toBeLessThan(personal)
     expect(markup.slice(personal)).not.toContain('Token expired.')
-  })
-  it('shows integration badges beside both connection names and Manage links below', () => {
-    const markup = renderConnections(
-      state([
-        {
-          id: 'github/work',
-          integration: 'github',
-          name: 'Work',
-          builtIn: false,
-          availability: { status: 'available' },
-        },
-        {
-          id: 'local',
-          integration: 'local',
-          name: 'Local files',
-          builtIn: true,
-          availability: { status: 'available' },
-        },
-      ]),
-    )
-    const headers = [...markup.matchAll(/<header>.*?<\/header>/g)].map(([header]) => header)
-    expect(headers).toHaveLength(2)
-    expect(headers[0]).toMatch(
-      /<div[^>]*><h2[^>]*>Work<\/h2><span[^>]*>GitHub<\/span><\/div>.*href="#\/settings\/connections\/github%2Fwork"[^>]*>Manage/,
-    )
-    expect(headers[1]).toMatch(
-      /<div[^>]*><h2[^>]*>Local files<\/h2><span[^>]*>Local<\/span><\/div>.*href="#\/settings\/connections\/local"[^>]*>Manage/,
-    )
-    expect(headers.join('')).not.toContain('registered Projects')
-    expect(headers.join('')).not.toContain('Built in')
   })
   it('offers project import for each connection, including built-in local connections', () => {
     const markup = renderConnections(

@@ -1,0 +1,113 @@
+import type { RegisteredProject, SafeError } from '@roadmap/contracts'
+import { Alert } from '@roadmap/ui/alert'
+import { Button } from '@roadmap/ui/button'
+import { Link } from '@roadmap/ui/link'
+import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
+import { Surface, SurfaceDescription } from '@roadmap/ui/surface'
+import { Toggle } from '@roadmap/ui/toggle'
+import { useState } from 'react'
+import { connectionSettingsHash, selectionHash } from '@/router'
+import { useRoadmap } from '@/store/roadmap-provider'
+import { unacknowledgedInterruption } from '@/views/settings/project-automation'
+import { ErrorText, sameProject } from '@/views/shared/settings-shared'
+
+type AutomationSectionProps = { project: RegisteredProject }
+
+export function AutomationSection({ project }: AutomationSectionProps) {
+  const { automation, configuration, configurationVersion, command, execute } = useRoadmap()
+  const [error, setError] = useState<SafeError | string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const blocked = busy || command.inFlight || !configuration.valid
+  const interruption = unacknowledgedInterruption(project.key, automation.evidence)
+  const preferred = automation.enabledProjects.some((key) => sameProject(key, project.key))
+  const toggleState = busy ? 'pending' : preferred ? 'on' : 'off'
+  const affectedMap = interruption
+    ? (project.openMaps.find(
+        (map) => map.id === interruption.target.mapId && sameProject(map.project, project.key),
+      ) ??
+      project.closedMaps.find(
+        (map) => map.id === interruption.target.mapId && sameProject(map.project, project.key),
+      ))
+    : undefined
+  const affectedTicket = affectedMap?.tickets.find(
+    (ticket) => ticket.id === interruption?.target.ticketId,
+  )
+
+  const setEnabled = async (enabled: boolean) => {
+    if (blocked) return
+    setBusy(true)
+    setError(null)
+    try {
+      const outcome = await execute({
+        type: 'set-project-automation-enabled',
+        expectedConfigurationVersion: configurationVersion,
+        project: project.key,
+        enabled,
+      })
+      if (!outcome.ok) setError(outcome.error)
+    } catch {
+      setError('The server did not confirm the change. Wait for live state before retrying.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Section>
+      <SectionHeader>
+        <SectionTitle>Automation</SectionTitle>
+      </SectionHeader>
+      <SectionBody>
+        <Surface>
+          <Toggle
+            state={interruption ? 'off' : toggleState}
+            disabled={blocked || interruption !== undefined}
+            aria-describedby="project-automation-description"
+            onChange={(event) => void setEnabled(event.currentTarget.checked)}
+          >
+            Enable automation for this project
+          </Toggle>
+          <SurfaceDescription id="project-automation-description">
+            Allow automation to hand eligible frontier tasks to Wayfinder.
+          </SurfaceDescription>
+          {preferred && !automation.enabled && (
+            <p>
+              Automation is paused globally.{' '}
+              <Link href={connectionSettingsHash}>Manage global automation</Link>
+            </p>
+          )}
+          {automation.availability.status === 'unavailable' && (
+            <Alert>
+              <strong>Automation unavailable.</strong>
+              <span>{automation.availability.cause}</span>
+            </Alert>
+          )}
+          {interruption && (
+            <Alert>
+              <strong>Session interrupted. Its outcome is unknown.</strong>
+              <span>
+                Review any changes before enabling automation. Acknowledgement does not mean the
+                Session succeeded. Queued work may resume when automation is enabled.
+              </span>
+              {affectedMap && affectedTicket && (
+                <Link href={selectionHash(affectedMap, { kind: 'ticket', id: affectedTicket.id })}>
+                  Review affected ticket
+                </Link>
+              )}
+              <Button
+                type="button"
+                disabled={blocked}
+                aria-busy={busy || undefined}
+                onClick={() => void setEnabled(true)}
+              >
+                Acknowledge interruption and enable
+              </Button>
+            </Alert>
+          )}
+          {busy && interruption && <p role="status">Saving automation preference...</p>}
+          <ErrorText error={error} />
+        </Surface>
+      </SectionBody>
+    </Section>
+  )
+}

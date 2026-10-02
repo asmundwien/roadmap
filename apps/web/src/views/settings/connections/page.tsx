@@ -4,6 +4,7 @@ import { Icon, icon } from '@roadmap/ui/icon'
 import { Page, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
 import { useState } from 'react'
 import { useRoadmap } from '@/store/roadmap-provider'
+import { AutomationSection } from './automation-section'
 import type { ConnectionOperation } from './connection-details'
 import { AddConnectionPane, AuthorizationPane } from './connection-panes'
 import { ConnectionSetupSection, ConnectionStride } from './connection-sections'
@@ -55,6 +56,7 @@ export function ConnectionSettings() {
           Add connection
         </Button>
       </PageHeader>
+      <AutomationSection />
       {(!github ||
         !configuration.valid ||
         configuration.notices.length > 0 ||
