@@ -42,8 +42,6 @@ Web source files use `@/` for imports outside their current directory. The alias
 
 Integration-specific code lives in `github` and `local`; `wayfinder` parses data tolerantly. The Local adapter discovers every `.wayfinder/<map-id>/map.md`, reads its sibling `tickets/` directory, and uses map frontmatter `status` to separate live maps from history. `store.ts` waits for one complete Slice from every Adapter before publishing a snapshot and keeps partial generations private. `change-feed.ts` derives source-blind events from consecutive complete snapshots.
 
-Adapters report source-specific diagnostics. The shared Snapshot store adds `No maps found for this project.` when a Project has neither open nor closed maps. Local discovery returns an empty Project without a warning when `.wayfinder/` is missing or empty. Overview keeps the Project warning's `Open project` link.
-
 `application/automation-database.ts` owns the strict schema version 3 Automation database. It
 persists immutable opportunities and append-only events atomically, rejects invalid histories, and
 replays valid history into current public evidence. An AFK Classification Verdict projects a queued
