@@ -25,13 +25,13 @@ describe('ButtonLink', () => {
     const markup = renderToStaticMarkup(
       createElement(
         ButtonLink,
-        { href: '#/settings/connections/github%2Fwork/import' },
+        { href: '/connections/github%2Fwork/projects/import' },
         'Import project',
       ),
     )
 
     expect(markup).toMatch(
-      /<a [^>]*href="#\/settings\/connections\/github%2Fwork\/import"[^>]*>Import project<\/a>/,
+      /<a [^>]*href="\/connections\/github%2Fwork\/projects\/import"[^>]*>Import project<\/a>/,
     )
     expect(markup).not.toContain('role="button"')
   })

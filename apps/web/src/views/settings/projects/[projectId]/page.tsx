@@ -1,9 +1,9 @@
 import type { ProjectKey } from '@roadmap/contracts'
 import { Alert } from '@roadmap/ui/alert'
-import { Link } from '@roadmap/ui/link'
 import { Page, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
 import classNames from 'classnames/bind'
-import { connectionSettingsHash } from '@/router'
+import { Link } from '@/navigation'
+import { routePaths } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { sameProject } from '@/views/shared/settings-shared'
 import { AutomationSection } from './automation-section'
@@ -28,7 +28,7 @@ export function ProjectRegistrationPage({ projectKey }: ProjectRegistrationPageP
             <PageTitle>{capturedAt === null ? 'Loading project' : 'Project not found'}</PageTitle>
           </div>
         </PageHeader>
-        <Link href={connectionSettingsHash}>Back to Connections</Link>
+        <Link href={routePaths.connections}>Back to Connections</Link>
       </Page>
     )
   }

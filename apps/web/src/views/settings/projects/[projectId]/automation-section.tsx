@@ -1,12 +1,12 @@
 import type { RegisteredProject, SafeError } from '@roadmap/contracts'
 import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
-import { Link } from '@roadmap/ui/link'
 import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
 import { Surface, SurfaceDescription } from '@roadmap/ui/surface'
 import { Toggle } from '@roadmap/ui/toggle'
 import { useState } from 'react'
-import { connectionSettingsHash, selectionHash } from '@/router'
+import { Link } from '@/navigation'
+import { routePaths, ticketPath } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { unacknowledgedInterruption } from '@/views/settings/project-automation'
 import { ErrorText, sameProject } from '@/views/shared/settings-shared'
@@ -73,7 +73,7 @@ export function AutomationSection({ project }: AutomationSectionProps) {
           {preferred && !automation.enabled && (
             <p>
               Automation is paused globally.{' '}
-              <Link href={connectionSettingsHash}>Manage global automation</Link>
+              <Link href={routePaths.connections}>Manage global automation</Link>
             </p>
           )}
           {automation.availability.status === 'unavailable' && (
@@ -90,7 +90,7 @@ export function AutomationSection({ project }: AutomationSectionProps) {
                 Session succeeded. Queued work may resume when automation is enabled.
               </span>
               {affectedMap && affectedTicket && (
-                <Link href={selectionHash(affectedMap, { kind: 'ticket', id: affectedTicket.id })}>
+                <Link href={ticketPath(affectedMap, affectedTicket.id)}>
                   Review affected ticket
                 </Link>
               )}

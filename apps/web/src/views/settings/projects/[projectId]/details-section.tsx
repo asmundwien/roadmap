@@ -2,12 +2,12 @@ import type { Connection, RegisteredProject, SafeError } from '@roadmap/contract
 import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
 import { ControlGroup } from '@roadmap/ui/control-group'
-import { Link } from '@roadmap/ui/link'
 import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
 import { Surface, SurfaceTitle } from '@roadmap/ui/surface'
 import { TextInput } from '@roadmap/ui/text-input'
 import { type FormEvent, useState } from 'react'
-import { connectionHash } from '@/router'
+import { Link } from '@/navigation'
+import { connectionPath } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
 import { SettingsFacts } from '@/views/shared/settings-facts'
@@ -74,7 +74,7 @@ export function DetailsSection({ project, connection }: DetailsSectionProps) {
           <dt>Connection</dt>
           <dd>
             {connection ? (
-              <Link href={connectionHash(connection.id)}>{connection.name}</Link>
+              <Link href={connectionPath(connection.id)}>{connection.name}</Link>
             ) : (
               project.connectionId
             )}

@@ -10,7 +10,8 @@ import { ControlGroup } from '@roadmap/ui/control-group'
 import { Link } from '@roadmap/ui/link'
 import { Surface, SurfaceTitle } from '@roadmap/ui/surface'
 import { useState } from 'react'
-import { connectionSettingsHash } from '@/router'
+import { useNavigate } from 'react-router'
+import { routePaths } from '@/router'
 import { AuthorizationControls, DeviceCode } from '@/views/shared/authorization-presentation'
 
 type RunCommand = (command: Command) => Promise<boolean>
@@ -137,6 +138,7 @@ export function RemoveConnectionGroup({
   blocked,
   run,
 }: RemoveConnectionGroupProps) {
+  const navigate = useNavigate()
   const [confirming, setConfirming] = useState(false)
   const remove = async () => {
     const removed = await run({
@@ -144,7 +146,7 @@ export function RemoveConnectionGroup({
       expectedConfigurationVersion: configurationVersion,
       connectionId,
     })
-    if (removed) window.location.hash = connectionSettingsHash
+    if (removed) navigate(routePaths.connections, { replace: true })
   }
 
   return (

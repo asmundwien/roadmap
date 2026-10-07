@@ -6,7 +6,8 @@ import { Modal } from '@roadmap/ui/modal'
 import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
 import { Surface, SurfaceTitle } from '@roadmap/ui/surface'
 import { type FormEvent, useState } from 'react'
-import { connectionHash, connectionSettingsHash } from '@/router'
+import { useNavigate } from 'react-router'
+import { connectionPath, routePaths } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { SettingsForm } from '@/views/shared/settings-form'
 import { ErrorText } from '@/views/shared/settings-shared'
@@ -15,6 +16,7 @@ import { WorkspaceFolderSelector } from '@/views/shared/workspace-folder-selecto
 type ManageSectionProps = { project: RegisteredProject; connectionExists: boolean }
 
 export function ManageSection({ project, connectionExists }: ManageSectionProps) {
+  const navigate = useNavigate()
   const { configuration, configurationVersion, command, execute, query } = useRoadmap()
   const [error, setError] = useState<SafeError | string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -75,9 +77,9 @@ export function ManageSection({ project, connectionExists }: ManageSectionProps)
       `${project.name} removed from Roadmap.`,
     )
     if (removed)
-      window.location.hash = connectionExists
-        ? connectionHash(project.connectionId)
-        : connectionSettingsHash
+      navigate(connectionExists ? connectionPath(project.connectionId) : routePaths.connections, {
+        replace: true,
+      })
   }
 
   return (

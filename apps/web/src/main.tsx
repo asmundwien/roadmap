@@ -1,5 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { BrowserRouter } from 'react-router'
 import { App } from './App'
 import { RoadmapProvider } from './store/roadmap-provider'
 import '@roadmap/ui/index.css'
@@ -11,7 +12,9 @@ if (!root) throw new Error('No #root element in index.html')
 createRoot(root).render(
   <StrictMode>
     <RoadmapProvider>
-      <App />
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
     </RoadmapProvider>
   </StrictMode>,
 )

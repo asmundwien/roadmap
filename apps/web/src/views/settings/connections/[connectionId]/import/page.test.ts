@@ -1,6 +1,7 @@
 import type { ApplicationState, Connection } from '@roadmap/contracts'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { RoadmapProvider } from '@/store/roadmap-provider'
 import type { RoadmapStore } from '@/store/roadmap-store'
@@ -38,7 +39,11 @@ function renderImport(connectionId: string, connection?: Connection, valid = tru
     },
   }
   return renderToStaticMarkup(
-    createElement(RoadmapProvider, { store }, createElement(ProjectImportPage, { connectionId })),
+    createElement(
+      MemoryRouter,
+      null,
+      createElement(RoadmapProvider, { store }, createElement(ProjectImportPage, { connectionId })),
+    ),
   )
 }
 

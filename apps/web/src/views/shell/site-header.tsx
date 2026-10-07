@@ -1,7 +1,8 @@
-import { Link } from '@roadmap/ui/link'
-import { Navbar, NavbarBrand } from '@roadmap/ui/navbar'
+import { Link as ExternalLink } from '@roadmap/ui/link'
+import { Navbar } from '@roadmap/ui/navbar'
 import classNames from 'classnames/bind'
-import { componentsHash, connectionSettingsHash, overviewHash } from '@/router'
+import { Link, NavbarBrand } from '@/navigation'
+import { routePaths } from '@/router'
 import styles from './site-header.module.css'
 
 const cx = classNames.bind(styles)
@@ -10,16 +11,16 @@ const cx = classNames.bind(styles)
 export function SiteHeader() {
   return (
     <Navbar>
-      <NavbarBrand href={overviewHash}>
+      <NavbarBrand href={routePaths.overview}>
         <img className={cx('brandIcon')} src="/favicon.svg" alt="" width="20" height="20" />
         Roadmap
       </NavbarBrand>
       <nav className={cx('navigation')} aria-label="Primary navigation">
-        <Link href={overviewHash}>Overview</Link>
-        <Link href={connectionSettingsHash}>Connections</Link>
-        <Link href={componentsHash}>Components</Link>
+        <Link href={routePaths.overview}>Overview</Link>
+        <Link href={routePaths.connections}>Connections</Link>
+        <Link href={routePaths.components}>Components</Link>
       </nav>
-      <Link href="http://localhost:5174">Open UI docs</Link>
+      <ExternalLink href="http://localhost:5174">Open UI docs</ExternalLink>
     </Navbar>
   )
 }

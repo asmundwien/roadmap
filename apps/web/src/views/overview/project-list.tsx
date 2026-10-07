@@ -1,11 +1,11 @@
 import { Alert } from '@roadmap/ui/alert'
 import { Badge } from '@roadmap/ui/badge'
-import { Link } from '@roadmap/ui/link'
 import { PageDescription, PageHeader, PageTitle } from '@roadmap/ui/page'
 import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
 import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
 import type { ReactNode } from 'react'
-import { connectionSettingsHash, projectHash } from '@/router'
+import { Link } from '@/navigation'
+import { projectPath, routePaths } from '@/router'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
 import type { AttentionItem, ProjectPortfolio, ProjectPresentation } from './project-presentation'
 import { formatMonth, formatRecency } from './recency'
@@ -116,8 +116,8 @@ function AttentionRow({ item }: AttentionRowProps) {
     <Alert>
       <strong>{item.title}</strong>
       <span>{item.detail}</span>
-      {item.kind === 'project' && <Link href={projectHash(item.project)}>Open project</Link>}
-      {item.kind === 'connection' && <Link href={connectionSettingsHash}>Connections</Link>}
+      {item.kind === 'project' && <Link href={projectPath(item.project)}>Open project</Link>}
+      {item.kind === 'connection' && <Link href={routePaths.connections}>Connections</Link>}
     </Alert>
   )
 }
@@ -131,7 +131,7 @@ function ActiveProjectRow({ presentation }: ActiveProjectRowProps) {
   return (
     <Surface>
       <SurfaceTitle>
-        <Link href={projectHash(project.key)}>{project.name}</Link>{' '}
+        <Link href={projectPath(project.key)}>{project.name}</Link>{' '}
         <IntegrationBadge integration={project.key.integration} />
       </SurfaceTitle>
       {connection && <SurfaceDescription>{connection.name}</SurfaceDescription>}
@@ -160,7 +160,7 @@ function RestingProjectRow({ presentation }: RestingProjectRowProps) {
   return (
     <Surface>
       <SurfaceTitle>
-        <Link href={projectHash(project.key)}>{project.name}</Link>{' '}
+        <Link href={projectPath(project.key)}>{project.name}</Link>{' '}
         <IntegrationBadge integration={project.key.integration} />
       </SurfaceTitle>
       <SurfaceDescription>
@@ -182,7 +182,7 @@ function WaitingProjectRow({ presentation }: WaitingProjectRowProps) {
   return (
     <Surface>
       <SurfaceTitle>
-        <Link href={projectHash(project.key)}>{project.name}</Link>{' '}
+        <Link href={projectPath(project.key)}>{project.name}</Link>{' '}
         <IntegrationBadge integration={project.key.integration} />
       </SurfaceTitle>
       <SurfaceDescription>

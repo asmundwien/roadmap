@@ -1,8 +1,8 @@
 import type { Project, WayfinderMap } from '@roadmap/contracts'
-import { Link } from '@roadmap/ui/link'
 import { Surface, SurfaceTitle } from '@roadmap/ui/surface'
 import classNames from 'classnames/bind'
-import { mapHash, projectHash } from '@/router'
+import { Link } from '@/navigation'
+import { mapPath, projectPath } from '@/router'
 import styles from './page.module.css'
 
 const cx = classNames.bind(styles)
@@ -17,7 +17,7 @@ export function MapNavigation({ project, selectedMap }: MapNavigationProps) {
     <Surface>
       <SurfaceTitle>Maps</SurfaceTitle>
       <nav aria-label="Project maps">
-        <Link href={projectHash(project.key)}>Active map or latest history</Link>
+        <Link href={projectPath(project.key)}>Active map or latest history</Link>
         <MapGroup heading="Live maps" maps={project.openMaps} selectedMap={selectedMap} />
         <MapGroup heading="History" maps={project.closedMaps} selectedMap={selectedMap} />
       </nav>
@@ -25,15 +25,13 @@ export function MapNavigation({ project, selectedMap }: MapNavigationProps) {
   )
 }
 
-function MapGroup({
-  heading,
-  maps,
-  selectedMap,
-}: {
+type MapGroupProps = {
   heading: string
   maps: WayfinderMap[]
   selectedMap: WayfinderMap | undefined
-}) {
+}
+
+function MapGroup({ heading, maps, selectedMap }: MapGroupProps) {
   return (
     <section className={cx('map-group')}>
       <h3>
@@ -46,7 +44,7 @@ function MapGroup({
           {maps.map((map, index) => (
             <li key={map.id}>
               <Link
-                href={mapHash(map)}
+                href={mapPath(map)}
                 aria-current={selectedMap?.id === map.id ? 'page' : undefined}
               >
                 <span>{map.title ?? map.displayId ?? map.id}</span>

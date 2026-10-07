@@ -6,6 +6,7 @@ import type {
 } from '@roadmap/contracts'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { RoadmapProvider } from '@/store/roadmap-provider'
 import type { RoadmapStore } from '@/store/roadmap-store'
@@ -111,9 +112,13 @@ function renderPage(
   }
   return renderToStaticMarkup(
     createElement(
-      RoadmapProvider,
-      { store },
-      createElement(ProjectRegistrationPage, { projectKey: project.key }),
+      MemoryRouter,
+      null,
+      createElement(
+        RoadmapProvider,
+        { store },
+        createElement(ProjectRegistrationPage, { projectKey: project.key }),
+      ),
     ),
   )
 }
@@ -266,7 +271,7 @@ describe('ProjectRegistrationPage', () => {
         ],
         overrides: [],
       })
-      expect(markup.includes('href="#/projects/local/my%20workspace/maps/map/ticket/ticket"')).toBe(
+      expect(markup.includes('href="/projects/local/my%20workspace/maps/map/tickets/ticket"')).toBe(
         linked,
       )
     },
@@ -313,6 +318,6 @@ describe('ProjectRegistrationPage', () => {
   it('provides a return link when the project is no longer registered', () => {
     const markup = renderPage([])
     expect(markup).toContain('Project not found')
-    expect(markup).toContain('href="#/settings/connections"')
+    expect(markup).toContain('href="/connections"')
   })
 })

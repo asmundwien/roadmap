@@ -1,12 +1,15 @@
 import type { Project, ProjectKey, Unreachable, WayfinderMap } from '@roadmap/contracts'
 import { Alert } from '@roadmap/ui/alert'
-import { Link } from '@roadmap/ui/link'
+import { Link as SourceLink } from '@roadmap/ui/link'
 import { Page, PageDescription, PageHeader, PageTitle } from '@roadmap/ui/page'
 import { Surface, SurfaceDescription } from '@roadmap/ui/surface'
 import classNames from 'classnames/bind'
-import { mapHash, projectRegistrationHash, type Route, selectionHash } from '@/router'
+import { useNavigate } from 'react-router'
+import { Link } from '@/navigation'
+import { mapPath, projectSettingsPath, ticketPath } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
+import { sameProject } from '@/views/shared/settings-shared'
 import { MapContainer } from './map-container'
 import { MapContent } from './map-content'
 import { MapNavigation } from './map-navigation'
@@ -15,29 +18,34 @@ import { TicketModal } from './ticket-modal'
 
 const cx = classNames.bind(styles)
 
-type MapPageProps = { route: Extract<Route, { screen: 'project' }> }
+type MapPageProps = {
+  projectKey: ProjectKey
+  mapId: string | null
+  ticketId: string | null
+}
 
-export function MapPage({ route }: MapPageProps) {
+export function MapPage({ projectKey, mapId, ticketId }: MapPageProps) {
+  const navigate = useNavigate()
   const { transport, projects, roadmapProjects, capturedAt, unreachable } = useRoadmap()
-  const registration = projects.find((candidate) => sameProject(candidate.key, route.project))
-  const source = roadmapProjects.find((candidate) => sameProject(candidate.key, route.project))
+  const registration = projects.find((candidate) => sameProject(candidate.key, projectKey))
+  const source = roadmapProjects.find((candidate) => sameProject(candidate.key, projectKey))
   const project = projectWithSource(registration, source)
-  const map = findMap(project, route.selected)
+  const map = findMap(project, mapId)
   const unavailable =
     registration?.availability.status === 'unavailable' ? registration.availability.cause : null
   const missingSources = unreachable.filter((candidate) =>
-    sameProject(candidate.project, route.project),
+    sameProject(candidate.project, projectKey),
   )
   const onOpenTicket = (id: string) => {
-    if (map) window.location.hash = selectionHash(map, { kind: 'ticket', id })
+    if (map) void navigate(ticketPath(map, id))
   }
   const onOpenMap = () => {
-    if (map) window.location.hash = mapHash(map)
+    if (map) void navigate(mapPath(map), { replace: true })
   }
 
   return (
     <Page>
-      <ProjectHeading projectKey={route.project} project={project} registration={registration} />
+      <ProjectHeading projectKey={projectKey} project={project} registration={registration} />
       <ProjectNotices
         transport={transport}
         capturedAt={capturedAt}
@@ -56,13 +64,13 @@ export function MapPage({ route }: MapPageProps) {
               <SelectedMap
                 map={map}
                 activeMapId={project.openMaps[0]?.id}
-                ticketId={route.selection?.kind === 'ticket' ? route.selection.id : null}
+                ticketId={ticketId}
                 onOpenTicket={onOpenTicket}
                 onOpenMap={onOpenMap}
               />
             ) : (
               <Surface>
-                <SurfaceDescription>{missingMapDescription(route.selected)}</SurfaceDescription>
+                <SurfaceDescription>{missingMapDescription(mapId)}</SurfaceDescription>
               </Surface>
             )}
           </div>
@@ -72,15 +80,13 @@ export function MapPage({ route }: MapPageProps) {
   )
 }
 
-function ProjectHeading({
-  projectKey,
-  project,
-  registration,
-}: {
+type ProjectHeadingProps = {
   projectKey: ProjectKey
   project: Project | undefined
   registration: ReturnType<typeof useRoadmap>['projects'][number] | undefined
-}) {
+}
+
+function ProjectHeading({ projectKey, project, registration }: ProjectHeadingProps) {
   return (
     <PageHeader>
       <PageTitle>{project?.name ?? projectKey.id}</PageTitle>
@@ -88,9 +94,7 @@ function ProjectHeading({
       <div className={cx('project-context')}>
         <IntegrationBadge integration={projectKey.integration} />
         <span className={cx('source-path')}>{projectKey.id}</span>
-        {registration && (
-          <Link href={projectRegistrationHash(registration.key)}>Project settings</Link>
-        )}
+        {registration && <Link href={projectSettingsPath(registration.key)}>Project settings</Link>}
       </div>
       {project?.sourcePath && <p className={cx('source-path')}>{project.sourcePath}</p>}
     </PageHeader>
@@ -115,9 +119,9 @@ function projectDescription(project: Project | undefined): string {
   return `${state} · ${project.openMaps.length} live maps · ${project.closedMaps.length} closed maps`
 }
 
-function missingMapDescription(selected: string | null): string {
-  return selected !== null
-    ? `The requested map "${selected}" is not available in this project. No other map has been selected.`
+function missingMapDescription(mapId: string | null): string {
+  return mapId !== null
+    ? `The requested map "${mapId}" is not available in this project. No other map has been selected.`
     : 'This project has no available open or closed maps.'
 }
 
@@ -139,7 +143,7 @@ function SelectedMap({ map, activeMapId, ticketId, onOpenTicket, onOpenMap }: Se
           <SurfaceDescription>
             {map.displayId ?? map.id} · {status} · {map.progress.completed} closed tickets
           </SurfaceDescription>
-          {map.url && <Link href={map.url}>Map source</Link>}
+          {map.url && <SourceLink href={map.url}>Map source</SourceLink>}
           {map.sourcePath && <span className={cx('source-path')}>{map.sourcePath}</span>}
         </header>
         <MapContainer map={map} onOpenTicket={onOpenTicket} />
@@ -214,14 +218,10 @@ function findMap(
   project:
     | Pick<ReturnType<typeof useRoadmap>['projects'][number], 'openMaps' | 'closedMaps'>
     | undefined,
-  selected: MapPageProps['route']['selected'],
+  mapId: string | null,
 ) {
-  return selected === null
+  return mapId === null
     ? (project?.openMaps[0] ?? project?.closedMaps[0])
-    : (project?.openMaps.find((candidate) => candidate.id === selected) ??
-        project?.closedMaps.find((candidate) => candidate.id === selected))
-}
-
-function sameProject(a: ProjectKey, b: ProjectKey): boolean {
-  return a.integration === b.integration && a.id === b.id
+    : (project?.openMaps.find((candidate) => candidate.id === mapId) ??
+        project?.closedMaps.find((candidate) => candidate.id === mapId))
 }

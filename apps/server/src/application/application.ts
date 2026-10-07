@@ -1298,7 +1298,7 @@ function compareConfigurations(
 }
 
 function projectActions(registration: RoadmapConfiguration['projects'][number], known?: Project) {
-  const roadmapHref = `#/projects/${registration.key.integration}/${encodeURIComponent(registration.key.id)}`
+  const roadmapHref = `/projects/${registration.key.integration}/${encodeURIComponent(registration.key.id)}`
   const actions: RegisteredProject['actions'] = [
     { id: 'open-roadmap', label: 'Open in Roadmap', kind: 'roadmap', href: roadmapHref },
     { id: 'open-workspace', label: 'Open in VS Code', kind: 'server-launch' },

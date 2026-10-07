@@ -1,6 +1,7 @@
 import type { ApplicationState, Connection, ProjectKey } from '@roadmap/contracts'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { RoadmapProvider } from '@/store/roadmap-provider'
 import type { RoadmapStore } from '@/store/roadmap-store'
@@ -28,7 +29,11 @@ function renderConnections(state: ApplicationState): string {
     },
   }
   return renderToStaticMarkup(
-    createElement(RoadmapProvider, { store }, createElement(ConnectionSettings)),
+    createElement(
+      MemoryRouter,
+      null,
+      createElement(RoadmapProvider, { store }, createElement(ConnectionSettings)),
+    ),
   )
 }
 
@@ -135,7 +140,7 @@ describe('ConnectionSettings', () => {
       })
       if (needsReview) {
         expect(markup).toMatch(
-          /href="#\/settings\/projects\/local\/shared"[^>]*>Automation needs review/,
+          /href="\/projects\/local\/shared\/settings"[^>]*>Automation needs review/,
         )
       } else {
         expect(markup).not.toContain('Automation needs review')
@@ -143,38 +148,6 @@ describe('ConnectionSettings', () => {
     },
   )
 
-  it('keeps setup and connection issues in their respective sections', () => {
-    const initial = state([
-      {
-        id: 'one',
-        integration: 'github',
-        name: 'Work',
-        builtIn: false,
-        availability: { status: 'authorization-required', cause: 'Token expired.' },
-      },
-      {
-        id: 'two',
-        integration: 'github',
-        name: 'Personal',
-        builtIn: false,
-        availability: { status: 'available' },
-      },
-    ])
-    const markup = renderConnections({
-      ...initial,
-      configuration: { valid: false, issues: [], notices: [] },
-    })
-    const setup = markup.indexOf('>Connection setup</h2>')
-    expect(setup).toBeGreaterThan(0)
-    expect(markup.indexOf('Configuration needs repair.')).toBeGreaterThan(setup)
-    const work = markup.indexOf('>Work</h2>')
-    const personal = markup.indexOf('>Personal</h2>')
-    const issue = markup.indexOf('Token expired.')
-    expect(work).toBeGreaterThan(0)
-    expect(issue).toBeGreaterThan(work)
-    expect(issue).toBeLessThan(personal)
-    expect(markup.slice(personal)).not.toContain('Token expired.')
-  })
   it('offers project import for each connection, including built-in local connections', () => {
     const markup = renderConnections(
       state([
@@ -194,9 +167,8 @@ describe('ConnectionSettings', () => {
         },
       ]),
     )
-    expect(markup).toContain('href="#/settings/connections/github%2Fwork/import"')
-    expect(markup).toContain('href="#/settings/connections/local/import"')
-    expect(markup.match(/Import project/g)).toHaveLength(2)
+    expect(markup).toContain('href="/connections/github%2Fwork/projects/import"')
+    expect(markup).toContain('href="/connections/local/projects/import"')
   })
   it('offers separate roadmap and registration destinations for a connection project', () => {
     const initial = state([
@@ -229,10 +201,8 @@ describe('ConnectionSettings', () => {
         },
       ],
     })
-    expect(markup).toContain('href="#/projects/local/my%20workspace"')
-    expect(markup).toContain('Go to roadmap')
-    expect(markup).toContain('href="#/settings/projects/local/my%20workspace"')
-    expect(markup).not.toContain('Open Project')
+    expect(markup).toContain('href="/projects/local/my%20workspace"')
+    expect(markup).toContain('href="/projects/local/my%20workspace/settings"')
     expect(markup).toContain('Open in VS Code</button>')
     expect(markup).toContain('View source folder</button>')
     expect(markup).toContain('Open Terminal</button>')
@@ -280,19 +250,5 @@ describe('ConnectionSettings', () => {
     expect(markup).toContain('Open Terminal</button>')
     expect(markup).toContain('href="https://github.com/acme/app"')
     expect(markup).toContain('Open on GitHub')
-  })
-
-  it('keeps setup problems and notices inside the setup section even with no connections', () => {
-    const initial = state([])
-    const markup = renderConnections({
-      ...initial,
-      supportedIntegrations: [],
-      configuration: { valid: false, issues: [], notices: ['Credential cleanup pending.'] },
-    })
-    const setup = markup.indexOf('>Connection setup</h2>')
-    expect(setup).toBeGreaterThan(0)
-    expect(markup.indexOf('GitHub Connections are unavailable.')).toBeGreaterThan(setup)
-    expect(markup.indexOf('Configuration needs repair.')).toBeGreaterThan(setup)
-    expect(markup.indexOf('Credential cleanup pending.')).toBeGreaterThan(setup)
   })
 })

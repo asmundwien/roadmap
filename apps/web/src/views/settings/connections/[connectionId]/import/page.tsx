@@ -1,12 +1,13 @@
 import type { Connection, ProjectKey } from '@roadmap/contracts'
 import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
-import { Link } from '@roadmap/ui/link'
+import { Link as ExternalLink } from '@roadmap/ui/link'
 import { Page, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
 import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
 import { TextInput } from '@roadmap/ui/text-input'
 import { type FormEvent, useState } from 'react'
-import { connectionSettingsHash, projectRegistrationHash } from '@/router'
+import { Link } from '@/navigation'
+import { projectSettingsPath, routePaths } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
 import {
@@ -36,7 +37,7 @@ export function ProjectImportPage({ connectionId }: ProjectImportPageProps) {
             </PageTitle>
           </div>
         </PageHeader>
-        <Link href={connectionSettingsHash}>Back to Connections</Link>
+        <Link href={routePaths.connections}>Back to Connections</Link>
       </Page>
     )
   }
@@ -140,7 +141,7 @@ function ProjectImportForm({
               <strong>Project validated and registered.</strong>
               <span>Roadmap queued it for reconciliation.</span>
               {saved.project && (
-                <Link href={projectRegistrationHash(saved.project)}>View project registration</Link>
+                <Link href={projectSettingsPath(saved.project)}>View project registration</Link>
               )}
             </Alert>
           ) : (
@@ -164,9 +165,9 @@ function ProjectImportForm({
                       GitHub authorization and repository installation are separate grants.
                     </span>
                     {githubInstallationUrl && (
-                      <Link href={githubInstallationUrl} external>
+                      <ExternalLink href={githubInstallationUrl} external>
                         Configure repository access
-                      </Link>
+                      </ExternalLink>
                     )}
                   </Alert>
                 </>

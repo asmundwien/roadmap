@@ -1,10 +1,11 @@
 import type { RegisteredProject } from '@roadmap/contracts'
 import { Alert } from '@roadmap/ui/alert'
-import { Button, ButtonLink } from '@roadmap/ui/button'
+import { Button, ButtonLink as ExternalButtonLink } from '@roadmap/ui/button'
 import { Icon, icon } from '@roadmap/ui/icon'
 import classNames from 'classnames/bind'
 import { useState } from 'react'
-import { projectHash } from '@/router'
+import { ButtonLink } from '@/navigation'
+import { projectPath } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import styles from './project-launch-buttons.module.css'
 
@@ -38,7 +39,7 @@ export function ProjectLaunchButtons({ project }: ProjectLaunchButtonsProps) {
   return (
     <>
       <div className={cx('connection-project-actions')}>
-        <ButtonLink href={projectHash(project.key)} size="small">
+        <ButtonLink href={projectPath(project.key)} size="small">
           <Icon icon={icon.codeBranch} />
           Go to roadmap
         </ButtonLink>
@@ -47,7 +48,7 @@ export function ProjectLaunchButtons({ project }: ProjectLaunchButtonsProps) {
             action.id === 'open-source' &&
             action.kind === 'external-link' &&
             action.href && (
-              <ButtonLink
+              <ExternalButtonLink
                 key={action.id}
                 href={action.href}
                 size="small"
@@ -56,7 +57,7 @@ export function ProjectLaunchButtons({ project }: ProjectLaunchButtonsProps) {
               >
                 <Icon icon={icon.github} />
                 {action.label}
-              </ButtonLink>
+              </ExternalButtonLink>
             ),
         )}
         {project.actions

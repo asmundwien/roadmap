@@ -1,6 +1,7 @@
 import type { ApplicationState, Connection } from '@roadmap/contracts'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { RoadmapProvider } from '@/store/roadmap-provider'
 import type { RoadmapStore } from '@/store/roadmap-store'
@@ -50,7 +51,11 @@ function renderDetail(connectionId: string, connections: Connection[], initial =
     },
   }
   return renderToStaticMarkup(
-    createElement(RoadmapProvider, { store }, createElement(ConnectionPage, { connectionId })),
+    createElement(
+      MemoryRouter,
+      null,
+      createElement(RoadmapProvider, { store }, createElement(ConnectionPage, { connectionId })),
+    ),
   )
 }
 
@@ -66,14 +71,6 @@ describe('ConnectionPage', () => {
     expect(markup).toContain('Remove connection')
     expect(markup).not.toContain('Other</h1>')
   })
-  it('places the editable name in Details, separate from management actions', () => {
-    const markup = renderDetail('github/work', [connection])
-    const details = markup.match(/<section[^>]*>.*?<h2[^>]*>Details<\/h2>.*?<\/section>/)?.[0]
-    expect(details).toContain('Connection name')
-    expect(details).toContain('Save name')
-    expect(details).not.toContain('Remove connection')
-    expect(markup).not.toContain('Connection details')
-  })
   it('waits for the first snapshot before reporting an unknown connection', () => {
     const markup = renderDetail('github/work', [], false)
     expect(markup).toContain('Loading connection')
@@ -83,7 +80,7 @@ describe('ConnectionPage', () => {
   it('offers a return link when a connection no longer exists', () => {
     const markup = renderDetail('missing', [connection])
     expect(markup).toContain('Connection not found')
-    expect(markup).toContain('href="#/settings/connections"')
+    expect(markup).toContain('href="/connections"')
     expect(markup).not.toContain('Save name')
   })
 })

@@ -1,13 +1,12 @@
 import type { Connection, RegisteredProject } from '@roadmap/contracts'
 import { Alert } from '@roadmap/ui/alert'
 import { Badge } from '@roadmap/ui/badge'
-import { ButtonLink } from '@roadmap/ui/button'
 import { Icon, icon } from '@roadmap/ui/icon'
-import { Link } from '@roadmap/ui/link'
 import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
 import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
 import classNames from 'classnames/bind'
-import { connectionHash, projectImportHash, projectRegistrationHash } from '@/router'
+import { ButtonLink, Link } from '@/navigation'
+import { connectionPath, projectImportPath, projectSettingsPath } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { unacknowledgedInterruption } from '@/views/settings/project-automation'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
@@ -33,10 +32,10 @@ export function ConnectionStride({ connection, dependents }: ConnectionStridePro
           <IntegrationBadge integration={connection.integration} />
         </div>
         <div className={cx('connection-manage-link')}>
-          <Link href={connectionHash(connection.id)}>Manage connection</Link>
+          <Link href={connectionPath(connection.id)}>Manage connection</Link>
         </div>
         <div className={cx('connection-import-link')}>
-          <ButtonLink href={projectImportHash(connection.id)}>
+          <ButtonLink href={projectImportPath(connection.id)}>
             <Icon icon={icon.plus} /> Import project
           </ButtonLink>
         </div>
@@ -58,7 +57,7 @@ export function ConnectionStride({ connection, dependents }: ConnectionStridePro
                 <SurfaceTitle>{project.name}</SurfaceTitle>
                 {interrupted ? (
                   <strong className={cx('connection-project-review')}>
-                    <Link href={projectRegistrationHash(project.key)}>Automation needs review</Link>
+                    <Link href={projectSettingsPath(project.key)}>Automation needs review</Link>
                   </strong>
                 ) : preferred ? (
                   <Badge>
@@ -72,7 +71,7 @@ export function ConnectionStride({ connection, dependents }: ConnectionStridePro
               </div>
               <SurfaceDescription>{locatorLabel(project)}</SurfaceDescription>
               <div className={cx('connection-project-links')}>
-                <Link href={projectRegistrationHash(project.key)}>Project settings</Link>
+                <Link href={projectSettingsPath(project.key)}>Project settings</Link>
               </div>
               <ProjectLaunchButtons project={project} />
             </Surface>

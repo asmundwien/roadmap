@@ -329,6 +329,12 @@ describe('RoadmapApplication', () => {
       name: 'acme/renamed',
       actions: expect.arrayContaining([
         {
+          id: 'open-roadmap',
+          label: 'Open in Roadmap',
+          kind: 'roadmap',
+          href: '/projects/github/stable%2Froute',
+        },
+        {
           id: 'open-source',
           label: 'Open on GitHub',
           kind: 'external-link',

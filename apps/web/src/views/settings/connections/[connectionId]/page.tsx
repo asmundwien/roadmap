@@ -1,8 +1,9 @@
 import { Alert } from '@roadmap/ui/alert'
-import { Link } from '@roadmap/ui/link'
+import { Link as ExternalLink } from '@roadmap/ui/link'
 import { Page, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
 import classNames from 'classnames/bind'
-import { connectionSettingsHash } from '@/router'
+import { Link } from '@/navigation'
+import { routePaths } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { AvailabilityLabel } from './availability-label'
 import { DetailsSection } from './details-section'
@@ -28,7 +29,7 @@ export function ConnectionPage({ connectionId }: ConnectionPageProps) {
             </PageTitle>
           </div>
         </PageHeader>
-        <Link href={connectionSettingsHash}>Back to Connections</Link>
+        <Link href={routePaths.connections}>Back to Connections</Link>
       </Page>
     )
   }
@@ -43,9 +44,9 @@ export function ConnectionPage({ connectionId }: ConnectionPageProps) {
           <PageTitle>{connection.name}</PageTitle>
         </div>
         {github && (
-          <Link href={github.installationsUrl} external>
+          <ExternalLink href={github.installationsUrl} external>
             Repository access
-          </Link>
+          </ExternalLink>
         )}
       </PageHeader>
       {!configuration.valid && (

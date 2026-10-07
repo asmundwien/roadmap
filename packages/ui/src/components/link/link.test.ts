@@ -5,9 +5,9 @@ import { Link } from './link'
 
 describe('Link', () => {
   it('defaults to same-tab navigation with a right arrow', () => {
-    const markup = renderToStaticMarkup(createElement(Link, { href: '#/components' }, 'Components'))
+    const markup = renderToStaticMarkup(createElement(Link, { href: '/components' }, 'Components'))
 
-    expect(markup).toContain('href="#/components"')
+    expect(markup).toContain('href="/components"')
     expect(markup).not.toContain('target="_blank"')
     expect(markup).toContain('Internal%20link')
     expect(markup).toContain('aria-hidden="true"')

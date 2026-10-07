@@ -20,7 +20,7 @@ See `package.json` for available scripts.
 - Read [docs/architecture.md](docs/architecture.md) before changing module boundaries, data flow, routing, transport, configuration, integrations, or authentication.
 - Read [docs/research/github-api-primitives.md](docs/research/github-api-primitives.md) before writing GitHub fetch code. Follow its decisions about endpoints, authorization, rate limits, and GraphQL.
 - Views read through `useRoadmap()` and never fetch directly.
-- Keep navigation state only in the URL hash; do not mirror it in `useState`.
+- Keep navigation state in the URL pathname, search, and fragment; do not mirror it in `useState`.
 - Callers and tests must use the public `RoadmapApplication` interface, not its internals.
 - Credentials remain server-side and never enter configuration, browser state, URLs, logs, health output, application state, or transport messages.
 - Mark incomplete data explicitly.
