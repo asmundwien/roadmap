@@ -1,6 +1,6 @@
 import { useRoute } from './router'
 import { CatalogPage } from './views/catalog/page'
-import { MapPage } from './views/map-v2/page'
+import { MapPage } from './views/map/page'
 import { OverviewPage } from './views/overview/page'
 import { ProjectImportPage } from './views/settings/connections/[connectionId]/import/page'
 import { ConnectionPage } from './views/settings/connections/[connectionId]/page'
