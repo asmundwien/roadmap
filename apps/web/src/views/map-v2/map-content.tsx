@@ -1,6 +1,4 @@
 import type { MapBody, WayfinderMap } from '@roadmap/contracts'
-import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
-import { Surface, SurfaceDescription } from '@roadmap/ui/surface'
 import classNames from 'classnames/bind'
 import styles from './map-content.module.css'
 import { Prose } from './prose'
@@ -17,26 +15,20 @@ export function MapContent({ map, onOpenTicket, onOpenMap }: MapContentProps) {
   const markdown = map.body.raw.trim() !== '' ? map.body.raw : structuredMarkdown(map.body)
 
   return (
-    <Section>
-      <SectionHeader>
-        <SectionTitle>Map content</SectionTitle>
-      </SectionHeader>
-      <SectionBody className={cx('body')}>
-        <Surface>
-          {markdown.trim() !== '' ? (
-            <Prose
-              map={map}
-              sourcePath={map.sourcePath}
-              markdown={markdown}
-              onOpenTicket={onOpenTicket}
-              onOpenMap={onOpenMap}
-            />
-          ) : (
-            <SurfaceDescription>No map body content is available.</SurfaceDescription>
-          )}
-        </Surface>
-      </SectionBody>
-    </Section>
+    <div className={cx('body')}>
+      <h2>Map content</h2>
+      {markdown.trim() !== '' ? (
+        <Prose
+          map={map}
+          sourcePath={map.sourcePath}
+          markdown={markdown}
+          onOpenTicket={onOpenTicket}
+          onOpenMap={onOpenMap}
+        />
+      ) : (
+        <p>No map body content is available.</p>
+      )}
+    </div>
   )
 }
 

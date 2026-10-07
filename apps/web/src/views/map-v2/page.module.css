@@ -16,26 +16,11 @@
   gap: 1.5rem;
 }
 
-.navigation {
-  padding: 1rem;
-  border: var(--sys-border-width-thin) solid var(--sys-color-outline-variant);
-  border-radius: 0.5rem;
-}
-
-.navigation summary {
-  cursor: pointer;
-  font-weight: 600;
-}
-
-.navigation nav {
-  padding-top: 1rem;
-}
-
 .map-group {
   margin-top: 1.5rem;
 }
 
-.map-group h2 {
+.map-group h3 {
   margin: 0 0 0.5rem;
   font-size: 1rem;
 }

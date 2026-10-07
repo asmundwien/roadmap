@@ -4,7 +4,7 @@ import { Link } from '@roadmap/ui/link'
 import { Page, PageDescription, PageHeader, PageTitle } from '@roadmap/ui/page'
 import { Surface, SurfaceDescription } from '@roadmap/ui/surface'
 import classNames from 'classnames/bind'
-import { mapHash, overviewHash, projectRegistrationHash, type Route, selectionHash } from '@/router'
+import { mapHash, projectRegistrationHash, type Route, selectionHash } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
 import { MapContainer } from './map-container'
@@ -83,7 +83,6 @@ function ProjectHeading({
 }) {
   return (
     <PageHeader>
-      <Link href={overviewHash}>Back to projects</Link>
       <PageTitle>{project?.name ?? projectKey.id}</PageTitle>
       <PageDescription>{projectDescription(project)}</PageDescription>
       <div className={cx('project-context')}>
@@ -92,7 +91,6 @@ function ProjectHeading({
         {registration && (
           <Link href={projectRegistrationHash(registration.key)}>Project settings</Link>
         )}
-        {project?.sourceUrl && <Link href={project.sourceUrl}>Project source</Link>}
       </div>
       {project?.sourcePath && <p className={cx('source-path')}>{project.sourcePath}</p>}
     </PageHeader>

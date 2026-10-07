@@ -1,5 +1,6 @@
 import type { Project, WayfinderMap } from '@roadmap/contracts'
 import { Link } from '@roadmap/ui/link'
+import { Surface, SurfaceTitle } from '@roadmap/ui/surface'
 import classNames from 'classnames/bind'
 import { mapHash, projectHash } from '@/router'
 import styles from './page.module.css'
@@ -13,14 +14,14 @@ type MapNavigationProps = {
 
 export function MapNavigation({ project, selectedMap }: MapNavigationProps) {
   return (
-    <details className={cx('navigation')} open>
-      <summary>Maps</summary>
+    <Surface>
+      <SurfaceTitle>Maps</SurfaceTitle>
       <nav aria-label="Project maps">
         <Link href={projectHash(project.key)}>Active map or latest history</Link>
         <MapGroup heading="Live maps" maps={project.openMaps} selectedMap={selectedMap} />
         <MapGroup heading="History" maps={project.closedMaps} selectedMap={selectedMap} />
       </nav>
-    </details>
+    </Surface>
   )
 }
 
@@ -35,9 +36,9 @@ function MapGroup({
 }) {
   return (
     <section className={cx('map-group')}>
-      <h2>
+      <h3>
         {heading} ({maps.length})
-      </h2>
+      </h3>
       {maps.length === 0 ? (
         <p>No {heading.toLowerCase()}.</p>
       ) : (
