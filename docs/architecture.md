@@ -96,7 +96,30 @@ Web source files use `@/` for imports outside their current directory. The alias
 
 `application/configuration.ts` owns the strict `roadmap.config.json` codec and live validation. It writes through a temporary file in the same directory, flushes it, and atomically renames it. An invalid manual save leaves the last valid runtime active and blocks writes until the configuration is repaired.
 
-Integration-specific code lives in `github` and `local`; `wayfinder` parses data tolerantly. The Local adapter discovers every `.wayfinder/<map-id>/map.md`, reads its sibling `tickets/` directory, and uses map frontmatter `status` to separate live maps from history. `store.ts` waits for one complete Slice from every Adapter before publishing a snapshot and keeps partial generations private. `change-feed.ts` derives source-blind events from consecutive complete snapshots.
+Integration readers live in `github` and `local`; `wayfinder` parses source content. They produce private scoped attempts from `observation/source.ts`, not public Projects, maps, or tickets. `store.ts` validates each Slice against that contract, waits for a baseline from every Adapter, and publishes private source snapshots. `RoadmapApplication` retains scoped evidence and translates it into the current public read model. `change-feed.ts` compares consecutive public snapshots.
+
+### Source evidence and scoped retention
+
+`observation/source.ts` owns source scopes, refined content, provenance, completeness, failure categories, and constructors. Unknown input must pass its semantic refinement before publication. The owner reuses neutral `Integration` and `ProjectKey` types, but does not import public Project, map, ticket, or Snapshot models as source authority.
+
+| Source evidence | Commit and interpretation |
+| --- | --- |
+| Readable observation | Commit the validated named scope with its actual attempt and successful-read times. Incomplete content retains raw prose, warnings, and unknown blockers. |
+| Transient, provider execution, response-read, or malformed-response failure | Record the named failed attempt and retain its prior successful content and source time. Failure is not a fresh empty observation. |
+| HTTP 401 or rejected credential | Record proven authorization loss. Do not infer it from a generic 403. |
+| HTTP 403/404, missing alias, or null provider resource | Record ambiguous access failure, not deletion. |
+| Local root, enumeration, or file failure | Keep the filesystem operation and ENOENT, EACCES, or other error category. A known file's ENOENT is not membership or deletion proof. |
+| Complete successful parent membership | Prove only that omitted maps or tickets are absent from that parent scope. Keep their identities and last-known trace. |
+
+Partial success commits by named scope. A readable sibling can advance while a failed alias or file retains its own history. Failed or incomplete enumeration retains prior membership and cannot certify a fresh empty collection. Scope constructors reject cross-parent content, contradictory provenance or provider identity, duplicate members, invalid absence proofs, and fabricated successful time on failures. Public failure descriptions are fixed safe text, not raw provider exceptions.
+
+GitHub readers validate unknown responses instead of trusting `graphql<T>` assertions. Before cross-repository blockers are projected, the Adapter refreshes current names for all admitted repositories and resolves provider identity to the existing opaque Project key. Renames change source names, not registered identity or Workspace proof. Unregistered source references remain explicitly external; unidentified references remain unresolved. They cannot become registered keys by copying a repository name. The public blocker union has one Zod schema in `packages/contracts/src/blocker.ts`, with its inferred type and decoder available through the supported contracts entrypoints.
+
+Known unavailable or scoped-absent maps and tickets remain addressable. They are not fresh admission evidence. Missing membership, unreadable active-map evidence, incomplete tickets, and unknown blockers prevent Automation admission. `MapProgress` is `null` when aggregate counts are unknown. Map and Overview consumers display unknown counts instead of zero and continue to render retained graph and ticket prose under the pinned URL.
+
+The obsolete `toProjects` and `activeMapOf` assembler, its implementation-only tests, and public Adapter/source contracts are removed. This cutover does not install the later observation coordinator, ResourceCatalog, full public-read schema replacement, or repository-wide import enforcement. Scoped compiler, import, runtime-refinement, and production-browser graph proofs cover the changed owners; the public-read cutover owns the permanent full dependency gate.
+
+### Automation
 
 `application/automation-database.ts` owns the strict schema version 3 Automation database. It
 persists immutable opportunities and append-only events atomically, rejects invalid histories, and
@@ -174,4 +197,4 @@ The root `.env.local` holds the public GitHub App identifiers. Device-flow crede
 
 ## Partial data
 
-The model marks incomplete data explicitly. Existing examples include `ticketsComplete`, `blockersComplete`, `unreachable`, and `MapBody.missingSections`.
+Source completeness belongs to each private observation scope. Public projections retain `ticketsComplete`, `blockersComplete`, `unreachable`, and `MapBody.missingSections`; unknown aggregate progress is `null`. A readable incomplete document, a failed read, and proven absence are different facts. None implies permission to discard known trace.

@@ -1,8 +1,14 @@
 import { watch } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { Project, ProjectRegistration, Unreachable } from '@roadmap/contracts'
-import type { AdapterHost, AdapterSlice, WayfinderAdapter } from '../store.ts'
+import type {
+  AdapterHost,
+  AdapterSlice,
+  ObservationAttempt,
+  SourceTicketKey,
+  WayfinderAdapter,
+} from '../observation/source.ts'
+import { absentAttempt, failedAttempt, sourceScopeKey } from '../observation/source.ts'
 import { type LocalProjectInput, readLocalProject } from '../wayfinder/from-local.ts'
 
 /** How long a local adapter waits for a burst of filesystem noise to settle. */
@@ -15,24 +21,7 @@ const RECONCILE_MS = 5 * 60_000
 const RECOVERY_MS = 2_000
 const MAX_RECOVERY_MS = 10_000
 
-interface RootStatusOk {
-  ok: true
-}
-
-interface RootStatusMissing {
-  ok: false
-  reason: string
-}
-
-type RootStatus = RootStatusOk | RootStatusMissing
-
-type LocalRegistration = ProjectRegistration & {
-  key: { integration: 'local'; id: string }
-  locator: { integration: 'local'; path: string }
-}
-
-type ReadProject = (input: LocalProjectInput) => Promise<Project>
-type InspectRoot = (path: string) => Promise<RootStatus>
+type ReadProject = (input: LocalProjectInput) => Promise<AdapterSlice>
 type PathExists = (path: string) => Promise<boolean>
 type WatchDirectory = (
   path: string,
@@ -50,21 +39,20 @@ interface Logger {
 }
 
 export interface LocalAdapterOptions {
-  registrations: readonly ProjectRegistration[]
+  sources: readonly LocalProjectInput[]
   debounceMs?: number
   maxDebounceMs?: number
   reconcileMs?: number
   recoveryMs?: number
   maxRecoveryMs?: number
   readProject?: ReadProject
-  inspectRoot?: InspectRoot
   pathExists?: PathExists
   watchDirectory?: WatchDirectory
   logger?: Logger
 }
 
 interface RegistrationState {
-  registration: LocalRegistration
+  source: LocalProjectInput
   watcher: WatchHandle | null
   recoveryTimer: ReturnType<typeof setTimeout> | null
   recoveryDelayMs: number
@@ -77,13 +65,14 @@ export function createLocalAdapter(options: LocalAdapterOptions): WayfinderAdapt
   const recoveryMs = options.recoveryMs ?? RECOVERY_MS
   const maxRecoveryMs = options.maxRecoveryMs ?? MAX_RECOVERY_MS
   const readProject = options.readProject ?? readLocalProject
-  const inspectRoot = options.inspectRoot ?? defaultInspectRoot
   const pathExists = options.pathExists ?? defaultPathExists
   const watchDirectory = options.watchDirectory ?? defaultWatchDirectory
   const logger = options.logger ?? console
 
   const states = new Map<string, RegistrationState>()
-  const registrations = options.registrations.filter(isLocalRegistration)
+  const sources = options.sources
+  const latest = new Map<string, ObservationAttempt>()
+  const knownTickets = new Map<string, { key: SourceTicketKey; path: string }>()
   let host: AdapterHost | null = null
   let stopped = false
   let started = false
@@ -107,29 +96,97 @@ export function createLocalAdapter(options: LocalAdapterOptions): WayfinderAdapt
       if (stopped) return
       try {
         await op()
-      } catch (error) {
-        logger.warn(`${label} failed; keeping the last good local slice`, error)
+      } catch {
+        logger.warn(`${label} failed; keeping the prior local evidence`)
       }
     })
     chain = run
     return run
   }
 
-  function stateFor(registration: LocalRegistration): RegistrationState {
-    let state = states.get(registration.workspace.path)
+  function stateFor(source: LocalProjectInput): RegistrationState {
+    let state = states.get(source.rootPath)
     if (!state) {
-      state = { registration, watcher: null, recoveryTimer: null, recoveryDelayMs: recoveryMs }
-      states.set(registration.workspace.path, state)
+      state = { source, watcher: null, recoveryTimer: null, recoveryDelayMs: recoveryMs }
+      states.set(source.rootPath, state)
     } else {
-      state.registration = registration
+      state.source = source
     }
     return state
   }
 
   async function reconcile(reason: string): Promise<void> {
     return enqueue(`Local reconcile (${reason})`, async () => {
-      const slice = await readSlice(registrations, readProject, inspectRoot)
-      publish(slice)
+      const slices = await Promise.all(
+        sources.map(async (source): Promise<AdapterSlice> => {
+          const attemptedAt = Date.now()
+          const priorTickets = [...knownTickets.values()].filter(
+            (ticket) =>
+              ticket.key.map.project.integration === source.key.integration &&
+              ticket.key.map.project.id === source.key.id,
+          )
+          try {
+            return await readProject({ ...source, knownTickets: priorTickets })
+          } catch (error) {
+            const code =
+              typeof error === 'object' && error !== null && 'code' in error
+                ? error.code
+                : undefined
+            return {
+              attempts: [
+                failedAttempt({
+                  kind: 'failed',
+                  scope: { kind: 'project', project: source.key },
+                  attemptedAt,
+                  provenance: { integration: 'local', path: source.rootPath, operation: 'read' },
+                  failure: {
+                    kind: 'filesystem',
+                    operation: 'read',
+                    code: code === 'ENOENT' || code === 'EACCES' ? code : 'other',
+                  },
+                }),
+              ],
+            }
+          }
+        }),
+      )
+      const attempts = slices.flatMap((slice) => slice.attempts)
+      for (const attempt of attempts) {
+        const key = sourceScopeKey(attempt.scope)
+        if (attempt.kind === 'observed' && attempt.scope.kind === 'tickets-membership') {
+          for (const storedKey of latest.keys()) {
+            if (storedKey.startsWith(`${key}|file:`)) latest.delete(storedKey)
+          }
+        }
+        proveOmittedMembers(attempt, latest)
+        latest.set(key, attempt)
+        if (
+          attempt.kind === 'failed' &&
+          attempt.scope.kind === 'tickets-membership' &&
+          attempt.provenance.integration === 'local' &&
+          attempt.provenance.operation === 'read'
+        ) {
+          latest.set(`${key}|file:${attempt.provenance.path}`, attempt)
+        }
+        if (
+          attempt.kind === 'observed' &&
+          attempt.scope.kind === 'ticket' &&
+          'source' in attempt.value &&
+          'kind' in attempt.value.source &&
+          attempt.value.source.kind === 'file'
+        ) {
+          knownTickets.set(sourceScopeKey(attempt.scope), {
+            key: attempt.scope.ticket,
+            path: attempt.value.source.path,
+          })
+        }
+      }
+      for (const [key, attempt] of latest) {
+        if (attempt.kind === 'proven-absent') {
+          knownTickets.delete(key)
+        }
+      }
+      publish({ attempts: [...new Set(latest.values())] })
     })
   }
 
@@ -180,7 +237,7 @@ export function createLocalAdapter(options: LocalAdapterOptions): WayfinderAdapt
       state.recoveryTimer = null
       if (stopped) return
 
-      if (await pathExists(watchPathOf(state.registration))) {
+      if (await pathExists(watchPathOf(state.source))) {
         state.recoveryDelayMs = recoveryMs
         await attachWatcher(state)
         invalidate('recovery')
@@ -193,19 +250,12 @@ export function createLocalAdapter(options: LocalAdapterOptions): WayfinderAdapt
   }
 
   async function handleDirty(state: RegistrationState): Promise<void> {
-    const [root, watcherPathLive] = await Promise.all([
-      inspectRoot(state.registration.workspace.path),
-      pathExists(watchPathOf(state.registration)),
-    ])
-    if (!root.ok || !watcherPathLive) scheduleRecovery(state)
+    if (!(await pathExists(watchPathOf(state.source)))) scheduleRecovery(state)
     invalidate('watch')
   }
 
-  function handleWatcherError(state: RegistrationState, error: Error): void {
-    logger.warn(
-      `Local watch failed for ${watchPathOf(state.registration)}; supervising re-attach`,
-      error,
-    )
+  function handleWatcherError(state: RegistrationState): void {
+    logger.warn(`Local watch failed for ${watchPathOf(state.source)}; supervising re-attach`)
     scheduleRecovery(state)
     invalidate('watch error')
   }
@@ -214,7 +264,7 @@ export function createLocalAdapter(options: LocalAdapterOptions): WayfinderAdapt
     if (stopped) return
     clearRecovery(state)
 
-    const path = watchPathOf(state.registration)
+    const path = watchPathOf(state.source)
     if (!(await pathExists(path))) {
       scheduleRecovery(state)
       return
@@ -224,10 +274,10 @@ export function createLocalAdapter(options: LocalAdapterOptions): WayfinderAdapt
       state.watcher = watchDirectory(
         path,
         () => void handleDirty(state),
-        (error) => handleWatcherError(state, error),
+        () => handleWatcherError(state),
       )
-    } catch (error) {
-      logger.warn(`Could not watch ${path}; supervising re-attach`, error)
+    } catch {
+      logger.warn(`Could not watch ${path}; supervising re-attach`)
       scheduleRecovery(state)
     }
   }
@@ -239,11 +289,11 @@ export function createLocalAdapter(options: LocalAdapterOptions): WayfinderAdapt
       started = true
       host = nextHost
 
-      await Promise.all(registrations.map((registration) => attachWatcher(stateFor(registration))))
+      await Promise.all(sources.map((source) => attachWatcher(stateFor(source))))
       await reconcile('baseline')
       scheduleReconcile()
       logger.info(
-        `local baseline: ${registrations.length} registered project${registrations.length === 1 ? '' : 's'}`,
+        `local baseline: ${sources.length} registered project${sources.length === 1 ? '' : 's'}`,
       )
     },
     async stop() {
@@ -259,81 +309,71 @@ export function createLocalAdapter(options: LocalAdapterOptions): WayfinderAdapt
   }
 }
 
-async function readSlice(
-  registrations: readonly LocalRegistration[],
-  readProject: ReadProject,
-  inspectRoot: InspectRoot,
-): Promise<AdapterSlice> {
-  const entries = await Promise.all(
-    registrations.map((registration) =>
-      materializeRegistration(registration, readProject, inspectRoot),
-    ),
-  )
-  return {
-    projects: entries.flatMap((entry) => (entry.project ? [entry.project] : [])),
-    unreachable: entries.flatMap((entry) => (entry.unreachable ? [entry.unreachable] : [])),
-  }
-}
-
-async function materializeRegistration(
-  registration: LocalRegistration,
-  readProject: ReadProject,
-  inspectRoot: InspectRoot,
-): Promise<{ project: Project | null; unreachable: Unreachable | null }> {
-  const rootPath = registration.workspace.path
-  const root = await inspectRoot(rootPath)
-  if (!root.ok) return { project: null, unreachable: toUnreachable(registration, root.reason) }
-
-  try {
-    const project = await readProject({
-      key: registration.key,
-      rootPath,
-      name: registration.displayName ?? registration.key.id,
-    })
-    if (project.openMaps.length === 0 && project.closedMaps.length === 0) {
-      const after = await inspectRoot(rootPath)
-      if (!after.ok)
-        return { project: null, unreachable: toUnreachable(registration, after.reason) }
+function proveOmittedMembers(
+  attempt: ObservationAttempt,
+  latest: Map<string, ObservationAttempt>,
+): void {
+  if (attempt.kind !== 'observed' || attempt.completeness.kind !== 'complete') return
+  if (attempt.scope.kind === 'maps-membership' && 'members' in attempt.value) {
+    const parent = attempt.scope
+    const members = new Set(
+      attempt.value.members.flatMap((key) =>
+        'mapId' in key ? [sourceScopeKey({ kind: 'map', map: key })] : [],
+      ),
+    )
+    for (const prior of latest.values()) {
+      if (
+        prior.scope.kind !== 'map' ||
+        prior.scope.map.project.integration !== parent.project.integration ||
+        prior.scope.map.project.id !== parent.project.id ||
+        members.has(sourceScopeKey(prior.scope))
+      )
+        continue
+      latest.set(
+        sourceScopeKey(prior.scope),
+        absentAttempt({
+          kind: 'proven-absent',
+          scope: prior.scope,
+          attemptedAt: attempt.attemptedAt,
+          observedAt: attempt.observedAt,
+          provenance: attempt.provenance,
+          proof: { kind: 'complete-membership', parent },
+        }),
+      )
     }
-    return { project, unreachable: null }
-  } catch (error) {
-    const after = await inspectRoot(rootPath)
-    const reason = after.ok
-      ? `Could not read registered path ${JSON.stringify(rootPath)}: ${messageOf(error)}.`
-      : after.reason
-    return { project: null, unreachable: toUnreachable(registration, reason) }
-  }
-}
-
-function toUnreachable(registration: LocalRegistration, reason: string): Unreachable {
-  return {
-    integration: 'local',
-    project: registration.key,
-    projectName: registration.displayName ?? registration.key.id,
-    reason,
-  }
-}
-
-function watchPathOf(registration: LocalRegistration): string {
-  return join(registration.workspace.path, '.wayfinder')
-}
-
-async function defaultInspectRoot(path: string): Promise<RootStatus> {
-  try {
-    await stat(path)
-    return { ok: true }
-  } catch (error) {
-    if (isMissing(error)) {
-      return {
-        ok: false,
-        reason: `Registered path ${JSON.stringify(path)} does not exist right now.`,
-      }
-    }
-    return {
-      ok: false,
-      reason: `Could not access registered path ${JSON.stringify(path)}: ${messageOf(error)}.`,
+  } else if (attempt.scope.kind === 'tickets-membership' && 'members' in attempt.value) {
+    const parent = attempt.scope
+    const members = new Set(
+      attempt.value.members.flatMap((key) =>
+        'ticketId' in key ? [sourceScopeKey({ kind: 'ticket', ticket: key })] : [],
+      ),
+    )
+    for (const prior of latest.values()) {
+      if (
+        prior.scope.kind !== 'ticket' ||
+        prior.scope.ticket.map.mapId !== parent.map.mapId ||
+        prior.scope.ticket.map.project.integration !== parent.map.project.integration ||
+        prior.scope.ticket.map.project.id !== parent.map.project.id ||
+        members.has(sourceScopeKey(prior.scope))
+      )
+        continue
+      latest.set(
+        sourceScopeKey(prior.scope),
+        absentAttempt({
+          kind: 'proven-absent',
+          scope: prior.scope,
+          attemptedAt: attempt.attemptedAt,
+          observedAt: attempt.observedAt,
+          provenance: attempt.provenance,
+          proof: { kind: 'complete-membership', parent },
+        }),
+      )
     }
   }
+}
+
+function watchPathOf(source: LocalProjectInput): string {
+  return join(source.rootPath, '.wayfinder')
 }
 
 async function defaultPathExists(path: string): Promise<boolean> {
@@ -353,16 +393,4 @@ function defaultWatchDirectory(
   const watcher = watch(path, { recursive: true }, () => onDirty())
   watcher.on('error', onError)
   return watcher
-}
-
-function isLocalRegistration(registration: ProjectRegistration): registration is LocalRegistration {
-  return registration.key.integration === 'local' && registration.locator.integration === 'local'
-}
-
-function isMissing(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT'
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }

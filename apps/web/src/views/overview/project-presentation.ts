@@ -16,8 +16,8 @@ export interface ProjectPresentation {
   activeMap: WayfinderMap | null
   destination: string
   mapCount: number
-  decisions: number
-  openTickets: number
+  decisions: number | null
+  openTickets: number | null
   hasFog: boolean
   priorities: string[]
   activityAt?: number
@@ -99,8 +99,15 @@ function presentProject(
     activeMap,
     destination,
     mapCount: maps.length,
-    decisions: maps.reduce((sum, map) => sum + map.progress.completed, 0),
-    openTickets: activeMap ? activeMap.progress.total - activeMap.progress.completed : 0,
+    decisions: maps.reduce<number | null>(
+      (sum, map) => (sum === null || map.progress === null ? null : sum + map.progress.completed),
+      0,
+    ),
+    openTickets: activeMap
+      ? activeMap.progress === null
+        ? null
+        : activeMap.progress.total - activeMap.progress.completed
+      : 0,
     hasFog: Boolean(
       activeMap &&
         (activeMap.body.notYetSpecified.length > 0 || activeMap.body.notYetSpecifiedNote !== ''),

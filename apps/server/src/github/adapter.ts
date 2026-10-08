@@ -1,77 +1,94 @@
+import type { ConnectionAvailability } from '@roadmap/contracts'
 import type {
-  ConnectionAvailability,
-  Project,
-  ProjectKey,
-  ProjectRegistration,
-  Unreachable,
-} from '@roadmap/contracts'
-import type { ConfiguredConnection } from '../application/configuration.ts'
-import type { AdapterHost, AdapterSlice, WayfinderAdapter } from '../store.ts'
-import { toWayfinderMap } from '../wayfinder/from-github.ts'
+  AdapterHost,
+  AdapterSlice,
+  ObservationAttempt,
+  SourceFailure,
+  SourceIntegration,
+  SourceMapKey,
+  SourceProjectKey,
+  SourceProvenance,
+  SourceScope,
+  SourceTicketKey,
+  WayfinderAdapter,
+} from '../observation/source.ts'
+import {
+  absentAttempt,
+  failedAttempt,
+  observedAttempt,
+  sourceScopeKey,
+} from '../observation/source.ts'
+import { observeGitHubMap } from '../wayfinder/from-github.ts'
 import { createGitHubClient, type GitHubClient, GitHubError, type RateLimit } from './client.ts'
 import { GitHubConnectionError } from './connections.ts'
 import { type FetchedMap, fetchMaps } from './map-query.ts'
-import { listRepositoryMaps, readRepository } from './repository.ts'
+import { listRepositoryMaps, type RepositoryIdentity, readRepository } from './repository.ts'
 
 const RECONCILE_MS = 30_000
 const MAX_RETRY_MS = 5 * 60_000
 const DEGRADED_AFTER_FAILURES = 2
-const THROTTLE_STEPS: { remainingBelow: number; multiplier: number }[] = [
+const THROTTLE_STEPS = [
   { remainingBelow: 300, multiplier: 8 },
   { remainingBelow: 1000, multiplier: 4 },
   { remainingBelow: 2000, multiplier: 2 },
 ]
 
-type GitHubConnection = ConfiguredConnection & { integration: 'github' }
-type GitHubRegistration = ProjectRegistration & {
-  key: { integration: 'github'; id: string }
-  locator: Extract<ProjectRegistration['locator'], { integration: 'github' }>
+interface SourceConnection {
+  readonly id: string
+  readonly integration: SourceIntegration
 }
 
-type ObservationStage = 'credentials' | 'repository' | 'map-list' | 'map-read'
-
-interface ObservationFailure {
-  error: unknown
-  stage: ObservationStage
+interface SourceRegistration {
+  readonly key: SourceProjectKey
+  readonly connectionId: string
+  readonly displayName?: string
+  readonly locator:
+    | { readonly integration: 'local' }
+    | { readonly integration: 'github'; readonly repositoryId: string }
 }
 
-interface Logger {
-  warn(message: string): void
+type GitHubRegistration = SourceRegistration & {
+  readonly locator: Extract<SourceRegistration['locator'], { integration: 'github' }>
 }
+type ObservationStage = Extract<SourceProvenance, { integration: 'github' }>['stage']
 
 interface Worker {
-  connection: GitHubConnection
+  connection: SourceConnection
   registrations: GitHubRegistration[]
   token: string | null
   client: GitHubClient | null
   rateLimit: RateLimit | null
-  projects: Project[]
-  unreachable: Unreachable[]
+  attempts: Map<string, ObservationAttempt>
+  mapMembers: Map<string, readonly SourceMapKey[]>
+  ticketMembers: Map<string, readonly SourceTicketKey[]>
   reconcileTimer: ReturnType<typeof setTimeout> | null
   lastSuccessfulAt: number | null
   transientFailures: number
   failureStartedAt: number | null
 }
 
+interface WorkerRead {
+  worker: Worker
+  client: GitHubClient | null
+  repositories: Map<GitHubRegistration, RepositoryIdentity>
+  failures: { failure: SourceFailure; stage: ObservationStage }[]
+}
+
 export interface GitHubAdapterOptions {
-  connections: readonly ConfiguredConnection[]
-  registrations: readonly ProjectRegistration[]
+  connections: readonly SourceConnection[]
+  registrations: readonly SourceRegistration[]
   accessToken(connectionId: string): Promise<string>
   onConnectionAvailability?(connectionId: string, availability: ConnectionAvailability): void
   createClient?: (accessToken: string) => GitHubClient
   reconcileMs?: number
   now?: () => number
-  logger?: Logger
-}
-
-interface GitHubDiagnostics {
-  rateLimit: RateLimit | null
+  logger?: { warn(message: string): void }
 }
 
 export interface GitHubAdapter extends WayfinderAdapter {
   type: 'github'
-  refresh(project: ProjectKey): Promise<boolean>
-  diagnostics(): GitHubDiagnostics
+  refresh(project: SourceProjectKey): Promise<boolean>
+  diagnostics(): { rateLimit: RateLimit | null }
 }
 
 export function createGitHubAdapter(options: GitHubAdapterOptions): GitHubAdapter {
@@ -80,21 +97,24 @@ export function createGitHubAdapter(options: GitHubAdapterOptions): GitHubAdapte
   const now = options.now ?? Date.now
   const logger = options.logger ?? console
   const registrations = options.registrations.filter(isGitHubRegistration)
-  const workers = options.connections.filter(isGitHubConnection).map<Worker>((connection) => ({
-    connection,
-    registrations: registrations.filter(
-      (registration) => registration.connectionId === connection.id,
-    ),
-    token: null,
-    client: null,
-    rateLimit: null,
-    projects: [],
-    unreachable: [],
-    reconcileTimer: null,
-    lastSuccessfulAt: null,
-    transientFailures: 0,
-    failureStartedAt: null,
-  }))
+  const workers = options.connections
+    .filter((connection) => connection.integration === 'github')
+    .map<Worker>((connection) => ({
+      connection,
+      registrations: registrations.filter(
+        (registration) => registration.connectionId === connection.id,
+      ),
+      token: null,
+      client: null,
+      rateLimit: null,
+      attempts: new Map(),
+      mapMembers: new Map(),
+      ticketMembers: new Map(),
+      reconcileTimer: null,
+      lastSuccessfulAt: null,
+      transientFailures: 0,
+      failureStartedAt: null,
+    }))
   let host: AdapterHost | null = null
   let stopped = false
   let started = false
@@ -104,8 +124,7 @@ export function createGitHubAdapter(options: GitHubAdapterOptions): GitHubAdapte
   function publish(): void {
     if (host === null || stopped) return
     const slice: AdapterSlice = {
-      projects: workers.flatMap((worker) => worker.projects),
-      unreachable: workers.flatMap((worker) => worker.unreachable),
+      attempts: workers.flatMap((worker) => [...worker.attempts.values()]),
     }
     const next = JSON.stringify(slice)
     if (next === sliceFingerprint) return
@@ -113,178 +132,379 @@ export function createGitHubAdapter(options: GitHubAdapterOptions): GitHubAdapte
     host.update(slice)
   }
 
-  function enqueue(label: string, operation: () => Promise<void>): Promise<void> {
+  function record(worker: Worker, attempt: ObservationAttempt): void {
+    const validated =
+      attempt.kind === 'observed'
+        ? observedAttempt(attempt)
+        : attempt.kind === 'failed'
+          ? failedAttempt(attempt)
+          : absentAttempt(attempt)
+    worker.attempts.set(sourceScopeKey(validated.scope), validated)
+  }
+
+  function failed(
+    worker: Worker,
+    registration: GitHubRegistration,
+    scope: SourceScope,
+    stage: ObservationStage,
+    attemptedAt: number,
+    failure: SourceFailure,
+  ): void {
+    record(worker, {
+      kind: 'failed',
+      scope,
+      attemptedAt,
+      provenance: provenance(registration, stage),
+      failure,
+    })
+  }
+
+  async function readWorkerRepositories(worker: Worker): Promise<WorkerRead> {
+    const read: WorkerRead = { worker, client: null, repositories: new Map(), failures: [] }
+    const credentialAttemptedAt = now()
+    try {
+      const token = await options.accessToken(worker.connection.id)
+      if (worker.client === null || worker.token !== token) {
+        worker.token = token
+        worker.client = createClient(token)
+      }
+      read.client = worker.client
+    } catch (error) {
+      const failure = sourceFailure(error)
+      read.failures.push({ failure, stage: 'credentials' })
+      for (const registration of worker.registrations) {
+        failed(
+          worker,
+          registration,
+          { kind: 'project', project: registration.key },
+          'credentials',
+          credentialAttemptedAt,
+          failure,
+        )
+      }
+      return read
+    }
+    const client = read.client
+    await Promise.all(
+      worker.registrations.map(async (registration) => {
+        const attemptedAt = now()
+        try {
+          const repository = await readRepository(client, registration.locator.repositoryId)
+          if (repository.id !== registration.locator.repositoryId) {
+            throw new GitHubError({ kind: 'identity-mismatch' })
+          }
+          read.repositories.set(registration, repository)
+          record(worker, {
+            kind: 'observed',
+            scope: { kind: 'project', project: registration.key },
+            attemptedAt,
+            observedAt: now(),
+            provenance: provenance(registration, 'repository'),
+            completeness: { kind: 'complete' },
+            value: {
+              key: registration.key,
+              name: registration.displayName ?? repository.nameWithOwner,
+              source: {
+                integration: 'github',
+                repositoryId: repository.id,
+                nameWithOwner: repository.nameWithOwner,
+                url: `https://github.com/${repository.nameWithOwner}`,
+              },
+              warnings: [],
+            },
+          })
+        } catch (error) {
+          const failure = sourceFailure(error)
+          read.failures.push({ failure, stage: 'repository' })
+          failed(
+            worker,
+            registration,
+            { kind: 'project', project: registration.key },
+            'repository',
+            attemptedAt,
+            failure,
+          )
+        }
+      }),
+    )
+    return read
+  }
+
+  async function readMaps(
+    read: WorkerRead,
+    registration: GitHubRegistration,
+    repository: RepositoryIdentity,
+    resolveProject: (nameWithOwner: string, repositoryId?: string) => SourceProjectKey | undefined,
+  ): Promise<void> {
+    const client = read.client
+    if (client === null) return
+    const worker = read.worker
+    const membershipScope = {
+      kind: 'maps-membership',
+      project: registration.key,
+    } satisfies SourceScope
+    const attemptedAt = now()
+    let refs: Awaited<ReturnType<typeof listRepositoryMaps>>
+    try {
+      refs = (await listRepositoryMaps(client, repository.nameWithOwner)).map((ref) => ({
+        ...ref,
+        repositoryId: repository.id,
+      }))
+    } catch (error) {
+      const failure = sourceFailure(error)
+      failed(worker, registration, membershipScope, 'map-list', attemptedAt, failure)
+      read.failures.push({ failure, stage: 'map-list' })
+      return
+    }
+    const observedAt = now()
+    const members = refs.map((ref) => ({ project: registration.key, mapId: String(ref.number) }))
+    const membershipKey = sourceScopeKey(membershipScope)
+    const knownMaps = worker.mapMembers.get(membershipKey) ?? []
+    record(worker, {
+      kind: 'observed',
+      scope: membershipScope,
+      attemptedAt,
+      observedAt,
+      provenance: provenance(registration, 'map-list'),
+      completeness: { kind: 'complete' },
+      value: { members },
+    })
+    // Only a complete list can end known membership. Failed lists never reach this branch.
+    worker.mapMembers.set(membershipKey, members)
+    const memberIds = new Set(members.map((member) => member.mapId))
+    for (const map of knownMaps) {
+      if (memberIds.has(map.mapId)) continue
+      record(worker, {
+        kind: 'proven-absent',
+        scope: { kind: 'map', map },
+        attemptedAt,
+        observedAt,
+        provenance: provenance(registration, 'map-list'),
+        proof: { kind: 'complete-membership', parent: membershipScope },
+      })
+    }
+    const fetchAttemptedAt = now()
+    let fetched: Awaited<ReturnType<typeof fetchMaps>>
+    try {
+      fetched = await fetchMaps(client, refs, now)
+    } catch (error) {
+      const failure = sourceFailure(error)
+      for (const ref of refs)
+        failed(
+          worker,
+          registration,
+          { kind: 'map', map: { project: registration.key, mapId: String(ref.number) } },
+          'map-read',
+          fetchAttemptedAt,
+          failure,
+        )
+      read.failures.push({ failure, stage: 'map-read' })
+      return
+    }
+    if (fetched.rateLimit)
+      worker.rateLimit = conservativeRateLimit(worker.rateLimit, fetched.rateLimit)
+    for (const entry of fetched.maps) {
+      try {
+        commitMap(read, registration, repository, entry, resolveProject)
+      } catch (error) {
+        const failure = sourceFailure(error)
+        failed(
+          worker,
+          registration,
+          { kind: 'map', map: { project: registration.key, mapId: String(entry.ref.number) } },
+          'map-read',
+          entry.attemptedAt,
+          failure,
+        )
+        read.failures.push({ failure, stage: 'map-read' })
+      }
+    }
+    for (const entry of fetched.failures) {
+      failed(
+        worker,
+        registration,
+        { kind: 'map', map: { project: registration.key, mapId: String(entry.ref.number) } },
+        'map-read',
+        entry.attemptedAt,
+        entry.failure,
+      )
+      read.failures.push({ failure: entry.failure, stage: 'map-read' })
+    }
+  }
+
+  function commitMap(
+    read: WorkerRead,
+    registration: GitHubRegistration,
+    repository: RepositoryIdentity,
+    entry: FetchedMap,
+    resolveProject: (nameWithOwner: string, repositoryId?: string) => SourceProjectKey | undefined,
+  ): void {
+    if (
+      entry.repository.databaseId !== undefined &&
+      entry.repository.databaseId !== repository.id
+    ) {
+      throw new GitHubError({ kind: 'identity-mismatch' })
+    }
+    const slice = observeGitHubMap(entry, {
+      project: registration.key,
+      repositoryId: repository.id,
+      connectionId: read.worker.connection.id,
+      resolveProject,
+    })
+    for (const attempt of slice.attempts) record(read.worker, attempt)
+    reconcileTickets(read.worker, registration, entry)
+  }
+
+  function reconcileTickets(
+    worker: Worker,
+    registration: GitHubRegistration,
+    entry: FetchedMap,
+  ): void {
+    const map = { project: registration.key, mapId: String(entry.ref.number) }
+    const membershipScope = { kind: 'tickets-membership', map } satisfies SourceScope
+    const membershipKey = sourceScopeKey(membershipScope)
+    const knownTickets = worker.ticketMembers.get(membershipKey) ?? []
+    const tickets = (entry.issue.subIssues?.nodes ?? []).map((ticket) => ({
+      map,
+      ticketId: String(ticket.number),
+    }))
+    if (entry.ticketsCompleteness.kind === 'incomplete') {
+      const knownIds = new Set(knownTickets.map((ticket) => ticket.ticketId))
+      worker.ticketMembers.set(membershipKey, [
+        ...knownTickets,
+        ...tickets.filter((ticket) => !knownIds.has(ticket.ticketId)),
+      ])
+      return
+    }
+    const ticketIds = new Set(tickets.map((ticket) => ticket.ticketId))
+    for (const ticket of knownTickets) {
+      if (ticketIds.has(ticket.ticketId)) continue
+      record(worker, {
+        kind: 'proven-absent',
+        scope: { kind: 'ticket', ticket },
+        attemptedAt: entry.attemptedAt,
+        observedAt: entry.observedAt,
+        provenance: provenance(registration, 'map-read'),
+        proof: { kind: 'complete-membership', parent: membershipScope },
+      })
+    }
+    worker.ticketMembers.set(membershipKey, tickets)
+  }
+
+  function connectionAvailability(read: WorkerRead, completed: boolean): void {
+    const worker = read.worker
+    const authorization = read.failures.find((entry) => entry.failure.kind === 'authorization')
+    if (authorization) {
+      worker.transientFailures = 0
+      worker.failureStartedAt = null
+      options.onConnectionAvailability?.(worker.connection.id, {
+        status: 'authorization-required',
+        cause:
+          authorization.failure.kind === 'authorization' &&
+          authorization.failure.proof === 'rejected-credential'
+            ? 'GitHub rejected the stored authorization. Reauthenticate this Connection.'
+            : 'GitHub authorization is required for this Connection.',
+        observedAt: now(),
+      })
+      return
+    }
+    const connectionFailure = read.failures.find(
+      (entry) =>
+        entry.failure.kind === 'transient' ||
+        entry.failure.kind === 'execution' ||
+        entry.failure.kind === 'read',
+    )
+    if (connectionFailure) {
+      const failedAt = now()
+      worker.failureStartedAt ??= failedAt
+      worker.transientFailures += 1
+      logger.warn(
+        `GitHub observation failed connection=${worker.connection.id} stage=${connectionFailure.stage} class=${connectionFailure.failure.kind} durationMs=${failedAt - worker.failureStartedAt} retryInMs=${transientRetryDelay(worker)}`,
+      )
+      if (worker.lastSuccessfulAt === null) {
+        options.onConnectionAvailability?.(worker.connection.id, {
+          status: 'unavailable',
+          cause: 'GitHub could not be observed for this Connection.',
+          observedAt: failedAt,
+        })
+      } else if (worker.transientFailures < DEGRADED_AFTER_FAILURES) {
+        options.onConnectionAvailability?.(worker.connection.id, {
+          status: 'available',
+          observedAt: worker.lastSuccessfulAt,
+        })
+      } else {
+        options.onConnectionAvailability?.(worker.connection.id, {
+          status: 'degraded',
+          cause:
+            'GitHub observations are temporarily failing; showing data from the last successful observation.',
+          observedAt: worker.lastSuccessfulAt,
+        })
+      }
+      return
+    }
+    if (!completed) return
+    worker.transientFailures = 0
+    worker.failureStartedAt = null
+    if (read.failures.length === 0) worker.lastSuccessfulAt = now()
+    options.onConnectionAvailability?.(worker.connection.id, {
+      status: 'available',
+      observedAt: worker.lastSuccessfulAt ?? now(),
+    })
+  }
+
+  function reconcile(reason: string, selected?: Worker): Promise<void> {
     const run = chain.then(async () => {
       if (stopped) return
       try {
-        await operation()
+        // All admitted identities are reconciled before any blocker reference is projected.
+        const reads = await Promise.all(workers.map(readWorkerRepositories))
+        const byName = new Map<string, SourceProjectKey>()
+        const byId = new Map(
+          registrations.map((registration) => [
+            registration.locator.repositoryId,
+            registration.key,
+          ]),
+        )
+        for (const read of reads) {
+          for (const [registration, repository] of read.repositories) {
+            byName.set(repository.nameWithOwner.toLowerCase(), registration.key)
+          }
+        }
+        const resolveProject = (
+          nameWithOwner: string,
+          repositoryId?: string,
+        ): SourceProjectKey | undefined =>
+          repositoryId === undefined
+            ? byName.get(nameWithOwner.toLowerCase())
+            : byId.get(repositoryId)
+        await Promise.all(
+          reads.map(async (read) => {
+            const completed = selected === undefined || read.worker === selected
+            if (completed)
+              await Promise.all(
+                [...read.repositories].map(([registration, repository]) =>
+                  readMaps(read, registration, repository, resolveProject),
+                ),
+              )
+            connectionAvailability(read, completed)
+          }),
+        )
+        publish()
       } catch {
-        logger.warn(`${label} failed unexpectedly; keeping the last good GitHub slice`)
+        logger.warn(`GitHub reconcile (${reason}) failed unexpectedly; retaining scoped evidence`)
+        publish()
       }
     })
     chain = run
     return run
   }
 
-  async function clientFor(worker: Worker): Promise<GitHubClient> {
-    const token = await options.accessToken(worker.connection.id)
-    if (worker.client === null || worker.token !== token) {
-      worker.token = token
-      worker.client = createClient(token)
-    }
-    return worker.client
-  }
-
-  async function reconcileWorker(worker: Worker): Promise<void> {
-    let client: GitHubClient
-    try {
-      client = await clientFor(worker)
-    } catch (error) {
-      connectionFailed(worker, { error, stage: 'credentials' })
-      return
-    }
-
-    const entries = await Promise.all(
-      worker.registrations.map((registration) => materializeProject(worker, registration, client)),
-    )
-    const connectionFailure = entries.find((entry) => entry.connectionFailure)?.connectionFailure
-    if (connectionFailure) {
-      connectionFailed(worker, connectionFailure)
-      return
-    }
-    worker.projects = entries.flatMap((entry) => (entry.project ? [entry.project] : []))
-    worker.unreachable = entries.flatMap((entry) => (entry.unreachable ? [entry.unreachable] : []))
-    const observedAt = now()
-    worker.lastSuccessfulAt = observedAt
-    worker.transientFailures = 0
-    worker.failureStartedAt = null
-    options.onConnectionAvailability?.(worker.connection.id, {
-      status: 'available',
-      observedAt,
-    })
-  }
-
-  async function materializeProject(
-    worker: Worker,
-    registration: GitHubRegistration,
-    client: GitHubClient,
-  ): Promise<{
-    project: Project | null
-    unreachable: Unreachable | null
-    connectionFailure: ObservationFailure | null
-  }> {
-    let stage: ObservationStage = 'repository'
-    try {
-      const repository = await readRepository(client, registration.locator.repositoryId)
-      if (repository.id !== registration.locator.repositoryId) {
-        return unavailableResult(registration, 'GitHub returned a different repository identity.')
-      }
-      stage = 'map-list'
-      const refs = await listRepositoryMaps(client, repository.nameWithOwner)
-      stage = 'map-read'
-      const fetched = await fetchMaps(client, refs)
-      if (fetched.rateLimit)
-        worker.rateLimit = conservativeRateLimit(worker.rateLimit, fetched.rateLimit)
-      const projectKeys = new Map(
-        registrations.map((candidate) => [
-          candidate.locator.nameWithOwner.toLocaleLowerCase(),
-          candidate.key,
-        ]),
-      )
-      projectKeys.set(repository.nameWithOwner.toLocaleLowerCase(), registration.key)
-      return {
-        project: toRegisteredProject(registration, repository, fetched.maps, (nameWithOwner) =>
-          projectKeys.get(nameWithOwner.toLocaleLowerCase()),
-        ),
-        unreachable: null,
-        connectionFailure: null,
-      }
-    } catch (error) {
-      if (isConnectionFailure(error)) {
-        return { project: null, unreachable: null, connectionFailure: { error, stage } }
-      }
-      return unavailableResult(registration, repositoryFailure(registration, error))
-    }
-  }
-
-  function connectionFailed(worker: Worker, failure: ObservationFailure): void {
-    if (isAuthorizationFailure(failure.error)) {
-      worker.transientFailures = 0
-      worker.failureStartedAt = null
-      const cause =
-        failure.error instanceof GitHubConnectionError && failure.error.kind === 'bad-refresh-token'
-          ? 'GitHub rejected the stored authorization. Reauthenticate this Connection.'
-          : 'GitHub authorization is required for this Connection.'
-      worker.projects = []
-      worker.unreachable = worker.registrations.map((registration) =>
-        toUnreachable(registration, cause),
-      )
-      options.onConnectionAvailability?.(worker.connection.id, {
-        status: 'authorization-required',
-        cause,
-        observedAt: now(),
-      })
-      logger.warn(failureLog(worker, failure.stage, 'authorization', 0, nextReconcileDelay(worker)))
-      return
-    }
-
-    const failedAt = now()
-    worker.failureStartedAt ??= failedAt
-    worker.transientFailures += 1
-    const retryInMs = transientRetryDelay(worker)
-    logger.warn(
-      failureLog(worker, failure.stage, 'transient', failedAt - worker.failureStartedAt, retryInMs),
-    )
-
-    if (worker.lastSuccessfulAt === null) {
-      options.onConnectionAvailability?.(worker.connection.id, {
-        status: 'unavailable',
-        cause: 'GitHub could not be observed for this Connection.',
-        observedAt: failedAt,
-      })
-      return
-    }
-    if (worker.transientFailures < DEGRADED_AFTER_FAILURES) {
-      options.onConnectionAvailability?.(worker.connection.id, {
-        status: 'available',
-        observedAt: worker.lastSuccessfulAt,
-      })
-      return
-    }
-    options.onConnectionAvailability?.(worker.connection.id, {
-      status: 'degraded',
-      cause:
-        'GitHub observations are temporarily failing; showing data from the last successful observation.',
-      observedAt: worker.lastSuccessfulAt,
-    })
-  }
-
   function transientRetryDelay(worker: Worker): number {
     const baseDelay = rateLimitedDelay(worker)
-    const multiplier = 2 ** Math.max(0, worker.transientFailures - 1)
-    return Math.min(baseDelay * multiplier, Math.max(baseDelay, MAX_RETRY_MS))
-  }
-
-  function failureLog(
-    worker: Worker,
-    stage: ObservationStage,
-    failureClass: 'authorization' | 'transient',
-    durationMs: number,
-    retryInMs: number,
-  ): string {
-    return `GitHub observation failed connection=${worker.connection.id} stage=${stage} class=${failureClass} durationMs=${durationMs} retryInMs=${retryInMs}`
-  }
-
-  function reconcile(reason: string, selected?: Worker): Promise<void> {
-    return enqueue(`GitHub reconcile (${reason})`, async () => {
-      await Promise.all((selected ? [selected] : workers).map(reconcileWorker))
-      publish()
-    })
-  }
-
-  function nextReconcileDelay(worker: Worker): number {
-    if (worker.transientFailures > 0) return transientRetryDelay(worker)
-    return rateLimitedDelay(worker)
+    return Math.min(
+      baseDelay * 2 ** Math.max(0, worker.transientFailures - 1),
+      Math.max(baseDelay, MAX_RETRY_MS),
+    )
   }
 
   function rateLimitedDelay(worker: Worker): number {
@@ -296,90 +516,66 @@ export function createGitHubAdapter(options: GitHubAdapterOptions): GitHubAdapte
 
   function scheduleReconcile(worker: Worker): void {
     if (stopped) return
-    worker.reconcileTimer = setTimeout(async () => {
-      await reconcile(`interval for ${worker.connection.id}`, worker)
-      scheduleReconcile(worker)
-    }, nextReconcileDelay(worker))
+    worker.reconcileTimer = setTimeout(
+      async () => {
+        await reconcile(`interval for ${worker.connection.id}`, worker)
+        scheduleReconcile(worker)
+      },
+      worker.transientFailures > 0 ? transientRetryDelay(worker) : rateLimitedDelay(worker),
+    )
   }
 
   return {
     type: 'github',
     diagnostics() {
-      const available = workers
-        .map((worker) => worker.rateLimit)
-        .filter((rate): rate is RateLimit => rate !== null)
-        .sort((a, b) => a.remaining - b.remaining)
-      return {
-        rateLimit: available[0] ?? null,
-      }
+      let rateLimit: RateLimit | null = null
+      for (const worker of workers)
+        if (
+          worker.rateLimit !== null &&
+          (rateLimit === null || worker.rateLimit.remaining < rateLimit.remaining)
+        )
+          rateLimit = worker.rateLimit
+      return { rateLimit }
     },
     refresh(project) {
       const worker = workers.find((candidate) =>
         candidate.registrations.some((registration) => sameProject(registration.key, project)),
       )
-      if (!worker) return Promise.resolve(false)
-      return reconcile('manual refresh', worker).then(() => true)
+      return worker ? reconcile('manual refresh', worker).then(() => true) : Promise.resolve(false)
     },
     async start(nextHost) {
       if (started) return
       started = true
       host = nextHost
       await reconcile('baseline')
-      if (stopped) return
-      for (const worker of workers) scheduleReconcile(worker)
+      if (!stopped) for (const worker of workers) scheduleReconcile(worker)
     },
     async stop() {
       stopped = true
-      for (const worker of workers) {
-        if (worker.reconcileTimer !== null) clearTimeout(worker.reconcileTimer)
-      }
+      for (const worker of workers) clearTimeout(worker.reconcileTimer ?? undefined)
       await chain
     },
   }
 }
 
-function toRegisteredProject(
-  registration: GitHubRegistration,
-  repository: { nameWithOwner: string },
-  fetched: readonly FetchedMap[],
-  resolveProject: (nameWithOwner: string) => ProjectKey | undefined,
-): Project {
-  const project: Project = {
-    key: registration.key,
-    name: registration.displayName ?? repository.nameWithOwner,
-    sourceUrl: `https://github.com/${repository.nameWithOwner}`,
-    openMaps: [],
-    closedMaps: [],
-    warnings: [],
-  }
-  for (const entry of fetched) {
-    const map = toWayfinderMap(entry, registration.key, resolveProject)
-    if (map.isOpen) project.openMaps.push(map)
-    else project.closedMaps.push(map)
-  }
-  project.openMaps.sort((a, b) => b.updatedAt - a.updatedAt)
-  project.closedMaps.sort((a, b) => (b.closedAt ?? b.updatedAt) - (a.closedAt ?? a.updatedAt))
-  return project
-}
-
-function unavailableResult(
-  registration: GitHubRegistration,
-  reason: string,
-): { project: null; unreachable: Unreachable; connectionFailure: null } {
-  return {
-    project: null,
-    unreachable: toUnreachable(registration, reason),
-    connectionFailure: null,
-  }
-}
-
-function toUnreachable(registration: GitHubRegistration, reason: string): Unreachable {
+function provenance(registration: GitHubRegistration, stage: ObservationStage): SourceProvenance {
   return {
     integration: 'github',
-    project: registration.key,
-    projectName: registration.displayName ?? registration.locator.nameWithOwner,
-    reason,
+    connectionId: registration.connectionId,
+    repositoryId: registration.locator.repositoryId,
+    stage,
   }
+}
+
+function sourceFailure(error: unknown): SourceFailure {
+  if (error instanceof GitHubError) return error.failure
+  if (error instanceof GitHubConnectionError) {
+    if (error.kind === 'network') return { kind: 'transient', cause: 'network' }
+    if (error.kind === 'unauthorized' || error.kind === 'bad-refresh-token')
+      return { kind: 'authorization', proof: 'rejected-credential' }
+    return { kind: 'read', cause: 'malformed-response' }
+  }
+  return { kind: 'read', cause: 'malformed-response' }
 }
 
 function conservativeRateLimit(current: RateLimit | null, observed: RateLimit): RateLimit {
@@ -388,38 +584,12 @@ function conservativeRateLimit(current: RateLimit | null, observed: RateLimit): 
   return observed
 }
 
-function repositoryFailure(registration: GitHubRegistration, error: unknown): string {
-  if (error instanceof GitHubError && error.status === 404) {
-    return `Repository ${registration.locator.nameWithOwner} is not available through this Connection.`
-  }
-  return `Could not read repository ${registration.locator.nameWithOwner} from GitHub.`
-}
-
-function isConnectionFailure(error: unknown): boolean {
-  return (
-    isAuthorizationFailure(error) ||
-    (error instanceof GitHubError &&
-      (error.status === 0 || error.status === 403 || error.status >= 500))
-  )
-}
-
-function isAuthorizationFailure(error: unknown): boolean {
-  return (
-    (error instanceof GitHubError && error.status === 401) ||
-    (error instanceof GitHubConnectionError && error.kind !== 'network')
-  )
-}
-
-function isGitHubConnection(connection: ConfiguredConnection): connection is GitHubConnection {
-  return connection.integration === 'github'
-}
-
 function isGitHubRegistration(
-  registration: ProjectRegistration,
+  registration: SourceRegistration,
 ): registration is GitHubRegistration {
   return registration.key.integration === 'github' && registration.locator.integration === 'github'
 }
 
-function sameProject(a: ProjectKey, b: ProjectKey): boolean {
+function sameProject(a: SourceProjectKey, b: SourceProjectKey): boolean {
   return a.integration === b.integration && a.id === b.id
 }

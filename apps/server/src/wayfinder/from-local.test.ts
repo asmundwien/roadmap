@@ -1,310 +1,285 @@
 import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { Project, Ticket, WayfinderMap } from '@roadmap/contracts'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
+import type { AdapterSlice, ObservationAttempt } from '../observation/source.ts'
 import { readLocalProject } from './from-local.ts'
 
-const RISIKO_FIXTURE = '/Users/asmund.wien/source/hdir/platform/microsoft-risiko'
-const RISIKO_MAP = 'azure-strategy-leadership-deck'
-const PIPELINES_FIXTURE = '/Users/asmund.wien/source/hdir/felleskomponenter/frontend-pipelines'
-const PIPELINES_MAP = 'frontend-pipeline-versioning'
+const fixtureRoots: string[] = []
+const key = { integration: 'local', id: 'admitted-opaque-key' } as const
+
+afterEach(async () => {
+  await Promise.all(
+    fixtureRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
+  )
+})
 
 describe('readLocalProject', () => {
-  it('parses the standardized Risiko fixture with stable source context', async () => {
-    const project = await readLocalProject({
-      key: { integration: 'local', id: 'microsoft-risiko' },
-      rootPath: RISIKO_FIXTURE,
-      name: 'microsoft-risiko',
-    })
+  it('reads standardized files with opaque identity, relative links and source timestamps', async () => {
+    const root = await createFixture(
+      'azure-strategy',
+      'Azure strategy',
+      [
+        { id: '2', body: '# Story\n\n[docs/page-list.md](../../../docs/page-list.md)\n' },
+        { id: '15', body: '# Done\n', closedAt: '2026-08-19T10:11:18.000Z' },
+      ],
+      '## Decisions\n\n- [Story](tickets/02-ticket.md)\n',
+    )
+    const before = Date.now()
+    const slice = await readLocalProject({ key, rootPath: root, name: 'Registered project' })
+    const map = onlyMap(slice)
 
-    expect(project).toMatchObject({
-      key: { integration: 'local', id: 'microsoft-risiko' },
-      name: 'microsoft-risiko',
+    expect(slice.attempts).toContainEqual(
+      expect.objectContaining({
+        kind: 'observed',
+        scope: { kind: 'project', project: key },
+        value: {
+          key,
+          name: 'Registered project',
+          source: { integration: 'local', path: root },
+          warnings: [],
+        },
+      }),
+    )
+    expect(map.value).toMatchObject({
+      key: { project: key, mapId: '.wayfinder/azure-strategy/map.md' },
+      title: 'Azure strategy',
+      status: 'open',
       warnings: [],
-      closedMaps: [],
-      sourcePath: RISIKO_FIXTURE,
+      source: { kind: 'file', path: join(root, '.wayfinder/azure-strategy/map.md') },
+      progress: { total: 2, completed: 1 },
+      unidentifiedTickets: [],
     })
-    expect(project.openMaps).toHaveLength(1)
-    const map = onlyMap(project)
-    expect(map).toMatchObject({
-      project: { integration: 'local', id: 'microsoft-risiko' },
-      id: `.wayfinder/${RISIKO_MAP}/map.md`,
-      title: 'Azure-strategy leadership deck as a scroll-through webapp',
-      isOpen: true,
-      ticketsComplete: true,
-      warnings: [],
-      sourcePath: join(RISIKO_FIXTURE, '.wayfinder', RISIKO_MAP, 'map.md'),
+    expect(map.observedAt).toBeGreaterThanOrEqual(before)
+    expect(map.observedAt).toBeLessThanOrEqual(Date.now())
+    expect(map.value.updatedAt).toBe(await latestRelevantMtime(root, 'azure-strategy'))
+    expect(map.value.body.decisions[0]?.url).toBe('tickets/02-ticket.md')
+    expect(byId(slice, '2').value).toMatchObject({
+      body: expect.stringContaining('[docs/page-list.md](../../../docs/page-list.md)'),
+      source: { kind: 'file', path: join(root, '.wayfinder/azure-strategy/tickets/02-ticket.md') },
+      status: 'open',
+      blockersComplete: true,
     })
-    expect(map.closedAt).toBeUndefined()
-    expect(map.updatedAt).toBe(await latestRelevantMtime(RISIKO_FIXTURE, RISIKO_MAP))
-    expect(map.body.decisions[0]?.url).toBe('tickets/02-re-story-for-scroll.md')
+    expect(byId(slice, '15').value).toMatchObject({
+      status: 'closed',
+      closedAt: Date.parse('2026-08-19T10:11:18.000Z'),
+    })
+    expect(byId(slice, '15').value.createdAt).toBeUndefined()
+  })
 
-    const ticket2 = byId(map, '2')
-    expect(ticket2.body).toContain('[docs/page-list.md](../../../docs/page-list.md)')
-    expect(ticket2.sourcePath).toBe(
-      join(RISIKO_FIXTURE, '.wayfinder', RISIKO_MAP, 'tickets/02-re-story-for-scroll.md'),
+  it('observes all enumerated map identities without inferring status from their order', async () => {
+    const root = await createFixture('active-map', 'Active', [])
+    const finished = join(root, '.wayfinder/finished-map')
+    await mkdir(join(finished, 'tickets'), { recursive: true })
+    await writeFile(
+      join(finished, 'map.md'),
+      '---\ntitle: Finished\nlabels: [wayfinder:map]\nstatus: closed\n---\n\n# Finished\n',
+    )
+    const slice = await readLocalProject({ key, rootPath: root })
+    const maps = slice.attempts.filter(
+      (attempt): attempt is MapAttempt =>
+        attempt.kind === 'observed' && attempt.scope.kind === 'map',
     )
 
-    const ticket15 = byId(map, '15')
-    expect(ticket15.state).toBe('closed')
-    expect(ticket15.createdAt).toBeUndefined()
-    expect(ticket15.closedAt).toBe(Date.parse('2026-08-19T10:11:18.000Z'))
+    expect(maps.map((map) => [map.value.key.mapId, map.value.status])).toEqual([
+      ['.wayfinder/active-map/map.md', 'open'],
+      ['.wayfinder/finished-map/map.md', 'closed'],
+    ])
+    expect(slice.attempts).toContainEqual(
+      expect.objectContaining({
+        kind: 'observed',
+        scope: { kind: 'maps-membership', project: key },
+        completeness: { kind: 'complete' },
+        value: {
+          members: [
+            { project: key, mapId: '.wayfinder/active-map/map.md' },
+            { project: key, mapId: '.wayfinder/finished-map/map.md' },
+          ],
+        },
+      }),
+    )
   })
 
-  it('parses the standardized pipelines fixture without compatibility warnings', async () => {
-    const project = await readLocalProject({
-      key: { integration: 'local', id: 'frontend-pipelines' },
-      rootPath: PIPELINES_FIXTURE,
-      name: 'frontend-pipelines',
-    })
-
-    expect(project.warnings).toEqual([])
-    expect(project.closedMaps).toEqual([])
-    expect(project.openMaps).toHaveLength(1)
-    const map = onlyMap(project)
-    expect(map).toMatchObject({
-      id: `.wayfinder/${PIPELINES_MAP}/map.md`,
-      title: 'Enforce versioned frontend pipeline releases',
-      isOpen: true,
-      ticketsComplete: true,
-      warnings: [],
-      sourcePath: join(PIPELINES_FIXTURE, '.wayfinder', PIPELINES_MAP, 'map.md'),
-    })
-    expect(byId(map, '1').state).toBe('closed')
-    expect(byId(map, '1').closedAt).toBe(Date.parse('2026-08-31T10:36:58.000Z'))
-  })
-
-  it('discovers multiple map directories and separates closed maps from live maps', async () => {
-    const rootPath = await mkdtemp(join(tmpdir(), 'roadmap-local-wayfinder-'))
-
-    try {
-      const maps: { id: string; status: 'open' | 'closed' }[] = [
-        { id: 'active-map', status: 'open' },
-        { id: 'finished-map', status: 'closed' },
-      ]
-      for (const map of maps) {
-        const mapDirectory = join(rootPath, '.wayfinder', map.id)
-        await mkdir(join(mapDirectory, 'tickets'), { recursive: true })
-        await writeFile(
-          join(mapDirectory, 'map.md'),
-          `---
-title: ${map.id}
-labels: [wayfinder:map]
-status: ${map.status}
----
-
-# ${map.id}
-`,
-        )
-      }
-
-      const project = await readLocalProject({
-        key: { integration: 'local', id: 'synthetic' },
-        rootPath,
-      })
-
-      expect(project.warnings).toEqual([])
-      expect(project.openMaps.map((map) => map.id)).toEqual(['.wayfinder/active-map/map.md'])
-      expect(project.closedMaps.map((map) => map.id)).toEqual(['.wayfinder/finished-map/map.md'])
-      expect(project.closedMaps[0]?.isOpen).toBe(false)
-    } finally {
-      await rm(rootPath, { recursive: true, force: true })
+  it('retains identified tickets with incomplete status and closure metadata', async () => {
+    const root = await createFixture('synthetic-map', 'Synthetic', [
+      { id: '2', body: '# Done', closedAt: '2026-08-17T08:42:36.000Z' },
+    ])
+    const tickets = join(root, '.wayfinder/synthetic-map/tickets')
+    await writeFile(
+      join(tickets, '01-good.md'),
+      '---\nid: 1\ntitle: Keep me\nlabels: wayfinder:task\nstatus: open\nassignee: research-subagent\nblocked-by: [2, 99]\n---\n\nBody with a [relative note](../notes.md).\n',
+    )
+    const incomplete = [
+      { id: '3', fields: '', status: 'unknown' },
+      { id: '4', fields: 'status: closed\n', status: 'closed' },
+      { id: '5', fields: 'status: open\nclosed-at: 2026-08-17T08:42:36.000Z\n', status: 'open' },
+      { id: '6', fields: 'status: closed\nclosed-at: 2026-08-17\n', status: 'closed' },
+    ]
+    for (const ticket of incomplete) {
+      await writeFile(
+        join(tickets, `${ticket.id}.md`),
+        `---\nid: ${ticket.id}\ntitle: Incomplete ${ticket.id}\nlabels: [wayfinder:task]\n${ticket.fields}blocked-by: []\n---\n\nReadable prose ${ticket.id}.\n`,
+      )
     }
-  })
+    const slice = await readLocalProject({ key, rootPath: root })
 
-  it('omits only unsafe tickets and marks unknown blockers as still blocking', async () => {
-    const rootPath = await mkdtemp(join(tmpdir(), 'roadmap-local-wayfinder-'))
-
-    try {
-      const wayfinderPath = join(rootPath, '.wayfinder')
-      const mapDirectory = join(wayfinderPath, 'synthetic-map')
-      const ticketsPath = join(mapDirectory, 'tickets')
-      await mkdir(ticketsPath, { recursive: true })
-
-      await writeFile(
-        join(mapDirectory, 'map.md'),
-        `---
-title: Synthetic map
-labels: [wayfinder:map]
-status: open
----
-
-# Synthetic map
-
-## Destination
-
-Prove tolerant local parsing.
-`,
-      )
-      await writeFile(
-        join(ticketsPath, '01-good.md'),
-        `---
-id: 1
-title: Keep me
-labels: wayfinder:task
-mode: AFK
-status: open
-assignee: research-subagent
-blocked-by: [2, 99]
----
-
-# Keep me
-
-Body with a [relative note](../notes.md).
-`,
-      )
-      await writeFile(
-        join(ticketsPath, '02-closed.md'),
-        `---
-id: 2
-title: Done
-labels: [wayfinder:task]
-mode: AFK
-status: closed
-closed-at: 2026-08-17T08:42:36.000Z
-assignee:
-blocked-by: []
----
-
-# Done
-`,
-      )
-      await writeFile(
-        join(ticketsPath, '03-unsafe.md'),
-        `---
-id: 3
-title: Unsafe
-labels: [wayfinder:task]
-mode: AFK
-assignee:
-blocked-by: []
----
-
-# Unsafe
-`,
-      )
-      await writeFile(
-        join(ticketsPath, '04-missing-closed-at.md'),
-        `---
-id: 4
-title: Missing closure time
-labels: [wayfinder:task]
-mode: AFK
-status: closed
-assignee:
-blocked-by: []
----
-
-# Missing closure time
-`,
-      )
-      await writeFile(
-        join(ticketsPath, '05-open-with-closed-at.md'),
-        `---
-id: 5
-title: Premature closure time
-labels: [wayfinder:task]
-mode: AFK
-status: open
-closed-at: 2026-08-17T08:42:36.000Z
-assignee:
-blocked-by: []
----
-
-# Premature closure time
-`,
-      )
-      await writeFile(
-        join(ticketsPath, '06-invalid-closed-at.md'),
-        `---
-id: 6
-title: Invalid closure time
-labels: [wayfinder:task]
-mode: AFK
-status: closed
-closed-at: 2026-08-17
-assignee:
-blocked-by: []
----
-
-# Invalid closure time
-`,
-      )
-
-      const project = await readLocalProject({
-        key: { integration: 'local', id: 'synthetic' },
-        rootPath,
+    expect(onlyMap(slice).completeness.kind).toBe('incomplete')
+    expect(onlyMap(slice).value.progress).toBeNull()
+    for (const ticket of incomplete) {
+      expect(byId(slice, ticket.id)).toMatchObject({
+        kind: 'observed',
+        completeness: { kind: 'incomplete' },
+        value: {
+          status: ticket.status,
+          body: expect.stringContaining(`Readable prose ${ticket.id}.`),
+        },
       })
-      const map = onlyMap(project)
-
-      expect(map.tickets.map((ticket) => ticket.id)).toEqual(['1', '2'])
-      expect(map.ticketsComplete).toBe(false)
-      expect(map.warnings).toContain(
-        'Omitted .wayfinder/synthetic-map/tickets/03-unsafe.md: missing or unparseable frontmatter status.',
-      )
-      expect(map.warnings).toContain(
-        'Omitted .wayfinder/synthetic-map/tickets/04-missing-closed-at.md: missing frontmatter closed-at.',
-      )
-      expect(map.warnings).toContain(
-        'Omitted .wayfinder/synthetic-map/tickets/05-open-with-closed-at.md: frontmatter closed-at is forbidden while status is open.',
-      )
-      expect(map.warnings).toContain(
-        'Omitted .wayfinder/synthetic-map/tickets/06-invalid-closed-at.md: unparseable frontmatter closed-at.',
-      )
-
-      expect(byId(map, '2').closedAt).toBe(Date.parse('2026-08-17T08:42:36.000Z'))
-
-      const ticket1 = byId(map, '1')
-      expect(ticket1.assignees).toEqual([{ name: 'research-subagent' }])
-      expect(ticket1.body).toContain('[relative note](../notes.md)')
-      expect(ticket1.sourcePath).toBe(join(rootPath, '.wayfinder/synthetic-map/tickets/01-good.md'))
-      expect(ticket1.blockersComplete).toBe(false)
-      expect(ticket1.state).toBe('blocked')
-      expect(ticket1.warnings).toContain(
-        'Frontmatter labels drifted from a list to a scalar; parsed it as one item.',
-      )
-      expect(ticket1.warnings).toContain('Unknown blocker 99: no parsed ticket carries that id.')
-      expect(ticket1.blockedBy).toEqual([
+    }
+    expect(byId(slice, '1').value).toMatchObject({
+      assignees: [{ name: 'research-subagent' }],
+      blockersComplete: false,
+      body: expect.stringContaining('[relative note](../notes.md)'),
+      blockedBy: [
         {
-          project: { integration: 'local', id: 'synthetic' },
-          ticketId: '2',
+          reference: { kind: 'registered', project: key, ticketId: '2' },
           displayId: '2',
-          title: 'Done',
+          title: 'Ticket 2',
           state: 'closed',
+          provenance: {
+            integration: 'local',
+            operation: 'read',
+            path: join(tickets, '02-ticket.md'),
+          },
         },
         {
-          project: { integration: 'local', id: 'synthetic' },
-          ticketId: '99',
+          reference: { kind: 'registered', project: key, ticketId: '99' },
           displayId: '99',
           state: 'unknown',
+          provenance: {
+            integration: 'local',
+            operation: 'read',
+            path: join(tickets, '01-good.md'),
+          },
         },
-      ])
-    } finally {
-      await rm(rootPath, { recursive: true, force: true })
-    }
+      ],
+    })
+    expect(byId(slice, '1').value.warnings).toContain(
+      'Frontmatter labels drifted from a list to a scalar; parsed it as one item.',
+    )
+  })
+
+  it('retains malformed map prose and readable unknown blockers', async () => {
+    const root = await createFixture('incomplete-map', 'Incomplete map', [])
+    const directory = join(root, '.wayfinder/incomplete-map')
+    const rawMap =
+      '---\ntitle: Unfinished header\n\n# Incomplete map\n\nRaw map prose remains readable.\n'
+    await writeFile(join(directory, 'map.md'), rawMap)
+    await writeFile(
+      join(directory, 'tickets/01-readable.md'),
+      '---\nid: 1\ntitle: Readable ticket\nlabels: [wayfinder:task]\nstatus: open\nblocked-by: [99]\n---\n\nReadable ticket body.\n',
+    )
+    await writeFile(
+      join(directory, 'tickets/99-incomplete.md'),
+      '---\nid: 99\ntitle: Incomplete blocker\nlabels: [wayfinder:task]\nblocked-by: []\n---\n\nRaw incomplete blocker prose must survive.\n',
+    )
+    const slice = await readLocalProject({ key, rootPath: root })
+
+    expect(onlyMap(slice).value.body.raw).toBe(rawMap)
+    expect(onlyMap(slice).value.status).toBe('unknown')
+    expect(onlyMap(slice).value.body.missingSections).toContain('Destination')
+    expect(byId(slice, '1').value).toMatchObject({
+      blockersComplete: false,
+      blockedBy: [expect.objectContaining({ state: 'unknown' })],
+    })
+    expect(byId(slice, '99')).toMatchObject({
+      completeness: { kind: 'incomplete' },
+      value: {
+        status: 'unknown',
+        body: expect.stringContaining('Raw incomplete blocker prose must survive.'),
+      },
+    })
+  })
+
+  it('preserves unidentified and duplicate ticket files without fabricating or replacing identities', async () => {
+    const root = await createFixture('identity-map', 'Identity map', [
+      { id: '1', body: 'First identity prose.' },
+    ])
+    const tickets = join(root, '.wayfinder/identity-map/tickets')
+    const missing = '---\ntitle: Missing identity\nstatus: open\n---\n\nUnidentified prose.\n'
+    const duplicate = '---\nid: 1\ntitle: Duplicate\nstatus: open\n---\n\nDuplicate prose.\n'
+    await writeFile(join(tickets, '02-no-id.md'), missing)
+    await writeFile(join(tickets, '03-duplicate.md'), duplicate)
+    const slice = await readLocalProject({ key, rootPath: root })
+
+    expect(byId(slice, '1').value.body).toBe('First identity prose.')
+    expect(onlyMap(slice).value.progress).toBeNull()
+    expect(onlyMap(slice).value.unidentifiedTickets).toMatchObject([
+      { sourcePath: join(tickets, '02-no-id.md'), raw: missing, warnings: expect.any(Array) },
+      { sourcePath: join(tickets, '03-duplicate.md'), raw: duplicate, warnings: expect.any(Array) },
+    ])
+    expect(slice.attempts).toContainEqual(
+      expect.objectContaining({
+        kind: 'observed',
+        scope: {
+          kind: 'tickets-membership',
+          map: { project: key, mapId: '.wayfinder/identity-map/map.md' },
+        },
+        completeness: { kind: 'incomplete', reason: 'unreadable' },
+      }),
+    )
   })
 })
 
-function onlyMap(project: Pick<Project, 'openMaps'>): WayfinderMap {
-  const map = project.openMaps[0]
-  if (!map) throw new Error('Expected project to contain one open map.')
+type MapAttempt = Extract<ObservationAttempt, { kind: 'observed'; scope: { kind: 'map' } }>
+type TicketAttempt = Extract<ObservationAttempt, { kind: 'observed'; scope: { kind: 'ticket' } }>
+
+function onlyMap(slice: AdapterSlice): MapAttempt {
+  const map = slice.attempts.find(
+    (attempt): attempt is MapAttempt => attempt.kind === 'observed' && attempt.scope.kind === 'map',
+  )
+  if (!map) throw new Error('Expected one readable map.')
   return map
 }
 
-function byId(map: { tickets: Ticket[] }, id: string): Ticket {
-  const ticket = map.tickets.find((candidate) => candidate.id === id)
-  if (!ticket) throw new Error(`Expected map to contain ticket ${id}.`)
+function byId(slice: AdapterSlice, id: string): TicketAttempt {
+  const ticket = slice.attempts.find(
+    (attempt): attempt is TicketAttempt =>
+      attempt.kind === 'observed' &&
+      attempt.scope.kind === 'ticket' &&
+      attempt.scope.ticket.ticketId === id,
+  )
+  if (!ticket) throw new Error(`Expected readable ticket ${id}.`)
   return ticket
 }
 
 async function latestRelevantMtime(rootPath: string, mapId: string): Promise<number> {
-  const mapDirectory = join(rootPath, '.wayfinder', mapId)
-  const mapPath = join(mapDirectory, 'map.md')
-  const ticketsPath = join(mapDirectory, 'tickets')
-  const ticketFiles = (await readdir(ticketsPath))
+  const directory = join(rootPath, '.wayfinder', mapId)
+  const files = (await readdir(join(directory, 'tickets')))
     .filter((name) => name.endsWith('.md'))
-    .map((name) => join(ticketsPath, name))
-  const stats = await Promise.all([mapPath, ...ticketFiles].map((path) => stat(path)))
+    .map((name) => join(directory, 'tickets', name))
+  const stats = await Promise.all([join(directory, 'map.md'), ...files].map((path) => stat(path)))
   return stats.reduce((latest, entry) => Math.max(latest, entry.mtimeMs), 0)
+}
+
+async function createFixture(
+  mapId: string,
+  title: string,
+  tickets: { id: string; body: string; closedAt?: string }[],
+  body = '',
+): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), 'roadmap-local-source-'))
+  fixtureRoots.push(root)
+  const directory = join(root, '.wayfinder', mapId)
+  await mkdir(join(directory, 'tickets'), { recursive: true })
+  await writeFile(
+    join(directory, 'map.md'),
+    `---\ntitle: ${title}\nlabels: [wayfinder:map]\nstatus: open\n---\n\n# ${title}\n\n${body}`,
+  )
+  for (const ticket of tickets) {
+    await writeFile(
+      join(directory, 'tickets', `${ticket.id.padStart(2, '0')}-ticket.md`),
+      `---\nid: ${ticket.id}\ntitle: Ticket ${ticket.id}\nlabels: [wayfinder:task]\nstatus: ${ticket.closedAt ? 'closed' : 'open'}\n${ticket.closedAt ? `closed-at: ${ticket.closedAt}\n` : ''}assignee:\nblocked-by: []\n---\n\n${ticket.body}`,
+    )
+  }
+  return root
 }

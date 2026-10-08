@@ -112,7 +112,9 @@ function ActiveProjectRow({ presentation }: ActiveProjectRowProps) {
       {connection && <SurfaceDescription>{connection.name}</SurfaceDescription>}
       <SurfaceDescription>{destination}</SurfaceDescription>
       <SurfaceDescription>
-        {decisions} decided · {openTickets} open{hasFog ? ' · fog ahead' : ''}
+        {decisions === null ? 'Decision count unknown' : `${decisions} decided`} ·{' '}
+        {openTickets === null ? 'Open ticket count unknown' : `${openTickets} open`}
+        {hasFog ? ' · fog ahead' : ''}
       </SurfaceDescription>
       {priorities.length > 0 && (
         <SurfaceDescription>Priority · {priorities.join(' · ')}</SurfaceDescription>
@@ -139,7 +141,8 @@ function RestingProjectRow({ presentation }: RestingProjectRowProps) {
         <IntegrationBadge integration={project.key.integration} />
       </SurfaceTitle>
       <SurfaceDescription>
-        All {mapCount === 1 ? '1 map' : `${mapCount} maps`} closed · {decisions} decisions recorded
+        All {mapCount === 1 ? '1 map' : `${mapCount} maps`} closed ·{' '}
+        {decisions === null ? 'Decision count unknown' : `${decisions} decisions recorded`}
       </SurfaceDescription>
       <SurfaceDescription>
         At rest{activityAt === undefined ? '' : ` · ${formatMonth(activityAt)}`}

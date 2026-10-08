@@ -1,3 +1,6 @@
+import type { SourceFailure } from '../observation/source.ts'
+import { isRecord } from '../type-guards.ts'
+
 const API_ROOT = 'https://api.github.com'
 const REST_API_VERSION = '2022-11-28'
 
@@ -8,36 +11,33 @@ export interface RateLimit {
   resetAt: string
 }
 
-/** All the client needs: one Connection's current access token. */
+/** The current access token for one Connection. */
 export interface GitHubAuth {
   token: string
 }
 
 export class GitHubError extends Error {
-  status: number
-  detail: string | null
+  readonly failure: SourceFailure
+  readonly status: number
 
-  constructor(message: string, status: number, detail: string | null = null) {
-    super(message)
+  constructor(failure: SourceFailure, status = 0) {
+    super(`GitHub source read failed (${failure.kind}).`)
     this.name = 'GitHubError'
+    this.failure = failure
     this.status = status
-    this.detail = detail
   }
 }
 
-export interface GitHubClient {
-  /** POSTs a GraphQL query. Throws `GitHubError` on transport errors *and* on `errors` payloads. */
-  graphql<T>(query: string, variables?: Record<string, unknown>): Promise<T>
-  /**
-   * GETs a REST path, transparently replaying the cached body on a 304. Conditional requests that
-   * return 304 cost nothing against the REST pool.
-   */
-  restGet<T>(path: string): Promise<T>
+export interface GraphQLResult {
+  readonly data: Record<string, unknown>
+  readonly errors: readonly { readonly path: readonly (string | number)[] | null }[]
 }
 
-interface GraphQLEnvelope<T> {
-  data?: T
-  errors?: { message: string }[]
+export interface GitHubClient {
+  /** Validates the envelope, but leaves query-specific data refinement to its reader. */
+  graphql(query: string, variables?: Record<string, unknown>): Promise<GraphQLResult>
+  /** Replays a cached unknown body on a conditional REST 304 response. */
+  restGet(path: string): Promise<unknown>
 }
 
 interface CacheEntry {
@@ -46,7 +46,6 @@ interface CacheEntry {
 }
 
 export function createGitHubClient(config: GitHubAuth): GitHubClient {
-  // Per-client so two clients never share a cache, and so tests start clean.
   const conditionalCache = new Map<string, CacheEntry>()
 
   function authHeaders(): Record<string, string> {
@@ -55,42 +54,30 @@ export function createGitHubClient(config: GitHubAuth): GitHubClient {
       Accept: 'application/vnd.github+json',
     }
   }
+
   async function request(input: string, init: RequestInit): Promise<Response> {
     try {
       return await fetch(input, init)
     } catch {
-      throw new GitHubError('GitHub could not be reached.', 0)
+      throw new GitHubError({ kind: 'transient', cause: 'network' })
     }
   }
 
-  async function graphql<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
+  async function graphql(
+    query: string,
+    variables: Record<string, unknown> = {},
+  ): Promise<GraphQLResult> {
     const response = await request(`${API_ROOT}/graphql`, {
       method: 'POST',
       headers: { ...authHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ query, variables }),
     })
+    if (!response.ok) throw new GitHubError(httpFailure(response), response.status)
 
-    if (!response.ok) {
-      throw new GitHubError(
-        `GraphQL request failed (${response.status})`,
-        response.status,
-        await readErrorDetail(response),
-      )
-    }
-
-    // GraphQL reports query-level failures as 200 + `errors`, so status alone proves nothing.
-    const envelope = (await response.json()) as GraphQLEnvelope<T>
-    if (envelope.errors && envelope.errors.length > 0) {
-      const messages = envelope.errors.map((error) => error.message).join('; ')
-      throw new GitHubError(`GraphQL error: ${messages}`, 200, messages)
-    }
-    if (!envelope.data) {
-      throw new GitHubError('GraphQL response carried no data', 200)
-    }
-    return envelope.data
+    return parseGraphQLResult(await readJSON(response), response.status)
   }
 
-  async function restGet<T>(path: string): Promise<T> {
+  async function restGet(path: string): Promise<unknown> {
     const url = path.startsWith('http') ? path : `${API_ROOT}${path}`
     const cached = conditionalCache.get(url)
     const headers: Record<string, string> = {
@@ -100,18 +87,10 @@ export function createGitHubClient(config: GitHubAuth): GitHubClient {
     if (cached) headers['If-None-Match'] = cached.etag
 
     const response = await request(url, { headers })
+    if (response.status === 304 && cached) return cached.body
+    if (!response.ok) throw new GitHubError(httpFailure(response), response.status)
 
-    if (response.status === 304 && cached) return cached.body as T
-
-    if (!response.ok) {
-      throw new GitHubError(
-        `GET ${path} failed (${response.status})`,
-        response.status,
-        await readErrorDetail(response),
-      )
-    }
-
-    const body = (await response.json()) as T
+    const body = await readJSON(response)
     const etag = response.headers.get('ETag')
     if (etag) conditionalCache.set(url, { etag, body })
     return body
@@ -120,11 +99,64 @@ export function createGitHubClient(config: GitHubAuth): GitHubClient {
   return { graphql, restGet }
 }
 
-async function readErrorDetail(response: Response): Promise<string | null> {
-  try {
-    const text = await response.text()
-    return text === '' ? null : text.slice(0, 500)
-  } catch {
-    return null
+/** Refines only the transport envelope and strips provider messages from retained evidence. */
+function parseGraphQLResult(envelope: unknown, status: number): GraphQLResult {
+  if (!isRecord(envelope)) throw malformed(status)
+  const errors = parseExecutionErrors(envelope.errors, status)
+  if (isRecord(envelope.data)) return { data: envelope.data, errors }
+  if (errors.length > 0 && (envelope.data === undefined || envelope.data === null)) {
+    throw new GitHubError({ kind: 'execution', cause: 'provider' }, status)
   }
+  throw malformed(status)
+}
+
+function parseExecutionErrors(input: unknown, status: number): GraphQLResult['errors'] {
+  if (input === undefined) return []
+  if (!Array.isArray(input)) throw malformed(status)
+  return input.map((error) => {
+    if (!isRecord(error) || typeof error.message !== 'string') throw malformed(status)
+    if (error.path === undefined || error.path === null) return { path: null }
+    if (!Array.isArray(error.path)) throw malformed(status)
+    const path = error.path.map((segment: unknown) => {
+      if (typeof segment === 'string') return segment
+      if (typeof segment === 'number' && Number.isSafeInteger(segment) && segment >= 0)
+        return segment
+      throw malformed(status)
+    })
+    return { path }
+  })
+}
+
+function httpFailure(response: Response): SourceFailure {
+  if (response.status === 401) return { kind: 'authorization', proof: 'http-401' }
+  if (
+    response.status === 429 ||
+    (response.status === 403 &&
+      (response.headers.get('X-RateLimit-Remaining') === '0' ||
+        response.headers.has('Retry-After')))
+  ) {
+    return { kind: 'transient', cause: 'rate-limit' }
+  }
+  if (response.status === 403) return { kind: 'access-ambiguous', evidence: 'http-403' }
+  if (response.status === 404) return { kind: 'access-ambiguous', evidence: 'http-404' }
+  if (response.status >= 500) return { kind: 'transient', cause: 'server' }
+  return { kind: 'execution', cause: 'provider' }
+}
+
+async function readJSON(response: Response): Promise<unknown> {
+  let text: string
+  try {
+    text = await response.text()
+  } catch {
+    throw new GitHubError({ kind: 'read', cause: 'response-read' }, response.status)
+  }
+  try {
+    return JSON.parse(text)
+  } catch {
+    throw malformed(response.status)
+  }
+}
+
+function malformed(status: number): GitHubError {
+  return new GitHubError({ kind: 'read', cause: 'malformed-response' }, status)
 }

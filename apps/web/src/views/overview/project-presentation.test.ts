@@ -98,6 +98,64 @@ describe('presentProjects', () => {
     )
   })
 
+  it('preserves unknown decisions and open-ticket totals for an active Map', () => {
+    const unknown = project('unknown', {
+      openMaps: [{ ...map('active', true, 3_000), progress: null, ticketsComplete: false }],
+      closedMaps: [map('closed', false, 2_000)],
+    })
+
+    expect(presentProjects(state([unknown])).active[0]).toMatchObject({
+      decisions: null,
+      openTickets: null,
+    })
+  })
+
+  it('does not report a partial decision sum when one Map aggregate is unknown', () => {
+    const mixed = project('mixed', {
+      openMaps: [map('active', true, 3_000)],
+      closedMaps: [{ ...map('closed', false, 2_000), progress: null, ticketsComplete: false }],
+    })
+
+    expect(presentProjects(state([mixed])).active[0]).toMatchObject({
+      decisions: null,
+      openTickets: 1,
+    })
+  })
+
+  it('retains zero open tickets without an active Map even when decisions are unknown', () => {
+    const resting = project('resting', {
+      closedMaps: [{ ...map('closed', false, 2_000), progress: null, ticketsComplete: false }],
+    })
+
+    expect(presentProjects(state([resting])).resting[0]).toMatchObject({
+      decisions: null,
+      openTickets: 0,
+    })
+  })
+
+  it('retains exact totals when every Map aggregate is known', () => {
+    const known = project('known', {
+      openMaps: [map('active', true, 3_000)],
+      closedMaps: [map('closed', false, 2_000)],
+    })
+
+    expect(presentProjects(state([known])).active[0]).toMatchObject({
+      decisions: 6,
+      openTickets: 1,
+    })
+    expect(presentProjects(state([project('empty')])).waiting[0]).toMatchObject({
+      decisions: 0,
+      openTickets: 0,
+    })
+    const zero = project('zero', {
+      openMaps: [{ ...map('zero', true, 3_000), progress: { total: 0, completed: 0 } }],
+    })
+    expect(presentProjects(state([zero])).active[0]).toMatchObject({
+      decisions: 0,
+      openTickets: 0,
+    })
+  })
+
   it('orders active Projects by current-map recency', () => {
     const older = project('older', { openMaps: [map('older', true, 2_000)] })
     const newer = project('newer', { openMaps: [map('newer', true, 4_000)] })

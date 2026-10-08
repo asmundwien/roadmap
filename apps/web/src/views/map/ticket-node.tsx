@@ -59,7 +59,13 @@ function BlockerCard({ data }: BlockerCardProps) {
   const { blocker, scope } = data
   const identity = blocker.displayId ?? blocker.ticketId
   const title = stripInlineMarkdown(blocker.title ?? '').trim() || 'Blocker title unavailable'
-  const project = `${blocker.project.integration}: ${blocker.project.id}`
+  const { reference } = blocker
+  const project =
+    reference.kind === 'registered'
+      ? `${reference.project.integration}: ${reference.project.id}`
+      : reference.kind === 'external'
+        ? `${reference.integration}: ${reference.nameWithOwner}`
+        : reference.locator
   return (
     <Surface
       className={cx('ticketNode', 'blockerNode')}
@@ -69,7 +75,11 @@ function BlockerCard({ data }: BlockerCardProps) {
       <div className={cx('identity')} title={identity}>
         <span className={cx('ticketId')}>{identity}</span>
         <Badge variant="warning">
-          {scope === 'external' ? 'External blocker' : 'Missing from map'}
+          {scope === 'external'
+            ? 'External blocker'
+            : scope === 'unresolved'
+              ? 'Unresolved blocker'
+              : 'Missing from map'}
         </Badge>
       </div>
       <p className={cx('ticketTitle')} title={title}>
@@ -96,9 +106,11 @@ function BlockerCard({ data }: BlockerCardProps) {
         {project}
       </p>
       <p className={cx('incomplete')}>
-        {scope === 'external'
-          ? 'Ticket belongs to another project.'
-          : 'Ticket details are absent from this map.'}
+        {scope === 'unresolved'
+          ? 'Project scope could not be resolved.'
+          : scope === 'external'
+            ? 'Ticket belongs to another project.'
+            : 'Ticket details are absent from this map.'}
       </p>
       <div className={cx('actions', 'nodrag', 'nopan')}>
         {blocker.url ? (

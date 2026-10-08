@@ -5,7 +5,7 @@ import {
   GitHubConnectionError,
   type GitHubConnectionPort,
 } from '../github/connections.ts'
-import type { AdapterSlice, WayfinderAdapter } from '../store.ts'
+import type { AdapterSlice, WayfinderAdapter } from '../observation/source.ts'
 import { type AdapterRuntime, createRoadmapApplication } from './application.ts'
 import type {
   ConfigurationDocument,
@@ -15,7 +15,7 @@ import type {
 } from './configuration.ts'
 import { type CredentialVault, CredentialVaultError } from './credential-vault.ts'
 
-const EMPTY_SLICE: AdapterSlice = { projects: [], unreachable: [] }
+const EMPTY_SLICE: AdapterSlice = { attempts: [] }
 const LOCAL_CONNECTION: RoadmapConfiguration['connections'][number] = {
   id: 'local',
   integration: 'local',

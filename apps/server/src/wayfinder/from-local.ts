@@ -1,60 +1,92 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { basename, dirname, join, relative } from 'node:path'
 import type {
-  Assignee,
-  Blocker,
-  Project,
-  ProjectKey,
-  Ticket,
-  WayfinderMap,
-} from '@roadmap/contracts'
+  AdapterSlice,
+  Completeness,
+  ObservationAttempt,
+  SourceFailure,
+  SourceMapContent,
+  SourceMapKey,
+  SourceProjectKey,
+  SourceProvenance,
+  SourceScope,
+  SourceTicketContent,
+  SourceTicketKey,
+} from '../observation/source.ts'
+import { failedAttempt, observedAttempt } from '../observation/source.ts'
 import { parseMapBody } from './map-body.ts'
-import { deriveTicketState, frontierOf, ticketTypeEvidenceFromLabels } from './tickets.ts'
+import { ticketTypeEvidenceFromLabels } from './tickets.ts'
 
 export interface LocalProjectInput {
-  key: ProjectKey
-  rootPath: string
-  name?: string
+  readonly key: SourceProjectKey & { readonly integration: 'local' }
+  readonly rootPath: string
+  readonly name?: string
+  readonly knownTickets?: readonly { readonly key: SourceTicketKey; readonly path: string }[]
 }
 
 interface ParsedMarkdownFile {
   body: string
   frontmatter: Record<string, string>
+  warnings: string[]
 }
 
 type ParsedTimestamp = { kind: 'missing' } | { kind: 'invalid' } | { kind: 'value'; value: number }
 
+type FailedAttempt = Extract<ObservationAttempt, { kind: 'failed' }>
+type MapAttempt = Extract<ObservationAttempt, { kind: 'observed'; scope: { kind: 'map' } }>
+
 interface ParsedLocalTicket {
   path: string
-  displayPath: string
+  raw: string
   body: string
   mtimeMs: number
+  attemptedAt: number
+  observedAt: number
   id: string | null
   title?: string
-  status: 'open' | 'closed' | null
+  status: 'open' | 'closed' | 'unknown'
   closedAt: ParsedTimestamp
   labels: string[]
-  assignees: Assignee[]
+  assignees: SourceTicketContent['assignees']
   blockedByIds: string[]
   blockersComplete: boolean
   warnings: string[]
 }
 
-type LocalMapReadResult = { kind: 'map'; map: WayfinderMap } | { kind: 'warning'; warning: string }
+type TicketRead = { kind: 'readable'; ticket: ParsedLocalTicket } | FailedAttempt
 
-/** Reads every canonical `.wayfinder/<map-id>/` tree off disk and turns it into one local project. */
-export async function readLocalProject(input: LocalProjectInput): Promise<Project> {
-  const name = input.name ?? basename(input.rootPath)
-  const wayfinderPath = join(input.rootPath, '.wayfinder')
-  const project: Project = {
-    key: input.key,
-    name,
-    openMaps: [],
-    closedMaps: [],
-    warnings: [],
-    sourcePath: input.rootPath,
+/** Reads admitted local source scopes without turning failed reads into empty content. */
+export async function readLocalProject(input: LocalProjectInput): Promise<AdapterSlice> {
+  const attempts: ObservationAttempt[] = []
+  const attemptedAt = Date.now()
+  const projectScope = { kind: 'project', project: input.key } satisfies SourceScope
+  const rootProvenance = provenance(input.rootPath, 'inspect-root')
+  try {
+    // Enumeration proves directory readability. A successful stat does not.
+    await readdir(input.rootPath, { withFileTypes: true })
+  } catch (error) {
+    return { attempts: [failed(projectScope, attemptedAt, rootProvenance, error)] }
   }
+  attempts.push(
+    observedAttempt({
+      kind: 'observed',
+      scope: projectScope,
+      attemptedAt,
+      observedAt: Date.now(),
+      provenance: rootProvenance,
+      completeness: { kind: 'complete' },
+      value: {
+        key: input.key,
+        name: input.name ?? basename(input.rootPath),
+        source: { integration: 'local', path: input.rootPath },
+        warnings: [],
+      },
+    }),
+  )
 
+  const wayfinderPath = join(input.rootPath, '.wayfinder')
+  const membershipScope = { kind: 'maps-membership', project: input.key } satisfies SourceScope
+  const enumerationAt = Date.now()
   let mapPaths: string[]
   try {
     const entries = await readdir(wayfinderPath, { withFileTypes: true })
@@ -63,318 +95,413 @@ export async function readLocalProject(input: LocalProjectInput): Promise<Projec
       .map((entry) => join(wayfinderPath, entry.name, 'map.md'))
       .sort((a, b) => a.localeCompare(b))
   } catch (error) {
-    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
-      project.warnings.push('Cannot read local maps directory: .wayfinder/.')
-    }
-    return project
+    attempts.push(
+      failed(membershipScope, enumerationAt, provenance(wayfinderPath, 'enumerate'), error),
+    )
+    return { attempts }
   }
-
-  const results = await Promise.all(mapPaths.map((mapPath) => readLocalMap(input, mapPath)))
-  for (const result of results) {
-    if (result.kind === 'warning') {
-      project.warnings.push(result.warning)
-      continue
-    }
-    if (result.map.isOpen) project.openMaps.push(result.map)
-    else project.closedMaps.push(result.map)
-  }
-
-  project.openMaps.sort((a, b) => b.updatedAt - a.updatedAt)
-  project.closedMaps.sort((a, b) => (b.closedAt ?? b.updatedAt) - (a.closedAt ?? a.updatedAt))
-  return project
+  attempts.push(
+    observedAttempt({
+      kind: 'observed',
+      scope: membershipScope,
+      attemptedAt: enumerationAt,
+      observedAt: Date.now(),
+      provenance: provenance(wayfinderPath, 'enumerate'),
+      completeness: { kind: 'complete' },
+      value: {
+        members: mapPaths.map((path) => ({
+          project: input.key,
+          mapId: displayPath(input.rootPath, path),
+        })),
+      },
+    }),
+  )
+  const maps = await Promise.all(mapPaths.map((path) => readLocalMap(input, path)))
+  attempts.push(...maps.flatMap((slice) => slice.attempts))
+  return { attempts }
 }
 
-async function readLocalMap(
-  input: LocalProjectInput,
-  mapPath: string,
-): Promise<LocalMapReadResult> {
-  let mapText: string
-  let mapMtimeMs: number
-  try {
-    const [raw, fileStat] = await Promise.all([readFile(mapPath, 'utf8'), stat(mapPath)])
-    mapText = raw
-    mapMtimeMs = fileStat.mtimeMs
-  } catch (error) {
-    void error
-    return {
-      kind: 'warning',
-      warning: `Missing local map: ${displayPath(input.rootPath, mapPath)}.`,
-    }
-  }
-
-  const parsedMap = parseMarkdownFile(mapText)
-  const { title: mapTitle, warnings: mapWarnings } = readMapHeading(parsedMap)
-  const mapLabels = readListField(parsedMap.frontmatter.labels, 'labels', mapWarnings)
-  if (!mapLabels.includes('wayfinder:map')) {
-    mapWarnings.push('Map frontmatter is missing the wayfinder:map label.')
-  }
-  const mapStatus = readStatus(parsedMap.frontmatter.status)
-  if (!mapStatus) {
-    mapWarnings.push('Map frontmatter status is missing or unparseable; treated it as open.')
-  }
-
-  const mapDirectory = dirname(mapPath)
-  const ticketsDir = join(mapDirectory, 'tickets')
+async function readLocalMap(input: LocalProjectInput, mapPath: string): Promise<AdapterSlice> {
+  const mapKey: SourceMapKey = { project: input.key, mapId: displayPath(input.rootPath, mapPath) }
+  const mapRead = await readLocalMapContent(mapKey, mapPath)
+  const mapWarnings = mapRead.kind === 'observed' ? [...mapRead.value.warnings] : []
+  const ticketsPath = join(dirname(mapPath), 'tickets')
+  const membershipScope = { kind: 'tickets-membership', map: mapKey } satisfies SourceScope
+  const enumerationAt = Date.now()
+  const attempts: ObservationAttempt[] = []
   let ticketPaths: string[] = []
-  let ticketsComplete = true
+  let membershipFailure: FailedAttempt | undefined
   try {
-    const entries = await readdir(ticketsDir, { withFileTypes: true })
+    const entries = await readdir(ticketsPath, { withFileTypes: true })
     ticketPaths = entries
       .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
-      .map((entry) => join(ticketsDir, entry.name))
+      .map((entry) => join(ticketsPath, entry.name))
       .sort((a, b) => a.localeCompare(b))
   } catch (error) {
-    ticketsComplete = false
-    mapWarnings.push(`Missing tickets directory: ${displayPath(input.rootPath, ticketsDir)}.`)
-    void error
+    membershipFailure = failed(
+      membershipScope,
+      enumerationAt,
+      provenance(ticketsPath, 'enumerate'),
+      error,
+    )
+    mapWarnings.push(`Cannot read tickets directory: ${displayPath(input.rootPath, ticketsPath)}.`)
+    ticketPaths = (input.knownTickets ?? [])
+      .filter(
+        (ticket) =>
+          ticket.key.map.mapId === mapKey.mapId &&
+          ticket.key.map.project.integration === mapKey.project.integration &&
+          ticket.key.map.project.id === mapKey.project.id,
+      )
+      .map((ticket) => ticket.path)
   }
-
-  const parsedTickets = await Promise.all(
-    ticketPaths.map((path) => readLocalTicket(input.rootPath, path)),
-  )
-  const latestTicketMtime = parsedTickets.reduce(
-    (latest, ticket) => Math.max(latest, ticket.mtimeMs),
-    0,
-  )
-
+  const results = await Promise.all(ticketPaths.map((path) => readLocalTicket(input, mapKey, path)))
   const kept = new Map<string, ParsedLocalTicket>()
-  for (const ticket of parsedTickets) {
-    const reasons = invalidTicketReasons(ticket)
-
-    if (reasons.length > 0 || ticket.id === null) {
-      ticketsComplete = false
-      mapWarnings.push(`Omitted ${ticket.displayPath}: ${reasons.join(' and ')}.`)
+  const unidentifiedTickets: SourceMapContent['unidentifiedTickets'][number][] = []
+  let membershipIncomplete = false
+  let ticketsIncomplete = membershipFailure !== undefined
+  let latestTicketMtime = 0
+  for (const result of results) {
+    if (result.kind === 'failed') {
+      ticketsIncomplete = true
+      membershipIncomplete = true
+      attempts.push(result)
+      mapWarnings.push(
+        `Cannot read ticket file: ${displayPath(input.rootPath, result.provenance.integration === 'local' ? result.provenance.path : ticketsPath)}.`,
+      )
       continue
     }
-
-    const id = ticket.id
-    if (kept.has(id)) {
-      ticketsComplete = false
-      mapWarnings.push(`Omitted ${ticket.displayPath}: duplicate ticket id ${id}.`)
+    const ticket = result.ticket
+    latestTicketMtime = Math.max(latestTicketMtime, ticket.mtimeMs)
+    if (ticket.id === null || kept.has(ticket.id)) {
+      membershipIncomplete = true
+      ticketsIncomplete = true
+      const warning =
+        ticket.id === null
+          ? 'Missing or unparseable frontmatter id.'
+          : `Duplicate ticket id ${ticket.id}.`
+      unidentifiedTickets.push({
+        sourcePath: ticket.path,
+        raw: ticket.raw,
+        warnings: [...ticket.warnings, warning],
+      })
+      mapWarnings.push(`Unidentified ${displayPath(input.rootPath, ticket.path)}: ${warning}`)
       continue
     }
-
-    kept.set(id, ticket)
+    kept.set(ticket.id, ticket)
+    if (ticket.warnings.length > 0 || ticket.status === 'unknown') ticketsIncomplete = true
   }
 
-  const tickets = materializeTickets(input.key, kept)
-  const isOpen = mapStatus !== 'closed'
-  return {
-    kind: 'map',
-    map: {
-      project: input.key,
-      id: displayPath(input.rootPath, mapPath),
-      title: mapTitle,
-      isOpen,
-      updatedAt: Math.max(mapMtimeMs, latestTicketMtime),
-      body: parseMapBody(parsedMap.body),
-      tickets,
-      frontier: frontierOf(tickets),
-      progress: {
-        total: tickets.length,
-        completed: tickets.filter((ticket) => ticket.state === 'closed').length,
-      },
-      ticketsComplete,
+  const ticketAttempts = materializeTickets(mapKey, kept)
+  attempts.push(...ticketAttempts)
+  if (membershipFailure) attempts.push(membershipFailure)
+  else
+    attempts.unshift(
+      observedAttempt({
+        kind: 'observed',
+        scope: membershipScope,
+        attemptedAt: enumerationAt,
+        observedAt: Date.now(),
+        provenance: provenance(ticketsPath, 'enumerate'),
+        completeness: membershipIncomplete
+          ? { kind: 'incomplete', reason: 'unreadable' }
+          : { kind: 'complete' },
+        value: { members: [...kept.keys()].map((ticketId) => ({ map: mapKey, ticketId })) },
+      }),
+    )
+  for (const attempt of ticketAttempts) observedAttempt(attempt)
+  if (mapRead.kind === 'failed') return { attempts: [mapRead, ...attempts] }
+  const incomplete =
+    ticketsIncomplete ||
+    mapRead.completeness.kind === 'incomplete' ||
+    ticketAttempts.some((attempt) => attempt.completeness.kind === 'incomplete')
+  const mapAttempt: MapAttempt = {
+    ...mapRead,
+    completeness: incomplete
+      ? { kind: 'incomplete', reason: ticketsIncomplete ? 'unreadable' : 'malformed' }
+      : { kind: 'complete' },
+    value: {
+      ...mapRead.value,
+      updatedAt: Math.max(mapRead.value.updatedAt, latestTicketMtime),
+      progress:
+        membershipFailure ||
+        membershipIncomplete ||
+        [...kept.values()].some((ticket) => ticket.status === 'unknown')
+          ? null
+          : {
+              total: kept.size,
+              completed: [...kept.values()].filter((ticket) => ticket.status === 'closed').length,
+            },
+      unidentifiedTickets,
       warnings: mapWarnings,
-      sourcePath: mapPath,
+    },
+  }
+  observedAttempt(mapAttempt)
+  return { attempts: [mapAttempt, ...attempts] }
+}
+
+async function readLocalMapContent(
+  key: SourceMapKey,
+  path: string,
+): Promise<MapAttempt | FailedAttempt> {
+  const attemptedAt = Date.now()
+  let raw: string
+  let mtimeMs: number
+  try {
+    const [text, fileStat] = await Promise.all([readFile(path, 'utf8'), stat(path)])
+    raw = text
+    mtimeMs = fileStat.mtimeMs
+  } catch (error) {
+    return failed({ kind: 'map', map: key }, attemptedAt, provenance(path, 'read'), error)
+  }
+  const parsed = parseMarkdownFile(raw)
+  const warnings = [...parsed.warnings]
+  const title = readTitle(parsed.frontmatter.title, parsed.body)
+  if (!parsed.frontmatter.title && title)
+    warnings.push(
+      'Map title fell back to the markdown heading because frontmatter title is missing.',
+    )
+  if (!title) warnings.push('Map title is missing from both frontmatter and the markdown heading.')
+  const labels = readListField(parsed.frontmatter.labels, 'labels', warnings)
+  if (!labels.includes('wayfinder:map'))
+    warnings.push('Map frontmatter is missing the wayfinder:map label.')
+  const status = readStatus(parsed.frontmatter.status)
+  if (status === 'unknown') warnings.push('Map frontmatter status is missing or unparseable.')
+  const body = parseMapBody(parsed.body)
+  return {
+    kind: 'observed',
+    scope: { kind: 'map', map: key },
+    attemptedAt,
+    observedAt: Date.now(),
+    provenance: provenance(path, 'read'),
+    completeness:
+      warnings.length > 0 || body.missingSections.length > 0
+        ? { kind: 'incomplete', reason: 'malformed' }
+        : { kind: 'complete' },
+    value: {
+      key,
+      title,
+      source: { kind: 'file', path },
+      status,
+      updatedAt: mtimeMs,
+      body,
+      progress: null,
+      unidentifiedTickets: [],
+      warnings,
     },
   }
 }
 
-function readMapHeading(parsedMap: ParsedMarkdownFile): {
-  title: string | undefined
-  warnings: string[]
-} {
-  const title = readTitle(parsedMap.frontmatter.title, parsedMap.body)
-  const warnings: string[] = []
-  if (!parsedMap.frontmatter.title && title) {
-    warnings.push(
-      'Map title fell back to the markdown heading because frontmatter title is missing.',
-    )
-  }
-  if (!title) {
-    warnings.push('Map title is missing from both frontmatter and the markdown heading.')
-  }
-  return { title, warnings }
-}
-
-function invalidTicketReasons(ticket: ParsedLocalTicket): string[] {
-  const reasons: string[] = []
-  if (ticket.id === null) reasons.push('missing or unparseable frontmatter id')
-  if (!ticket.status) reasons.push('missing or unparseable frontmatter status')
-  if (ticket.status === 'closed' && ticket.closedAt.kind !== 'value') {
-    reasons.push(
-      ticket.closedAt.kind === 'missing'
-        ? 'missing frontmatter closed-at'
-        : 'unparseable frontmatter closed-at',
-    )
-  }
-  if (ticket.status === 'open' && ticket.closedAt.kind !== 'missing') {
-    reasons.push('frontmatter closed-at is forbidden while status is open')
-  }
-  return reasons
-}
-
 function materializeTickets(
-  project: ProjectKey,
+  map: SourceMapKey,
   parsedTickets: Map<string, ParsedLocalTicket>,
-): Ticket[] {
-  const tickets = [...parsedTickets.entries()].map(([id, ticket]) => {
-    const titleWarnings = [...ticket.warnings]
-    if (!ticket.title) {
-      titleWarnings.push('Ticket title is missing from both frontmatter and the markdown heading.')
-    }
-
-    const built: Ticket = {
-      id,
-      displayId: id,
-      title: ticket.title,
-      body: ticket.body,
-      typeEvidence: ticketTypeEvidenceFromLabels(ticket.labels),
-      ...(ticket.closedAt.kind === 'value' ? { closedAt: ticket.closedAt.value } : {}),
-      state: 'frontier',
-      isClaimed: ticket.assignees.length > 0,
-      isBlocked: false,
-      assignees: ticket.assignees,
-      blockedBy: [],
-      blockersComplete: ticket.blockersComplete,
-      warnings: titleWarnings,
-      sourcePath: ticket.path,
-    }
-    return built
-  })
-  const ticketsById = new Map(tickets.map((ticket) => [ticket.id, ticket]))
-
-  for (const ticket of tickets) {
-    const parsed = parsedTickets.get(ticket.id)
-    if (!parsed) continue
-
-    const blockedBy: Blocker[] = []
-    let blockersComplete = parsed.blockersComplete
-    const warnings = [...ticket.warnings]
-
+): Extract<ObservationAttempt, { kind: 'observed'; scope: { kind: 'ticket' } }>[] {
+  return [...parsedTickets.entries()].map(([ticketId, parsed]) => {
+    const key: SourceTicketKey = { map, ticketId }
+    const warnings = [...parsed.warnings]
+    let blockersComplete = parsed.blockersComplete && parsed.status !== 'unknown'
+    const blockedBy: SourceTicketContent['blockedBy'][number][] = []
     for (const blockerId of parsed.blockedByIds) {
-      const target = ticketsById.get(blockerId)
-      const targetParsed = parsedTickets.get(blockerId)
-      if (!target || !targetParsed) {
+      const target = parsedTickets.get(blockerId)
+      if (!target || target.status === 'unknown') {
         blockersComplete = false
-        warnings.push(`Unknown blocker ${blockerId}: no parsed ticket carries that id.`)
-        blockedBy.push({
-          project,
-          ticketId: blockerId,
-          displayId: blockerId,
-          state: 'unknown',
-        })
-        continue
+        warnings.push(`Unknown blocker ${blockerId}: no readable ticket certifies its status.`)
       }
-
       blockedBy.push({
-        project,
-        ticketId: target.id,
-        displayId: target.displayId,
-        title: target.title,
-        state: targetParsed.status === 'closed' ? 'closed' : 'open',
+        reference: { kind: 'registered', project: map.project, ticketId: blockerId },
+        displayId: blockerId,
+        title: target?.title,
+        state: target?.status ?? 'unknown',
+        provenance: provenance(target?.path ?? parsed.path, 'read'),
       })
     }
-
-    const isOpen = parsed.status === 'open'
-    const hasOpenBlockers = blockedBy.some((blocker) => blocker.state !== 'closed')
-    ticket.blockedBy = blockedBy
-    ticket.blockersComplete = blockersComplete
-    ticket.warnings = warnings
-    ticket.isClaimed = parsed.assignees.length > 0
-    ticket.isBlocked = hasOpenBlockers
-    ticket.state = deriveTicketState({ isOpen, isClaimed: ticket.isClaimed, hasOpenBlockers })
-  }
-
-  return tickets
+    const completeness: Completeness =
+      warnings.length > 0 || !blockersComplete
+        ? { kind: 'incomplete', reason: 'malformed' }
+        : { kind: 'complete' }
+    return {
+      kind: 'observed',
+      scope: { kind: 'ticket', ticket: key },
+      attemptedAt: parsed.attemptedAt,
+      observedAt: parsed.observedAt,
+      provenance: provenance(parsed.path, 'read'),
+      completeness,
+      value: {
+        key,
+        displayId: ticketId,
+        title: parsed.title,
+        source: { kind: 'file', path: parsed.path },
+        body: parsed.body,
+        typeEvidence: ticketTypeEvidenceFromLabels(parsed.labels),
+        status: parsed.status,
+        ...(parsed.closedAt.kind === 'value' && parsed.status === 'closed'
+          ? { closedAt: parsed.closedAt.value }
+          : {}),
+        isClaimed: parsed.assignees.length > 0,
+        assignees: parsed.assignees,
+        blockedBy,
+        blockersComplete,
+        warnings,
+      },
+    }
+  })
 }
 
-async function readLocalTicket(rootPath: string, path: string): Promise<ParsedLocalTicket> {
-  const [raw, fileStat] = await Promise.all([readFile(path, 'utf8'), stat(path)])
+async function readLocalTicket(
+  input: LocalProjectInput,
+  map: SourceMapKey,
+  path: string,
+): Promise<TicketRead> {
+  const attemptedAt = Date.now()
+  let raw: string
+  let mtimeMs: number
+  try {
+    const [text, fileStat] = await Promise.all([readFile(path, 'utf8'), stat(path)])
+    raw = text
+    mtimeMs = fileStat.mtimeMs
+  } catch (error) {
+    const known = input.knownTickets?.find(
+      (ticket) =>
+        ticket.path === path &&
+        ticket.key.map.mapId === map.mapId &&
+        ticket.key.map.project.integration === map.project.integration &&
+        ticket.key.map.project.id === map.project.id,
+    )
+    const scope: SourceScope = known
+      ? { kind: 'ticket', ticket: known.key }
+      : { kind: 'tickets-membership', map }
+    return failed(scope, attemptedAt, provenance(path, 'read'), error)
+  }
   const parsed = parseMarkdownFile(raw)
-  const warnings: string[] = []
+  const warnings = [...parsed.warnings]
   const title = readTitle(parsed.frontmatter.title, parsed.body)
-  if (!parsed.frontmatter.title && title) {
+  if (!parsed.frontmatter.title && title)
     warnings.push(
       'Ticket title fell back to the markdown heading because frontmatter title is missing.',
     )
-  }
-
+  if (!title)
+    warnings.push('Ticket title is missing from both frontmatter and the markdown heading.')
   const labels = readListField(parsed.frontmatter.labels, 'labels', warnings)
   const blockedByIds = readListField(parsed.frontmatter['blocked-by'], 'blocked-by', warnings)
   const status = readStatus(parsed.frontmatter.status)
   const closedAt = readTimestamp(parsed.frontmatter['closed-at'])
+  if (status === 'unknown') warnings.push('Ticket frontmatter status is missing or unparseable.')
+  if (status === 'closed' && closedAt.kind !== 'value')
+    warnings.push(
+      closedAt.kind === 'missing'
+        ? 'Missing frontmatter closed-at.'
+        : 'Unparseable frontmatter closed-at.',
+    )
+  if (status === 'open' && closedAt.kind !== 'missing')
+    warnings.push('Frontmatter closed-at is forbidden while status is open.')
   const assignee = readScalar(parsed.frontmatter.assignee)
-
   return {
-    path,
-    displayPath: displayPath(rootPath, path),
-    body: parsed.body,
-    mtimeMs: fileStat.mtimeMs,
-    id: readId(parsed.frontmatter.id),
-    title,
-    status,
-    closedAt,
-    labels,
-    assignees: assignee ? [{ name: assignee }] : [],
-    blockedByIds,
-    blockersComplete: !warnings.some((warning) => warning.startsWith('Frontmatter blocked-by ')),
-    warnings,
+    kind: 'readable',
+    ticket: {
+      path,
+      raw,
+      body: parsed.body,
+      mtimeMs,
+      attemptedAt,
+      observedAt: Date.now(),
+      id: readId(parsed.frontmatter.id),
+      title,
+      status,
+      closedAt,
+      labels,
+      assignees: assignee ? [{ name: assignee }] : [],
+      blockedByIds,
+      blockersComplete: !warnings.some((warning) => warning.startsWith('Frontmatter blocked-by ')),
+      warnings,
+    },
   }
+}
+
+function failed(
+  scope: SourceScope,
+  attemptedAt: number,
+  source: SourceProvenance,
+  error: unknown,
+): FailedAttempt {
+  const code =
+    typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined
+  const failure: SourceFailure = {
+    kind: 'filesystem',
+    operation: source.integration === 'local' ? source.operation : 'read',
+    code: code === 'ENOENT' || code === 'EACCES' ? code : 'other',
+  }
+  return failedAttempt({ kind: 'failed', scope, attemptedAt, provenance: source, failure })
+}
+
+function provenance(
+  path: string,
+  operation: 'inspect-root' | 'enumerate' | 'read',
+): SourceProvenance {
+  return { integration: 'local', path, operation }
 }
 
 function parseMarkdownFile(raw: string): ParsedMarkdownFile {
   const match = raw.match(/^---\s*\n([\s\S]*?)\n---\s*(?:\n|$)([\s\S]*)$/)
-  if (!match) return { body: raw, frontmatter: {} }
-
-  const frontmatterBlock = match[1] ?? ''
-  const body = match[2] ?? ''
+  if (!match)
+    return {
+      body: raw,
+      frontmatter: {},
+      warnings: raw.startsWith('---')
+        ? ['Frontmatter is malformed; retained the raw Markdown.']
+        : [],
+    }
   const frontmatter: Record<string, string> = {}
-  for (const line of frontmatterBlock.split(/\r?\n/)) {
+  const warnings: string[] = []
+  const duplicateFields = new Set<string>()
+  for (const line of (match[1] ?? '').split(/\r?\n/)) {
     const lineMatch = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/)
-    if (!lineMatch) continue
+    if (!lineMatch) {
+      if (line.trim()) warnings.push('Frontmatter contains an unparseable field.')
+      continue
+    }
     const key = lineMatch[1]
     const value = lineMatch[2]
     if (key === undefined || value === undefined) continue
-    frontmatter[key] = value
+    if (Object.hasOwn(frontmatter, key) || duplicateFields.has(key)) {
+      warnings.push(`Duplicate frontmatter field ${key}.`)
+      duplicateFields.add(key)
+      delete frontmatter[key]
+    } else {
+      frontmatter[key] = value
+    }
   }
-  return { body, frontmatter }
+  return { body: match[2] ?? '', frontmatter, warnings }
 }
 
 function readTitle(frontmatterTitle: string | undefined, body: string): string | undefined {
   const title = readScalar(frontmatterTitle)
   if (title) return title
-
-  const heading = body.match(/^#\s+(.+)$/m)?.[1]?.trim()
-  return heading ? heading : undefined
+  return body.match(/^#\s+(.+)$/m)?.[1]?.trim() || undefined
 }
 
 function readId(raw: string | undefined): string | null {
   const value = readScalar(raw)
-  return value ? value : null
+  return value && !/[[\]{}]/.test(value) && !['null', '~'].includes(value.toLowerCase())
+    ? value
+    : null
 }
 
-function readStatus(raw: string | undefined): 'open' | 'closed' | null {
+function readStatus(raw: string | undefined): 'open' | 'closed' | 'unknown' {
   const value = readScalar(raw)?.toLowerCase()
-  return value === 'open' || value === 'closed' ? value : null
+  return value === 'open' || value === 'closed' ? value : 'unknown'
 }
 
 function readTimestamp(raw: string | undefined): ParsedTimestamp {
   const value = readScalar(raw)
   if (!value) return { kind: 'missing' }
-
   const timestamp = Date.parse(value)
-  if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString() !== value) {
+  if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString() !== value)
     return { kind: 'invalid' }
-  }
   return { kind: 'value', value: timestamp }
 }
 
 function readListField(raw: string | undefined, field: string, warnings: string[]): string[] {
   const value = raw?.trim()
   if (!value) return []
-
   if (value.startsWith('[') && value.endsWith(']')) {
     const inner = value.slice(1, -1).trim()
     if (!inner) return []
@@ -383,7 +510,6 @@ function readListField(raw: string | undefined, field: string, warnings: string[
       .map((entry) => readScalar(entry))
       .filter((entry): entry is string => Boolean(entry))
   }
-
   const scalar = readScalar(value)
   if (!scalar) return []
   warnings.push(`Frontmatter ${field} drifted from a list to a scalar; parsed it as one item.`)
@@ -396,9 +522,8 @@ function readScalar(raw: string | undefined): string | null {
   if (
     (value.startsWith('"') && value.endsWith('"')) ||
     (value.startsWith("'") && value.endsWith("'"))
-  ) {
+  )
     return value.slice(1, -1)
-  }
   return value
 }
 

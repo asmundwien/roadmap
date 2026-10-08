@@ -200,9 +200,9 @@ repaired only by proving the same Project identity. Wayfinder-map presence is a 
 _Avoid_: optional checkout, source path
 
 **Degraded**:
-The state of a Connection whose observations have repeatedly failed while Roadmap retains its last
-successful Project data. The Connection carries the last successful observation time; its Projects
-remain available until a source-specific hard failure proves otherwise.
+The state of a Connection whose observations have repeatedly failed while Roadmap retains known
+Project trace. Its last successful observation time does not advance on failure. Connection
+usability and Project reachability are separate facts; Degraded does not prove a Project readable.
 _Avoid_: unavailable Project, disconnected
 
 **Unreachable**:

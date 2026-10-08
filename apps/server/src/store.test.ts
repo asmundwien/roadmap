@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { AdapterHost, WayfinderAdapter } from './store.ts'
+import type { AdapterHost, ObservationAttempt, WayfinderAdapter } from './observation/source.ts'
+import { sourceFixture } from './source-test-fixtures.ts'
 import { createSnapshotStore } from './store.ts'
 
 function fakeAdapter(type: WayfinderAdapter['type'], ready: Promise<void> = Promise.resolve()) {
@@ -39,6 +40,21 @@ const localProject = {
   warnings: [],
 }
 
+const githubSlice = sourceFixture([githubProject], 100)
+const localSlice = sourceFixture([localProject], 200)
+const failedMap: ObservationAttempt = {
+  kind: 'failed',
+  scope: { kind: 'map', map: { project: githubProject.key, mapId: '16' } },
+  attemptedAt: 300,
+  provenance: {
+    integration: 'github',
+    connectionId: 'github',
+    repositoryId: 'a/roadmap',
+    stage: 'map-read',
+  },
+  failure: { kind: 'access-ambiguous', evidence: 'null-resource' },
+}
+
 describe('createSnapshotStore', () => {
   it('keeps partial Adapter baselines private until every Adapter is ready', async () => {
     let releaseLocal = (): void => {
@@ -53,12 +69,13 @@ describe('createSnapshotStore', () => {
 
     const starting = store.start()
     await Promise.resolve()
-    github.push({ projects: [githubProject], unreachable: [] })
+    github.push(githubSlice)
     expect(store.snapshot().capturedAt).toBe(0)
+    expect(store.snapshot().attempts).toEqual([])
 
     releaseLocal()
     await starting
-    expect(store.snapshot().projects.map((project) => project.key)).toEqual([githubProject.key])
+    expect(store.snapshot().attempts).toEqual(githubSlice.attempts)
   })
 
   it('merges every adapter slice into one source-blind snapshot', async () => {
@@ -67,23 +84,14 @@ describe('createSnapshotStore', () => {
     const store = createSnapshotStore([github.adapter, local.adapter])
 
     await store.start()
-    github.push({
-      projects: [githubProject],
-      unreachable: [
-        {
-          integration: 'github',
-          project: githubProject.key,
-          projectName: githubProject.name,
-          mapId: '16',
-          mapDisplayId: '#16',
-          reason: 'gone',
-        },
-      ],
-    })
-    local.push({ projects: [localProject], unreachable: [] })
+    github.push({ attempts: [...githubSlice.attempts, failedMap] })
+    local.push(localSlice)
 
-    expect(store.snapshot().projects.map((project) => project.name)).toEqual(['a/roadmap', 'demo'])
-    expect(store.snapshot().unreachable).toHaveLength(1)
+    expect(store.snapshot().attempts).toEqual([
+      ...githubSlice.attempts,
+      failedMap,
+      ...localSlice.attempts,
+    ])
   })
 
   it('replaces an adapter by its whole current slice whenever that adapter updates', async () => {
@@ -91,10 +99,10 @@ describe('createSnapshotStore', () => {
     const store = createSnapshotStore([github.adapter])
 
     await store.start()
-    github.push({ projects: [githubProject], unreachable: [] })
-    github.push({ projects: [], unreachable: [] })
+    github.push(githubSlice)
+    github.push({ attempts: [] })
 
-    expect(store.snapshot().projects).toEqual([])
+    expect(store.snapshot().attempts).toEqual([])
   })
 
   it('hands the current snapshot to a late subscriber', async () => {
@@ -102,7 +110,7 @@ describe('createSnapshotStore', () => {
     const store = createSnapshotStore([github.adapter])
 
     await store.start()
-    github.push({ projects: [githubProject], unreachable: [] })
+    github.push(githubSlice)
 
     const late = vi.fn()
     store.onChange(late)
@@ -117,13 +125,65 @@ describe('createSnapshotStore', () => {
     await store.start()
     const changes = vi.fn()
     store.onChange(changes)
-    github.push({ projects: [githubProject], unreachable: [] })
+    github.push(githubSlice)
     changes.mockClear()
 
-    github.push({ projects: [githubProject], unreachable: [] })
+    github.push(githubSlice)
     expect(changes).not.toHaveBeenCalled()
   })
 
+  it('retains prior contribution when an Adapter publishes another Integration', async () => {
+    const github = fakeAdapter('github')
+    const store = createSnapshotStore([github.adapter])
+    await store.start()
+    github.push(githubSlice)
+    github.push(localSlice)
+    expect(store.snapshot().attempts).toEqual(githubSlice.attempts)
+  })
+
+  it('rejects contradictory publications for the same scope without losing prior evidence', async () => {
+    const github = fakeAdapter('github')
+    const store = createSnapshotStore([github.adapter])
+    await store.start()
+    github.push(githubSlice)
+    const previous = store.snapshot()
+    const project = githubSlice.attempts.find((attempt) => attempt.scope.kind === 'project')
+    if (!project) throw new Error('Missing fixture project evidence')
+    github.push({
+      attempts: [
+        project,
+        {
+          kind: 'failed',
+          scope: project.scope,
+          attemptedAt: 300,
+          provenance: project.provenance,
+          failure: { kind: 'execution', cause: 'provider' },
+        },
+      ],
+    })
+    expect(store.snapshot()).toBe(previous)
+  })
+
+  it('rejects runtime malformed content without publishing raw diagnostics', async () => {
+    const github = fakeAdapter('github')
+    const store = createSnapshotStore([github.adapter])
+    await store.start()
+    github.push(githubSlice)
+    const previous = store.snapshot()
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const failure = {
+        kind: 'execution',
+        cause: 'provider',
+        message: 'credential-secret',
+      } as const
+      github.push({ attempts: [{ ...failedMap, failure }] })
+      expect(store.snapshot()).toBe(previous)
+      expect(warnings.mock.calls.flat().join(' ')).not.toContain('credential-secret')
+    } finally {
+      warnings.mockRestore()
+    }
+  })
   it('stops every adapter', async () => {
     const github = fakeAdapter('github')
     const local = fakeAdapter('local')

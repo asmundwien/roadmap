@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseDecision, parseMapBody } from './map-body.ts'
+import { parseMapBody } from './map-body.ts'
 
 const TEMPLATE_BODY = `## Destination
 
@@ -124,11 +124,12 @@ describe('parseMapBody', () => {
   })
 })
 
-describe('parseDecision', () => {
+describe('map body decisions', () => {
   it('splits a linked entry into title, url, and gist', () => {
-    const decision = parseDecision(
-      '[Scaffold the app](https://github.com/a/r/issues/4) — the shell runs',
+    const body = parseMapBody(
+      '## Decisions so far\n\n- [Scaffold the app](https://github.com/a/r/issues/4) — the shell runs',
     )
+    const decision = body.decisions[0]
 
     expect(decision).toMatchObject({
       title: 'Scaffold the app',
@@ -138,15 +139,18 @@ describe('parseDecision', () => {
   })
 
   it('accepts a plain hyphen as the separator', () => {
-    expect(parseDecision('[A](https://x/1) - gist here').gist).toBe('gist here')
+    const body = parseMapBody('## Decisions so far\n\n- [A](https://x/1) - gist here')
+    expect(body.decisions[0]?.gist).toBe('gist here')
   })
 
   it('handles a link with no gist', () => {
-    expect(parseDecision('[A](https://x/1)')).toMatchObject({ title: 'A', gist: '' })
+    const body = parseMapBody('## Decisions so far\n\n- [A](https://x/1)')
+    expect(body.decisions[0]).toMatchObject({ title: 'A', url: 'https://x/1', gist: '' })
   })
 
   it('reads an unlinked entry as title and gist', () => {
-    expect(parseDecision('Some decision — its gist')).toMatchObject({
+    const body = parseMapBody('## Decisions so far\n\n- Some decision — its gist')
+    expect(body.decisions[0]).toMatchObject({
       title: 'Some decision',
       url: null,
       gist: 'its gist',
@@ -154,8 +158,12 @@ describe('parseDecision', () => {
   })
 
   it('keeps an unparseable line whole rather than losing it', () => {
-    const decision = parseDecision('just some prose')
-    expect(decision).toMatchObject({ title: 'just some prose', url: null, gist: '' })
-    expect(decision.raw).toBe('just some prose')
+    const body = parseMapBody('## Decisions so far\n\n- just some prose')
+    expect(body.decisions[0]).toEqual({
+      title: 'just some prose',
+      url: null,
+      gist: '',
+      raw: 'just some prose',
+    })
   })
 })

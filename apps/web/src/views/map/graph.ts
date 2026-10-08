@@ -4,7 +4,7 @@ import { type Edge, MarkerType, type Node, Position } from '@xyflow/react'
 
 type MapNodeData =
   | { kind: 'ticket'; ticket: Ticket }
-  | { kind: 'blocker'; blocker: Blocker; scope: 'external' | 'missing' }
+  | { kind: 'blocker'; blocker: Blocker; scope: 'external' | 'missing' | 'unresolved' }
 
 export type MapNode = Node<MapNodeData, 'ticket'>
 
@@ -17,7 +17,23 @@ const TICKET_NODE_WIDTH = 340
 const TICKET_NODE_HEIGHT = 324
 
 function scopedTicketId(project: ProjectKey, ticketId: string): string {
-  return JSON.stringify([project.integration, project.id, ticketId])
+  return JSON.stringify(['registered', project.integration, project.id, ticketId])
+}
+
+export function blockerNodeId(blocker: Blocker): string {
+  const { reference, ticketId } = blocker
+  switch (reference.kind) {
+    case 'registered':
+      return scopedTicketId(reference.project, ticketId)
+    case 'external':
+      return JSON.stringify(['external', reference.integration, reference.nameWithOwner, ticketId])
+    case 'unresolved':
+      return JSON.stringify(['unresolved', reference.locator, ticketId])
+    default: {
+      const exhaustive: never = reference
+      return exhaustive
+    }
+  }
 }
 
 function sameProject(left: ProjectKey, right: ProjectKey): boolean {
@@ -46,7 +62,7 @@ function addBlockerNode(
   project: ProjectKey,
   blocker: Blocker,
 ): string {
-  const source = scopedTicketId(blocker.project, blocker.ticketId)
+  const source = blockerNodeId(blocker)
   const existing = nodes.get(source)
   if (!existing) {
     nodes.set(
@@ -54,7 +70,13 @@ function addBlockerNode(
       ticketNode(source, {
         kind: 'blocker',
         blocker: { ...blocker },
-        scope: sameProject(project, blocker.project) ? 'missing' : 'external',
+        scope:
+          blocker.reference.kind === 'unresolved'
+            ? 'unresolved'
+            : blocker.reference.kind === 'registered' &&
+                sameProject(project, blocker.reference.project)
+              ? 'missing'
+              : 'external',
       }),
     )
   } else if (existing.data.kind === 'blocker') {

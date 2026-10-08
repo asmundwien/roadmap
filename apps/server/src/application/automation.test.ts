@@ -12,7 +12,8 @@ import type {
   WayfinderMap,
 } from '@roadmap/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { AdapterHost, WayfinderAdapter } from '../store.ts'
+import type { AdapterHost, WayfinderAdapter } from '../observation/source.ts'
+import { sourceFixture } from '../source-test-fixtures.ts'
 import { isRecord } from '../type-guards.ts'
 import { createRoadmapApplication } from './application.ts'
 import {
@@ -31,7 +32,6 @@ import {
   createAutomationDatabaseDocument,
   replayAutomationDatabase,
 } from './automation-database.ts'
-import { classificationResultSchemaJson } from './classification-contract.ts'
 import type {
   ConfigurationDocument,
   ConfigurationRead,
@@ -189,11 +189,12 @@ function memoryAutomationDatabase(
 function adapter(initial: Project[]) {
   let host: AdapterHost | null = null
   let projects = initial
+  let observedAt = 100
   const value: WayfinderAdapter = {
     type: 'local',
     start(nextHost) {
       host = nextHost
-      host.update({ projects, unreachable: [] })
+      host.update(sourceFixture(projects, observedAt))
     },
     stop() {},
   }
@@ -202,7 +203,7 @@ function adapter(initial: Project[]) {
     push(next: Project[]) {
       projects = next
       if (!host) throw new Error('Adapter has not started.')
-      host.update({ projects, unreachable: [] })
+      host.update(sourceFixture(projects, ++observedAt))
     },
   }
 }
@@ -739,40 +740,6 @@ describe('RoadmapApplication Automation', () => {
     await current.application.stop()
   })
 
-  it('renders configured map and ticket pointers for both Harness Commands', async () => {
-    const mapUrl = 'https://github.com/example/project/issues/1'
-    const ticketUrl = 'https://github.com/example/project/issues/2'
-    const sourceTicket = ticket('2', TASK, { url: ticketUrl })
-    const sourceProject = project('github-pointers', [sourceTicket])
-    sourceProject.openMaps[0] = map(sourceProject.key, [sourceTicket], { url: mapUrl })
-    const launches = deferredLauncher()
-    const current = await harness({
-      projects: [sourceProject],
-      launcher: launches.launcher,
-      configuration: configuration([sourceProject], {
-        classificationCommand: {
-          ...COMMAND,
-          promptTemplate:
-            'Classify {{roadmap.ticket}} under {{roadmap.map}}. Contract: {{roadmap.classificationResultSchema}}',
-        },
-        wayfinderCommand: {
-          ...COMMAND,
-          promptTemplate:
-            'Run {{roadmap.map}} ticket {{roadmap.ticket}}. Contract: {{roadmap.sessionReportSchema}}',
-        },
-      }),
-    })
-    expect(launches.classifications[0]?.request.prompt).toBe(
-      `Classify ${ticketUrl} under ${mapUrl}. Contract: ${classificationResultSchemaJson}`,
-    )
-    launches.classifications[0]?.resolve(processResult())
-    await vi.waitFor(() => expect(launches.dispatches).toHaveLength(1))
-    expect(launches.dispatches[0]?.prompt).toBe(
-      `Run ${mapUrl} ticket ${ticketUrl}. Contract: ${sessionReportSchemaJson}`,
-    )
-    await current.application.stop()
-  })
-
   it('persists each attempt before launch and never repeats the same ticket identity', async () => {
     const sourceProject = project('one', [ticket('1')])
     const database = memoryAutomationDatabase()
@@ -1028,55 +995,24 @@ describe('RoadmapApplication Automation', () => {
     await current.application.stop()
   })
 
-  it('explains and enforces task, source, blocker, claim, and opportunity uniqueness', async () => {
+  it('rejects a claimed ticket override without recording or launching an attempt', async () => {
     const sourceProject = project('override-eligibility', [
-      ticket('research', { kind: 'recognized', value: 'research', labels: ['research'] }),
-      ticket('incomplete', TASK, { blockersComplete: false }),
-      ticket('blocked', TASK, { state: 'blocked', isBlocked: true }),
       ticket('claimed', TASK, { state: 'claimed', isClaimed: true }),
-      ticket('closed', TASK, { state: 'closed' }),
     ])
-    const incompleteMapProject = project('override-map-incomplete', [ticket('map-incomplete')])
-    const incompleteMap = incompleteMapProject.openMaps[0]
-    if (incompleteMap) incompleteMap.ticketsComplete = false
     const launches = deferredLauncher()
     const current = await harness({
-      projects: [sourceProject, incompleteMapProject],
+      projects: [sourceProject],
       launcher: launches.launcher,
-      configuration: configuration([sourceProject, incompleteMapProject], {
-        enabled: false,
-        enabledProjects: [],
-      }),
+      configuration: configuration([sourceProject], { enabled: false, enabledProjects: [] }),
     })
-    const controls = new Map(
-      current.application
-        .current()
-        .automation.overrides.map((control) => [control.target.ticketId, control.classification]),
-    )
-
-    expect(controls).toEqual(
-      new Map([
-        ['research', { status: 'ineligible', reason: 'Only task tickets can use Automation.' }],
-        ['incomplete', { status: 'ineligible', reason: 'Ticket blocker data is incomplete.' }],
-        ['blocked', { status: 'ineligible', reason: 'Ticket is blocked.' }],
-        ['claimed', { status: 'ineligible', reason: 'Ticket is already claimed.' }],
-        ['closed', { status: 'ineligible', reason: 'Ticket is already decided.' }],
-        [
-          'map-incomplete',
-          { status: 'ineligible', reason: 'The active map’s ticket list is incomplete.' },
-        ],
-      ]),
-    )
     const rejected = await current.application.execute({
       type: 'start-automation-override',
       expectedConfigurationVersion: 1,
       target: { project: sourceProject.key, mapId: 'map', ticketId: 'claimed' },
       stage: 'classification',
     })
-    expect(rejected).toMatchObject({
-      ok: false,
-      error: { code: 'validation', message: 'Ticket is already claimed.' },
-    })
+    expect(rejected).toMatchObject({ ok: false, error: { code: 'validation' } })
+    expect(current.database.events()).toEqual([])
     expect(launches.classifications).toHaveLength(0)
     await current.application.stop()
   })

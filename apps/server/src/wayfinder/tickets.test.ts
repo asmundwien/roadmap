@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { deriveTicketState, ticketTypeEvidenceFromLabels } from './tickets.ts'
+import { ticketTypeEvidenceFromLabels } from './tickets.ts'
 
 describe('ticketTypeEvidenceFromLabels', () => {
   it('retains recognized type evidence', () => {
@@ -26,36 +26,34 @@ describe('ticketTypeEvidenceFromLabels', () => {
       labels: ['research', 'task'],
     })
   })
-})
 
-describe('deriveTicketState', () => {
-  it('calls an open, unblocked, unassigned ticket the frontier', () => {
-    expect(deriveTicketState({ isOpen: true, isClaimed: false, hasOpenBlockers: false })).toBe(
-      'frontier',
-    )
+  it.each(['research', 'prototype', 'grilling', 'task'])('recognizes the %s type', (value) => {
+    expect(ticketTypeEvidenceFromLabels([`wayfinder:${value}`])).toEqual({
+      kind: 'recognized',
+      value,
+      labels: [value],
+    })
   })
 
-  it('calls an assigned open ticket claimed', () => {
-    expect(deriveTicketState({ isOpen: true, isClaimed: true, hasOpenBlockers: false })).toBe(
-      'claimed',
-    )
+  it('normalizes repeated type labels without inventing a conflict', () => {
+    expect(ticketTypeEvidenceFromLabels([' Wayfinder:Task ', 'wayfinder:task', 'bug'])).toEqual({
+      kind: 'recognized',
+      value: 'task',
+      labels: ['task'],
+    })
   })
 
-  it('calls a ticket with an open blocker blocked', () => {
-    expect(deriveTicketState({ isOpen: true, isClaimed: false, hasOpenBlockers: true })).toBe(
-      'blocked',
-    )
+  it('retains unsupported evidence alongside a recognized type as a conflict', () => {
+    expect(ticketTypeEvidenceFromLabels(['wayfinder:task', 'wayfinder:custom'])).toEqual({
+      kind: 'conflicting',
+      labels: ['custom', 'task'],
+    })
   })
 
-  it('reports blocked over claimed, because the state answers "can this be taken?"', () => {
-    expect(deriveTicketState({ isOpen: true, isClaimed: true, hasOpenBlockers: true })).toBe(
-      'blocked',
-    )
-  })
-
-  it('calls any closed ticket closed, whatever else is true of it', () => {
-    expect(deriveTicketState({ isOpen: false, isClaimed: true, hasOpenBlockers: true })).toBe(
-      'closed',
-    )
+  it('retains an empty type label as unknown rather than missing', () => {
+    expect(ticketTypeEvidenceFromLabels(['wayfinder:'])).toEqual({
+      kind: 'unknown',
+      labels: [''],
+    })
   })
 })

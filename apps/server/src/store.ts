@@ -1,29 +1,17 @@
-import type { Integration, Project, Snapshot, Unreachable } from '@roadmap/contracts'
-
-export interface AdapterSlice {
-  projects: Project[]
-  unreachable: Unreachable[]
-}
-
-export interface AdapterHost {
-  /** Replace this adapter's whole current slice. Call whenever anything this adapter owns changes. */
-  update(slice: AdapterSlice): void
-}
-
-export interface WayfinderAdapter {
-  type: Integration
-  start(host: AdapterHost): void | Promise<void>
-  stop(): void | Promise<void>
-}
+import type {
+  AdapterHost,
+  AdapterSlice,
+  SourceIntegration,
+  SourceSnapshot,
+  WayfinderAdapter,
+} from './observation/source.ts'
+import { refineObservationAttempt, sourceScopeKey } from './observation/source.ts'
 
 export interface SnapshotStore {
-  /** The current snapshot. Empty (zero `capturedAt`) until every adapter baseline lands. */
-  snapshot(): Snapshot
-  /** Registers for every complete state change. The listener also fires once if a snapshot exists. */
-  onChange(listener: (snapshot: Snapshot) => void): () => void
-  /** Starts every adapter and resolves only after the first complete composed baseline. */
+  /** Empty until every adapter baseline lands. */
+  snapshot(): SourceSnapshot
+  onChange(listener: (snapshot: SourceSnapshot) => void): () => void
   start(): Promise<void>
-  /** Stops every adapter and prevents later slice publishes. */
   stop(): Promise<void>
 }
 
@@ -31,37 +19,43 @@ export function createSnapshotStore(adapters: readonly WayfinderAdapter[]): Snap
   if (new Set(adapters.map((adapter) => adapter.type)).size !== adapters.length) {
     throw new Error('createSnapshotStore requires one adapter per Integration')
   }
-  const slices = new Map<Integration, AdapterSlice>()
-  let current: Snapshot = { capturedAt: 0, projects: [], unreachable: [] }
+  const slices = new Map<SourceIntegration, AdapterSlice>()
+  let current: SourceSnapshot = { capturedAt: 0, attempts: [] }
   let fingerprint = ''
-  const listeners = new Set<(snapshot: Snapshot) => void>()
+  const listeners = new Set<(snapshot: SourceSnapshot) => void>()
   let stopped = false
   let startPromise: Promise<void> | null = null
 
   function publish(): void {
-    if (slices.size !== adapters.length) return
-    const projects = [...slices.values()]
-      .flatMap((slice) => slice.projects)
-      .map((project) =>
-        project.openMaps.length === 0 && project.closedMaps.length === 0
-          ? { ...project, warnings: [...project.warnings, 'No maps found for this project.'] }
-          : project,
-      )
-      .sort(compareProjects)
-    const unreachable = [...slices.values()]
-      .flatMap((slice) => slice.unreachable)
-      .sort(compareUnreachable)
-    const next = JSON.stringify({ projects, unreachable })
+    if (stopped || slices.size !== adapters.length) return
+    const attempts = adapters.flatMap((adapter) => slices.get(adapter.type)?.attempts ?? [])
+    const next = JSON.stringify(attempts)
     if (next === fingerprint) return
     fingerprint = next
-    current = { capturedAt: Date.now(), projects, unreachable }
-    for (const listener of listeners) listener(current)
+    current = { capturedAt: Date.now(), attempts }
+    for (const listener of listeners) {
+      if (stopped) break
+      listener(current)
+    }
   }
 
   function hostFor(adapter: WayfinderAdapter): AdapterHost {
     return {
       update(slice) {
         if (stopped) return
+        const scopes = new Set<string>()
+        for (const input of slice.attempts) {
+          const attempt = refineObservationAttempt(input)
+          if (
+            !attempt ||
+            attempt.provenance.integration !== adapter.type ||
+            scopes.has(sourceScopeKey(attempt.scope))
+          ) {
+            console.warn(`${adapter.type} adapter published invalid source evidence.`)
+            return
+          }
+          scopes.add(sourceScopeKey(attempt.scope))
+        }
         slices.set(adapter.type, slice)
         publish()
       },
@@ -71,24 +65,25 @@ export function createSnapshotStore(adapters: readonly WayfinderAdapter[]): Snap
   async function safelyStart(adapter: WayfinderAdapter): Promise<void> {
     try {
       await adapter.start(hostFor(adapter))
-      if (!slices.has(adapter.type)) slices.set(adapter.type, { projects: [], unreachable: [] })
-    } catch (error) {
-      console.warn(`${adapter.type} adapter failed to start; using an empty baseline`, error)
-      slices.set(adapter.type, { projects: [], unreachable: [] })
+    } catch {
+      // An adapter-wide exception supplies no trustworthy named source evidence.
+      console.warn(`${adapter.type} adapter failed to start.`)
     }
+    if (!stopped && !slices.has(adapter.type)) slices.set(adapter.type, { attempts: [] })
   }
 
   async function safelyStop(adapter: WayfinderAdapter): Promise<void> {
     try {
       await adapter.stop()
-    } catch (error) {
-      console.warn(`${adapter.type} adapter failed to stop cleanly`, error)
+    } catch {
+      console.warn(`${adapter.type} adapter failed to stop cleanly.`)
     }
   }
 
   return {
     snapshot: () => current,
     onChange(listener) {
+      if (stopped) return () => undefined
       listeners.add(listener)
       if (current.capturedAt > 0) listener(current)
       return () => {
@@ -97,30 +92,14 @@ export function createSnapshotStore(adapters: readonly WayfinderAdapter[]): Snap
     },
     start() {
       if (startPromise) return startPromise
-      startPromise = Promise.all(adapters.map((adapter) => safelyStart(adapter))).then(() => {
-        publish()
-      })
+      startPromise = Promise.all(adapters.map((adapter) => safelyStart(adapter))).then(publish)
       return startPromise
     },
     async stop() {
       if (stopped) return
       stopped = true
+      listeners.clear()
       await Promise.all(adapters.map((adapter) => safelyStop(adapter)))
     },
   }
-}
-
-function compareProjects(a: Project, b: Project): number {
-  return (
-    Number(b.openMaps.length > 0) - Number(a.openMaps.length > 0) || a.name.localeCompare(b.name)
-  )
-}
-
-function compareUnreachable(a: Unreachable, b: Unreachable): number {
-  return (
-    a.project.integration.localeCompare(b.project.integration) ||
-    a.project.id.localeCompare(b.project.id) ||
-    (a.mapId ?? '').localeCompare(b.mapId ?? '') ||
-    a.reason.localeCompare(b.reason)
-  )
 }

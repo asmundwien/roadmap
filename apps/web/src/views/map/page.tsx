@@ -137,7 +137,10 @@ function SelectedMap({ map, activeMapId, ticketId, onOpenTicket, onOpenMap }: Se
         <header className={cx('map-heading')}>
           <h2>{map.title ?? map.displayId ?? map.id}</h2>
           <SurfaceDescription>
-            {map.displayId ?? map.id} · {status} · {map.progress.completed} closed tickets
+            {map.displayId ?? map.id} · {status} ·{' '}
+            {map.progress === null
+              ? 'Closed ticket count unknown'
+              : `${map.progress.completed} closed tickets`}
           </SurfaceDescription>
           {map.url && <SourceLink href={map.url}>Map source</SourceLink>}
           {map.sourcePath && <span className={cx('source-path')}>{map.sourcePath}</span>}

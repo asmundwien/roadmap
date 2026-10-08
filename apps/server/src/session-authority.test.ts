@@ -15,6 +15,7 @@ import type {
   RoadmapConfiguration,
 } from './application/configuration.ts'
 import { createApplicationOperations } from './application/operations.ts'
+import { sourceFixture } from './source-test-fixtures.ts'
 import { createRoadmapTransport, type RoadmapTransport } from './transport.ts'
 
 const ORIGIN = 'http://localhost:5173'
@@ -111,18 +112,20 @@ async function backend(epoch: string): Promise<Backend> {
       {
         type: 'local',
         start(host) {
-          host.update({
-            projects: [
-              {
-                key: { integration: 'local', id: 'fixture' },
-                name: epoch,
-                openMaps: [],
-                closedMaps: [],
-                warnings: [],
-              },
-            ],
-            unreachable: [],
-          })
+          host.update(
+            sourceFixture(
+              [
+                {
+                  key: { integration: 'local', id: 'fixture' },
+                  name: epoch,
+                  openMaps: [],
+                  closedMaps: [],
+                  warnings: [],
+                },
+              ],
+              100,
+            ),
+          )
         },
         stop() {},
       },

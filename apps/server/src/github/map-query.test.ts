@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest'
-import { type GitHubClient, GitHubError } from './client.ts'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createGitHubClient, type GitHubClient } from './client.ts'
 import { buildMapsQuery, fetchMaps, readMapsResponse } from './map-query.ts'
 import type { MapRef } from './repository.ts'
 
@@ -10,12 +10,14 @@ const REFS: MapRef[] = [
 
 function repository(nameWithOwner: string) {
   return {
+    id: `R_${nameWithOwner}`,
+    databaseId: nameWithOwner === 'a/gainstage' ? 2 : 1,
     nameWithOwner,
     issue: {
       number: 1,
       title: 'A map',
       url: `https://github.com/${nameWithOwner}/issues/1`,
-      state: 'OPEN' as const,
+      state: 'OPEN',
       updatedAt: '2026-08-01T12:00:00Z',
       closedAt: null,
       body: '',
@@ -23,6 +25,21 @@ function repository(nameWithOwner: string) {
       subIssues: { totalCount: 0, pageInfo: { hasNextPage: false }, nodes: [] },
     },
   }
+}
+
+function client(data: Record<string, unknown>): GitHubClient {
+  return {
+    graphql: async () => ({ data, errors: [] }),
+    restGet: async () => {
+      throw new Error('Map query fixtures do not make REST requests')
+    },
+  }
+}
+
+afterEach(() => vi.unstubAllGlobals())
+
+function response(data: unknown): Response {
+  return new Response(JSON.stringify({ data }))
 }
 
 describe('buildMapsQuery', () => {
@@ -75,80 +92,281 @@ describe('readMapsResponse', () => {
     })
 
     expect(result.maps.map((map) => map.ref.nameWithOwner)).toEqual(['a/roadmap', 'a/gainstage'])
-    expect(result.missing).toEqual([])
+    expect(result).toHaveProperty('failures', [])
   })
 
-  it('reports a ref the API returned nothing for instead of dropping it silently', () => {
+  it('records a null repository alias as access ambiguity, not deletion', () => {
     const result = readMapsResponse(REFS, { m0: repository('a/roadmap'), m1: null })
 
-    expect(result.maps).toHaveLength(1)
-    expect(result.missing).toEqual([REFS[1]])
+    expect(result.maps.map((map) => map.ref.nameWithOwner)).toEqual(['a/roadmap'])
+    expect(result).toHaveProperty('failures', [
+      expect.objectContaining({
+        ref: REFS[1],
+        failure: expect.objectContaining({ kind: 'access-ambiguous' }),
+      }),
+    ])
   })
 
-  it('treats a repo whose issue vanished as missing', () => {
-    const result = readMapsResponse([REFS[0] as MapRef], {
-      m0: { nameWithOwner: 'a/roadmap', issue: null },
+  it('records a null issue as access ambiguity instead of proving absence', () => {
+    const result = readMapsResponse(REFS.slice(0, 1), {
+      m0: { ...repository('a/roadmap'), issue: null },
     })
 
     expect(result.maps).toEqual([])
-    expect(result.missing).toHaveLength(1)
+    expect(result).toHaveProperty('failures', [
+      expect.objectContaining({
+        ref: REFS[0],
+        failure: expect.objectContaining({ kind: 'access-ambiguous' }),
+      }),
+    ])
   })
 })
 
 describe('fetchMaps', () => {
-  function clientReturning(impl: GitHubClient['graphql']): GitHubClient {
-    return { graphql: impl, restGet: vi.fn() }
-  }
-
   it('makes no request at all when nothing was discovered', async () => {
-    const graphql = vi.fn()
-    const result = await fetchMaps(clientReturning(graphql), [])
+    const fetchMock = vi.fn<typeof fetch>()
+    vi.stubGlobal('fetch', fetchMock)
 
-    expect(graphql).not.toHaveBeenCalled()
-    expect(result).toEqual({ maps: [], rateLimit: null, missing: [] })
+    const result = await fetchMaps(createGitHubClient({ token: 'fixture-token' }), [])
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(result.maps).toEqual([])
   })
 
-  it('batches many maps into few requests', async () => {
-    const refs = Array.from({ length: 25 }, (_, i) => ({
+  it('refines unknown client data and records the actual successful read time', async () => {
+    const result = await fetchMaps(
+      client({ m0: repository('a/roadmap') }),
+      REFS.slice(0, 1),
+      () => 1_234,
+    )
+
+    expect(result.maps).toEqual([
+      expect.objectContaining({
+        ref: REFS[0],
+        attemptedAt: 1_234,
+        observedAt: 1_234,
+        ticketsCompleteness: { kind: 'complete' },
+      }),
+    ])
+    expect(result.failures).toEqual([])
+  })
+
+  it.each([
+    ['unreadable connection', null, { kind: 'incomplete', reason: 'unreadable' }],
+    [
+      'later page',
+      { totalCount: 1, pageInfo: { hasNextPage: true }, nodes: [] },
+      { kind: 'incomplete', reason: 'pagination' },
+    ],
+    [
+      'missing counted child',
+      { totalCount: 1, pageInfo: { hasNextPage: false }, nodes: [] },
+      { kind: 'incomplete', reason: 'pagination' },
+    ],
+    [
+      'complete empty connection',
+      { totalCount: 0, pageInfo: { hasNextPage: false }, nodes: [] },
+      { kind: 'complete' },
+    ],
+  ])(
+    'keeps map prose but distinguishes %s from complete ticket membership',
+    async (_name, subIssues, completeness) => {
+      const data = {
+        m0: {
+          ...repository('a/roadmap'),
+          issue: {
+            ...repository('a/roadmap').issue,
+            body: 'Retain independently readable map prose.',
+            subIssues,
+          },
+        },
+      }
+
+      const result = await fetchMaps(client(data), REFS.slice(0, 1), () => 2_000)
+
+      expect(result.maps[0]?.issue.body).toBe('Retain independently readable map prose.')
+      expect(result.maps[0]?.ticketsCompleteness).toEqual(completeness)
+      expect(result.failures).toEqual([])
+    },
+  )
+
+  it.each([
+    ['missing alias', {}],
+    ['null repository', { m1: null }],
+    [
+      'null issue',
+      { m1: { id: 'R_gainstage', databaseId: 2, nameWithOwner: 'a/gainstage', issue: null } },
+    ],
+    [
+      'invalid issue',
+      {
+        m1: {
+          id: 'R_gainstage',
+          databaseId: 2,
+          nameWithOwner: 'a/gainstage',
+          issue: { number: 1, title: 99 },
+        },
+      },
+    ],
+    [
+      'wrong issue identity',
+      {
+        m1: {
+          ...repository('a/gainstage'),
+          issue: { ...repository('a/gainstage').issue, number: 99 },
+        },
+      },
+    ],
+    ['wrong repository identity', { m1: repository('a/unregistered') }],
+  ])('preserves a validated alias beside a %s', async (_name, failedAlias) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => response({ m0: repository('a/roadmap'), ...failedAlias })),
+    )
+
+    const result = await fetchMaps(createGitHubClient({ token: 'fixture-token' }), REFS)
+
+    expect(result.maps.map((map) => map.ref.nameWithOwner)).toEqual(['a/roadmap'])
+    expect(result).toHaveProperty('failures', [expect.objectContaining({ ref: REFS[1] })])
+  })
+
+  it('commits validated first-batch maps when a later batch fails', async () => {
+    const refs = Array.from({ length: 11 }, (_, index) => ({
       owner: 'a',
-      repo: `r${i}`,
-      nameWithOwner: `a/r${i}`,
+      repo: `r${index}`,
+      nameWithOwner: `a/r${index}`,
       number: 1,
     }))
-    const graphql = vi.fn(async () => ({ rateLimit: null }))
+    const firstBatch = Object.fromEntries(
+      refs.slice(0, 10).map((ref, index) => [`m${index}`, repository(ref.nameWithOwner)]),
+    )
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(response(firstBatch))
+        .mockResolvedValueOnce(new Response('private provider detail', { status: 503 })),
+    )
 
-    await fetchMaps(clientReturning(graphql as unknown as GitHubClient['graphql']), refs)
+    const result = await fetchMaps(createGitHubClient({ token: 'fixture-token' }), refs)
 
-    // 25 maps at 10 per request.
-    expect(graphql).toHaveBeenCalledTimes(3)
+    expect(result.maps.map((map) => map.ref.repo)).toEqual([
+      'r0',
+      'r1',
+      'r2',
+      'r3',
+      'r4',
+      'r5',
+      'r6',
+      'r7',
+      'r8',
+      'r9',
+    ])
+    expect(result).toHaveProperty('failures', [
+      expect.objectContaining({
+        ref: refs[10],
+        failure: expect.objectContaining({ kind: 'transient' }),
+      }),
+    ])
+    expect(JSON.stringify(result)).not.toContain('private provider detail')
   })
 
-  it('rejects a partial refresh so the Adapter can retain the last-good slice', async () => {
-    const refs = Array.from({ length: 11 }, (_, i) => ({
-      owner: 'a',
-      repo: `r${i}`,
-      nameWithOwner: `a/r${i}`,
-      number: 1,
-    }))
-    let call = 0
-    const graphql = vi.fn(async () => {
-      call += 1
-      if (call === 1) throw new GitHubError('Service unavailable', 503)
-      return { m0: repository('a/r10'), rateLimit: null }
-    })
+  it('returns named failures rather than empty success when every batch has execution errors', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ errors: [{ message: 'private execution detail' }] })),
+      ),
+    )
 
-    await expect(
-      fetchMaps(clientReturning(graphql as unknown as GitHubClient['graphql']), refs),
-    ).rejects.toThrow('Service unavailable')
+    const result = await fetchMaps(createGitHubClient({ token: 'fixture-token' }), REFS)
+
+    expect(result.maps).toEqual([])
+    expect(result).toHaveProperty('failures', [
+      expect.objectContaining({
+        ref: REFS[0],
+        failure: expect.objectContaining({ kind: 'execution' }),
+      }),
+      expect.objectContaining({
+        ref: REFS[1],
+        failure: expect.objectContaining({ kind: 'execution' }),
+      }),
+    ])
+    expect(JSON.stringify(result)).not.toContain('private execution detail')
   })
 
-  it('throws when every batch fails, rather than reporting an empty roadmap', async () => {
-    const graphql = vi.fn(async () => {
-      throw new Error('boom')
-    })
+  it('commits validated data outside the named path of a partial execution error', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              data: { m0: repository('a/roadmap'), m1: null },
+              errors: [{ path: ['m1', 'issue'], message: 'private execution detail' }],
+            }),
+          ),
+      ),
+    )
 
-    await expect(
-      fetchMaps(clientReturning(graphql as unknown as GitHubClient['graphql']), REFS),
-    ).rejects.toThrow('boom')
+    const result = await fetchMaps(createGitHubClient({ token: 'fixture-token' }), REFS)
+
+    expect(result.maps.map((map) => map.ref.nameWithOwner)).toEqual(['a/roadmap'])
+    expect(result).toHaveProperty('failures', [
+      expect.objectContaining({ ref: REFS[1], failure: { kind: 'execution', cause: 'provider' } }),
+    ])
+    expect(JSON.stringify(result)).not.toContain('private execution detail')
   })
+
+  it.each([
+    ['unattributed error', [{ message: 'private execution detail' }]],
+    ['unknown alias path', [{ path: ['other', 'issue'], message: 'private execution detail' }]],
+    ['empty error path', [{ path: [], message: 'private execution detail' }]],
+    [
+      'one known and one unknown path',
+      [
+        { path: ['m1', 'issue'], message: 'private execution detail' },
+        { path: ['other'], message: 'private execution detail' },
+      ],
+    ],
+    [
+      'errors for both aliases',
+      [
+        { path: ['m0', 'issue'], message: 'private execution detail' },
+        { path: ['m1', 'issue'], message: 'private execution detail' },
+      ],
+    ],
+  ])(
+    'does not certify aliases outside a provably unaffected scope after an %s',
+    async (_name, errors) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(
+          async () =>
+            new Response(
+              JSON.stringify({
+                data: { m0: repository('a/roadmap'), m1: repository('a/gainstage') },
+                errors,
+              }),
+            ),
+        ),
+      )
+
+      const result = await fetchMaps(createGitHubClient({ token: 'fixture-token' }), REFS)
+
+      expect(result.maps).toEqual([])
+      expect(result).toHaveProperty('failures', [
+        expect.objectContaining({
+          ref: REFS[0],
+          failure: { kind: 'execution', cause: 'provider' },
+        }),
+        expect.objectContaining({
+          ref: REFS[1],
+          failure: { kind: 'execution', cause: 'provider' },
+        }),
+      ])
+      expect(JSON.stringify(result)).not.toContain('private execution detail')
+    },
+  )
 })

@@ -2,6 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createGitHubClient, GitHubError } from './client.ts'
 
 const CONFIG = { token: 't0ken', user: 'asmundwien' }
+const RATE_LIMIT_RESPONSES: { status: number; headers: Record<string, string> }[] = [
+  { status: 429, headers: {} },
+  { status: 403, headers: { 'X-RateLimit-Remaining': '0' } },
+  { status: 403, headers: { 'Retry-After': '60' } },
+]
 
 function jsonResponse(body: unknown, init: { status?: number; etag?: string } = {}): Response {
   const headers = new Headers()
@@ -14,28 +19,38 @@ afterEach(() => {
 })
 
 describe('graphql', () => {
-  it('sends the token and returns the data', async () => {
+  it('sends the token and preserves validated envelope data for query-specific refinement', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse({ data: { viewer: 'a' } }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const data = await createGitHubClient(CONFIG).graphql<{ viewer: string }>('query {}', { a: 1 })
+    const result = await createGitHubClient(CONFIG).graphql('query {}', { a: 1 })
 
-    expect(data).toEqual({ viewer: 'a' })
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit
-    const headers = init.headers as Record<string, string>
-    expect(headers.Authorization).toBe('Bearer t0ken')
-    expect(JSON.parse(String(init.body))).toEqual({ query: 'query {}', variables: { a: 1 } })
+    expect(result).toEqual({ data: { viewer: 'a' }, errors: [] })
+    const init = fetchMock.mock.calls[0]?.[1]
+    const headers = new Headers(init?.headers)
+    expect(headers.get('Authorization')).toBe('Bearer t0ken')
+    expect(JSON.parse(String(init?.body))).toEqual({ query: 'query {}', variables: { a: 1 } })
   })
 
-  it('throws on an errors payload, which GraphQL sends with a 200', async () => {
+  it('classifies HTTP-200 execution failure without exposing provider prose as its safe cause', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => jsonResponse({ errors: [{ message: "Field 'x' doesn't exist" }] })),
+      vi.fn(async () =>
+        jsonResponse({ errors: [{ message: 'private repository and credential detail t0ken' }] }),
+      ),
     )
 
-    await expect(createGitHubClient(CONFIG).graphql('query {}')).rejects.toThrow(
-      "Field 'x' doesn't exist",
-    )
+    const error = await createGitHubClient(CONFIG)
+      .graphql('query {}')
+      .catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(GitHubError)
+    expect(error).toMatchObject({ status: 200 })
+    expect(error).toHaveProperty('failure', { kind: 'execution', cause: 'provider' })
+    expect(error instanceof Error ? error.message : '').not.toContain('private repository')
+    expect(error instanceof Error ? error.message : '').not.toContain('t0ken')
+    expect(error).not.toHaveProperty('detail')
+    expect(JSON.stringify(error)).not.toContain('t0ken')
   })
 
   it('throws on a transport failure', async () => {
@@ -59,8 +74,137 @@ describe('graphql', () => {
     )
 
     await expect(createGitHubClient(CONFIG).graphql('query {}')).rejects.toEqual(
-      new GitHubError('GitHub could not be reached.', 0),
+      new GitHubError({ kind: 'transient', cause: 'network' }),
     )
+  })
+
+  it.each([
+    [401, { kind: 'authorization', proof: 'http-401' }],
+    [403, { kind: 'access-ambiguous', evidence: 'http-403' }],
+    [404, { kind: 'access-ambiguous', evidence: 'http-404' }],
+    [503, { kind: 'transient', cause: 'server' }],
+  ])(
+    'classifies HTTP-%s by source proof rather than treating every denial as credentials',
+    async (status, failure) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => jsonResponse({ message: 'private t0ken provider detail' }, { status })),
+      )
+
+      const error = await createGitHubClient(CONFIG)
+        .graphql('query {}')
+        .catch((caught: unknown) => caught)
+
+      expect(error).toBeInstanceOf(GitHubError)
+      expect(error).toHaveProperty('failure', failure)
+      expect(error instanceof Error ? error.message : '').not.toContain('t0ken')
+    },
+  )
+
+  it.each(RATE_LIMIT_RESPONSES)(
+    'keeps proved rate limiting distinct from generic HTTP-$status access ambiguity',
+    async ({ status, headers }) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => new Response('private t0ken detail', { status, headers })),
+      )
+
+      await expect(createGitHubClient(CONFIG).graphql('query {}')).rejects.toMatchObject({
+        failure: { kind: 'transient', cause: 'rate-limit' },
+        status,
+      })
+    },
+  )
+
+  it('preserves only validated execution paths beside unknown query data', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse({
+          data: { m0: { issue: { body: 'readable prose' } }, m1: null },
+          errors: [{ path: ['m1', 'issue', 0], message: 'private t0ken detail' }],
+        }),
+      ),
+    )
+
+    const result = await createGitHubClient(CONFIG).graphql('query {}')
+
+    expect(result).toEqual({
+      data: { m0: { issue: { body: 'readable prose' } }, m1: null },
+      errors: [{ path: ['m1', 'issue', 0] }],
+    })
+    expect(JSON.stringify(result.errors)).not.toContain('private t0ken detail')
+  })
+
+  it.each([
+    ['null envelope', null],
+    ['array envelope', []],
+    ['primitive data', { data: 'not an object' }],
+    ['missing data', {}],
+    ['malformed execution errors', { errors: [{ message: { credential: 't0ken' } }] }],
+    ['non-array execution errors', { errors: { message: 't0ken' } }],
+    [
+      'invalid error path',
+      { data: {}, errors: [{ message: 'private t0ken detail', path: [null] }] },
+    ],
+  ])('classifies a %s as malformed rather than returning unchecked data', async (_name, body) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(body)),
+    )
+
+    const error = await createGitHubClient(CONFIG)
+      .graphql('query {}')
+      .catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(GitHubError)
+    expect(error).toMatchObject({
+      status: 200,
+      failure: { kind: 'read', cause: 'malformed-response' },
+    })
+    expect(error instanceof Error ? error.message : '').not.toContain('t0ken')
+  })
+
+  it('classifies invalid JSON as malformed without exposing its body', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('private t0ken {', { status: 200 })),
+    )
+
+    const error = await createGitHubClient(CONFIG)
+      .graphql('query {}')
+      .catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(GitHubError)
+    expect(error).toMatchObject({
+      status: 200,
+      failure: { kind: 'read', cause: 'malformed-response' },
+    })
+    expect(error instanceof Error ? error.message : '').not.toContain('t0ken')
+  })
+
+  it('classifies rejected response-body reading separately from malformed JSON', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.error(new Error('private stream detail t0ken'))
+              },
+            }),
+          ),
+      ),
+    )
+
+    const error = await createGitHubClient(CONFIG)
+      .graphql('query {}')
+      .catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(GitHubError)
+    expect(error).toMatchObject({ status: 200, failure: { kind: 'read', cause: 'response-read' } })
+    expect(error instanceof Error ? error.message : '').not.toContain('private stream')
   })
 })
 
@@ -77,8 +221,8 @@ describe('restGet', () => {
     const second = await client.restGet('/search/issues?q=x')
 
     expect(second).toEqual(first)
-    const secondInit = fetchMock.mock.calls[1]?.[1] as RequestInit
-    expect((secondInit.headers as Record<string, string>)['If-None-Match']).toBe('W/"abc"')
+    const secondInit = fetchMock.mock.calls[1]?.[1]
+    expect(new Headers(secondInit?.headers).get('If-None-Match')).toBe('W/"abc"')
   })
 
   it('sends no If-None-Match before anything has been cached', async () => {
@@ -87,9 +231,9 @@ describe('restGet', () => {
 
     await createGitHubClient(CONFIG).restGet('/search/issues?q=x')
 
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit
-    expect((init.headers as Record<string, string>)['If-None-Match']).toBeUndefined()
-    expect((init.headers as Record<string, string>)['X-GitHub-Api-Version']).toBe('2022-11-28')
+    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers)
+    expect(headers.has('If-None-Match')).toBe(false)
+    expect(headers.get('X-GitHub-Api-Version')).toBe('2022-11-28')
   })
 
   it('keeps caches apart between clients', async () => {
@@ -101,8 +245,8 @@ describe('restGet', () => {
     await createGitHubClient(CONFIG).restGet('/x')
     await createGitHubClient(CONFIG).restGet('/x')
 
-    const secondInit = fetchMock.mock.calls[1]?.[1] as RequestInit
-    expect((secondInit.headers as Record<string, string>)['If-None-Match']).toBeUndefined()
+    const secondInit = fetchMock.mock.calls[1]?.[1]
+    expect(new Headers(secondInit?.headers).has('If-None-Match')).toBe(false)
   })
 
   it('reports a failed request as a GitHubError carrying the status', async () => {
@@ -117,5 +261,47 @@ describe('restGet', () => {
 
     expect(error).toBeInstanceOf(GitHubError)
     expect(error).toMatchObject({ status: 404 })
+  })
+
+  it('classifies invalid REST JSON before it can enter the conditional cache', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response('private t0ken {', { headers: { ETag: 'W/"invalid"' } }))
+      .mockResolvedValueOnce(jsonResponse({ items: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+    const client = createGitHubClient(CONFIG)
+
+    const error = await client.restGet('/x').catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(GitHubError)
+    expect(error).toHaveProperty('failure', { kind: 'read', cause: 'malformed-response' })
+    expect(error instanceof Error ? error.message : '').not.toContain('t0ken')
+    await expect(client.restGet('/x')).resolves.toEqual({ items: [] })
+    const headers = new Headers(fetchMock.mock.calls[1]?.[1]?.headers)
+    expect(headers.has('If-None-Match')).toBe(false)
+  })
+
+  it('classifies a REST body-read rejection without returning empty success', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.error(new Error('private stream detail'))
+              },
+            }),
+          ),
+      ),
+    )
+
+    const error = await createGitHubClient(CONFIG)
+      .restGet('/x')
+      .catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(GitHubError)
+    expect(error).toHaveProperty('failure', { kind: 'read', cause: 'response-read' })
+    expect(error instanceof Error ? error.message : '').not.toContain('private stream')
   })
 })

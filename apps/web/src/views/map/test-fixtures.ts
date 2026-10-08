@@ -1,24 +1,36 @@
 import type {
   Blocker,
   MapBody,
+  ProjectKey,
   Ticket,
   TicketState,
   TicketType,
   WayfinderMap,
 } from '@roadmap/contracts'
+import type { RoadmapStore, RoadmapStoreSnapshot } from '@/store/roadmap-store'
 
-/** Map-view test fixtures — the one place tests build snapshot-shaped maps from shorthand. */
+/** Map-view fixtures build snapshot-shaped maps from shorthand. */
 
 const HOME = 'me/repo'
-const HOME_PROJECT = { integration: 'github' as const, id: HOME }
-export function blocker(id: number | string, open: boolean = true, projectId = HOME): Blocker {
+const HOME_PROJECT: ProjectKey = { integration: 'github', id: 'project-home' }
+export function blocker(
+  id: number | string,
+  open: boolean = true,
+  reference: Blocker['reference'] = { kind: 'registered', project: HOME_PROJECT },
+): Blocker {
   const value = String(id)
+  const locator =
+    reference.kind === 'external'
+      ? reference.nameWithOwner
+      : reference.kind === 'unresolved'
+        ? reference.locator
+        : HOME
   return {
-    project: { integration: 'github', id: projectId },
+    reference,
     ticketId: value,
     displayId: `#${value}`,
     title: `Ticket ${value}`,
-    url: `https://example.test/${projectId}/${value}`,
+    url: `https://example.test/${locator}/${value}`,
     state: open ? 'open' : 'closed',
   }
 }
@@ -87,5 +99,43 @@ export function makeMap(tickets: Ticket[], bodyOverrides: Partial<MapBody> = {})
     },
     ticketsComplete: true,
     warnings: [],
+  }
+}
+
+export function makeRoadmapStore(): RoadmapStore {
+  const snapshot: RoadmapStoreSnapshot = {
+    transport: 'live',
+    synchronization: 'synchronized',
+    command: { inFlight: false, error: null },
+    state: {
+      serverEpoch: 'test',
+      stateSequence: 1,
+      configurationVersion: 1,
+      supportedIntegrations: [],
+      connections: [],
+      registrations: [],
+      projects: [],
+      authorizationOperations: [],
+      configuration: { valid: true, issues: [], notices: [] },
+      automation: {
+        enabled: false,
+        enabledProjects: [],
+        availability: { status: 'ready' },
+        evidence: [],
+        overrides: [],
+      },
+      roadmap: { capturedAt: 0, projects: [], unreachable: [] },
+    },
+  }
+  return {
+    subscribe: () => () => undefined,
+    getSnapshot: () => snapshot,
+    start: () => () => undefined,
+    query: async () => {
+      throw new Error('Unexpected query')
+    },
+    execute: async () => {
+      throw new Error('Unexpected command')
+    },
   }
 }

@@ -64,7 +64,20 @@ async function main(): Promise<void> {
     admission,
     operations,
     createAdapters(configuration, runtime: AdapterRuntime) {
-      const adapters = [createLocalAdapter({ registrations: configuration.projects })]
+      const adapters = [
+        createLocalAdapter({
+          sources: configuration.projects.flatMap((registration) =>
+            registration.key.integration === 'local'
+              ? [
+                  {
+                    key: { integration: 'local' as const, id: registration.key.id },
+                    rootPath: registration.workspace.path,
+                  },
+                ]
+              : [],
+          ),
+        }),
+      ]
       if (github) {
         githubAdapter = createGitHubAdapter({
           connections: configuration.connections,

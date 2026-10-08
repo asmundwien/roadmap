@@ -84,7 +84,7 @@ function repositoryClient(repositories: RepositoryIdentity[] = [REPOSITORY]): Gi
     graphql: async () => {
       throw new Error('not used')
     },
-    restGet: async <T>(path: string) => {
+    restGet: async (path: string): Promise<unknown> => {
       const match = /^\/repos\/([^/]+)\/([^/]+)$/.exec(path)
       const nameWithOwner = match
         ? `${decodeURIComponent(match[1] ?? '')}/${decodeURIComponent(match[2] ?? '')}`
@@ -97,7 +97,7 @@ function repositoryClient(repositories: RepositoryIdentity[] = [REPOSITORY]): Gi
       return {
         id: repository.id,
         full_name: repository.nameWithOwner,
-      } as T
+      }
     },
   }
 }
@@ -218,7 +218,7 @@ describe('GitHub Project admission', () => {
           throw new Error('not used')
         },
         restGet: async () => {
-          throw new GitHubError('GET failed', 404)
+          throw new GitHubError({ kind: 'access-ambiguous', evidence: 'http-404' }, 404)
         },
       }),
       inspectWorkspace: async () => ({

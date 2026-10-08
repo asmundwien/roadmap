@@ -1,6 +1,7 @@
-import type { Project, Snapshot, Unreachable } from '@roadmap/contracts'
+import type { Project, Snapshot, Ticket, WayfinderMap } from '@roadmap/contracts'
 import { describe, expect, it, vi } from 'vitest'
-import type { AdapterHost, AdapterSlice, WayfinderAdapter } from '../store.ts'
+import type { AdapterHost, AdapterSlice, WayfinderAdapter } from '../observation/source.ts'
+import { sourceFixture } from '../source-test-fixtures.ts'
 import { createRoadmapApplication } from './application.ts'
 import type {
   ConfigurationDocument,
@@ -10,7 +11,7 @@ import type {
 } from './configuration.ts'
 import { createApplicationOperations } from './operations.ts'
 
-const EMPTY_SLICE: AdapterSlice = { projects: [], unreachable: [] }
+const EMPTY_SLICE: AdapterSlice = { attempts: [] }
 const LOCAL_CONNECTION: RoadmapConfiguration['connections'][number] = {
   id: 'local',
   integration: 'local',
@@ -132,12 +133,17 @@ function localProject(id: string): Project {
   }
 }
 
-function unavailable(id: string): Unreachable {
+function unavailable(id: string): AdapterSlice {
   return {
-    integration: 'local',
-    project: { integration: 'local', id },
-    projectName: id,
-    reason: 'Workspace cannot be read.',
+    attempts: [
+      {
+        kind: 'failed',
+        scope: { kind: 'project', project: { integration: 'local', id } },
+        attemptedAt: 50,
+        provenance: { integration: 'local', path: `/tmp/${id}`, operation: 'inspect-root' },
+        failure: { kind: 'filesystem', operation: 'inspect-root', code: 'other' },
+      },
+    ],
   }
 }
 
@@ -153,7 +159,7 @@ describe('RoadmapApplication', () => {
       key: { integration: 'github', id: 'owner/repo' },
       warnings: ['Source diagnostic'],
     }
-    const adapter = immediateAdapter({ projects: [local], unreachable: [] })
+    const adapter = immediateAdapter(sourceFixture([local], 1_000))
     const application = createRoadmapApplication({
       configuration: memoryConfiguration({ ok: true, document: BASE_CONFIGURATION }).document,
       createAdapters: () => [
@@ -161,7 +167,7 @@ describe('RoadmapApplication', () => {
         {
           type: 'github',
           start(host) {
-            host.update({ projects: [github], unreachable: [] })
+            host.update(sourceFixture([github], 1_000))
           },
           stop() {},
         },
@@ -182,7 +188,7 @@ describe('RoadmapApplication', () => {
       )
       expect(local.warnings).toEqual([])
       expect(github.warnings).toEqual(['Source diagnostic'])
-      adapter.push({ projects: [local], unreachable: [] })
+      adapter.push(sourceFixture([local], 1_000))
       expect(
         application
           .current()
@@ -247,7 +253,7 @@ describe('RoadmapApplication', () => {
       ],
     }
     const configuration = memoryConfiguration({ ok: true, document: registered })
-    const adapter = immediateAdapter({ projects: [localProject('demo')], unreachable: [] })
+    const adapter = immediateAdapter(sourceFixture([localProject('demo')], 25))
     const application = createRoadmapApplication({
       configuration: configuration.document,
       createAdapters: () => [adapter.adapter],
@@ -256,7 +262,7 @@ describe('RoadmapApplication', () => {
     })
     await application.start()
 
-    adapter.push({ projects: [], unreachable: [unavailable('demo')] })
+    adapter.push(unavailable('demo'))
 
     expect(application.current().projects).toEqual([
       expect.objectContaining({
@@ -273,6 +279,104 @@ describe('RoadmapApplication', () => {
       }),
     ])
     await application.stop()
+  })
+
+  it('does not advance a failed GitHub scope when an unrelated Local source changes', async () => {
+    let clock = 1_000
+    const githubProject: Project = {
+      key: { integration: 'github', id: 'opaque/github-key' },
+      name: 'acme/remote',
+      sourceUrl: 'https://github.com/acme/remote',
+      openMaps: [],
+      closedMaps: [],
+      warnings: [],
+    }
+    const configuration = memoryConfiguration({
+      ok: true,
+      document: {
+        ...BASE_CONFIGURATION,
+        connections: [
+          LOCAL_CONNECTION,
+          {
+            id: 'github',
+            integration: 'github',
+            name: 'GitHub',
+            builtIn: false,
+            githubIdentity: { id: '7', login: 'octocat' },
+          },
+        ],
+        projects: [
+          {
+            key: githubProject.key,
+            connectionId: 'github',
+            locator: {
+              integration: 'github',
+              repositoryId: '42',
+              nameWithOwner: 'acme/remote',
+            },
+            workspace: { path: '/unused/github-workspace', gitIdentity: '42' },
+          },
+        ],
+      },
+    })
+    const local = immediateAdapter(sourceFixture([localProject('local-source')], clock))
+    const githubHost: { current: AdapterHost | null } = { current: null }
+    const application = createRoadmapApplication({
+      configuration: configuration.document,
+      createAdapters: (_configuration, runtime) => [
+        local.adapter,
+        {
+          type: 'github',
+          start(host) {
+            githubHost.current = host
+            runtime.setConnectionAvailability('github', { status: 'available', observedAt: clock })
+            host.update(sourceFixture([githubProject], clock))
+          },
+          stop() {},
+        },
+      ],
+      serverEpoch: 'source-time-test',
+      now: () => clock,
+    })
+    try {
+      await application.start()
+      expect(application.current().projects[0]?.availability.observedAt).toBe(1_000)
+
+      clock = 2_000
+      if (!githubHost.current) throw new Error('GitHub Adapter did not start')
+      githubHost.current.update({
+        attempts: [
+          {
+            kind: 'failed',
+            scope: { kind: 'project', project: githubProject.key },
+            attemptedAt: clock,
+            provenance: {
+              integration: 'github',
+              connectionId: 'github',
+              repositoryId: '42',
+              stage: 'repository',
+            },
+            failure: { kind: 'read', cause: 'response-read' },
+          },
+        ],
+      })
+      clock = 3_000
+      local.push(
+        sourceFixture(
+          [{ ...localProject('local-source'), warnings: ['A Local file changed.'] }],
+          clock,
+        ),
+      )
+
+      const retained = application.current().projects[0]
+      expect(retained?.key).toEqual({ integration: 'github', id: 'opaque/github-key' })
+      expect(retained?.availability.observedAt).toBe(1_000)
+      expect(
+        application.current().connections.find((connection) => connection.id === 'github'),
+      ).toMatchObject({ availability: { observedAt: 1_000 } })
+    } finally {
+      await application.stop()
+    }
   })
 
   it('projects the current GitHub source URL without changing the stable route key', async () => {
@@ -312,7 +416,7 @@ describe('RoadmapApplication', () => {
     const adapter: WayfinderAdapter = {
       type: 'github',
       start(host) {
-        host.update({ projects: [githubProject], unreachable: [] })
+        host.update(sourceFixture([githubProject], 1_000))
       },
       stop() {},
     }
@@ -677,7 +781,7 @@ describe('RoadmapApplication', () => {
         connections: [{ ...LOCAL_CONNECTION, name: 'On this Mac' }],
       },
     })
-    first.push({ projects: [localProject('still-live')], unreachable: [] })
+    first.push(sourceFixture([localProject('still-live')], 1_000))
     await vi.waitFor(() =>
       expect(snapshotProjectIds(application.current().roadmap)).toEqual(['still-live']),
     )
@@ -685,7 +789,7 @@ describe('RoadmapApplication', () => {
     second.release()
     await vi.waitFor(() => expect(application.current().configurationVersion).toBe(2))
     expect(first.stopped).toBe(true)
-    first.push({ projects: [localProject('late')], unreachable: [] })
+    first.push(sourceFixture([localProject('late')], 1_000))
     expect(snapshotProjectIds(application.current().roadmap)).toEqual([])
     await application.stop()
   })
@@ -698,11 +802,8 @@ describe('RoadmapApplication', () => {
       createAdapters: () => {
         generation += 1
         return [
-          immediateAdapter(
-            generation === 1
-              ? EMPTY_SLICE
-              : { projects: [], unreachable: [unavailable('microsoft-risiko')] },
-          ).adapter,
+          immediateAdapter(generation === 1 ? EMPTY_SLICE : unavailable('microsoft-risiko'))
+            .adapter,
         ]
       },
       serverEpoch: 'test',
@@ -718,7 +819,10 @@ describe('RoadmapApplication', () => {
 
     expect(outcome.ok).toBe(true)
     expect(outcome.state.configurationVersion).toBe(2)
-    expect(outcome.state.roadmap.unreachable).toEqual([unavailable('microsoft-risiko')])
+    expect(outcome.state.roadmap.projects).toEqual([])
+    expect(outcome.state.roadmap.unreachable).toContainEqual(
+      expect.objectContaining({ project: { integration: 'local', id: 'microsoft-risiko' } }),
+    )
     expect(configuration.writes[0]?.configurationVersion).toBe(2)
     await application.stop()
   })
@@ -825,5 +929,156 @@ describe('RoadmapApplication', () => {
     expect(cleanupOrphans).toHaveBeenCalledWith(new Set(['local']))
     expect(JSON.stringify(application.current())).not.toMatch(/token|secret|credential/i)
     await application.stop()
+  })
+
+  it('projects ticket state precedence and keeps complete frontier order including closed external blockers', async () => {
+    const key = { integration: 'local', id: 'ticket-policy' } as const
+    const ticket = (id: string, extra: Partial<Ticket> = {}): Ticket => ({
+      id,
+      body: `Ticket ${id}`,
+      sourcePath: `/tmp/ticket-policy/${id}.md`,
+      typeEvidence: { kind: 'recognized', value: 'task', labels: ['task'] },
+      state: 'frontier',
+      isClaimed: false,
+      isBlocked: false,
+      assignees: [],
+      blockedBy: [],
+      blockersComplete: true,
+      warnings: [],
+      ...extra,
+    })
+    const openBlocker: Ticket['blockedBy'][number] = {
+      reference: { kind: 'registered', project: key },
+      ticketId: 'outside',
+      state: 'open',
+    }
+    const map: WayfinderMap = {
+      project: key,
+      id: 'map',
+      sourcePath: '/tmp/ticket-policy/map.md',
+      isOpen: true,
+      updatedAt: 1,
+      body: {
+        raw: 'Raw map prose',
+        destination: 'Destination',
+        notes: [],
+        decisions: [],
+        notYetSpecified: [],
+        notYetSpecifiedNote: '',
+        outOfScope: [],
+        sections: [],
+        missingSections: [],
+      },
+      tickets: [
+        ticket('first'),
+        ticket('claimed', { isClaimed: true }),
+        ticket('blocked', { blockedBy: [openBlocker] }),
+        ticket('blocked-claimed', { isClaimed: true, blockedBy: [openBlocker] }),
+        ticket('closed', { state: 'closed', isClaimed: true, blockedBy: [openBlocker] }),
+        ticket('external-closed', {
+          blockedBy: [
+            {
+              reference: {
+                kind: 'external',
+                integration: 'github',
+                nameWithOwner: 'outside/repository',
+              },
+              ticketId: '7',
+              state: 'closed',
+              url: 'https://github.com/outside/repository/issues/7',
+            },
+          ],
+        }),
+        ticket('unknown-blocker', { blockedBy: [{ ...openBlocker, state: 'unknown' }] }),
+      ],
+      frontier: [],
+      progress: { total: 7, completed: 1 },
+      ticketsComplete: true,
+      warnings: [],
+    }
+    const adapter = immediateAdapter(
+      sourceFixture(
+        [{ key, name: 'Ticket policy', openMaps: [map], closedMaps: [], warnings: [] }],
+        10,
+      ),
+    )
+    const application = createRoadmapApplication({
+      configuration: memoryConfiguration({ ok: true, document: BASE_CONFIGURATION }).document,
+      createAdapters: () => [adapter.adapter],
+    })
+    try {
+      await application.start()
+      const projected = application.current().roadmap.projects[0]?.openMaps[0]
+      expect(projected?.tickets.map((entry) => [entry.id, entry.state])).toEqual([
+        ['first', 'frontier'],
+        ['claimed', 'claimed'],
+        ['blocked', 'blocked'],
+        ['blocked-claimed', 'blocked'],
+        ['closed', 'closed'],
+        ['external-closed', 'frontier'],
+        ['unknown-blocker', 'blocked'],
+      ])
+      expect(projected?.frontier.map((entry) => entry.id)).toEqual(['first', 'external-closed'])
+      expect(
+        projected?.tickets.find((entry) => entry.id === 'external-closed')?.blockedBy[0],
+      ).toEqual({
+        reference: { kind: 'external', integration: 'github', nameWithOwner: 'outside/repository' },
+        ticketId: '7',
+        state: 'closed',
+        url: 'https://github.com/outside/repository/issues/7',
+      })
+      adapter.push(
+        sourceFixture(
+          [
+            {
+              key,
+              name: 'Ticket policy',
+              openMaps: [{ ...map, tickets: [ticket('incomplete', { blockersComplete: false })] }],
+              closedMaps: [],
+              warnings: [],
+            },
+          ],
+          20,
+        ),
+      )
+      expect(application.current().roadmap.projects[0]?.openMaps[0]?.tickets[0]?.state).toBe(
+        'blocked',
+      )
+      expect(application.current().roadmap.projects[0]?.openMaps[0]?.frontier).toEqual([])
+      const unknown = sourceFixture(
+        [
+          {
+            key,
+            name: 'Ticket policy',
+            openMaps: [{ ...map, tickets: [ticket('unknown-status')] }],
+            closedMaps: [],
+            warnings: [],
+          },
+        ],
+        30,
+      )
+      adapter.push({
+        attempts: unknown.attempts.map((attempt) => {
+          if (
+            attempt.kind !== 'observed' ||
+            attempt.scope.kind !== 'ticket' ||
+            !('typeEvidence' in attempt.value)
+          )
+            return attempt
+          return {
+            ...attempt,
+            scope: attempt.scope,
+            value: { ...attempt.value, status: 'unknown' },
+            completeness: { kind: 'incomplete', reason: 'malformed' },
+          }
+        }),
+      })
+      expect(application.current().roadmap.projects[0]?.openMaps[0]?.tickets[0]?.state).toBe(
+        'blocked',
+      )
+      expect(application.current().roadmap.projects[0]?.openMaps[0]?.frontier).toEqual([])
+    } finally {
+      await application.stop()
+    }
   })
 })

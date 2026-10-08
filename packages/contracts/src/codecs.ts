@@ -1,3 +1,5 @@
+import { blockerSchema } from './blocker.ts'
+
 import type {
   ApplicationState,
   CommandOutcome,
@@ -144,14 +146,14 @@ const assignee = object({
   url: optional(stringValue),
   avatarUrl: optional(stringValue),
 })
-const blocker = object({
-  project: required(projectKey),
-  ticketId: required(stringValue),
-  displayId: optional(stringValue),
-  title: optional(stringValue),
-  url: optional(stringValue),
-  state: required(literal('open', 'closed', 'unknown')),
-})
+const blocker: Check = (input, path, issues) => {
+  const result = blockerSchema.safeParse(input)
+  if (result.success) return true
+  for (const issue of result.error.issues) {
+    problem(issues, path + issue.path.map((key) => `.${String(key)}`).join(''), issue.code)
+  }
+  return false
+}
 const ticketTypeEvidence = discriminated('ticket type evidence', 'kind', {
   recognized: object({
     kind: required(literal('recognized')),
@@ -221,7 +223,7 @@ const wayfinderMap = object({
   body: required(mapBody),
   tickets: required(arrayOf(ticket)),
   frontier: required(arrayOf(ticket)),
-  progress: required(mapProgress),
+  progress: required((input, path, issues) => input === null || mapProgress(input, path, issues)),
   ticketsComplete: required(booleanValue),
   warnings: required(arrayOf(stringValue)),
   sourcePath: optional(stringValue),

@@ -1,4 +1,6 @@
-import type { Decision, MapBody, MapSection } from '@roadmap/contracts'
+import type { SourceMapBody } from '../observation/source.ts'
+
+type SourceMapSection = SourceMapBody['sections'][number]
 
 /**
  * Template headings, keyed by their normalised form. The extra keys are drift tolerance: a map
@@ -26,9 +28,9 @@ const TEMPLATE_HEADINGS: Record<TemplateSection, string> = {
 }
 
 /** Splits a map body into its `##` sections and reads the template out of them. */
-export function parseMapBody(raw: string): MapBody {
-  const sections = splitSections(raw ?? '')
-  const found = new Map<TemplateSection, MapSection>()
+export function parseMapBody(raw: string): SourceMapBody {
+  const sections = splitSections(raw)
+  const found = new Map<TemplateSection, SourceMapSection>()
 
   for (const section of sections) {
     const key = HEADING_ALIASES[normaliseHeading(section.heading)]
@@ -62,7 +64,7 @@ export function parseMapBody(raw: string): MapBody {
  * Reads one Decisions-so-far bullet: `[Title](url) — gist`. The dash may be an em dash, en dash,
  * or hyphen, and a bullet that matches nothing at all still survives as its own title.
  */
-export function parseDecision(item: string): Decision {
+function parseDecision(item: string): SourceMapBody['decisions'][number] {
   const linked = /^\[(.+?)\]\((\S+?)\)\s*(?:[—–-]\s*(.*))?$/s.exec(item)
   if (linked) {
     return {
@@ -85,8 +87,8 @@ export function parseDecision(item: string): Decision {
  * Every `##`-level block, in order. Deeper headings stay inside their section rather than starting
  * a new one, and content above the first heading is dropped — the template has none.
  */
-function splitSections(raw: string): MapSection[] {
-  const sections: MapSection[] = []
+function splitSections(raw: string): SourceMapSection[] {
+  const sections: SourceMapSection[] = []
   let heading: string | null = null
   let buffer: string[] = []
 
@@ -109,7 +111,7 @@ function splitSections(raw: string): MapSection[] {
   return sections
 }
 
-function toSection(heading: string, body: string): MapSection {
+function toSection(heading: string, body: string): SourceMapSection {
   const text = body.trim()
   return { heading, text, items: toItems(text) }
 }

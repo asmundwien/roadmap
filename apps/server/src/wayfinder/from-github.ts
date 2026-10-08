@@ -1,135 +1,183 @@
-import type { Blocker, Project, ProjectKey, Ticket, WayfinderMap } from '@roadmap/contracts'
 import type { FetchedMap, RawSubIssue } from '../github/map-query.ts'
+import type {
+  AdapterSlice,
+  Completeness,
+  SourceBlocker,
+  SourceMapContent,
+  SourceProjectKey,
+  SourceProvenance,
+  SourceTicketContent,
+} from '../observation/source.ts'
+import { observedAttempt } from '../observation/source.ts'
 import { parseMapBody } from './map-body.ts'
-import { deriveTicketState, frontierOf, ticketTypeEvidenceFromLabels } from './tickets.ts'
+import { ticketTypeEvidenceFromLabels } from './tickets.ts'
 
-/** Turns one map's raw GraphQL payload into the domain object the views read. */
-export function toWayfinderMap(
-  fetched: FetchedMap,
-  project: ProjectKey = githubProjectKey(fetched.ref.nameWithOwner),
-  resolveProject: (nameWithOwner: string) => ProjectKey | undefined = githubProjectKey,
-): WayfinderMap {
+interface GitHubMapContext {
+  readonly project: SourceProjectKey
+  readonly repositoryId: string
+  readonly connectionId: string
+  readonly resolveProject: (
+    nameWithOwner: string,
+    repositoryId?: string,
+  ) => SourceProjectKey | undefined
+}
+
+/** Constructs private evidence only after the provider has refined a named map response. */
+export function observeGitHubMap(fetched: FetchedMap, context: GitHubMapContext): AdapterSlice {
+  if (
+    context.project.integration !== 'github' ||
+    fetched.issue.number !== fetched.ref.number ||
+    (fetched.repository.databaseId !== undefined &&
+      String(fetched.repository.databaseId) !== context.repositoryId)
+  ) {
+    throw new Error('GitHub map identity does not match its admitted scope.')
+  }
   const { issue } = fetched
+  const key = { project: context.project, mapId: String(issue.number) }
+  const provenance: SourceProvenance = {
+    integration: 'github',
+    connectionId: context.connectionId,
+    repositoryId: context.repositoryId,
+    stage: 'map-read',
+  }
   const rawTickets = issue.subIssues?.nodes ?? []
-  const tickets = rawTickets.map((ticket) => toTicket(ticket, resolveProject))
-  const summary = issue.subIssuesSummary
-  return {
-    project,
-    id: String(issue.number),
+  const parsedTickets = rawTickets.map((ticket) =>
+    ticketContent(ticket, key, provenance, context.resolveProject),
+  )
+  const tickets = parsedTickets.map((ticket) => ticket.value)
+  const membershipCompleteness = fetched.ticketsCompleteness
+  const body = parseMapBody(issue.body)
+  const map: SourceMapContent = {
+    key,
     displayId: `#${issue.number}`,
     title: issue.title,
-    url: issue.url,
-    isOpen: issue.state === 'OPEN',
-    updatedAt: parseTime(issue.updatedAt),
-    closedAt: issue.closedAt === null ? undefined : parseTime(issue.closedAt),
-    body: parseMapBody(issue.body ?? ''),
-    tickets,
-    frontier: frontierOf(tickets),
-    progress: {
-      total: summary?.total ?? tickets.length,
-      completed: summary?.completed ?? tickets.filter((ticket) => ticket.state === 'closed').length,
-    },
-    ticketsComplete: !(issue.subIssues?.pageInfo.hasNextPage ?? false),
-    warnings: [],
+    source: { kind: 'issue', url: issue.url },
+    status: issue.state === 'OPEN' ? 'open' : 'closed',
+    updatedAt: Date.parse(issue.updatedAt),
+    closedAt: issue.closedAt === null ? undefined : Date.parse(issue.closedAt),
+    body,
+    progress:
+      issue.subIssuesSummary === null
+        ? null
+        : {
+            total: issue.subIssuesSummary.total,
+            completed: issue.subIssuesSummary.completed,
+          },
+    unidentifiedTickets: [],
+    warnings: body.missingSections.map((section) => `Missing map section: ${section}.`),
+  }
+  const times = { attemptedAt: fetched.attemptedAt, observedAt: fetched.observedAt, provenance }
+  return {
+    attempts: [
+      observedAttempt({
+        kind: 'observed',
+        scope: { kind: 'map', map: key },
+        ...times,
+        completeness:
+          map.progress === null
+            ? { kind: 'incomplete', reason: 'unreadable' }
+            : { kind: 'complete' },
+        value: map,
+      }),
+      observedAttempt({
+        kind: 'observed',
+        scope: { kind: 'tickets-membership', map: key },
+        ...times,
+        completeness: membershipCompleteness,
+        value: { members: tickets.map((ticket) => ticket.key) },
+      }),
+      ...parsedTickets.map((ticket) =>
+        observedAttempt({
+          kind: 'observed',
+          scope: { kind: 'ticket', ticket: ticket.value.key },
+          ...times,
+          completeness: ticket.completeness,
+          value: ticket.value,
+        }),
+      ),
+    ],
   }
 }
-function toTicket(
+
+function ticketContent(
   raw: RawSubIssue,
-  resolveProject: (nameWithOwner: string) => ProjectKey | undefined,
-): Ticket {
+  map: SourceMapContent['key'],
+  provenance: SourceProvenance,
+  resolveProject: GitHubMapContext['resolveProject'],
+) {
   const labels = (raw.labels?.nodes ?? []).map((label) => label.name)
   const assignees = (raw.assignees?.nodes ?? []).map((assignee) => ({
     name: assignee.login,
     url: assignee.url,
     avatarUrl: assignee.avatarUrl,
   }))
-  const blockedBy: Blocker[] = (raw.blockedBy?.nodes ?? []).map((blocker) => ({
-    project:
-      resolveProject(blocker.repository.nameWithOwner) ??
-      githubProjectKey(blocker.repository.nameWithOwner),
-    ticketId: String(blocker.number),
-    displayId: `#${blocker.number}`,
-    title: blocker.title,
-    url: blocker.url,
-    state: blocker.state === 'OPEN' ? 'open' : 'closed',
-  }))
-
-  const isOpen = raw.state === 'OPEN'
-  const isClaimed = assignees.length > 0
-  const hasOpenBlockers = blockedBy.some((blocker) => blocker.state !== 'closed')
-
-  return {
-    id: String(raw.number),
+  const blockedBy: SourceBlocker[] = (raw.blockedBy?.nodes ?? []).map((blocker) => {
+    const nameWithOwner = blocker.repository.nameWithOwner
+    const repositoryId =
+      blocker.repository.databaseId === undefined
+        ? undefined
+        : String(blocker.repository.databaseId)
+    const project = resolveProject(nameWithOwner, repositoryId)
+    return {
+      reference: project
+        ? { kind: 'registered', project, ticketId: String(blocker.number) }
+        : {
+            kind: 'external',
+            integration: 'github',
+            nameWithOwner,
+            ticketId: String(blocker.number),
+            ...(repositoryId === undefined ? {} : { repositoryId }),
+          },
+      displayId: `#${blocker.number}`,
+      title: blocker.title,
+      url: blocker.url,
+      state: blocker.state === 'OPEN' ? 'open' : 'closed',
+      provenance,
+    }
+  })
+  const blockersComplete =
+    raw.blockedBy !== null &&
+    raw.blockedBy.nodes !== null &&
+    raw.blockedBy.totalCount === blockedBy.length &&
+    !raw.blockedBy.pageInfo.hasNextPage
+  const warnings: string[] = []
+  if (!blockersComplete) warnings.push('Blocker membership is incomplete.')
+  if (
+    raw.labels === null ||
+    raw.labels.nodes === null ||
+    raw.labels.pageInfo.hasNextPage ||
+    raw.labels.totalCount > labels.length
+  )
+    warnings.push('Ticket labels are incomplete.')
+  if (
+    raw.assignees === null ||
+    raw.assignees.nodes === null ||
+    raw.assignees.pageInfo.hasNextPage ||
+    raw.assignees.totalCount > assignees.length
+  )
+    warnings.push('Ticket assignees are incomplete.')
+  const completeness: Completeness = [raw.blockedBy, raw.labels, raw.assignees].some(
+    (connection) => connection === null || connection.nodes === null,
+  )
+    ? { kind: 'incomplete', reason: 'unreadable' }
+    : warnings.length > 0
+      ? { kind: 'incomplete', reason: 'pagination' }
+      : { kind: 'complete' }
+  const value: SourceTicketContent = {
+    key: { map, ticketId: String(raw.number) },
     displayId: `#${raw.number}`,
     title: raw.title,
-    url: raw.url,
-    body: raw.body ?? '',
+    source: { kind: 'issue', url: raw.url },
+    body: raw.body,
     typeEvidence: ticketTypeEvidenceFromLabels(labels),
-    state: deriveTicketState({ isOpen, isClaimed, hasOpenBlockers }),
-    isClaimed,
-    isBlocked: hasOpenBlockers,
-    createdAt: parseTime(raw.createdAt),
-    closedAt: raw.closedAt === null ? undefined : parseTime(raw.closedAt),
+    status: raw.state === 'OPEN' ? 'open' : 'closed',
+    isClaimed: assignees.length > 0,
+    createdAt: Date.parse(raw.createdAt),
+    closedAt: raw.closedAt === null ? undefined : Date.parse(raw.closedAt),
     assignees,
     blockedBy,
-    blockersComplete: (raw.blockedBy?.totalCount ?? 0) <= blockedBy.length,
-    warnings: [],
+    blockersComplete,
+    warnings,
   }
-}
-
-/**
- * Groups maps by repo. A project can carry several: open ones are the live efforts, closed ones
- * the history — so they are split here rather than left to every view to re-derive.
- */
-export function toProjects(fetched: readonly FetchedMap[]): Project[] {
-  const projects = new Map<string, Project>()
-
-  for (const entry of fetched) {
-    const key = entry.ref.nameWithOwner
-    let project = projects.get(key)
-    if (!project) {
-      project = {
-        key: githubProjectKey(key),
-        name: key,
-        openMaps: [],
-        closedMaps: [],
-        warnings: [],
-      }
-      projects.set(key, project)
-    }
-
-    const map = toWayfinderMap(entry)
-    if (map.isOpen) project.openMaps.push(map)
-    else project.closedMaps.push(map)
-  }
-
-  // The head of openMaps is the active map; closed maps read newest stride first.
-  for (const project of projects.values()) {
-    project.openMaps.sort((a, b) => b.updatedAt - a.updatedAt)
-    project.closedMaps.sort((a, b) => (b.closedAt ?? b.updatedAt) - (a.closedAt ?? a.updatedAt))
-  }
-
-  // Projects with live efforts sort first; the rest are browsable history.
-  return [...projects.values()].sort(
-    (a, b) =>
-      Number(b.openMaps.length > 0) - Number(a.openMaps.length > 0) || a.name.localeCompare(b.name),
-  )
-}
-
-/**
- * The map a project is currently travelling — its most recently updated open map. Null means the
- * project is resting: every map closed, the trace intact. See CONTEXT.md for both terms.
- */
-export function activeMapOf(project: Project): WayfinderMap | null {
-  return project.openMaps[0] ?? null
-}
-
-/** GitHub timestamps are ISO 8601; an unparsable one sorts to the beginning rather than throwing. */
-function parseTime(iso: string): number {
-  const ms = Date.parse(iso)
-  return Number.isNaN(ms) ? 0 : ms
-}
-
-function githubProjectKey(nameWithOwner: string): ProjectKey {
-  return { integration: 'github', id: nameWithOwner }
+  return { value, completeness }
 }

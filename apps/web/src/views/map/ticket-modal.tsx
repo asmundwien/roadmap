@@ -22,6 +22,7 @@ import { useState } from 'react'
 import { type RoadmapViewState, useRoadmap } from '@/store/roadmap-provider'
 import { TicketMark } from '@/views/shared/ticket-mark'
 import { TICKET_STATE_META } from '@/views/shared/ticket-presentation'
+import { blockerNodeId } from './graph'
 import { Prose } from './prose'
 import styles from './ticket-modal.module.css'
 
@@ -171,7 +172,7 @@ function TicketContent({ map, ticket, roadmap, onOpenTicket, onOpenMap }: Ticket
           <SurfaceTitle>Blocked by</SurfaceTitle>
           <ul className={cx('blockers')}>
             {ticket.blockedBy.map((blocker) => (
-              <li key={`${blocker.project.integration}:${blocker.project.id}:${blocker.ticketId}`}>
+              <li key={blockerNodeId(blocker)}>
                 <BlockerItem map={map} blocker={blocker} onOpenTicket={onOpenTicket} />
               </li>
             ))}
@@ -207,10 +208,19 @@ type BlockerItemProps = {
 }
 
 function BlockerItem({ map, blocker, onOpenTicket }: BlockerItemProps) {
+  const { reference } = blocker
   const local =
-    blocker.project.integration === map.project.integration && blocker.project.id === map.project.id
+    reference.kind === 'registered' &&
+    reference.project.integration === map.project.integration &&
+    reference.project.id === map.project.id
       ? map.tickets.find((ticket) => ticket.id === blocker.ticketId)
       : undefined
+  const scope =
+    reference.kind === 'registered'
+      ? `${reference.project.integration}:${reference.project.id}`
+      : reference.kind === 'external'
+        ? `${reference.integration}:${reference.nameWithOwner}`
+        : reference.locator
   const identity = blocker.displayId ?? blocker.ticketId
   const title = blocker.title ?? identity
 
@@ -237,7 +247,7 @@ function BlockerItem({ map, blocker, onOpenTicket }: BlockerItemProps) {
         <span>{title}</span>
       )}
       <span className={cx('supporting')}>
-        {blocker.project.integration}:{blocker.project.id} · {identity} · {blocker.state}
+        {scope} · {identity} · {blocker.state}
         {blocker.url ? ' · source' : ' · No source link is available.'}
         {blocker.state === 'unknown' && ' Blocker state is unknown.'}
       </span>

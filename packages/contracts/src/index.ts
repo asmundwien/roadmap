@@ -1,3 +1,7 @@
+import type { Blocker } from './blocker.ts'
+
+export type { Blocker } from './blocker.ts'
+
 export type { Command, Query } from './operations.ts'
 
 export type RecognizedTicketType = 'research' | 'prototype' | 'grilling' | 'task'
@@ -41,17 +45,7 @@ export interface Assignee {
   avatarUrl?: string
 }
 
-export type BlockerState = 'open' | 'closed' | 'unknown'
-
-/** One end of a blocked-by edge, scoped to the project the blocker lives in. */
-export interface Blocker {
-  project: ProjectKey
-  ticketId: string
-  displayId?: string
-  title?: string
-  url?: string
-  state: BlockerState
-}
+export type BlockerState = Blocker['state']
 
 export interface Ticket {
   id: string
@@ -135,7 +129,8 @@ export interface WayfinderMap {
   tickets: Ticket[]
   /** Open, unblocked, unclaimed tickets in map order — what a session can take right now. */
   frontier: Ticket[]
-  progress: MapProgress
+  /** Null when source evidence cannot establish aggregate ticket counts. */
+  progress: MapProgress | null
   /** False when some ticket records were omitted or a ticket directory drifted out of shape. */
   ticketsComplete: boolean
   /** Human drift signals for the map itself. */
