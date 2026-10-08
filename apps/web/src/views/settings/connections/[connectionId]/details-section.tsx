@@ -48,7 +48,7 @@ export function DetailsSection({ connection }: DetailsSectionProps) {
         setNotice(`${connection.name} renamed.`)
       }
     } catch {
-      setError('The server did not confirm the change. Wait for live state before retrying.')
+      setError('The change may have completed. Check the relevant configuration before retrying.')
     } finally {
       setBusy(false)
     }

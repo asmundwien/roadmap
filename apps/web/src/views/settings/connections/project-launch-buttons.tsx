@@ -30,7 +30,9 @@ export function ProjectLaunchButtons({ project }: ProjectLaunchButtonsProps) {
       })
       if (!result.ok) setError(result.error.message)
     } catch {
-      setError('The server did not confirm the operation. Wait for live state before retrying.')
+      setError(
+        'The native action may have completed. Roadmap cannot verify a lost launch reply; retrying may repeat it.',
+      )
     } finally {
       setBusy(false)
     }

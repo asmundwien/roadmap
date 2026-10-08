@@ -283,7 +283,7 @@ function AutomationSection({ roadmap, control, evidence, map, ticket }: Automati
     } catch {
       setFeedback({
         kind: 'error',
-        text: 'The server did not confirm the Automation override. Wait for live state before retrying.',
+        text: 'The Automation override may have been admitted. Check its recorded stage evidence before another attempt.',
       })
     }
   }

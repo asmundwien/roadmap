@@ -12,9 +12,13 @@ Roadmap is a pnpm workspace:
 - `packages/contracts` owns browser-safe Zod 4 operation and wire schemas, inferred request types, shared domain types, and the remaining state/result codecs.
 - `packages/ui` is the design system: tokens and presentational components, with no domain knowledge.
 
-The server sends full state replacements over WebSocket. HTTP carries queries and commands. The browser distinguishes attributable pre-admission rejection from uncertain delivery, retains live state on non-admission, and never receives credentials. HTTP delivery has no automatic retries, replay, or receipts.
+The server sends full state replacements over WebSocket. HTTP carries queries and commands. Only a validated baseline from the current socket generation establishes browser authority. HTTP captures that authority when a request starts and cannot seed startup state. A valid different-session HTTP outcome can initiate fresh WebSocket synchronization, but cannot replace state itself. The browser never receives credentials.
 
-See [docs/architecture.md](docs/architecture.md) for ownership, the HTTP admission and failure contract, and the remaining public-read cutover. [CONTEXT.md](CONTEXT.md) defines the domain language.
+Before the first authoritative state, the provider shows an explicit waiting status rather than a fabricated empty roadmap. Previously accepted facts remain visible through disconnect and reconnect, with a retained-state status until a valid baseline establishes synchronization. An open socket alone is not synchronization. Server Connection degradation and Project reachability remain separate facts.
+
+The browser distinguishes attributable pre-admission rejection, decoded application outcome, and completion unknown after response loss. A newer snapshot is not a universal receipt. A lost host-launch reply without durable operation-specific evidence stays unknown. There is no automatic completion reconciliation, HTTP retry, replay, or receipt mechanism.
+
+See [docs/architecture.md](docs/architecture.md) for the authority transition and operation-evidence tables, the HTTP admission and failure contract, and the remaining public-read cutover. It records the implementation contract for [What establishes the authoritative server session across HTTP and WebSocket?](https://github.com/asmundwien/roadmap/issues/107), not a claim of completed runtime proof or repository-wide architecture enforcement. [CONTEXT.md](CONTEXT.md) defines the domain language.
 
 ## Development
 

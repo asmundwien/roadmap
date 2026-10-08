@@ -23,7 +23,7 @@ import { WorkspaceFolderSelector } from '@/views/shared/workspace-folder-selecto
 type ProjectImportPageProps = { connectionId: string }
 
 export function ProjectImportPage({ connectionId }: ProjectImportPageProps) {
-  const { connections, capturedAt, supportedIntegrations, configuration } = useRoadmap()
+  const { connections, supportedIntegrations, configuration } = useRoadmap()
   const connection = connections.find((candidate) => candidate.id === connectionId)
 
   if (!connection) {
@@ -32,9 +32,7 @@ export function ProjectImportPage({ connectionId }: ProjectImportPageProps) {
         <PageHeader>
           <div>
             <PageEyebrow>Settings / Connections</PageEyebrow>
-            <PageTitle>
-              {capturedAt === null ? 'Loading connection' : 'Connection not found'}
-            </PageTitle>
+            <PageTitle>Connection not found</PageTitle>
           </div>
         </PageHeader>
         <Link href={routePaths.connections}>Back to Connections</Link>
@@ -104,7 +102,7 @@ function ProjectImportForm({
       setGeneralError(general)
     } catch {
       setGeneralError(
-        'The server did not confirm registration. Wait for live state before retrying.',
+        'Registration may have completed. Check the canonical Project configuration before retrying.',
       )
     } finally {
       setSaving(false)

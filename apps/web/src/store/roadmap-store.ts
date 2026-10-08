@@ -39,11 +39,21 @@ export interface CommandActivity {
   error: SafeError | null
 }
 
-interface RoadmapStoreSnapshot {
+export type RoadmapStoreSnapshot = {
   transport: TransportLiveness
-  /** Last authoritative replacement; retained while disconnected. */
-  state: ApplicationState | null
   command: CommandActivity
+} & (
+  | { synchronization: 'not-ready'; state: null }
+  | { synchronization: 'synchronized' | 'retained'; state: ApplicationState }
+)
+
+interface EstablishedAuthority {
+  readonly baseline: ApplicationState
+}
+
+interface SocketGeneration {
+  readonly socket: SocketLike
+  authority: EstablishedAuthority | null
 }
 
 export interface RoadmapStore {
@@ -72,6 +82,7 @@ export interface RoadmapStoreOptions {
 
 const EMPTY_SNAPSHOT: RoadmapStoreSnapshot = {
   transport: 'connecting',
+  synchronization: 'not-ready',
   state: null,
   command: { inFlight: false, error: null },
 }
@@ -93,61 +104,146 @@ export function createRoadmapStore(
 
   let snapshot: RoadmapStoreSnapshot = EMPTY_SNAPSHOT
   const listeners = new Set<() => void>()
-  const retiredEpochs = new Set<string>()
   let activeCommands = 0
-  let socket: SocketLike | null = null
+  let generation: SocketGeneration | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let attempts = 0
   let watchers = 0
 
-  function publish(patch: Partial<RoadmapStoreSnapshot>): void {
-    snapshot = { ...snapshot, ...patch }
+  function publish(next: RoadmapStoreSnapshot): void {
+    snapshot = next
     for (const listener of listeners) listener()
   }
 
-  function applyState(next: ApplicationState): boolean {
-    const current = snapshot.state
-    if (current !== null) {
-      if (current.serverEpoch === next.serverEpoch) {
-        if (next.stateSequence <= current.stateSequence) return false
-      } else {
-        if (retiredEpochs.has(next.serverEpoch)) return false
-        retiredEpochs.add(current.serverEpoch)
-      }
+  function retainState(transport: TransportLiveness): void {
+    if (snapshot.state === null) {
+      publish({ transport, synchronization: 'not-ready', state: null, command: snapshot.command })
+    } else {
+      publish({
+        transport,
+        synchronization: 'retained',
+        state: snapshot.state,
+        command: snapshot.command,
+      })
     }
-    snapshot = { ...snapshot, state: next }
-    return true
+  }
+
+  function publishState(state: ApplicationState): void {
+    publish({
+      transport: 'live',
+      synchronization: 'synchronized',
+      state,
+      command: snapshot.command,
+    })
+  }
+
+  function publishCommand(error: SafeError | null): void {
+    publish({ ...snapshot, command: { inFlight: activeCommands > 0, error } })
+  }
+
+  function clearReconnect(): void {
+    if (reconnectTimer === null) return
+    clearTimeout(reconnectTimer)
+    reconnectTimer = null
+  }
+
+  function closeRetired(retired: SocketGeneration | null): void {
+    if (retired === null) return
+    try {
+      retired.socket.close()
+    } catch {
+      // Its callbacks and request authority have already been invalidated.
+    }
+  }
+
+  function scheduleReconnect(): void {
+    if (watchers === 0 || generation !== null || reconnectTimer !== null) return
+    const timer = setTimeout(() => {
+      if (reconnectTimer !== timer) return
+      reconnectTimer = null
+      if (watchers > 0) connect()
+    }, reconnectDelayMs(attempts++))
+    reconnectTimer = timer
+  }
+
+  function acceptSocketState(current: SocketGeneration, next: ApplicationState): void {
+    if (generation !== current || watchers === 0) return
+    if (current.authority === null) {
+      current.authority = { baseline: next }
+      const previous = snapshot.state
+      const state =
+        previous !== null &&
+        previous.serverEpoch === next.serverEpoch &&
+        previous.stateSequence >= next.stateSequence
+          ? previous
+          : next
+      publishState(state)
+      return
+    }
+    if (
+      next.serverEpoch !== current.authority.baseline.serverEpoch ||
+      snapshot.synchronization !== 'synchronized' ||
+      next.stateSequence <= snapshot.state.stateSequence
+    )
+      return
+    publishState(next)
   }
 
   function connect(): void {
-    const current = createSocket(socketUrl.href)
-    socket = current
+    if (watchers === 0 || generation !== null || reconnectTimer !== null) return
+    let socket: SocketLike
+    try {
+      socket = createSocket(socketUrl.href)
+    } catch {
+      retainState('disconnected')
+      scheduleReconnect()
+      return
+    }
+    const current: SocketGeneration = { socket, authority: null }
+    generation = current
+    retainState('connecting')
 
-    current.addEventListener('open', () => {
-      if (socket !== current) return
+    socket.addEventListener('open', () => {
+      if (generation !== current || watchers === 0) return
       attempts = 0
-      publish({ transport: 'live' })
+      publish({ ...snapshot, transport: 'live' })
     })
 
-    current.addEventListener('message', (event) => {
-      if (socket !== current) return
+    socket.addEventListener('message', (event) => {
+      if (generation !== current || watchers === 0) return
       const message = parseJson(event.data)
       if (message === null) return
       const decoded = stateEnvelopeCodec.decode(message)
       if (!decoded.ok) return
-      const changed = applyState(decoded.value.state)
-      if (changed || snapshot.transport !== 'live') publish({ transport: 'live' })
+      acceptSocketState(current, decoded.value.state)
     })
 
-    current.addEventListener('close', () => {
-      if (socket !== current) return
-      socket = null
-      publish({ transport: 'disconnected' })
-      reconnectTimer = setTimeout(() => {
-        reconnectTimer = null
-        if (watchers > 0) connect()
-      }, reconnectDelayMs(attempts++))
+    socket.addEventListener('close', () => {
+      if (generation !== current || watchers === 0) return
+      generation = null
+      retainState('disconnected')
+      scheduleReconnect()
     })
+  }
+
+  function applyCommandState(authority: EstablishedAuthority | null, next: ApplicationState): void {
+    if (
+      authority === null ||
+      watchers === 0 ||
+      generation?.authority !== authority ||
+      snapshot.synchronization !== 'synchronized'
+    )
+      return
+    if (next.serverEpoch !== authority.baseline.serverEpoch) {
+      const retired = generation
+      generation = null
+      clearReconnect()
+      retainState('connecting')
+      closeRetired(retired)
+      connect()
+      return
+    }
+    if (next.stateSequence > snapshot.state.stateSequence) publishState(next)
   }
 
   async function query(queryValue: Query): Promise<QueryDelivery> {
@@ -176,9 +272,11 @@ export function createRoadmapStore(
   }
 
   async function execute(command: Command): Promise<CommandDelivery> {
+    const authority = generation?.authority ?? null
     activeCommands += 1
-    publish({ command: { inFlight: true, error: null } })
+    let completionError: SafeError | null = null
     try {
+      publishCommand(null)
       const requestId = crypto.randomUUID()
       const response = await fetchRequest(new URL('/api/command', httpUrl), {
         method: 'POST',
@@ -189,7 +287,7 @@ export function createRoadmapStore(
       const body: unknown = await response.json()
       const rejection = attributableRejection(body, response.status, 'command', requestId)
       if (rejection !== null) {
-        publish({ command: { inFlight: activeCommands > 1, error: rejection.error } })
+        completionError = rejection.error
         return rejection
       }
       if (response.status !== 200) {
@@ -199,45 +297,35 @@ export function createRoadmapStore(
       if (!decoded.ok || !commandOutcomeMatches(command, decoded.value.outcome)) {
         throw new Error('Server returned an invalid command result.')
       }
-      applyState(decoded.value.outcome.state)
-      publish({
-        command: {
-          inFlight: activeCommands > 1,
-          error: decoded.value.outcome.ok ? null : decoded.value.outcome.error,
-        },
-      })
+      completionError = decoded.value.outcome.ok ? null : decoded.value.outcome.error
+      applyCommandState(authority, decoded.value.outcome.state)
       return decoded.value.outcome
-    } catch (error) {
-      const failure: SafeError = {
+    } catch {
+      completionError = {
         code: 'transport-failed',
-        message: 'The command may have completed; wait for live state before retrying.',
+        message: 'The command may have completed, but its completion is unknown.',
       }
-      publish({ command: { inFlight: activeCommands > 1, error: failure } })
-      throw error
+      throw new Error(completionError.message)
     } finally {
       activeCommands -= 1
-      if (activeCommands === 0 && snapshot.command.inFlight) {
-        publish({ command: { ...snapshot.command, inFlight: false } })
-      }
+      publishCommand(completionError)
     }
   }
 
   function start(): () => void {
     watchers += 1
-    if (watchers === 1 && socket === null && reconnectTimer === null) connect()
+    if (watchers === 1) connect()
+    let stopped = false
     return () => {
+      if (stopped) return
+      stopped = true
       watchers -= 1
       if (watchers > 0) return
-      if (reconnectTimer !== null) {
-        clearTimeout(reconnectTimer)
-        reconnectTimer = null
-      }
-      if (socket !== null) {
-        const closing = socket
-        socket = null
-        closing.close()
-      }
-      publish({ transport: 'connecting' })
+      clearReconnect()
+      const retired = generation
+      generation = null
+      retainState('connecting')
+      closeRetired(retired)
     }
   }
 

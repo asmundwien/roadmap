@@ -14,9 +14,41 @@ WebSocket carries full state replacements. HTTP carries `query` and `execute` re
 
 ## Web application
 
-`apps/web/src/store` is the SPA data layer. It replaces local state with complete WebSocket snapshots and sends HTTP queries and commands. It also handles epoch and sequence ordering, transport liveness, stale-state retention, command status and errors, and capped reconnect backoff.
+`apps/web/src/store` is the SPA data layer. It accepts complete state replacements under current-generation authority, sends HTTP queries and commands, and owns synchronization, socket liveness, retained facts, command status and errors, and capped reconnect backoff.
 
-`RoadmapProvider` and `useRoadmap` expose the current roadmap to views. Views never fetch directly.
+`RoadmapProvider` owns the store start effect and subscribes even while initial children are gated. Before any authoritative state exists it renders an explicit waiting status, not empty Projects, default configuration, or a fabricated capture time. Once real state exists, children remain mounted through disconnect and reconnect. `useRoadmap` exposes the actual state fields, a real `capturedAt`, existing query and execute methods, and `synchronization: 'synchronized' | 'retained'`. Views never fetch directly.
+
+### Browser authority and synchronization
+
+The contract for [What establishes the authoritative server session across HTTP and WebSocket?](https://github.com/asmundwien/roadmap/issues/107) separates state authority from operation delivery. Each new socket has a distinct generation. Only the first validated state from the current generation establishes its authoritative server session. Socket open alone proves no application synchronization. Epoch identifiers are opaque identities, not clocks; sequence numbers are comparable only within the same established epoch.
+
+`RoadmapStore.getSnapshot` retains transport and command activity and represents application synchronization as a discriminated union:
+
+- `synchronization: 'not-ready'` requires `state: null`.
+- `synchronization: 'synchronized'` requires a real `ApplicationState` accepted under the current generation.
+- `synchronization: 'retained'` requires a previously accepted `ApplicationState` without current-generation synchronization.
+
+Socket liveness is independently `connecting`, `live`, or `disconnected`. A live socket can still be not-ready or retained while awaiting a valid baseline. The provider exposes a global retained-state status even in that case. Browser synchronization says nothing about server Connection degradation or Project reachability; a synchronized snapshot can contain either.
+
+Every HTTP request captures its authority at invocation: the current socket generation and its established baseline identity, or no authority if that generation has no baseline. Settlement never supplies missing request-start provenance. An independently valid operation outcome remains usable even when its enclosed state cannot be accepted. Queries currently carry no state and retain the HTTP admission and delivery semantics below.
+
+| Event and provenance | State authority and ordering | Synchronization |
+| --- | --- | --- |
+| Startup with no accepted state | No epoch or state is established. HTTP cannot seed either. | Not-ready. |
+| Current socket opens, or sends an invalid or withheld baseline | Opening and invalid input establish no authority. | Not-ready, or retained if prior facts exist. |
+| First valid state on the current socket generation | Establish its epoch. A different epoch may replace prior facts without comparing sequence numbers across epochs. | Synchronized. |
+| Later state on the established current socket, same epoch | Accept only a strictly greater sequence; equal or older state leaves the accepted maximum intact. | Synchronized. |
+| Later state on the established current socket, different epoch | Ignore it; the same socket cannot establish a successor epoch. | Unchanged. |
+| Reconnect baseline, same epoch, equal or older sequence | Establish the new generation's authority but retain the previous maximum state. | Synchronized after that valid baseline. |
+| Reconnect baseline, same epoch, newer sequence | Establish the new generation's authority and advance the state. | Synchronized. |
+| Reconnect baseline, different epoch | Establish the new generation's epoch and accept its baseline; no epoch chronology is inferred. | Synchronized. |
+| HTTP outcome started under still-current established authority, same epoch | Its state may advance only at a strictly greater sequence. Equal or older state does not regress facts. | Unchanged. |
+| HTTP outcome started under still-current established authority, different epoch | Return the valid outcome but never adopt its enclosed state. Retire the socket generation and start a fresh one to obtain a valid authoritative baseline. | Retained until the fresh baseline. |
+| HTTP outcome started before a baseline, under retired authority, before stop/restart, or under otherwise obsolete authority | Return the independently valid outcome without changing state or triggering synchronization. | Unchanged. |
+| Callback from a retired socket generation | Ignore it; it cannot establish authority, replace state, or change current transport status. | Unchanged. |
+| Current socket disconnects, store stops, or reconnect begins | Retire current authority and retain any accepted facts. | Retained with state, otherwise not-ready. |
+
+An unknown command completion survives socket state transitions. Reopening a socket or accepting a newer state does not clear that uncertainty. There is no automatic completion reconciliation, HTTP retry, replay, or receipt mechanism.
 
 `apps/web/src/main.tsx` mounts React Router 8.4's declarative `BrowserRouter`. `App.tsx` declares `Routes` and `Route` elements. `apps/web/src/router.ts` exports canonical route patterns and resource path helpers built with the library's `generatePath`.
 
@@ -113,6 +145,22 @@ Admitted replies must have HTTP 200, pass the outgoing result decoder, and have 
 The default body cap is 64 KiB. The transport buffers at most the cap, rejects declared excess before reading the body, and stops consuming on the first streamed excess without waiting for EOF or draining unbounded input. It pauses input, sends HTTP 413 with `Connection: close` when possible, and closes the socket after response flush. Request and response error handlers contain late stream errors, peer close, synchronous write throws, and asynchronous write failures.
 
 Diagnostics contain fixed safe categories, never raw request values, credentials, or exception messages and causes. Request decoder issues report paths and categories rather than input values. Outgoing application state and results must pass strict decoding both as objects and after JSON serialization, so getters or `toJSON` cannot introduce credentials into an otherwise accepted reply.
+
+### Operation evidence and completion uncertainty
+
+Delivery evidence and state authority answer different questions. Accepting an operation outcome does not require accepting its enclosed state, and accepting authoritative state does not prove completion of an earlier operation.
+
+| Evidence | What it establishes | What it does not establish |
+| --- | --- | --- |
+| Attributable, decoded pre-admission rejection with matching request family, UUID, and status | This HTTP attempt did not reach application admission. | An application outcome or a result for another attempt. |
+| Decoded HTTP 200 application outcome with legal meaning for the requested operation | That operation's reported outcome, including application-level rejection. | Authority to adopt its state outside the request-start provenance rules. |
+| Lost, unreadable, malformed, wrongly attributed, or otherwise untrustworthy response | Completion unknown; effects may already have occurred. | Non-admission, failure, or permission to replay. |
+| Relevant canonical configuration identity or version in authoritative state | Only the relevant current configuration fact, such as the targeted identity or version now being present. | A universal receipt, attribution of that fact to a lost attempt, or unrelated host-effect completion. |
+| Durable Automation evidence for the exact opportunity and stage | Only that stage's recorded admission or stage facts. | Another stage's admission, process success beyond recorded evidence, or completion of an unrelated command. |
+| A newer snapshot, unrelated sequence advance, or a live socket | State advancement or transport liveness under their respective contracts. | Receipt or completion of an uncertain operation. |
+| A lost host-launch reply without an operation-specific durable trace | Completion stays unknown even after synchronization. | Whether the host effect occurred; absence of a trace is not failure evidence. |
+
+These limits describe the meaning of existing evidence, not an automatic reconciliation policy. The browser does not retry or replay an uncertain operation, infer failure after reconnect, or convert arbitrary live state into a receipt.
 
 ### Contracts ownership and remaining cutover
 

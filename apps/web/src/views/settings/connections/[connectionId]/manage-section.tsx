@@ -37,7 +37,7 @@ export function ManageSection({ connection }: ManageSectionProps) {
       }
       return true
     } catch {
-      setError('The server did not confirm the change. Wait for live state before retrying.')
+      setError('The change may have completed. Check the relevant configuration before retrying.')
       return false
     } finally {
       setBusy(false)

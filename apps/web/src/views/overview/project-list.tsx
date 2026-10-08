@@ -11,7 +11,7 @@ import type { AttentionItem, ProjectPortfolio, ProjectPresentation } from './pro
 import { formatMonth, formatRecency } from './recency'
 
 type OverviewHeaderProps = {
-  capturedAt: number | null
+  capturedAt: number
   portfolio: ProjectPortfolio
 }
 
@@ -19,37 +19,12 @@ export function OverviewHeader({ capturedAt, portfolio }: OverviewHeaderProps) {
   return (
     <PageHeader>
       <PageTitle>Roadmap</PageTitle>
-      <PageDescription>
-        The whole of things
-        {capturedAt !== null && ` · updated ${formatClock(capturedAt)}`}
-      </PageDescription>
+      <PageDescription>The whole of things · updated {formatClock(capturedAt)}</PageDescription>
       <PageDescription>
         {portfolio.projects.length} projects · {portfolio.active.length} active ·{' '}
         {portfolio.resting.length} at rest · {portfolio.attention.length} need attention
       </PageDescription>
     </PageHeader>
-  )
-}
-
-type OverviewConnectionStatusProps = {
-  capturedAt: number | null
-  transport: 'connecting' | 'live' | 'disconnected'
-}
-
-export function OverviewConnectionStatus({ capturedAt, transport }: OverviewConnectionStatusProps) {
-  return (
-    <>
-      {transport === 'disconnected' && (
-        <Alert>
-          Server unreachable, reconnecting.
-          {capturedAt !== null && ` Showing the snapshot from ${formatClock(capturedAt)}.`}
-        </Alert>
-      )}
-
-      {transport === 'connecting' && capturedAt === null && (
-        <Alert variant="info">Waiting for the server…</Alert>
-      )}
-    </>
   )
 }
 

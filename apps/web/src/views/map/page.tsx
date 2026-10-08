@@ -7,7 +7,7 @@ import classNames from 'classnames/bind'
 import { useNavigate } from 'react-router'
 import { Link } from '@/navigation'
 import { mapPath, projectSettingsPath, ticketPath } from '@/router'
-import { useRoadmap } from '@/store/roadmap-provider'
+import { type RoadmapViewState, useRoadmap } from '@/store/roadmap-provider'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
 import { sameProject } from '@/views/shared/settings-shared'
 import { MapContainer } from './map-container'
@@ -26,7 +26,7 @@ type MapPageProps = {
 
 export function MapPage({ projectKey, mapId, ticketId }: MapPageProps) {
   const navigate = useNavigate()
-  const { transport, projects, roadmapProjects, capturedAt, unreachable } = useRoadmap()
+  const { projects, roadmapProjects, unreachable } = useRoadmap()
   const registration = projects.find((candidate) => sameProject(candidate.key, projectKey))
   const source = roadmapProjects.find((candidate) => sameProject(candidate.key, projectKey))
   const project = projectWithSource(registration, source)
@@ -47,15 +47,11 @@ export function MapPage({ projectKey, mapId, ticketId }: MapPageProps) {
     <Page>
       <ProjectHeading projectKey={projectKey} project={project} registration={registration} />
       <ProjectNotices
-        transport={transport}
-        capturedAt={capturedAt}
         unavailable={unavailable}
         missingSources={missingSources}
         warnings={project?.warnings}
       />
-      {capturedAt !== null && !project && (
-        <Alert>This project is not present in the current roadmap snapshot.</Alert>
-      )}
+      {!project && <Alert>This project is not present in the current roadmap snapshot.</Alert>}
       {project && (
         <div className={cx('layout')}>
           <MapNavigation project={project} selectedMap={map} />
@@ -83,7 +79,7 @@ export function MapPage({ projectKey, mapId, ticketId }: MapPageProps) {
 type ProjectHeadingProps = {
   projectKey: ProjectKey
   project: Project | undefined
-  registration: ReturnType<typeof useRoadmap>['projects'][number] | undefined
+  registration: RoadmapViewState['projects'][number] | undefined
 }
 
 function ProjectHeading({ projectKey, project, registration }: ProjectHeadingProps) {
@@ -102,7 +98,7 @@ function ProjectHeading({ projectKey, project, registration }: ProjectHeadingPro
 }
 
 function projectWithSource(
-  registration: ReturnType<typeof useRoadmap>['projects'][number] | undefined,
+  registration: RoadmapViewState['projects'][number] | undefined,
   source: Project | undefined,
 ): Project | undefined {
   if (!registration) return source
@@ -160,19 +156,13 @@ function SelectedMap({ map, activeMapId, ticketId, onOpenTicket, onOpenMap }: Se
   )
 }
 
-type ProjectNoticesProps = Pick<ReturnType<typeof useRoadmap>, 'transport' | 'capturedAt'> & {
+type ProjectNoticesProps = {
   unavailable: string | null
   missingSources: Unreachable[]
   warnings: string[] | undefined
 }
 
-function ProjectNotices({
-  transport,
-  capturedAt,
-  unavailable,
-  missingSources,
-  warnings,
-}: ProjectNoticesProps) {
+function ProjectNotices({ unavailable, missingSources, warnings }: ProjectNoticesProps) {
   const sourceNotices = new Map(
     missingSources.map((entry) => [
       JSON.stringify([
@@ -190,14 +180,6 @@ function ProjectNotices({
 
   return (
     <>
-      {transport === 'disconnected' && (
-        <Alert>
-          {capturedAt === null
-            ? 'Server disconnected. Waiting for the first roadmap snapshot.'
-            : 'Server disconnected. Showing the last roadmap snapshot.'}
-        </Alert>
-      )}
-      {capturedAt === null && <Alert variant="info">Loading project data.</Alert>}
       {unavailable !== null && <Alert>Project unavailable: {unavailable}</Alert>}
       {Array.from(sourceNotices, ([key, entry]) => (
         <Alert key={key}>
@@ -215,9 +197,7 @@ function ProjectNotices({
 }
 
 function findMap(
-  project:
-    | Pick<ReturnType<typeof useRoadmap>['projects'][number], 'openMaps' | 'closedMaps'>
-    | undefined,
+  project: Pick<RoadmapViewState['projects'][number], 'openMaps' | 'closedMaps'> | undefined,
   mapId: string | null,
 ) {
   return mapId === null

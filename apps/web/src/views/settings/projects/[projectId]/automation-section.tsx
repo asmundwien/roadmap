@@ -46,7 +46,7 @@ export function AutomationSection({ project }: AutomationSectionProps) {
       })
       if (!outcome.ok) setError(outcome.error)
     } catch {
-      setError('The server did not confirm the change. Wait for live state before retrying.')
+      setError('The change may have completed. Check the relevant configuration before retrying.')
     } finally {
       setBusy(false)
     }

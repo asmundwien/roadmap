@@ -2,7 +2,7 @@
 
 A live visualization of wayfinder-organized efforts on GitHub and in local workspaces. The vocabulary
 here is what the views render; the wayfinder ticket-state terms (`closed`, `blocked`, `claimed`,
-`frontier`) are defined in code at `packages/contracts` and are not restated.
+`frontier`) are not restated.
 
 ## Language
 
@@ -146,6 +146,24 @@ _Avoid_: source, provider, backend, connector
 A configured instance of one Integration. It carries the identity and authorization context through
 which registered Projects reach that Integration; one Connection may serve several Projects.
 _Avoid_: account, credential, adapter instance
+
+**Authoritative server session**:
+The server session whose roadmap facts the browser currently accepts. A session's identity does not
+imply that it is earlier or later than another session.
+_Avoid_: latest server, newest epoch
+
+**Synchronization**:
+The browser's relationship to authoritative roadmap facts. Not-ready means no real state has been
+accepted. Synchronized means the browser has established current authority. Retained means it still
+shows previously accepted facts without current synchronization. This is separate from Connection
+degradation and Project reachability.
+_Avoid_: socket liveness, Connection health, empty roadmap
+
+**Completion unknown**:
+An operation whose trustworthy outcome is unavailable even though its effects may have occurred.
+Transport recovery or unrelated roadmap changes do not settle it. Only evidence specific to the
+operation can establish a relevant fact; missing evidence does not prove failure.
+_Avoid_: failed command, retryable command
 
 **Project registration**:
 Roadmap's durable declaration of one Project: an immutable admitted coupling of Connection,

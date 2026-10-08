@@ -37,11 +37,20 @@ function renderDetail(connectionId: string, connections: Connection[], initial =
   }
   const store: RoadmapStore = {
     subscribe: () => () => undefined,
-    getSnapshot: () => ({
-      transport: 'live',
-      state: initial ? state : null,
-      command: { inFlight: false, error: null },
-    }),
+    getSnapshot: () =>
+      initial
+        ? {
+            transport: 'live',
+            synchronization: 'synchronized',
+            state,
+            command: { inFlight: false, error: null },
+          }
+        : {
+            transport: 'live',
+            synchronization: 'not-ready',
+            state: null,
+            command: { inFlight: false, error: null },
+          },
     start: () => () => undefined,
     query: async () => {
       throw new Error('Unexpected query')
@@ -73,7 +82,6 @@ describe('ConnectionPage', () => {
   })
   it('waits for the first snapshot before reporting an unknown connection', () => {
     const markup = renderDetail('github/work', [], false)
-    expect(markup).toContain('Loading connection')
     expect(markup).not.toContain('Connection not found')
   })
 

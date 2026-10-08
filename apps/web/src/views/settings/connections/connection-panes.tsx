@@ -57,7 +57,9 @@ export function AddConnectionPane({
       }
       onStarted(outcome.result.operationId)
     } catch {
-      setError('The server did not confirm authorization. Wait for live state before retrying.')
+      setError(
+        'Authorization may have started. Check its operation status before starting another attempt.',
+      )
     } finally {
       setBusy(false)
     }

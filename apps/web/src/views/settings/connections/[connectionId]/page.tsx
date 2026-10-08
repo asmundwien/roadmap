@@ -15,7 +15,7 @@ const cx = classNames.bind(pageStyles)
 type ConnectionPageProps = { connectionId: string }
 
 export function ConnectionPage({ connectionId }: ConnectionPageProps) {
-  const { connections, capturedAt, supportedIntegrations, configuration } = useRoadmap()
+  const { connections, supportedIntegrations, configuration } = useRoadmap()
   const connection = connections.find((candidate) => candidate.id === connectionId)
 
   if (!connection) {
@@ -24,9 +24,7 @@ export function ConnectionPage({ connectionId }: ConnectionPageProps) {
         <PageHeader>
           <div>
             <PageEyebrow>Settings / Connections</PageEyebrow>
-            <PageTitle>
-              {capturedAt === null ? 'Loading connection' : 'Connection not found'}
-            </PageTitle>
+            <PageTitle>Connection not found</PageTitle>
           </div>
         </PageHeader>
         <Link href={routePaths.connections}>Back to Connections</Link>

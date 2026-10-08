@@ -1,4 +1,5 @@
 import type { ApplicationState, Snapshot } from '@roadmap/contracts'
+import { Alert } from '@roadmap/ui/alert'
 import {
   createContext,
   type ReactNode,
@@ -8,21 +9,25 @@ import {
   useSyncExternalStore,
 } from 'react'
 import { createStoreFromEnv } from './create-store'
-import type { CommandActivity, RoadmapStore, TransportLiveness } from './roadmap-store'
+import type {
+  CommandActivity,
+  RoadmapStore,
+  RoadmapStoreSnapshot,
+  TransportLiveness,
+} from './roadmap-store'
 
 const RoadmapContext = createContext<RoadmapStore | null>(null)
-const EMPTY_ROADMAP: Snapshot = { capturedAt: 0, projects: [], unreachable: [] }
 
 export interface RoadmapViewState {
   transport: TransportLiveness
+  synchronization: Exclude<RoadmapStoreSnapshot['synchronization'], 'not-ready'>
   projects: ApplicationState['projects']
   roadmapProjects: Snapshot['projects']
   connections: ApplicationState['connections']
   configuration: ApplicationState['configuration']
   automation: ApplicationState['automation']
   unreachable: Snapshot['unreachable']
-  /** Null until an authoritative ApplicationState has arrived. */
-  capturedAt: number | null
+  capturedAt: number
   supportedIntegrations: ApplicationState['supportedIntegrations']
   authorizationOperations: ApplicationState['authorizationOperations']
   configurationVersion: number
@@ -39,7 +44,29 @@ type RoadmapProviderProps = {
 /** Owns the single store the app renders from; injectable for prototypes and tests. */
 export function RoadmapProvider({ children, store }: RoadmapProviderProps) {
   const value = useMemo(() => store ?? createStoreFromEnv(), [store])
-  return <RoadmapContext.Provider value={value}>{children}</RoadmapContext.Provider>
+  const snapshot = useSyncExternalStore(value.subscribe, value.getSnapshot, value.getSnapshot)
+  useEffect(() => value.start(), [value])
+
+  if (snapshot.synchronization === 'not-ready') {
+    return (
+      <div role="status">
+        <Alert variant="info">Waiting for the first authoritative Roadmap state.</Alert>
+      </div>
+    )
+  }
+
+  return (
+    <RoadmapContext.Provider value={value}>
+      {snapshot.synchronization === 'retained' && (
+        <div role="status">
+          <Alert variant="info">
+            Showing the last authoritative Roadmap snapshot while synchronization is pending.
+          </Alert>
+        </div>
+      )}
+      {children}
+    </RoadmapContext.Provider>
+  )
 }
 
 /** Projects the application's roadmap while preserving transport liveness and stale-state truth. */
@@ -48,28 +75,25 @@ export function useRoadmap(): RoadmapViewState {
   if (!store) throw new Error('useRoadmap must be used inside a <RoadmapProvider>')
 
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
-  useEffect(() => store.start(), [store])
-  const state = snapshot.state
-  const roadmap = state?.roadmap ?? EMPTY_ROADMAP
+  if (snapshot.synchronization === 'not-ready') {
+    throw new Error('useRoadmap requires authoritative state from its provider')
+  }
+  const { state } = snapshot
+  const { roadmap } = state
 
   return {
     transport: snapshot.transport,
-    projects: state?.projects ?? [],
+    synchronization: snapshot.synchronization,
+    projects: state.projects,
     roadmapProjects: roadmap.projects,
-    connections: state?.connections ?? [],
-    automation: state?.automation ?? {
-      enabled: false,
-      enabledProjects: [],
-      availability: { status: 'unavailable', cause: 'Waiting for Roadmap state.' },
-      evidence: [],
-      overrides: [],
-    },
-    configuration: state?.configuration ?? { valid: true, issues: [], notices: [] },
+    connections: state.connections,
+    automation: state.automation,
+    configuration: state.configuration,
     unreachable: roadmap.unreachable,
-    capturedAt: state === null ? null : roadmap.capturedAt,
-    supportedIntegrations: state?.supportedIntegrations ?? [],
-    authorizationOperations: state?.authorizationOperations ?? [],
-    configurationVersion: state?.configurationVersion ?? 0,
+    capturedAt: roadmap.capturedAt,
+    supportedIntegrations: state.supportedIntegrations,
+    authorizationOperations: state.authorizationOperations,
+    configurationVersion: state.configurationVersion,
     command: snapshot.command,
     query: store.query,
     execute: store.execute,

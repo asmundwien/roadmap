@@ -52,7 +52,7 @@ export function DetailsSection({ project, connection }: DetailsSectionProps) {
       if (!outcome.ok) setError(outcome.error)
       else setNotice(`${project.name} renamed.`)
     } catch {
-      setError('The server did not confirm the change. Wait for live state before retrying.')
+      setError('The change may have completed. Check the relevant configuration before retrying.')
     } finally {
       setBusy(false)
     }

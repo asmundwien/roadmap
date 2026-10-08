@@ -72,6 +72,20 @@ function jsonResponse(value: unknown, status = 200): Response {
   })
 }
 
+const refreshCommand = {
+  type: 'refresh-project',
+  expectedConfigurationVersion: 1,
+  project: { integration: 'github', id: 'a/one' },
+} satisfies Parameters<ReturnType<typeof createRoadmapStore>['execute']>[0]
+
+function refreshOutcome(next: ApplicationState): CommandOutcome {
+  return {
+    ok: true,
+    result: { type: 'project-refreshed', project: { integration: 'github', id: 'a/one' } },
+    state: next,
+  }
+}
+
 function requestRejection(
   request: 'query' | 'command',
   requestId: string | null,
@@ -423,6 +437,7 @@ describe('createRoadmapStore', () => {
     const { store, sockets } = harness()
     expect(store.getSnapshot()).toEqual({
       transport: 'connecting',
+      synchronization: 'not-ready',
       state: null,
       command: { inFlight: false, error: null },
     })
@@ -445,18 +460,365 @@ describe('createRoadmapStore', () => {
     ])
   })
 
-  it('ignores equal and older states, accepts a new epoch, then retires the old epoch', () => {
+  it('stays not-ready when the socket opens without a valid baseline', async () => {
+    const { store, sockets } = harness()
+    const stop = store.start()
+    sockets[0]?.emit('open')
+    expect(store.getSnapshot()).toMatchObject({
+      transport: 'live',
+      synchronization: 'not-ready',
+      state: null,
+    })
+    sockets[0]?.emit('message', 'not json')
+    sockets[0]?.emit(
+      'message',
+      JSON.stringify({ type: 'state', state: { ...state(1), token: 'x' } }),
+    )
+    expect(store.getSnapshot()).toMatchObject({ synchronization: 'not-ready', state: null })
+    sockets[0]?.emit('close')
+    await flushTimers()
+    sockets[1]?.emit('open')
+    expect(store.getSnapshot()).toMatchObject({
+      transport: 'live',
+      synchronization: 'not-ready',
+      state: null,
+    })
+    stop()
+  })
+
+  it('does not let a malformed message choose the baseline epoch', () => {
+    const { store, sockets } = harness()
+    store.start()
+    sockets[0]?.emit('open')
+    sockets[0]?.emit(
+      'message',
+      JSON.stringify({ type: 'state', state: { ...state(10, 'epoch-a'), token: 'x' } }),
+    )
+    expect(store.getSnapshot()).toMatchObject({ synchronization: 'not-ready', state: null })
+    sockets[0]?.emit('message', wire(state(1, 'epoch-b')))
+    expect(store.getSnapshot()).toMatchObject({
+      synchronization: 'synchronized',
+      state: { serverEpoch: 'epoch-b', stateSequence: 1 },
+    })
+  })
+
+  it.each(['HTTP first', 'WebSocket first'])(
+    'never adopts unseen predecessor A/10 around the first B/1 baseline (%s)',
+    async (settlementOrder) => {
+      const response = deferred<Response>()
+      const { store, sockets } = harness(() => response.promise)
+      store.start()
+      sockets[0]?.emit('open')
+      const execution = store.execute(refreshCommand)
+      const oldOutcome = refreshOutcome(state(10, 'epoch-a', [project('unseen-predecessor')]))
+
+      if (settlementOrder === 'HTTP first') {
+        response.resolve(jsonResponse({ type: 'command-result', outcome: oldOutcome }))
+        await expect(execution).resolves.toEqual(oldOutcome)
+        expect(store.getSnapshot()).toMatchObject({ synchronization: 'not-ready', state: null })
+        sockets[0]?.emit('message', wire(state(1, 'epoch-b', [project('baseline-b')])))
+      } else {
+        sockets[0]?.emit('message', wire(state(1, 'epoch-b', [project('baseline-b')])))
+        response.resolve(jsonResponse({ type: 'command-result', outcome: oldOutcome }))
+        await expect(execution).resolves.toEqual(oldOutcome)
+      }
+
+      expect(store.getSnapshot()).toMatchObject({
+        synchronization: 'synchronized',
+        state: { serverEpoch: 'epoch-b', stateSequence: 1 },
+      })
+      expect(sockets).toHaveLength(1)
+      sockets[0]?.emit('message', wire(state(2, 'epoch-b', [project('continued-b')])))
+      expect(store.getSnapshot()).toMatchObject({
+        synchronization: 'synchronized',
+        state: { serverEpoch: 'epoch-b', stateSequence: 2 },
+      })
+      expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe('continued-b')
+    },
+  )
+
+  it.each([
+    { name: 'equal', responseSequence: 4, expectedSequence: 4, expectedProject: 'socket-newest' },
+    { name: 'older', responseSequence: 3, expectedSequence: 4, expectedProject: 'socket-newest' },
+    { name: 'newer', responseSequence: 5, expectedSequence: 5, expectedProject: 'http-newest' },
+  ])(
+    'orders $name same-epoch HTTP state within its request-start authority',
+    async ({ responseSequence, expectedSequence, expectedProject }) => {
+      const response = deferred<Response>()
+      const { store, sockets } = harness(() => response.promise)
+      store.start()
+      sockets[0]?.emit('open')
+      sockets[0]?.emit('message', wire(state(1, 'epoch-b')))
+      const execution = store.execute(refreshCommand)
+      sockets[0]?.emit('message', wire(state(4, 'epoch-b', [project('socket-newest')])))
+      const outcome = refreshOutcome(state(responseSequence, 'epoch-b', [project('http-newest')]))
+      response.resolve(jsonResponse({ type: 'command-result', outcome }))
+
+      await expect(execution).resolves.toEqual(outcome)
+      expect(store.getSnapshot()).toMatchObject({
+        synchronization: 'synchronized',
+        state: { serverEpoch: 'epoch-b', stateSequence: expectedSequence },
+      })
+      expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe(expectedProject)
+      expect(sockets).toHaveLength(1)
+    },
+  )
+
+  it.each(['epoch-b', 'epoch-c'])(
+    'does not let a pre-baseline HTTP request acquire authority after the baseline (%s)',
+    async (responseEpoch) => {
+      const response = deferred<Response>()
+      const { store, sockets } = harness(() => response.promise)
+      store.start()
+      sockets[0]?.emit('open')
+      const execution = store.execute(refreshCommand)
+      sockets[0]?.emit('message', wire(state(1, 'epoch-b', [project('baseline-b')])))
+      const outcome = refreshOutcome(state(10, responseEpoch))
+      response.resolve(jsonResponse({ type: 'command-result', outcome }))
+
+      await expect(execution).resolves.toEqual(outcome)
+      expect(store.getSnapshot()).toMatchObject({
+        synchronization: 'synchronized',
+        state: { serverEpoch: 'epoch-b', stateSequence: 1 },
+      })
+      expect(sockets).toHaveLength(1)
+    },
+  )
+
+  it('returns a valid HTTP outcome before start without seeding application state', async () => {
+    const outcome = refreshOutcome(state(10))
+    const { store, sockets } = harness(async () =>
+      jsonResponse({ type: 'command-result', outcome }),
+    )
+
+    await expect(store.execute(refreshCommand)).resolves.toEqual(outcome)
+    expect(store.getSnapshot()).toMatchObject({ synchronization: 'not-ready', state: null })
+    expect(sockets).toHaveLength(0)
+  })
+
+  it('resumes from an equal reconnect baseline without rolling back the retained maximum', async () => {
+    const { store, sockets } = harness()
+    const stop = store.start()
+    sockets[0]?.emit('open')
+    sockets[0]?.emit('message', wire(state(4, 'epoch-b', [project('retained-maximum')])))
+    sockets[0]?.emit('close')
+    await flushTimers()
+    sockets[1]?.emit('open')
+    expect(store.getSnapshot()).toMatchObject({ synchronization: 'retained' })
+    sockets[1]?.emit('message', wire(state(4, 'epoch-b', [project('equal-baseline')])))
+    expect(store.getSnapshot()).toMatchObject({
+      synchronization: 'synchronized',
+      state: { serverEpoch: 'epoch-b', stateSequence: 4 },
+    })
+    expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe('retained-maximum')
+    sockets[1]?.emit('message', wire(state(3, 'epoch-b', [project('older')])))
+    expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe('retained-maximum')
+    sockets[1]?.emit('message', wire(state(5, 'epoch-b', [project('resumed')])))
+    expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe('resumed')
+    stop()
+  })
+
+  it('lets only the new socket establish a successor epoch and ignores retired callbacks', async () => {
+    const { store, sockets } = harness()
+    const stop = store.start()
+    sockets[0]?.emit('open')
+    sockets[0]?.emit('message', wire(state(10, 'epoch-a')))
+    sockets[0]?.emit('close')
+    await flushTimers()
+    sockets[1]?.emit('open')
+    sockets[1]?.emit('message', wire(state(1, 'epoch-b', [project('current-b')])))
+    sockets[0]?.emit('open')
+    sockets[0]?.emit('message', wire(state(99, 'epoch-a')))
+    sockets[0]?.emit('message', wire(state(99, 'epoch-b')))
+    sockets[0]?.emit('close')
+    await flushTimers()
+
+    expect(store.getSnapshot()).toMatchObject({
+      transport: 'live',
+      synchronization: 'synchronized',
+      state: { serverEpoch: 'epoch-b', stateSequence: 1 },
+    })
+    expect(sockets).toHaveLength(2)
+    sockets[1]?.emit('message', wire(state(2, 'epoch-b')))
+    expect(store.getSnapshot().state?.stateSequence).toBe(2)
+    stop()
+  })
+
+  it.each(['epoch-b', 'epoch-c'])(
+    'ignores retired-socket HTTP authority even when its outcome is valid (%s)',
+    async (responseEpoch) => {
+      const response = deferred<Response>()
+      const { store, sockets } = harness(() => response.promise)
+      const stop = store.start()
+      sockets[0]?.emit('open')
+      sockets[0]?.emit('message', wire(state(1, 'epoch-b')))
+      const execution = store.execute(refreshCommand)
+      sockets[0]?.emit('close')
+      await flushTimers()
+      sockets[1]?.emit('open')
+      sockets[1]?.emit('message', wire(state(2, 'epoch-b')))
+      const outcome = refreshOutcome(state(10, responseEpoch))
+      response.resolve(jsonResponse({ type: 'command-result', outcome }))
+
+      await expect(execution).resolves.toEqual(outcome)
+      expect(store.getSnapshot()).toMatchObject({
+        synchronization: 'synchronized',
+        state: { serverEpoch: 'epoch-b', stateSequence: 2 },
+      })
+      expect(sockets).toHaveLength(2)
+      stop()
+    },
+  )
+
+  it.each(['epoch-b', 'epoch-c'])(
+    'ignores stopped and restarted HTTP authority without losing its valid outcome (%s)',
+    async (responseEpoch) => {
+      const response = deferred<Response>()
+      const { store, sockets } = harness(() => response.promise)
+      const stopFirst = store.start()
+      sockets[0]?.emit('open')
+      sockets[0]?.emit('message', wire(state(1, 'epoch-b')))
+      const execution = store.execute(refreshCommand)
+      stopFirst()
+      const stopLast = store.start()
+      sockets[1]?.emit('open')
+      sockets[1]?.emit('message', wire(state(2, 'epoch-b')))
+      const outcome = refreshOutcome(state(10, responseEpoch))
+      response.resolve(jsonResponse({ type: 'command-result', outcome }))
+
+      await expect(execution).resolves.toEqual(outcome)
+      expect(store.getSnapshot()).toMatchObject({
+        synchronization: 'synchronized',
+        state: { serverEpoch: 'epoch-b', stateSequence: 2 },
+      })
+      expect(sockets).toHaveLength(2)
+      stopLast()
+    },
+  )
+
+  it('does not give a request made during reconnect the authority of its later baseline', async () => {
+    const response = deferred<Response>()
+    const { store, sockets } = harness(() => response.promise)
+    const stop = store.start()
+    sockets[0]?.emit('open')
+    sockets[0]?.emit('message', wire(state(4, 'epoch-b')))
+    sockets[0]?.emit('close')
+    await flushTimers()
+    sockets[1]?.emit('open')
+    const execution = store.execute(refreshCommand)
+    sockets[1]?.emit('message', wire(state(4, 'epoch-b')))
+    const outcome = refreshOutcome(state(10, 'epoch-b'))
+    response.resolve(jsonResponse({ type: 'command-result', outcome }))
+
+    await expect(execution).resolves.toEqual(outcome)
+    expect(store.getSnapshot()).toMatchObject({
+      synchronization: 'synchronized',
+      state: { serverEpoch: 'epoch-b', stateSequence: 4 },
+    })
+    stop()
+  })
+
+  it('uses a legitimate successor HTTP outcome only to request a new socket baseline', async () => {
+    const response = deferred<Response>()
+    const { store, sockets } = harness(() => response.promise)
+    const stop = store.start()
+    sockets[0]?.emit('open')
+    sockets[0]?.emit('message', wire(state(4, 'epoch-b', [project('retained-b')])))
+    const execution = store.execute(refreshCommand)
+    const outcome = refreshOutcome(state(10, 'epoch-c', [project('http-c-not-authoritative')]))
+    response.resolve(jsonResponse({ type: 'command-result', outcome }))
+
+    await expect(execution).resolves.toEqual(outcome)
+    expect(store.getSnapshot()).toMatchObject({
+      synchronization: 'retained',
+      state: { serverEpoch: 'epoch-b', stateSequence: 4 },
+    })
+    expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe('retained-b')
+    await flushTimers()
+    expect(sockets).toHaveLength(2)
+    sockets[1]?.emit('open')
+    expect(store.getSnapshot().synchronization).toBe('retained')
+    sockets[0]?.emit('message', wire(state(99, 'epoch-b')))
+    expect(store.getSnapshot().state?.stateSequence).toBe(4)
+    sockets[1]?.emit('message', wire(state(1, 'epoch-c', [project('baseline-c')])))
+    expect(store.getSnapshot()).toMatchObject({
+      synchronization: 'synchronized',
+      state: { serverEpoch: 'epoch-c', stateSequence: 1 },
+    })
+    expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe('baseline-c')
+    sockets[1]?.emit('message', wire(state(2, 'epoch-c')))
+    expect(store.getSnapshot().state?.stateSequence).toBe(2)
+    stop()
+  })
+
+  it('does not let an obsolete baseline HTTP response disrupt its established successor', async () => {
+    const firstResponse = deferred<Response>()
+    const lateResponse = deferred<Response>()
+    const replies = [firstResponse, lateResponse]
+    const { store, sockets } = harness(() => {
+      const response = replies.shift()
+      if (!response) throw new Error('Unexpected HTTP attempt.')
+      return response.promise
+    })
+    const stop = store.start()
+    sockets[0]?.emit('open')
+    sockets[0]?.emit('message', wire(state(4, 'epoch-b')))
+    const firstExecution = store.execute(refreshCommand)
+    const lateExecution = store.execute(refreshCommand)
+    const firstOutcome = refreshOutcome(state(10, 'epoch-c'))
+    firstResponse.resolve(jsonResponse({ type: 'command-result', outcome: firstOutcome }))
+    await expect(firstExecution).resolves.toEqual(firstOutcome)
+    await flushTimers()
+    sockets[1]?.emit('open')
+    sockets[1]?.emit('message', wire(state(1, 'epoch-c')))
+    const lateOutcome = refreshOutcome(state(20, 'epoch-d'))
+    lateResponse.resolve(jsonResponse({ type: 'command-result', outcome: lateOutcome }))
+
+    await expect(lateExecution).resolves.toEqual(lateOutcome)
+    expect(store.getSnapshot()).toMatchObject({
+      synchronization: 'synchronized',
+      state: { serverEpoch: 'epoch-c', stateSequence: 1 },
+    })
+    expect(sockets).toHaveLength(2)
+    stop()
+  })
+
+  it('cannot restore synchronization with a same-epoch HTTP outcome while disconnected', async () => {
+    const response = deferred<Response>()
+    const { store, sockets } = harness(() => response.promise)
+    const stop = store.start()
+    sockets[0]?.emit('open')
+    sockets[0]?.emit('message', wire(state(4, 'epoch-b')))
+    const execution = store.execute(refreshCommand)
+    sockets[0]?.emit('close')
+    const outcome = refreshOutcome(state(10, 'epoch-b'))
+    response.resolve(jsonResponse({ type: 'command-result', outcome }))
+
+    await expect(execution).resolves.toEqual(outcome)
+    expect(store.getSnapshot()).toMatchObject({
+      synchronization: 'retained',
+      state: { serverEpoch: 'epoch-b', stateSequence: 4 },
+    })
+    stop()
+  })
+
+  it('ignores equal and older states and refuses an epoch switch on the current socket', () => {
     const { store, sockets } = harness()
     store.start()
     const socket = sockets[0]
+    socket?.emit('open')
     socket?.emit('message', wire(state(4, 'epoch-a', [project('newest-a')])))
     socket?.emit('message', wire(state(4, 'epoch-a', [project('equal-a')])))
     socket?.emit('message', wire(state(3, 'epoch-a', [project('older-a')])))
     expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe('newest-a')
 
-    socket?.emit('message', wire(state(0, 'epoch-b', [project('restart-b')])))
-    socket?.emit('message', wire(state(9, 'epoch-a', [project('late-a')])))
-    expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe('restart-b')
+    socket?.emit('message', wire(state(0, 'epoch-b', [project('unproven-b')])))
+    expect(store.getSnapshot()).toMatchObject({
+      synchronization: 'synchronized',
+      state: { serverEpoch: 'epoch-a', stateSequence: 4 },
+    })
+    socket?.emit('message', wire(state(5, 'epoch-a', [project('continued-a')])))
+    expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe('continued-a')
   })
 
   it('accepts independently observable Automation evidence', () => {
@@ -552,6 +914,7 @@ describe('createRoadmapStore', () => {
     sockets[0]?.emit('close')
 
     expect(store.getSnapshot().transport).toBe('disconnected')
+    expect(store.getSnapshot().synchronization).toBe('retained')
     expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe('kept')
     await flushTimers()
     sockets[1]?.emit('close')
@@ -559,6 +922,7 @@ describe('createRoadmapStore', () => {
     expect(delays).toEqual([0, 1])
 
     sockets[2]?.emit('open')
+    expect(store.getSnapshot().synchronization).toBe('retained')
     sockets[2]?.emit('close')
     await flushTimers()
     expect(delays).toEqual([0, 1, 0])
@@ -581,7 +945,9 @@ describe('createRoadmapStore', () => {
   it('applies a command response before resolving execute and records application errors', async () => {
     const response = deferred<Response>()
     const fetchRequest = () => response.promise
-    const { store } = harness(fetchRequest as typeof fetch)
+    const { store, sockets } = harness(fetchRequest as typeof fetch)
+    store.start()
+    sockets[0]?.emit('message', wire(state(1)))
     const execution = store.execute({
       type: 'rename-connection',
       expectedConfigurationVersion: 1,
@@ -638,8 +1004,11 @@ describe('createRoadmapStore', () => {
         expectedConfigurationVersion: 1,
         project: { integration: 'github', id: 'a/one' },
       }),
-    ).rejects.toThrow('connection reset')
+    ).rejects.toBeInstanceOf(Error)
     expect(store.getSnapshot().state?.stateSequence).toBe(1)
+    expect(store.getSnapshot().command.error).toMatchObject({ code: 'transport-failed' })
+    sockets[0]?.emit('message', wire(state(2)))
+    expect(store.getSnapshot().state?.stateSequence).toBe(2)
     expect(store.getSnapshot().command.error).toMatchObject({ code: 'transport-failed' })
   })
 

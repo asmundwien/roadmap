@@ -97,11 +97,20 @@ function renderPage(
   }
   const store: RoadmapStore = {
     subscribe: () => () => undefined,
-    getSnapshot: () => ({
-      transport: 'live',
-      state: initial ? state : null,
-      command: { inFlight, error: null },
-    }),
+    getSnapshot: () =>
+      initial
+        ? {
+            transport: 'live',
+            synchronization: 'synchronized',
+            state,
+            command: { inFlight, error: null },
+          }
+        : {
+            transport: 'live',
+            synchronization: 'not-ready',
+            state: null,
+            command: { inFlight, error: null },
+          },
     start: () => () => undefined,
     query: async () => {
       throw new Error('Unexpected query')
@@ -311,7 +320,6 @@ describe('ProjectRegistrationPage', () => {
   })
 
   it('waits for a first snapshot before reporting a missing project', () => {
-    expect(renderPage([], false)).toContain('Loading project')
     expect(renderPage([], false)).not.toContain('Project not found')
   })
 

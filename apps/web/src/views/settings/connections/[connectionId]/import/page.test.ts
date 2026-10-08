@@ -29,7 +29,12 @@ function renderImport(connectionId: string, connection?: Connection, valid = tru
   }
   const store: RoadmapStore = {
     subscribe: () => () => undefined,
-    getSnapshot: () => ({ transport: 'live', state, command: { inFlight: false, error: null } }),
+    getSnapshot: () => ({
+      transport: 'live',
+      synchronization: 'synchronized',
+      state,
+      command: { inFlight: false, error: null },
+    }),
     start: () => () => undefined,
     query: async () => {
       throw new Error('Unexpected query')

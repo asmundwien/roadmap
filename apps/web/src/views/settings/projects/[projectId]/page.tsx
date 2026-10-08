@@ -16,7 +16,7 @@ const cx = classNames.bind(pageStyles)
 type ProjectRegistrationPageProps = { projectKey: ProjectKey }
 
 export function ProjectRegistrationPage({ projectKey }: ProjectRegistrationPageProps) {
-  const { projects, connections, capturedAt, configuration } = useRoadmap()
+  const { projects, connections, configuration } = useRoadmap()
   const project = projects.find((candidate) => sameProject(candidate.key, projectKey))
 
   if (!project) {
@@ -25,7 +25,7 @@ export function ProjectRegistrationPage({ projectKey }: ProjectRegistrationPageP
         <PageHeader>
           <div>
             <PageEyebrow>Settings / Projects</PageEyebrow>
-            <PageTitle>{capturedAt === null ? 'Loading project' : 'Project not found'}</PageTitle>
+            <PageTitle>Project not found</PageTitle>
           </div>
         </PageHeader>
         <Link href={routePaths.connections}>Back to Connections</Link>
