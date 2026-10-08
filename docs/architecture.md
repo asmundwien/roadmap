@@ -2,9 +2,9 @@
 
 ## System shape
 
-Roadmap is a local-first, read-only application for one user. The repository has five workspace areas:
+Roadmap is a local-first application for one user. It reads source maps and tickets, but configuration, authorization, host actions, and opt-in Automation can have effects. The repository has five workspace areas:
 
-- `packages/contracts` defines domain types such as `Project`, `WayfinderMap`, `Ticket`, and `ApplicationState`. It also provides runtime codecs for transport messages through `@roadmap/contracts/codecs`.
+- `packages/contracts` owns browser-safe authoritative Zod 4 operation schemas in `@roadmap/contracts/operations` and HTTP request/rejection schemas and decoders in `@roadmap/contracts/wire`. `Query` and `Command` are inferred from those schemas and exported through the existing package facade. It also defines domain types such as `Project`, `WayfinderMap`, `Ticket`, and `ApplicationState`.
 - `packages/ui` provides domain-independent presentational components and design tokens through the `@roadmap/ui` workspace package.
 - `apps/server` owns application state, persistence, integrations, and network access.
 - `apps/web` renders application state and sends queries and commands.
@@ -85,7 +85,40 @@ unknown outcome. Public Automation evidence distinguishes queued, launching, run
 outcome-unknown states, preserves each admitted stage's `automatic` or `override` reason, and marks
 whether an unknown Session outcome has been acknowledged.
 
-`transport.ts` is the network boundary. It provides a full-state WebSocket with strict origin checks and HTTP handlers for queries and commands. Request bodies cannot exceed 64 KiB. `main.ts` composes modules and binds loopback.
+`transport.ts` owns HTTP acceptance, bounded body reading, JSON parsing, request decoding, application dispatch, outgoing validation and serialization, and response writes and failures. It also provides a full-state WebSocket with exact origin checks. `main.ts` composes modules and binds loopback.
+
+### HTTP admission and delivery
+
+Queries use `POST /api/query`; commands use `POST /api/command`. HTTP and WebSocket require the exact configured Origin. Commands additionally require a loopback peer. HTTP operations require the `application/json` media type and strict request fields, including nested registration candidates and Workspaces. The browser-safe operations and wire modules have no Node or server imports. Schema validation is the authority for request types, not a handwritten request interface or Boolean-check codec.
+
+The browser generates a fresh UUID with `crypto.randomUUID()` for each HTTP attempt and sends it as `X-Roadmap-Request-Id`. Allowed-origin CORS preflight permits that header. This identifier is call-local correlation, not identity, authorization, chronology, deduplication, or a durable receipt. Nonbrowser clients may omit it. The server includes a syntactically valid supplied UUID in a rejection, or uses `null` when it is absent or invalid. Requests do not follow redirects.
+
+Admission occurs when the transport invokes the public `RoadmapApplication.query` or `RoadmapApplication.execute` method. Expected failures before that invocation return the strict rejection envelope `{ type: 'request-rejected', request: 'query' | 'command', requestId: string | null, reason, message }`. It has no state or application outcome. No fabricated state or application-shaped rejection stands in for non-admission.
+
+| Failure | Response when possible | Consumer meaning |
+| --- | --- | --- |
+| Pre-admission Origin or command peer denial | Rejection with reason `origin` or `peer`, HTTP 403 | Definitive non-admission only if the browser can read and attribute it. Origin denial omits CORS, so the browser normally observes an unreadable response and remains uncertain. |
+| Pre-admission wrong method or media type | Rejection with reason `method`, HTTP 405, or `media-type`, HTTP 415 | Attributable decoded rejection proves non-admission. |
+| Pre-admission declared or streamed body overflow | Rejection with reason `too-large`, HTTP 413, and connection close | Attributable decoded rejection proves non-admission. |
+| Pre-admission invalid JSON or request schema | Rejection with reason `malformed-json` or `malformed-envelope`, HTTP 400 | Attributable decoded rejection proves non-admission. |
+| Pre-admission body interruption | Rejection with reason `interrupted`, HTTP 400, if a response is still possible | A disconnected peer cannot be promised a response. An unreadable or lost response remains uncertain to the consumer. |
+| Admitted application rejection | Legal query result or command outcome with HTTP 200 | An application-level rejection, not a transport admission failure. |
+| Unexpected decode, dispatch, outgoing validation, serialization, or write failure | Safe generic HTTP 500 transport error, or connection termination | Not a non-admission proof. After invocation, application effects may have occurred. |
+| Consumer-observed response loss, malformed reply, wrong attribution, wrong status, or illegal result meaning | No trustworthy delivery result | Completion remains unknown, even if the server finished writing or performed an effect. |
+
+The browser accepts non-admission only when `decodeRequestRejection` decodes the exact envelope and its request family, attempt UUID, and reason-specific HTTP status all match. A generic readable 4xx or 5xx is insufficient. The browser constructs the local `RequestNotAdmitted` value `{ kind: 'not-admitted', ok: false, rejection, error: { code: 'admission-failed', message } }`. Query and command delivery include this value; it has no state and leaves live state intact. Command activity publishes `admission-failed` rather than reporting an uncertain application outcome.
+
+Admitted replies must have HTTP 200, pass the outgoing result decoder, and have legal result meaning for the requested operation. A successful result for another operation or a valid-looking outcome with the wrong HTTP status is not trustworthy. Uncertain command delivery reports `transport-failed` and does not synthesize a replacement state. There are no automatic HTTP retries, replay, or receipts.
+
+The default body cap is 64 KiB. The transport buffers at most the cap, rejects declared excess before reading the body, and stops consuming on the first streamed excess without waiting for EOF or draining unbounded input. It pauses input, sends HTTP 413 with `Connection: close` when possible, and closes the socket after response flush. Request and response error handlers contain late stream errors, peer close, synchronous write throws, and asynchronous write failures.
+
+Diagnostics contain fixed safe categories, never raw request values, credentials, or exception messages and causes. Request decoder issues report paths and categories rather than input values. Outgoing application state and results must pass strict decoding both as objects and after JSON serialization, so getters or `toJSON` cannot introduce credentials into an otherwise accepted reply.
+
+### Contracts ownership and remaining cutover
+
+The operations and wire schemas replace the obsolete query/command request codecs without aliases. Unrelated legacy state and result codecs remain in `@roadmap/contracts/codecs` for their owning public-read cutover; outgoing validation still uses them. The scoped ingress change does not replace the entire public read model or install the selected dependency-cruiser/import-rule enforcement. Those changes belong to the public-read execution ticket.
+
+`operations.ts` defines strict objects and discriminated unions with Zod 4; `z.output` supplies the public operation types. `wire.ts` owns the strict query and command envelopes, rejection envelope, decoders, UUID validation, and rejection status policy. These modules accept only supported own-data request fields, not inherited discriminators or fields.
 
 ## Configuration and credentials
 
@@ -93,4 +126,4 @@ The root `.env.local` holds the public GitHub App identifiers. Device-flow crede
 
 ## Partial data
 
-The model marks incomplete data explicitly. Existing examples include `ticketsTruncated`, `blockersTruncated`, `unreachable`, and `MapBody.missingSections`.
+The model marks incomplete data explicitly. Existing examples include `ticketsComplete`, `blockersComplete`, `unreachable`, and `MapBody.missingSections`.

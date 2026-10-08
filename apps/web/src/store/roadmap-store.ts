@@ -12,6 +12,22 @@ import {
   stateEnvelopeCodec,
 } from '@roadmap/contracts/codecs'
 
+import {
+  decodeRequestRejection,
+  REQUEST_ID_HEADER,
+  type RequestRejection,
+  requestRejectionStatus,
+} from '@roadmap/contracts/wire'
+
+interface RequestNotAdmitted {
+  kind: 'not-admitted'
+  ok: false
+  rejection: RequestRejection
+  error: SafeError
+}
+
+type CommandDelivery = CommandOutcome | RequestNotAdmitted
+type QueryDelivery = QueryResult | RequestNotAdmitted
 const RECONNECT_BASE_MS = 1_000
 const RECONNECT_MAX_MS = 30_000
 
@@ -33,9 +49,9 @@ interface RoadmapStoreSnapshot {
 export interface RoadmapStore {
   subscribe(listener: () => void): () => void
   getSnapshot(): RoadmapStoreSnapshot
-  query(query: Query): Promise<QueryResult>
+  query(query: Query): Promise<QueryDelivery>
   /** Rejects only when HTTP failure makes command completion unknowable. */
-  execute(command: Command): Promise<CommandOutcome>
+  execute(command: Command): Promise<CommandDelivery>
   /** Opens the socket. Ref-counted, so React StrictMode's double-subscribe is harmless. */
   start(): () => void
 }
@@ -134,32 +150,55 @@ export function createRoadmapStore(
     })
   }
 
-  async function query(queryValue: Query): Promise<QueryResult> {
+  async function query(queryValue: Query): Promise<QueryDelivery> {
     try {
+      const requestId = crypto.randomUUID()
       const response = await fetchRequest(new URL('/api/query', httpUrl), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', [REQUEST_ID_HEADER]: requestId },
+        redirect: 'error',
         body: JSON.stringify({ type: 'query', query: queryValue }),
       })
-      const decoded = queryResultEnvelopeCodec.decode(await response.json())
-      if (!decoded.ok) return transportQueryFailure('Server returned a malformed query result.')
+      const body: unknown = await response.json()
+      const rejection = attributableRejection(body, response.status, 'query', requestId)
+      if (rejection !== null) return rejection
+      if (response.status !== 200) {
+        return transportQueryFailure('The query did not receive a valid server response.')
+      }
+      const decoded = queryResultEnvelopeCodec.decode(body)
+      if (!decoded.ok || !queryResultMatches(queryValue, decoded.value.result)) {
+        return transportQueryFailure('Server returned an invalid query result.')
+      }
       return decoded.value.result
     } catch {
       return transportQueryFailure('The query did not receive a valid server response.')
     }
   }
 
-  async function execute(command: Command): Promise<CommandOutcome> {
+  async function execute(command: Command): Promise<CommandDelivery> {
     activeCommands += 1
     publish({ command: { inFlight: true, error: null } })
     try {
+      const requestId = crypto.randomUUID()
       const response = await fetchRequest(new URL('/api/command', httpUrl), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', [REQUEST_ID_HEADER]: requestId },
+        redirect: 'error',
         body: JSON.stringify({ type: 'command', command }),
       })
-      const decoded = commandResultEnvelopeCodec.decode(await response.json())
-      if (!decoded.ok) throw new Error('Server returned a malformed command result.')
+      const body: unknown = await response.json()
+      const rejection = attributableRejection(body, response.status, 'command', requestId)
+      if (rejection !== null) {
+        publish({ command: { inFlight: activeCommands > 1, error: rejection.error } })
+        return rejection
+      }
+      if (response.status !== 200) {
+        throw new Error('The command did not receive a valid server response.')
+      }
+      const decoded = commandResultEnvelopeCodec.decode(body)
+      if (!decoded.ok || !commandOutcomeMatches(command, decoded.value.outcome)) {
+        throw new Error('Server returned an invalid command result.')
+      }
       applyState(decoded.value.outcome.state)
       publish({
         command: {
@@ -171,10 +210,7 @@ export function createRoadmapStore(
     } catch (error) {
       const failure: SafeError = {
         code: 'transport-failed',
-        message:
-          error instanceof Error
-            ? `${error.message} The command may have completed; wait for live state before retrying.`
-            : 'The command may have completed; wait for live state before retrying.',
+        message: 'The command may have completed; wait for live state before retrying.',
       }
       publish({ command: { inFlight: activeCommands > 1, error: failure } })
       throw error
@@ -247,4 +283,84 @@ function parseJson(data: unknown): unknown | null {
 
 function transportQueryFailure(message: string): QueryResult {
   return { ok: false, error: { code: 'transport-failed', message } }
+}
+
+function attributableRejection(
+  body: unknown,
+  status: number,
+  request: RequestRejection['request'],
+  requestId: string,
+): RequestNotAdmitted | null {
+  const decoded = decodeRequestRejection(body)
+  if (
+    !decoded.ok ||
+    decoded.value.requestId !== requestId ||
+    decoded.value.request !== request ||
+    requestRejectionStatus(decoded.value.reason) !== status
+  )
+    return null
+  return {
+    kind: 'not-admitted',
+    ok: false,
+    rejection: decoded.value,
+    error: { code: 'admission-failed', message: decoded.value.message },
+  }
+}
+
+function queryResultMatches(query: Query, result: QueryResult): boolean {
+  if (!result.ok) return true
+  switch (query.type) {
+    case 'select-workspace':
+      return result.type === 'workspace-selection'
+    default: {
+      const _exhaustive: never = query.type
+      return _exhaustive
+    }
+  }
+}
+
+function commandOutcomeMatches(command: Command, outcome: CommandOutcome): boolean {
+  if (!outcome.ok) return true
+  const result = outcome.result
+  switch (command.type) {
+    case 'begin-github-authorization':
+      return result.type === 'authorization-started'
+    case 'retry-github-authorization':
+      return result.type === 'authorization-started' && result.operationId === command.operationId
+    case 'cancel-github-authorization':
+      return result.type === 'authorization-cancelled' && result.operationId === command.operationId
+    case 'refresh-project':
+      return (
+        result.type === 'project-refreshed' &&
+        result.project.integration === command.project.integration &&
+        result.project.id === command.project.id
+      )
+    case 'launch-action':
+      return result.type === 'action-launched' && result.actionId === command.actionId
+    case 'start-automation-override':
+      return (
+        result.type === 'automation-override-started' &&
+        result.stage === command.stage &&
+        result.target.project.integration === command.target.project.integration &&
+        result.target.project.id === command.target.project.id &&
+        result.target.mapId === command.target.mapId &&
+        result.target.ticketId === command.target.ticketId
+      )
+    case 'rename-connection':
+    case 'remove-connection':
+    case 'register-project':
+    case 'rename-project':
+    case 'repair-project-workspace':
+    case 'remove-project':
+    case 'set-automation-enabled':
+    case 'set-project-automation-enabled':
+      return (
+        result.type === 'configuration-updated' &&
+        result.configurationVersion === outcome.state.configurationVersion
+      )
+    default: {
+      const _exhaustive: never = command
+      return _exhaustive
+    }
+  }
 }

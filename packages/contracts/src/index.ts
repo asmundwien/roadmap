@@ -1,3 +1,5 @@
+export type { Command, Query } from './operations.ts'
+
 export type RecognizedTicketType = 'research' | 'prototype' | 'grilling' | 'task'
 
 /** The displayable ticket type; `untyped` represents every malformed evidence variant. */
@@ -412,48 +414,9 @@ export interface SafeError {
   dependentProjects?: ProjectKey[]
 }
 
-export type Query = { type: 'select-workspace' }
-
 export type QueryResult =
   | { ok: true; type: 'workspace-selection'; path?: string }
   | { ok: false; error: SafeError }
-
-interface VersionedCommand {
-  expectedConfigurationVersion: number
-}
-
-export type Command =
-  | (VersionedCommand & {
-      type: 'begin-github-authorization'
-      name: string
-      /** Present only when reauthorizing an existing Connection. */
-      connectionId?: ConnectionId
-    })
-  | (VersionedCommand & { type: 'cancel-github-authorization'; operationId: string })
-  | (VersionedCommand & { type: 'retry-github-authorization'; operationId: string })
-  | (VersionedCommand & { type: 'rename-connection'; connectionId: ConnectionId; name: string })
-  | (VersionedCommand & { type: 'remove-connection'; connectionId: ConnectionId })
-  | (VersionedCommand & { type: 'register-project'; candidate: ProjectRegistrationCandidate })
-  | (VersionedCommand & { type: 'rename-project'; project: ProjectKey; name: string })
-  | (VersionedCommand & {
-      type: 'repair-project-workspace'
-      project: ProjectKey
-      workspace: Workspace
-    })
-  | (VersionedCommand & { type: 'remove-project'; project: ProjectKey })
-  | (VersionedCommand & { type: 'set-automation-enabled'; enabled: boolean })
-  | (VersionedCommand & {
-      type: 'set-project-automation-enabled'
-      project: ProjectKey
-      enabled: boolean
-    })
-  | (VersionedCommand & {
-      type: 'start-automation-override'
-      target: AutomationTarget
-      stage: AutomationOverrideStage
-    })
-  | (VersionedCommand & { type: 'refresh-project'; project: ProjectKey })
-  | (VersionedCommand & { type: 'launch-action'; actionId: string; project?: ProjectKey })
 
 export type CommandResult =
   | { type: 'configuration-updated'; configurationVersion: number }

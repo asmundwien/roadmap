@@ -1,16 +1,22 @@
 import type { IncomingMessage, Server, ServerResponse } from 'node:http'
 import type { Duplex } from 'node:stream'
-import type { CommandOutcome, QueryResult } from '@roadmap/contracts'
+import type { ApplicationState } from '@roadmap/contracts'
 import {
   type CommandResultEnvelope,
-  commandEnvelopeCodec,
   commandResultEnvelopeCodec,
   type QueryResultEnvelope,
-  queryEnvelopeCodec,
   queryResultEnvelopeCodec,
   type StateEnvelope,
   stateEnvelopeCodec,
 } from '@roadmap/contracts/codecs'
+import {
+  decodeCommandEnvelope,
+  decodeQueryEnvelope,
+  REQUEST_ID_HEADER,
+  type RequestRejection,
+  requestIdSchema,
+  requestRejectionStatus,
+} from '@roadmap/contracts/wire'
 import { WebSocket, WebSocketServer } from 'ws'
 import type { RoadmapApplication } from './application/application.ts'
 
@@ -41,7 +47,7 @@ export function createRoadmapTransport(options: RoadmapTransportOptions): Roadma
   const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES
   const sockets = new WebSocketServer({ noServer: true })
 
-  const broadcast = (state: ReturnType<RoadmapApplication['current']>): void => {
+  const broadcast = (state: ApplicationState): void => {
     const encoded = encodeState(state)
     if (encoded === null) return
     for (const client of sockets.clients) {
@@ -73,7 +79,10 @@ export function createRoadmapTransport(options: RoadmapTransportOptions): Roadma
   function handle(request: IncomingMessage, response: ServerResponse): boolean {
     const path = request.url?.split('?', 1)[0]
     if (path !== QUERY_PATH && path !== COMMAND_PATH) return false
-    void handleApiRequest(request, response, path, options, maxBodyBytes)
+    void handleApiRequest(request, response, path, options, maxBodyBytes).catch(() => {
+      reportTransportFailure('request task')
+      terminateResponse(response)
+    })
     return true
   }
 
@@ -96,153 +105,157 @@ async function handleApiRequest(
   options: RoadmapTransportOptions,
   maxBodyBytes: number,
 ): Promise<void> {
-  if (!acceptApiRequest(request, response, path, options.allowedOrigin)) return
-  const body = await readJson(request, maxBodyBytes)
-  if (!body.ok) {
-    sendBodyFailure(response, path, options.application, body)
-    return
-  }
-  if (path === QUERY_PATH) await handleQuery(response, options.application, body.value)
-  else await handleCommand(response, options.application, body.value)
-}
+  const lifetime = new ApiRequestLifetime(request, response)
+  const requestKind = path === QUERY_PATH ? 'query' : 'command'
+  let requestId: string | null = null
 
-function acceptApiRequest(
-  request: IncomingMessage,
-  response: ServerResponse,
-  path: typeof QUERY_PATH | typeof COMMAND_PATH,
-  allowedOrigin: string,
-): boolean {
-  if (request.headers.origin !== allowedOrigin) {
-    sendPlainError(response, 403, 'Forbidden')
-    return false
+  const reject = async (reason: RequestRejection['reason'], message: string): Promise<void> => {
+    const rejection: RequestRejection = {
+      type: 'request-rejected',
+      request: requestKind,
+      requestId,
+      reason,
+      message,
+    }
+    await lifetime.sendJson(
+      requestRejectionStatus(reason),
+      rejection,
+      reason !== 'malformed-json' && reason !== 'malformed-envelope',
+    )
   }
-  setCors(response, allowedOrigin)
-  if (request.method === 'OPTIONS') {
-    response.writeHead(204, {
-      'Access-Control-Allow-Methods': 'POST',
-      'Access-Control-Allow-Headers': 'Content-Type',
-      'Access-Control-Max-Age': '600',
-    })
-    response.end()
-    return false
-  }
-  if (request.method !== 'POST') {
-    response.setHeader('Allow', 'POST, OPTIONS')
-    sendPlainError(response, 405, 'Method Not Allowed')
-    return false
-  }
-  if (path === COMMAND_PATH && !isLoopback(request.socket.remoteAddress)) {
-    sendPlainError(response, 403, 'Forbidden')
-    return false
-  }
-  if (
-    request.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase() !== 'application/json'
-  ) {
-    sendPlainError(response, 415, 'Content-Type must be application/json')
-    return false
-  }
-  return true
-}
 
-function sendBodyFailure(
-  response: ServerResponse,
-  path: typeof QUERY_PATH | typeof COMMAND_PATH,
-  application: RoadmapApplication,
-  body: Extract<BodyResult, { ok: false }>,
-): void {
-  if (path === QUERY_PATH) sendQueryResult(response, body.status, failedQuery(body.message))
-  else sendCommandOutcome(response, body.status, failedCommand(application, body.message))
-}
-
-async function handleQuery(
-  response: ServerResponse,
-  application: RoadmapApplication,
-  input: unknown,
-): Promise<void> {
-  const decoded = queryEnvelopeCodec.decode(input)
-  if (!decoded.ok) {
-    sendQueryResult(response, 400, failedQuery('Malformed query request.'))
-    return
+  async function acceptHeaders(): Promise<boolean> {
+    if (request.headers.origin !== options.allowedOrigin) {
+      await reject('origin', 'Origin is not allowed.')
+      return false
+    }
+    setCors(response, options.allowedOrigin)
+    if (request.method === 'OPTIONS') {
+      response.setHeader('Access-Control-Allow-Methods', 'POST')
+      response.setHeader('Access-Control-Allow-Headers', `Content-Type, ${REQUEST_ID_HEADER}`)
+      response.setHeader('Access-Control-Max-Age', '600')
+      await lifetime.sendJson(204, undefined, !request.complete)
+      return false
+    }
+    if (request.method !== 'POST') {
+      response.setHeader('Allow', 'POST, OPTIONS')
+      await reject('method', 'Method must be POST.')
+      return false
+    }
+    if (requestKind === 'command' && !isLoopback(request.socket.remoteAddress)) {
+      await reject('peer', 'Command peer is not allowed.')
+      return false
+    }
+    if (
+      request.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase() !== 'application/json'
+    ) {
+      await reject('media-type', 'Content-Type must be application/json.')
+      return false
+    }
+    return true
   }
+
+  async function dispatchParsedOperation(input: unknown): Promise<void> {
+    if (requestKind === 'query') {
+      const decoded = decodeQueryEnvelope(input)
+      if (!decoded.ok) {
+        await reject('malformed-envelope', 'Malformed query request.')
+        return
+      }
+      if (!lifetime.admit()) return
+      const result = await options.application.query(decoded.value.query)
+      const envelope: QueryResultEnvelope = { type: 'query-result', result }
+      await lifetime.sendJson(200, envelope, false, queryResultEnvelopeCodec.decode)
+    } else {
+      const decoded = decodeCommandEnvelope(input)
+      if (!decoded.ok) {
+        await reject('malformed-envelope', 'Malformed command request.')
+        return
+      }
+      if (!lifetime.admit()) return
+      const outcome = await options.application.execute(decoded.value.command)
+      const envelope: CommandResultEnvelope = { type: 'command-result', outcome }
+      await lifetime.sendJson(200, envelope, false, commandResultEnvelopeCodec.decode)
+    }
+  }
+
+  async function containFailure(): Promise<void> {
+    reportTransportFailure('request processing')
+    try {
+      if (!lifetime.canRespond || response.headersSent) {
+        lifetime.terminate()
+        return
+      }
+      await lifetime.sendJson(500, { error: 'Internal transport error.' }, true)
+    } catch {
+      lifetime.terminate()
+    }
+  }
+
   try {
-    sendQueryResult(response, 200, await application.query(decoded.value.query))
+    const correlation = requestIdSchema.safeParse(request.headers[REQUEST_ID_HEADER.toLowerCase()])
+    if (correlation.success) requestId = correlation.data
+
+    if (!(await acceptHeaders())) return
+
+    const body = await lifetime.readBody(maxBodyBytes)
+    if (!body.ok) {
+      await reject(
+        body.reason,
+        body.reason === 'too-large'
+          ? 'Request body is too large.'
+          : 'Request body was interrupted.',
+      )
+      return
+    }
+
+    let input: unknown
+    try {
+      input = JSON.parse(body.text)
+    } catch (error: unknown) {
+      if (!(error instanceof SyntaxError)) throw error
+      await reject('malformed-json', 'Request body must contain valid JSON.')
+      return
+    }
+    if (lifetime.interrupted) {
+      await reject('interrupted', 'Request body was interrupted.')
+      return
+    }
+
+    await dispatchParsedOperation(input)
   } catch {
-    sendPlainError(response, 500, 'Internal transport error.')
+    await containFailure()
   }
 }
 
-async function handleCommand(
-  response: ServerResponse,
-  application: RoadmapApplication,
-  input: unknown,
-): Promise<void> {
-  const decoded = commandEnvelopeCodec.decode(input)
-  if (!decoded.ok) {
-    sendCommandOutcome(response, 400, failedCommand(application, 'Malformed command request.'))
-    return
-  }
-  try {
-    sendCommandOutcome(response, 200, await application.execute(decoded.value.command))
-  } catch {
-    sendPlainError(response, 500, 'Internal transport error.')
-  }
-}
-
-function failedQuery(message: string): QueryResult {
-  return { ok: false, error: { code: 'validation', message } }
-}
-
-function failedCommand(application: RoadmapApplication, message: string): CommandOutcome {
-  return {
-    ok: false,
-    error: { code: 'validation', message },
-    state: application.current(),
-  }
-}
-
-function sendQueryResult(response: ServerResponse, status: number, result: QueryResult): void {
-  const envelope: QueryResultEnvelope = { type: 'query-result', result }
-  const decoded = queryResultEnvelopeCodec.decode(envelope)
-  if (!decoded.ok) {
-    reportCodecFailure('query result', decoded.issues)
-    sendPlainError(response, 500, 'Internal transport error.')
-    return
-  }
-  sendJson(response, status, decoded.value)
-}
-
-function sendCommandOutcome(
-  response: ServerResponse,
-  status: number,
-  outcome: CommandOutcome,
-): void {
-  const envelope: CommandResultEnvelope = { type: 'command-result', outcome }
-  const decoded = commandResultEnvelopeCodec.decode(envelope)
-  if (!decoded.ok) {
-    reportCodecFailure('command result', decoded.issues)
-    sendPlainError(response, 500, 'Internal transport error.')
-    return
-  }
-  sendJson(response, status, decoded.value)
-}
-
-function encodeState(state: ReturnType<RoadmapApplication['current']>): string | null {
+function encodeState(state: ApplicationState): string | null {
   const envelope: StateEnvelope = { type: 'state', state }
-  const decoded = stateEnvelopeCodec.decode(envelope)
-  if (!decoded.ok) {
-    reportCodecFailure('application state', decoded.issues)
+  try {
+    return encodeOutgoing(envelope, stateEnvelopeCodec.decode)
+  } catch {
+    reportTransportFailure('application state encoding')
     return null
   }
-  return JSON.stringify(decoded.value)
 }
 
-function reportCodecFailure(
-  kind: string,
-  issues: readonly { path: string; message: string }[],
-): void {
-  console.error(
-    `Refused malformed ${kind}: ${issues.map((issue) => `${issue.path} ${issue.message}`).join('; ')}`,
-  )
+type EnvelopeDecoder = (input: unknown) => { ok: boolean }
+
+function encodeOutgoing(value: unknown, decode: EnvelopeDecoder): string {
+  if (!decode(value).ok) throw new Error('Invalid application envelope.')
+  const encoded = JSON.stringify(value)
+  if (encoded === undefined) throw new Error('Application envelope did not serialize.')
+  // toJSON and getters can change a value after the first decode.
+  const serialized: unknown = JSON.parse(encoded)
+  if (!decode(serialized).ok) throw new Error('Invalid serialized application envelope.')
+  return encoded
+}
+
+function reportTransportFailure(kind: string): void {
+  try {
+    console.error(`Roadmap transport failure: ${kind}.`)
+  } catch {
+    // Diagnostic failures must not escape the request's containment.
+  }
 }
 
 function setCors(response: ServerResponse, origin: string): void {
@@ -250,13 +263,17 @@ function setCors(response: ServerResponse, origin: string): void {
   response.setHeader('Vary', 'Origin')
 }
 
-function sendJson(response: ServerResponse, status: number, value: unknown): void {
-  response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' })
-  response.end(JSON.stringify(value))
-}
-
-function sendPlainError(response: ServerResponse, status: number, message: string): void {
-  sendJson(response, status, { error: message })
+function terminateResponse(response: ServerResponse): void {
+  try {
+    response.destroy()
+  } catch {
+    // Still try to terminate the socket when response teardown itself fails.
+  }
+  try {
+    response.socket?.destroy()
+  } catch {
+    // There is no further response recovery after the connection is lost.
+  }
 }
 
 function rejectUpgrade(socket: Duplex, status: number, message: string): void {
@@ -272,31 +289,170 @@ function isLoopback(address: string | undefined): boolean {
   )
 }
 
-type BodyResult = { ok: true; value: unknown } | { ok: false; status: 400 | 413; message: string }
+type BodyResult = { ok: true; text: string } | { ok: false; reason: 'too-large' | 'interrupted' }
 
-async function readJson(request: IncomingMessage, maxBytes: number): Promise<BodyResult> {
-  const declared = Number(request.headers['content-length'])
-  if (Number.isFinite(declared) && declared > maxBytes) {
-    request.resume()
-    return { ok: false, status: 413, message: 'Request body is too large.' }
+/** Owns stream events until completion and keeps late error events contained. */
+class ApiRequestLifetime {
+  interrupted = false
+  private admitted = false
+  private responseClosed = false
+  private responseFailed = false
+  private responseFinished = false
+  private settleBody: ((result: BodyResult) => void) | undefined
+  private settleWrite: ((finished: boolean) => void) | undefined
+  private readonly request: IncomingMessage
+  private readonly response: ServerResponse
+
+  constructor(request: IncomingMessage, response: ServerResponse) {
+    this.request = request
+    this.response = response
+    request.on('error', () => {
+      reportTransportFailure('request stream')
+      this.interruptBody()
+      if (this.admitted && !this.responseFinished) this.terminate()
+    })
+    request.once('aborted', () => this.interruptBody())
+    request.once('close', () => {
+      if (!request.complete) this.interruptBody()
+    })
+    response.on('error', () => {
+      reportTransportFailure('response stream')
+      this.responseFailed = true
+      this.interruptBody()
+      this.settleWrite?.(false)
+      if (!this.responseFinished) this.terminate()
+    })
+    response.once('finish', () => {
+      this.responseFinished = true
+      this.settleWrite?.(true)
+      this.settleWrite = undefined
+    })
+    response.once('close', () => {
+      this.responseClosed = true
+      if (!this.responseFinished) {
+        if (this.admitted) reportTransportFailure('peer close after admission')
+        this.interruptBody()
+        this.settleWrite?.(false)
+        this.settleWrite = undefined
+      }
+    })
   }
 
-  const chunks: Buffer[] = []
-  let bytes = 0
-  let oversized = false
-  for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
-    bytes += buffer.byteLength
-    if (bytes > maxBytes) {
-      oversized = true
-      continue
+  get canRespond(): boolean {
+    return (
+      !this.responseClosed &&
+      !this.responseFailed &&
+      !this.response.destroyed &&
+      !this.request.socket.destroyed &&
+      !this.response.writableEnded
+    )
+  }
+
+  admit(): boolean {
+    if (this.interrupted || !this.canRespond) return false
+    this.admitted = true
+    return true
+  }
+
+  private interruptBody(): void {
+    this.interrupted = true
+    this.settleBody?.({ ok: false, reason: 'interrupted' })
+  }
+
+  private stopInput(): void {
+    this.request.pause()
+    this.request.socket.pause()
+  }
+
+  terminate(): void {
+    terminateResponse(this.response)
+  }
+
+  async readBody(maxBytes: number): Promise<BodyResult> {
+    const declared = Number(this.request.headers['content-length'])
+    if (Number.isFinite(declared) && declared > maxBytes) {
+      this.stopInput()
+      return { ok: false, reason: 'too-large' }
     }
-    chunks.push(buffer)
+    if (this.interrupted || this.request.destroyed || !this.canRespond) {
+      return { ok: false, reason: 'interrupted' }
+    }
+
+    return new Promise<BodyResult>((resolve, reject) => {
+      const chunks: Buffer[] = []
+      let bytes = 0
+      const cleanup = (): void => {
+        this.request.off('data', onData)
+        this.request.off('end', onEnd)
+        this.settleBody = undefined
+      }
+      const finish = (result: BodyResult): void => {
+        cleanup()
+        chunks.length = 0
+        resolve(result)
+      }
+      const onData = (chunk: Buffer): void => {
+        try {
+          if (chunk.byteLength > maxBytes - bytes) {
+            this.stopInput()
+            finish({ ok: false, reason: 'too-large' })
+            return
+          }
+          bytes += chunk.byteLength
+          chunks.push(chunk)
+        } catch {
+          cleanup()
+          chunks.length = 0
+          reject(new Error('Request body read failed.'))
+        }
+      }
+      const onEnd = (): void => {
+        try {
+          const first = chunks[0]
+          const buffer =
+            chunks.length === 1 && first !== undefined ? first : Buffer.concat(chunks, bytes)
+          finish({ ok: true, text: buffer.toString('utf8') })
+        } catch {
+          cleanup()
+          chunks.length = 0
+          reject(new Error('Request body encoding failed.'))
+        }
+      }
+      this.settleBody = finish
+      this.request.on('data', onData)
+      this.request.once('end', onEnd)
+    })
   }
-  if (oversized) return { ok: false, status: 413, message: 'Request body is too large.' }
-  try {
-    return { ok: true, value: JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown }
-  } catch {
-    return { ok: false, status: 400, message: 'Request body must contain valid JSON.' }
+
+  async sendJson(
+    status: number,
+    value: unknown,
+    closeInput = false,
+    decode?: EnvelopeDecoder,
+  ): Promise<void> {
+    const encoded =
+      value === undefined
+        ? undefined
+        : decode === undefined
+          ? JSON.stringify(value)
+          : encodeOutgoing(value, decode)
+    if (!this.canRespond) return
+    if (closeInput) this.stopInput()
+
+    const finished = await new Promise<boolean>((resolve, reject) => {
+      this.settleWrite = resolve
+      try {
+        this.response.writeHead(status, {
+          ...(encoded === undefined ? {} : { 'Content-Type': 'application/json; charset=utf-8' }),
+          ...(closeInput ? { Connection: 'close' } : {}),
+        })
+        this.response.end(encoded)
+      } catch {
+        this.settleWrite = undefined
+        reject(new Error('Response write failed.'))
+      }
+    })
+    if (!finished) throw new Error('Response did not finish.')
+    if (closeInput) this.request.socket.destroySoon()
   }
 }

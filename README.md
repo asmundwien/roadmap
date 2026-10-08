@@ -1,6 +1,6 @@
 # Roadmap
 
-Roadmap is a local, read-only view of projects organized with [wayfinder](https://github.com/mattpocock). It maps registered GitHub repositories and local workspaces, showing ground covered and fog together.
+Roadmap is a local view of projects organized with [wayfinder](https://github.com/mattpocock). It reads GitHub and local source maps and tickets, and supports configuration, authorization, host actions, and opt-in Automation.
 
 ## Architecture
 
@@ -9,12 +9,12 @@ Roadmap is a pnpm workspace:
 - `apps/web` is the Vite and React SPA.
 - `apps/server` maintains the single `ApplicationState` and owns all external integrations.
 - [apps/docs](apps/docs/README.md) is the standalone catalog for shared components and design tokens.
-- `packages/contracts` defines shared domain types and runtime codecs for transport messages.
+- `packages/contracts` owns browser-safe Zod 4 operation and wire schemas, inferred request types, shared domain types, and the remaining state/result codecs.
 - `packages/ui` is the design system: tokens and presentational components, with no domain knowledge.
 
-The server sends full state replacements over WebSocket. HTTP carries queries and commands. The browser renders server state and never receives credentials.
+The server sends full state replacements over WebSocket. HTTP carries queries and commands. The browser distinguishes attributable pre-admission rejection from uncertain delivery, retains live state on non-admission, and never receives credentials. HTTP delivery has no automatic retries, replay, or receipts.
 
-See [docs/architecture.md](docs/architecture.md) for the implementation map and [CONTEXT.md](CONTEXT.md) for the domain language.
+See [docs/architecture.md](docs/architecture.md) for ownership, the HTTP admission and failure contract, and the remaining public-read cutover. [CONTEXT.md](CONTEXT.md) defines the domain language.
 
 ## Development
 

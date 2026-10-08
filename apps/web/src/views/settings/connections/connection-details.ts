@@ -1,13 +1,7 @@
-import type {
-  AuthorizationOperation,
-  Command,
-  CommandOutcome,
-  Connection,
-} from '@roadmap/contracts'
+import type { AuthorizationOperation, Connection } from '@roadmap/contracts'
+import type { RoadmapStore } from '../../../store/roadmap-store'
 
-export interface ConnectionOperation {
-  execute(command: Command): Promise<CommandOutcome>
-}
+export type ConnectionOperation = Pick<RoadmapStore, 'execute'>
 
 export function connectionAvailability(connection: Connection): string {
   switch (connection.availability.status) {

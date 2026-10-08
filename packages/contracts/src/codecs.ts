@@ -1,9 +1,7 @@
 import type {
   ApplicationState,
-  Command,
   CommandOutcome,
   ConfigurationIssue,
-  Query,
   QueryResult,
   RuntimeCodec,
 } from './index.ts'
@@ -13,19 +11,9 @@ export interface StateEnvelope {
   state: ApplicationState
 }
 
-export interface QueryEnvelope {
-  type: 'query'
-  query: Query
-}
-
 export interface QueryResultEnvelope {
   type: 'query-result'
   result: QueryResult
-}
-
-export interface CommandEnvelope {
-  type: 'command'
-  command: Command
 }
 
 export interface CommandResultEnvelope {
@@ -104,7 +92,7 @@ function checkObjectFields(
     if (!allowed.has(key)) valid = problem(issues, `${path}.${key}`, 'is not allowed')
   }
   for (const [key, field] of Object.entries(fields)) {
-    if (!(key in value)) {
+    if (!Object.hasOwn(value, key)) {
       if (!field.optional) valid = problem(issues, `${path}.${key}`, 'is required')
       continue
     }
@@ -129,8 +117,10 @@ function discriminated(name: string, key: string, variants: Record<string, Check
     if (typeof input !== 'object' || input === null || Array.isArray(input)) {
       return problem(issues, path, 'must be an object')
     }
-    const discriminator = (input as Record<string, unknown>)[key]
-    if (typeof discriminator !== 'string' || !(discriminator in variants)) {
+    const discriminator = Object.hasOwn(input, key)
+      ? (input as Record<string, unknown>)[key]
+      : undefined
+    if (typeof discriminator !== 'string' || !Object.hasOwn(variants, discriminator)) {
       return problem(issues, `${path}.${key}`, `must identify a supported ${name} variant`)
     }
     const variant = variants[discriminator]
@@ -298,12 +288,6 @@ const projectLocator = discriminated('Project locator', 'integration', {
   local: object({ integration: required(literal('local')), path: required(stringValue) }),
 })
 const workspace = object({ path: required(stringValue), gitIdentity: optional(stringValue) })
-const registrationCandidate = object({
-  integration: required(integration),
-  connectionId: required(stringValue),
-  workspace: required(object({ path: required(stringValue) })),
-  displayName: optional(stringValue),
-})
 const registration = object({
   key: required(projectKey),
   connectionId: required(stringValue),
@@ -534,9 +518,6 @@ const applicationState = object({
   automation: required(automationState),
   roadmap: required(snapshot),
 })
-const query = discriminated('query', 'type', {
-  'select-workspace': object({ type: required(literal('select-workspace')) }),
-})
 const queryResult = oneOf(
   'query result',
   object({
@@ -546,86 +527,6 @@ const queryResult = oneOf(
   }),
   object({ ok: required(literal(false)), error: required(safeError) }),
 )
-const version = { expectedConfigurationVersion: required(nonnegativeInteger) }
-const command = discriminated('command', 'type', {
-  'begin-github-authorization': object({
-    type: required(literal('begin-github-authorization')),
-    ...version,
-    name: required(stringValue),
-    connectionId: optional(stringValue),
-  }),
-  'cancel-github-authorization': object({
-    type: required(literal('cancel-github-authorization')),
-    ...version,
-    operationId: required(stringValue),
-  }),
-  'retry-github-authorization': object({
-    type: required(literal('retry-github-authorization')),
-    ...version,
-    operationId: required(stringValue),
-  }),
-  'rename-connection': object({
-    type: required(literal('rename-connection')),
-    ...version,
-    connectionId: required(stringValue),
-    name: required(stringValue),
-  }),
-  'remove-connection': object({
-    type: required(literal('remove-connection')),
-    ...version,
-    connectionId: required(stringValue),
-  }),
-  'register-project': object({
-    type: required(literal('register-project')),
-    ...version,
-    candidate: required(registrationCandidate),
-  }),
-  'rename-project': object({
-    type: required(literal('rename-project')),
-    ...version,
-    project: required(projectKey),
-    name: required(stringValue),
-  }),
-  'repair-project-workspace': object({
-    type: required(literal('repair-project-workspace')),
-    ...version,
-    project: required(projectKey),
-    workspace: required(workspace),
-  }),
-  'remove-project': object({
-    type: required(literal('remove-project')),
-    ...version,
-    project: required(projectKey),
-  }),
-  'set-automation-enabled': object({
-    type: required(literal('set-automation-enabled')),
-    ...version,
-    enabled: required(booleanValue),
-  }),
-  'set-project-automation-enabled': object({
-    type: required(literal('set-project-automation-enabled')),
-    ...version,
-    project: required(projectKey),
-    enabled: required(booleanValue),
-  }),
-  'start-automation-override': object({
-    type: required(literal('start-automation-override')),
-    ...version,
-    target: required(automationTarget),
-    stage: required(literal('classification', 'wayfinder')),
-  }),
-  'refresh-project': object({
-    type: required(literal('refresh-project')),
-    ...version,
-    project: required(projectKey),
-  }),
-  'launch-action': object({
-    type: required(literal('launch-action')),
-    ...version,
-    actionId: required(stringValue),
-    project: optional(projectKey),
-  }),
-})
 const commandResult = discriminated('command result', 'type', {
   'configuration-updated': object({
     type: required(literal('configuration-updated')),
@@ -671,14 +572,8 @@ export const applicationStateCodec = codec<ApplicationState>(applicationState)
 export const stateEnvelopeCodec = codec<StateEnvelope>(
   object({ type: required(literal('state')), state: required(applicationState) }),
 )
-export const queryEnvelopeCodec = codec<QueryEnvelope>(
-  object({ type: required(literal('query')), query: required(query) }),
-)
 export const queryResultEnvelopeCodec = codec<QueryResultEnvelope>(
   object({ type: required(literal('query-result')), result: required(queryResult) }),
-)
-export const commandEnvelopeCodec = codec<CommandEnvelope>(
-  object({ type: required(literal('command')), command: required(command) }),
 )
 export const commandResultEnvelopeCodec = codec<CommandResultEnvelope>(
   object({ type: required(literal('command-result')), outcome: required(commandOutcome) }),

@@ -192,6 +192,7 @@ describe('GitHub Project admission', () => {
     })
     const duplicate = createGitHubProjectAdmission({
       github: github(),
+      createClient: () => repositoryClient(),
       inspectWorkspace: async () => ({
         path: '/canonical',
         remotes: [{ name: 'origin', nameWithOwner: 'Acme/Roadmap' }],

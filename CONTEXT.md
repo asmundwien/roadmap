@@ -1,7 +1,7 @@
 # Roadmap
 
-A live, read-only visualization of wayfinder-organized efforts on GitHub. The vocabulary here is
-what the views render; the wayfinder ticket-state terms (`closed`, `blocked`, `claimed`,
+A live visualization of wayfinder-organized efforts on GitHub and in local workspaces. The vocabulary
+here is what the views render; the wayfinder ticket-state terms (`closed`, `blocked`, `claimed`,
 `frontier`) are defined in code at `packages/contracts` and are not restated.
 
 ## Language

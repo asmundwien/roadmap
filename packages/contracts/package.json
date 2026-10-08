@@ -5,9 +5,14 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./codecs": "./src/codecs.ts"
+    "./codecs": "./src/codecs.ts",
+    "./operations": "./src/operations.ts",
+    "./wire": "./src/wire.ts"
   },
   "devDependencies": {
     "typescript": "~6.0.2"
+  },
+  "dependencies": {
+    "zod": "^4.6.5"
   }
 }
