@@ -1,10 +1,8 @@
 import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import type {
-  AutomationEvidence,
-  AutomationTarget,
   Project,
   ProjectKey,
   Ticket,
@@ -12,17 +10,6 @@ import type {
   WayfinderMap,
 } from '@roadmap/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { AdapterHost, WayfinderAdapter } from '../observation/source.ts'
-import { sourceFixture } from '../source-test-fixtures.ts'
-import { isRecord } from '../type-guards.ts'
-import { createRoadmapApplication } from './application.ts'
-import {
-  type AutomationLaunch,
-  type AutomationLauncher,
-  type ClassificationProcessResult,
-  createAutomationLauncher,
-  type WayfinderProcessResult,
-} from './automation.ts'
 import {
   type AutomationAppend,
   type AutomationDatabase,
@@ -31,14 +18,43 @@ import {
   appendAutomationDatabase,
   createAutomationDatabaseDocument,
   replayAutomationDatabase,
-} from './automation-database.ts'
+} from '../automation/database.ts'
+import {
+  type AutomationLaunch,
+  type AutomationLauncher,
+  type ClassificationProcessResult,
+  createAutomationLauncher,
+  type WayfinderProcessResult,
+} from '../automation/engine.ts'
+import type { AutomationEvidence, AutomationTarget } from '../automation/model.ts'
 import type {
   ConfigurationDocument,
   ConfigurationRead,
   ConfigurationWrite,
+} from '../configuration/document.ts'
+import type { CredentialBundle, GitHubConnectionPort } from '../github/connections.ts'
+import type {
+  GitHubObservationInput,
+  LocalObservationInput,
+  SourceObserverFactories,
+} from '../observation/coordinator.ts'
+import type {
+  ObservationAttempt,
+  SourceContribution,
+  SourceObserver,
+} from '../observation/source.ts'
+import type {
+  AdmissionOutcome,
+  GitHubProviderRead,
   HarnessCommand,
-  RoadmapConfiguration,
-} from './configuration.ts'
+  ProjectAdmission,
+  ProjectConfiguration,
+  ProjectRevalidationRequest,
+} from '../projects/registry.ts'
+import { sourceFixture } from '../source-test-fixtures.ts'
+import { isRecord } from '../type-guards.ts'
+import { createRoadmapApplication } from './application.ts'
+import type { CredentialVault } from './credential-vault.ts'
 import { sessionReportSchemaJson } from './session-report-contract.ts'
 
 const TASK: TicketTypeEvidence = { kind: 'recognized', value: 'task', labels: ['task'] }
@@ -122,12 +138,12 @@ function project(id: string, tickets: Ticket[], overrides: Partial<Project> = {}
 }
 
 function memoryConfiguration(
-  initial: RoadmapConfiguration,
-  writeResult: ConfigurationWrite = { ok: true },
+  initial: ProjectConfiguration,
+  writeResult: ConfigurationWrite = { ok: true, durability: 'confirmed' },
 ) {
   let current = initial
   const listeners = new Set<(result: ConfigurationRead) => void>()
-  const writes: RoadmapConfiguration[] = []
+  const writes: ProjectConfiguration[] = []
   const document: ConfigurationDocument = {
     async load() {
       return { ok: true, document: current }
@@ -147,9 +163,10 @@ function memoryConfiguration(
   return {
     document,
     writes,
-    emit(next: RoadmapConfiguration) {
-      current = next
-      for (const listener of listeners) listener({ ok: true, document: next })
+    emit(next: ProjectConfiguration | ConfigurationRead) {
+      const result: ConfigurationRead = 'ok' in next ? next : { ok: true, document: next }
+      if (result.ok) current = result.document
+      for (const listener of listeners) listener(result)
     },
   }
 }
@@ -163,7 +180,10 @@ interface MemoryAutomationDatabase {
 
 function memoryAutomationDatabase(
   initial: AutomationDatabase = { schemaVersion: 3, opportunities: [], events: [] },
-  options: { failAppend?: (batch: AutomationAppend) => boolean } = {},
+  options: {
+    failAppend?: (batch: AutomationAppend) => boolean
+    beforeAppend?: (batch: AutomationAppend) => Promise<void>
+  } = {},
 ): MemoryAutomationDatabase {
   let current = initial
   const writes: AutomationDatabase[] = []
@@ -172,10 +192,11 @@ function memoryAutomationDatabase(
       return current
     },
     async append(batch) {
+      await options.beforeAppend?.(batch)
       if (options.failAppend?.(batch)) throw new Error('Automation database is read-only.')
       current = appendAutomationDatabase(current, batch)
       writes.push(current)
-      return current
+      return { database: current, durability: 'confirmed' }
     },
   }
   return {
@@ -186,42 +207,355 @@ function memoryAutomationDatabase(
   }
 }
 
-function adapter(initial: Project[]) {
-  let host: AdapterHost | null = null
+function controlledObservers(initial: Project[]) {
   let projects = initial
   let observedAt = 100
-  const value: WayfinderAdapter = {
-    type: 'local',
-    start(nextHost) {
-      host = nextHost
-      host.update(sourceFixture(projects, observedAt))
-    },
-    stop() {},
+  const owners = new Set<{
+    input: LocalObservationInput | GitHubObservationInput
+    listeners: Set<(value: SourceContribution) => void>
+  }>()
+
+  function contribution(
+    input: LocalObservationInput | GitHubObservationInput,
+    completedAt = observedAt,
+  ): SourceContribution {
+    const key: ProjectKey = { integration: input.integration, id: input.ref.projectId }
+    const entry = projects.find(
+      (candidate) => candidate.key.integration === key.integration && candidate.key.id === key.id,
+    ) ?? { ...project(key.id, []), key, openMaps: [], closedMaps: [] }
+    const sourceProject = {
+      ...entry,
+      ...(input.integration === 'local'
+        ? { sourcePath: input.workspace.path }
+        : { name: input.source.locator.nameWithOwner }),
+    }
+    const batch = sourceFixture(
+      [sourceProject],
+      completedAt,
+      input.integration === 'github'
+        ? {
+            projects: [
+              {
+                ref: input.ref,
+                connectionId: input.source.connectionId,
+                locator: {
+                  repositoryId: input.source.repositoryId,
+                  nameWithOwner: input.source.locator.nameWithOwner,
+                },
+              },
+            ],
+          }
+        : undefined,
+    )
+    const attempts = batch.attempts.map((attempt): ObservationAttempt => {
+      if (input.integration === 'github') return attempt
+      let path: string
+      let operation: 'inspect-root' | 'enumerate' | 'read' = 'read'
+      switch (attempt.scope.kind) {
+        case 'project':
+          path = input.workspace.path
+          operation = 'inspect-root'
+          break
+        case 'maps-membership':
+          path = join(input.workspace.path, '.wayfinder')
+          operation = 'enumerate'
+          break
+        case 'map':
+          path = resolve(input.workspace.path, attempt.scope.map.mapId)
+          break
+        case 'tickets-membership':
+          path = join(dirname(resolve(input.workspace.path, attempt.scope.map.mapId)), 'tickets')
+          operation = 'enumerate'
+          break
+        case 'ticket':
+          path = join(
+            dirname(resolve(input.workspace.path, attempt.scope.ticket.map.mapId)),
+            'tickets',
+            `${attempt.scope.ticket.ticketId}.md`,
+          )
+          break
+      }
+      return { ...attempt, provenance: { integration: 'local', path, operation } }
+    })
+    return { project: key, attempts, health: { status: 'available', observedAt: completedAt } }
   }
+
+  function observer(input: LocalObservationInput | GitHubObservationInput): SourceObserver {
+    const owner = { input, listeners: new Set<(value: SourceContribution) => void>() }
+    owners.add(owner)
+    return {
+      async observe() {
+        return contribution(input)
+      },
+      subscribe(listener) {
+        owner.listeners.add(listener)
+        return () => owner.listeners.delete(listener)
+      },
+      async refresh() {
+        return contribution(input)
+      },
+      async stop() {
+        owners.delete(owner)
+        owner.listeners.clear()
+      },
+    }
+  }
+
+  const observers: SourceObserverFactories = { local: observer, github: observer }
   return {
-    value,
+    observers,
     push(next: Project[]) {
       projects = next
-      if (!host) throw new Error('Adapter has not started.')
-      host.update(sourceFixture(projects, ++observedAt))
+      observedAt += 1
+      for (const owner of owners) {
+        const value = contribution(owner.input)
+        for (const listener of owner.listeners) listener(value)
+      }
+    },
+    pushProject(next: Project) {
+      projects = projects.map((entry) =>
+        entry.key.integration === next.key.integration && entry.key.id === next.key.id
+          ? next
+          : entry,
+      )
+      observedAt += 1
+      for (const owner of owners) {
+        if (
+          owner.input.integration !== next.key.integration ||
+          owner.input.ref.projectId !== next.key.id
+        )
+          continue
+        const value = contribution(owner.input)
+        for (const listener of owner.listeners) listener(value)
+      }
+    },
+    fail(projectKey: ProjectKey) {
+      const lastObservedAt = observedAt++
+      for (const owner of owners) {
+        if (
+          owner.input.integration !== 'local' ||
+          owner.input.ref.projectId !== projectKey.id ||
+          projectKey.integration !== 'local'
+        )
+          continue
+        const value: SourceContribution = {
+          project: projectKey,
+          attempts: [
+            ...contribution(owner.input, lastObservedAt).attempts.filter(
+              (attempt) => attempt.scope.kind !== 'maps-membership',
+            ),
+            {
+              kind: 'failed',
+              scope: { kind: 'maps-membership', project: projectKey },
+              attemptedAt: observedAt,
+              provenance: {
+                integration: 'local',
+                path: join(owner.input.workspace.path, '.wayfinder'),
+                operation: 'enumerate',
+              },
+              failure: { kind: 'filesystem', operation: 'enumerate', code: 'EACCES' },
+            },
+          ],
+          health: {
+            status: 'degraded',
+            cause: 'The map directory is unreadable.',
+            observedAt: lastObservedAt,
+          },
+        }
+        for (const listener of owner.listeners) listener(value)
+      }
     },
   }
 }
 
+const PROVIDER_READ: GitHubProviderRead = {
+  async restGet() {
+    throw new Error('Controlled observers must not read GitHub.')
+  },
+  async graphql() {
+    throw new Error('Controlled observers must not read GitHub.')
+  },
+}
+
+function admissionFixtures(): Partial<Record<'local' | 'github', ProjectAdmission>> {
+  async function inspect(
+    request: ProjectRevalidationRequest,
+    runtime: Parameters<ProjectAdmission['revalidate']>[1],
+  ): Promise<AdmissionOutcome> {
+    if (request.intent.ref.integration === 'local') return localInspection(request.path)
+    if (request.connection.integration !== 'github' || !('locator' in request.intent))
+      throw new Error('GitHub fixture requires a matching Connection.')
+    const access = await runtime.github(request.connection)
+    return {
+      integration: 'github',
+      source: { ok: true, value: { ...access, repositoryId: request.intent.locator.repositoryId } },
+      workspace: {
+        ok: true,
+        value: {
+          integration: 'github',
+          path: request.path,
+          readable: true,
+          searchable: true,
+          worktreeRoot: true,
+          matchedRepositoryId: request.intent.locator.repositoryId,
+          verifiedConnectionId: request.connection.id,
+          nameWithOwner: request.intent.locator.nameWithOwner,
+        },
+      },
+    }
+  }
+  const local: ProjectAdmission = {
+    async admit(request) {
+      return localInspection(request.path)
+    },
+    repair: inspect,
+    revalidate: inspect,
+  }
+  const github: ProjectAdmission = {
+    async admit() {
+      return {
+        integration: 'github',
+        source: {
+          ok: false,
+          error: {
+            code: 'not-supported',
+            message: 'This fixture only revalidates configured GitHub Projects.',
+          },
+        },
+        workspace: {
+          ok: false,
+          error: {
+            code: 'not-supported',
+            message: 'This fixture only revalidates configured GitHub Projects.',
+          },
+        },
+      }
+    },
+    repair: inspect,
+    revalidate: inspect,
+  }
+  return { local, github }
+}
+
+function localInspection(path: string): AdmissionOutcome {
+  return {
+    integration: 'local',
+    workspace:
+      path === '/tmp/missing-workspace'
+        ? {
+            ok: false,
+            error: {
+              code: 'admission-failed',
+              field: 'workspace.path',
+              message: 'Workspace is missing.',
+              filesystemCode: 'ENOENT',
+            },
+          }
+        : { ok: true, value: { integration: 'local', path, readable: true, searchable: true } },
+  }
+}
+
+function githubAuthorizationFixtures(): {
+  github: GitHubConnectionPort
+  credentialVault: CredentialVault
+  providerRead: () => GitHubProviderRead
+} {
+  const credentials: CredentialBundle = {
+    accessToken: 'test-access',
+    refreshToken: 'test-refresh',
+    accessTokenExpiresAt: Number.MAX_SAFE_INTEGER,
+    refreshTokenExpiresAt: Number.MAX_SAFE_INTEGER,
+  }
+  return {
+    github: {
+      integration: {
+        integration: 'github',
+        name: 'GitHub',
+        connectionKind: 'device-authorization',
+        newInstallationUrl: 'https://github.com/apps/test/installations/new',
+        installationsUrl: 'https://github.com/settings/installations',
+        authorizationsUrl: 'https://github.com/settings/connections/applications/test',
+      },
+      async identify() {
+        return { id: 'account', login: 'tester' }
+      },
+      async beginDeviceAuthorization() {
+        throw new Error('The automation fixture does not authorize Connections.')
+      },
+      async pollDeviceAuthorization() {
+        throw new Error('The automation fixture does not authorize Connections.')
+      },
+      async refresh() {
+        throw new Error('The automation fixture uses unexpired credentials.')
+      },
+    },
+    credentialVault: {
+      async read() {
+        return credentials
+      },
+      async write() {},
+      async delete() {},
+      async cleanupOrphans() {},
+    },
+    providerRead: () => PROVIDER_READ,
+  }
+}
+
+function githubProject(id: string, tickets: Ticket[]): Project {
+  const key: ProjectKey = { integration: 'github', id }
+  const remoteTickets = tickets.map((entry) => ({
+    ...entry,
+    sourcePath: undefined,
+    url: `https://github.com/owner/${id}/issues/${entry.id}`,
+  }))
+  return project(id, [], {
+    key,
+    name: `owner/${id}`,
+    sourceUrl: `https://github.com/owner/${id}`,
+    openMaps: [
+      map(key, remoteTickets, {
+        sourcePath: undefined,
+        url: `https://github.com/owner/${id}/issues/100`,
+      }),
+    ],
+  })
+}
+
 function configuration(
   projects: Project[],
-  overrides: Partial<RoadmapConfiguration['automation']> = {},
-): RoadmapConfiguration {
+  overrides: Partial<ProjectConfiguration['automation']> = {},
+): ProjectConfiguration {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     configurationVersion: 1,
-    connections: [{ id: 'local', integration: 'local', name: 'Local', builtIn: true }],
-    projects: projects.map((entry) => ({
-      key: entry.key,
-      connectionId: 'local',
-      locator: { integration: 'local', path: `/tmp/${entry.key.id}` },
-      workspace: { path: `/tmp/${entry.key.id}` },
-    })),
+    connections: [
+      { id: 'local', integration: 'local', name: 'Local', builtIn: true },
+      ...(projects.some((entry) => entry.key.integration === 'github')
+        ? [
+            {
+              id: 'github',
+              integration: 'github' as const,
+              name: 'GitHub',
+              builtIn: false as const,
+              githubIdentity: { id: 'account', login: 'tester' },
+            },
+          ]
+        : []),
+    ],
+    projects: projects.map((entry): ProjectConfiguration['projects'][number] =>
+      entry.key.integration === 'local'
+        ? {
+            ref: { integration: 'local', projectId: entry.key.id },
+            connectionId: 'local',
+            workspace: { path: `/tmp/${entry.key.id}` },
+          }
+        : {
+            ref: { integration: 'github', projectId: entry.key.id },
+            connectionId: 'github',
+            locator: { repositoryId: entry.key.id, nameWithOwner: entry.name },
+            workspace: { path: `/tmp/${entry.key.id}` },
+          },
+    ),
     automation: {
       enabled: true,
       classificationCommand: COMMAND,
@@ -335,10 +669,10 @@ async function harness(options: {
   projects: Project[]
   launcher: AutomationLauncher
   database?: MemoryAutomationDatabase
-  configuration?: RoadmapConfiguration
+  configuration?: ProjectConfiguration
   configurationWriteResult?: ConfigurationWrite
 }) {
-  const source = adapter(options.projects)
+  const source = controlledObservers(options.projects)
   const database = options.database ?? memoryAutomationDatabase()
   const configured = memoryConfiguration(
     options.configuration ?? configuration(options.projects),
@@ -347,7 +681,11 @@ async function harness(options: {
   const application = createRoadmapApplication({
     configuration: configured.document,
     automation: { database: database.database, launcher: options.launcher },
-    createAdapters: () => [source.value],
+    observers: source.observers,
+    admissions: admissionFixtures(),
+    ...(options.projects.some((entry) => entry.key.integration === 'github')
+      ? githubAuthorizationFixtures()
+      : {}),
     serverEpoch: 'automation-test',
   })
   await application.start()
@@ -378,6 +716,628 @@ function queuedDatabase(targets: readonly AutomationTarget[]): AutomationDatabas
     ]),
   }
 }
+
+function appendGate(type: AutomationEvent['type']) {
+  const entered = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  return {
+    entered: entered.promise,
+    release: () => release.resolve(),
+    async beforeAppend(batch: AutomationAppend) {
+      if (!batch.events.some((event) => event.type === type)) return
+      entered.resolve()
+      await release.promise
+    },
+  }
+}
+
+const INVALID_CONFIGURATION: ConfigurationRead = {
+  ok: false,
+  issues: [{ path: '$', message: 'Invalid JSON.' }],
+}
+
+describe('Automation admission after durable append', () => {
+  it.each(['fresh target', 'AFK handoff'])(
+    'blocks %s after an invalid manual configuration read',
+    async (scenario) => {
+      const sourceProject = project('invalid-read', [ticket('1')])
+      const launches = deferredLauncher()
+      const current = await harness({ projects: [sourceProject], launcher: launches.launcher })
+      try {
+        current.configured.emit(INVALID_CONFIGURATION)
+        await vi.waitFor(() =>
+          expect(current.application.current().automation.availability.status).toBe('unavailable'),
+        )
+        launches.classifications[0]?.resolve(
+          processResult(
+            scenario === 'fresh target'
+              ? {
+                  stdout: JSON.stringify({
+                    schemaVersion: 1,
+                    verdict: 'hitl',
+                    reason: 'Requires a person.',
+                  }),
+                }
+              : {},
+          ),
+        )
+        await vi.waitFor(() =>
+          expect(current.database.evidence()[0]?.classification.status).toBe('completed'),
+        )
+        if (scenario === 'fresh target')
+          current.source.push([project('invalid-read', [ticket('2')])])
+        await delay(20)
+        expect(launches.classifications).toHaveLength(1)
+        expect(launches.dispatches).toEqual([])
+        expect(current.application.current().configurationVersion).toBe(1)
+        expect(current.application.current().projects[0]?.key).toEqual(sourceProject.key)
+        expect(
+          current.application
+            .current()
+            .automation.overrides.every(
+              (entry) =>
+                entry.classification.status === 'ineligible' &&
+                entry.wayfinder.status === 'ineligible',
+            ),
+        ).toBe(true)
+        expect(
+          await current.application.execute({
+            type: 'start-automation-override',
+            expectedConfigurationVersion: 1,
+            target: {
+              project: sourceProject.key,
+              mapId: 'map',
+              ticketId: scenario === 'fresh target' ? '2' : '1',
+            },
+            stage: scenario === 'fresh target' ? 'classification' : 'wayfinder',
+          }),
+        ).toMatchObject({ ok: false, error: { code: 'configuration-invalid' } })
+      } finally {
+        await current.application.stop()
+      }
+    },
+  )
+
+  for (const stage of ['classification', 'wayfinder'] as const) {
+    for (const admission of ['automatic', 'override'] as const) {
+      it.each([
+        'claimed',
+        'blocked',
+        'closed map',
+        'incomplete tickets',
+        'incomplete blockers',
+        'missing source',
+        'source failure',
+        'invalid configuration',
+        'changed command',
+        'changed workspace',
+        'missing workspace',
+        'removed Project',
+        ...(admission === 'automatic' ? ['disabled policy'] : []),
+      ])(
+        `records known nonlaunch for ${admission} ${stage} when %s revokes deferred admission`,
+        async (change) => {
+          const sourceProject = project('revoked', [ticket('1')])
+          const target = { project: sourceProject.key, mapId: 'map', ticketId: '1' }
+          const startType =
+            stage === 'classification' ? 'classification-started' : 'wayfinder-launching'
+          const failureType =
+            stage === 'classification' ? 'classification-launch-failed' : 'wayfinder-launch-failed'
+          const gate = appendGate(startType)
+          const database = memoryAutomationDatabase(
+            stage === 'wayfinder' ? queuedDatabase([target]) : undefined,
+            { beforeAppend: gate.beforeAppend },
+          )
+          const launches = deferredLauncher()
+          const disabled = configuration([sourceProject], { enabled: false })
+          const current = await harness({
+            projects: [sourceProject],
+            launcher: launches.launcher,
+            database,
+            configuration: disabled,
+          })
+          const enabled = {
+            ...disabled,
+            configurationVersion: 2,
+            automation: { ...disabled.automation, enabled: true },
+          }
+          try {
+            const pending =
+              admission === 'override'
+                ? current.application.execute({
+                    type: 'start-automation-override',
+                    expectedConfigurationVersion: 1,
+                    target,
+                    stage,
+                  })
+                : null
+            if (admission === 'automatic') current.configured.emit(enabled)
+            await gate.entered
+            expect(launches.classifications).toEqual([])
+            expect(launches.dispatches).toEqual([])
+            expect(database.events().some((event) => event.type === startType)).toBe(false)
+            if (change === 'invalid configuration') {
+              current.configured.emit(INVALID_CONFIGURATION)
+              await vi.waitFor(() =>
+                expect(current.application.current().automation.availability.status).toBe(
+                  'unavailable',
+                ),
+              )
+            } else if (
+              [
+                'disabled policy',
+                'changed command',
+                'changed workspace',
+                'missing workspace',
+                'removed Project',
+              ].includes(change)
+            ) {
+              const base = admission === 'automatic' ? enabled : disabled
+              current.configured.emit({
+                ...base,
+                configurationVersion: 3,
+                projects:
+                  change === 'removed Project'
+                    ? []
+                    : change === 'missing workspace'
+                      ? base.projects.map((entry) => ({
+                          ...entry,
+                          workspace: { path: '/tmp/missing-workspace' },
+                        }))
+                      : change === 'changed workspace'
+                        ? base.projects.map((entry) => ({
+                            ...entry,
+                            workspace: { path: '/tmp/replaced-workspace' },
+                          }))
+                        : base.projects,
+                automation: {
+                  ...base.automation,
+                  enabledProjects:
+                    change === 'removed Project' ? [] : base.automation.enabledProjects,
+                  enabled: change === 'disabled policy' ? false : base.automation.enabled,
+                  ...(change === 'changed command'
+                    ? {
+                        [stage === 'classification' ? 'classificationCommand' : 'wayfinderCommand']:
+                          { ...COMMAND, args: ['-e', 'process.exit(0)'] },
+                      }
+                    : {}),
+                },
+              })
+              if (admission === 'automatic')
+                await vi.waitFor(() =>
+                  expect(current.application.current().configurationVersion).toBe(3),
+                )
+            } else if (change === 'missing source') current.source.push([project('revoked', [])])
+            else if (change === 'source failure') {
+              current.source.fail(sourceProject.key)
+              expect(current.application.current().projects[0]?.availability.status).toBe(
+                'unavailable',
+              )
+              expect(current.application.current().connections[0]?.availability.status).toBe(
+                'degraded',
+              )
+            } else {
+              const changedTicket = ticket('1', TASK, {
+                isClaimed: change === 'claimed',
+                state: change === 'claimed' ? 'claimed' : 'frontier',
+                isBlocked: change === 'blocked',
+                blockersComplete: change !== 'incomplete blockers',
+                blockedBy:
+                  change === 'blocked'
+                    ? [
+                        {
+                          reference: { kind: 'registered', project: sourceProject.key },
+                          ticketId: 'blocker',
+                          state: 'open',
+                        },
+                      ]
+                    : [],
+              })
+              current.source.push([
+                project('revoked', [changedTicket], {
+                  openMaps: [
+                    map(sourceProject.key, [changedTicket], {
+                      isOpen: change !== 'closed map',
+                      ticketsComplete: change !== 'incomplete tickets',
+                    }),
+                  ],
+                }),
+              ])
+            }
+            gate.release()
+            if (pending)
+              expect(await pending).toMatchObject({
+                ok: false,
+                error: {
+                  code: expect.stringMatching(
+                    /^(validation|configuration-invalid|selection-failed)$/,
+                  ),
+                },
+              })
+            await vi.waitFor(() =>
+              expect(database.events().some((event) => event.type === failureType)).toBe(true),
+            )
+            expect(launches.classifications).toEqual([])
+            expect(launches.dispatches).toEqual([])
+            expect(database.events().some((event) => event.type === 'wayfinder-running')).toBe(
+              false,
+            )
+            expect(current.application.current().automation.evidence[0]).toMatchObject(
+              stage === 'classification'
+                ? { classification: { status: 'launch-failed', admission } }
+                : {
+                    classification: { status: 'completed', verdict: { value: 'afk' } },
+                    wayfinder: { status: 'launch-failed', admission },
+                  },
+            )
+            current.configured.emit({ ...enabled, configurationVersion: 4 })
+            current.source.push([project('revoked', [])])
+            current.source.push([sourceProject])
+            await vi.waitFor(() =>
+              expect(current.application.current().configurationVersion).toBe(4),
+            )
+            expect(
+              await current.application.execute({
+                type: 'start-automation-override',
+                expectedConfigurationVersion: 4,
+                target,
+                stage,
+              }),
+            ).toMatchObject({ ok: false })
+            expect(database.events().filter((event) => event.type === startType)).toHaveLength(1)
+            expect(launches.classifications).toEqual([])
+            expect(launches.dispatches).toEqual([])
+          } finally {
+            gate.release()
+            await current.application.stop()
+          }
+          const restartedLaunches = deferredLauncher()
+          const restarted = await harness({
+            projects: [sourceProject],
+            launcher: restartedLaunches.launcher,
+            database,
+          })
+          try {
+            expect(restartedLaunches.classifications).toEqual([])
+            expect(restartedLaunches.dispatches).toEqual([])
+          } finally {
+            await restarted.application.stop()
+          }
+        },
+      )
+    }
+  }
+
+  for (const stage of ['classification', 'wayfinder'] as const) {
+    it.each(['rename', 'unrelated source', 'override enablement'])(
+      `admits deferred ${stage} after observation-neutral %s`,
+      async (change) => {
+        const sourceProject = project('neutral', [ticket('1')])
+        const unrelated = project('unrelated', [])
+        const target = { project: sourceProject.key, mapId: 'map', ticketId: '1' }
+        const gate = appendGate(
+          stage === 'classification' ? 'classification-started' : 'wayfinder-launching',
+        )
+        const database = memoryAutomationDatabase(
+          stage === 'wayfinder' ? queuedDatabase([target]) : undefined,
+          { beforeAppend: gate.beforeAppend },
+        )
+        const launches = deferredLauncher()
+        const disabled = configuration([sourceProject, unrelated], { enabled: false })
+        const current = await harness({
+          projects: [sourceProject, unrelated],
+          launcher: launches.launcher,
+          database,
+          configuration: disabled,
+        })
+        try {
+          const pending = current.application.execute({
+            type: 'start-automation-override',
+            expectedConfigurationVersion: 1,
+            target,
+            stage,
+          })
+          await gate.entered
+          expect(launches.classifications).toEqual([])
+          expect(launches.dispatches).toEqual([])
+          if (change === 'unrelated source')
+            current.source.push([sourceProject, project('unrelated', [ticket('2')])])
+          else
+            current.configured.emit({
+              ...disabled,
+              configurationVersion: 2,
+              connections:
+                change === 'rename'
+                  ? disabled.connections.map((entry) => ({ ...entry, name: 'Renamed Local' }))
+                  : disabled.connections,
+              automation:
+                change === 'override enablement'
+                  ? { ...disabled.automation, enabled: true }
+                  : disabled.automation,
+            })
+          gate.release()
+          expect(await pending).toMatchObject({ ok: true })
+          const requests =
+            stage === 'classification'
+              ? launches.classifications.map((entry) => entry.request)
+              : launches.dispatches
+          expect(requests).toHaveLength(1)
+          expect(requests[0]?.environment.ROADMAP_TICKET_ID).toBe('1')
+          expect(
+            database
+              .events()
+              .some(
+                (event) =>
+                  event.type ===
+                  (stage === 'classification'
+                    ? 'classification-launch-failed'
+                    : 'wayfinder-launch-failed'),
+              ),
+          ).toBe(false)
+        } finally {
+          gate.release()
+          await current.application.stop()
+        }
+      },
+    )
+
+    it.each(['automatic', 'override'] as const)(
+      `admits deferred ${stage} for a retained GitHub target after an unrelated Local source read with %s admission`,
+      async (admission) => {
+        const sourceProject = githubProject('remote-neutral', [ticket('1')])
+        const unrelated = project('local-neutral', [])
+        const target = { project: sourceProject.key, mapId: 'map', ticketId: '1' }
+        const startType =
+          stage === 'classification' ? 'classification-started' : 'wayfinder-launching'
+        const gate = appendGate(startType)
+        const database = memoryAutomationDatabase(
+          stage === 'wayfinder' ? queuedDatabase([target]) : undefined,
+          { beforeAppend: gate.beforeAppend },
+        )
+        const launches = deferredLauncher()
+        const disabled = configuration([sourceProject, unrelated], {
+          enabled: false,
+          enabledProjects: [sourceProject.key],
+        })
+        const current = await harness({
+          projects: [sourceProject, unrelated],
+          launcher: launches.launcher,
+          database,
+          configuration: disabled,
+        })
+        try {
+          const pending =
+            admission === 'override'
+              ? current.application.execute({
+                  type: 'start-automation-override',
+                  expectedConfigurationVersion: 1,
+                  target,
+                  stage,
+                })
+              : null
+          if (admission === 'automatic')
+            current.configured.emit({
+              ...disabled,
+              configurationVersion: 2,
+              automation: { ...disabled.automation, enabled: true },
+            })
+          await gate.entered
+          const retainedObservedAt = current.application
+            .current()
+            .projects.find((entry) => entry.key.integration === 'github')?.availability.observedAt
+          expect(retainedObservedAt).toBe(100)
+          expect(launches.classifications).toEqual([])
+          expect(launches.dispatches).toEqual([])
+          current.source.pushProject(project('local-neutral', [ticket('2')]))
+          expect(
+            current.application
+              .current()
+              .projects.find((entry) => entry.key.integration === 'github')?.availability
+              .observedAt,
+          ).toBe(retainedObservedAt)
+          gate.release()
+          if (pending) expect(await pending).toMatchObject({ ok: true })
+          const requests = () =>
+            stage === 'classification'
+              ? launches.classifications.map((entry) => entry.request)
+              : launches.dispatches
+          await vi.waitFor(() => expect(requests()).toHaveLength(1))
+          expect(requests()[0]?.environment.ROADMAP_TICKET_ID).toBe('1')
+          expect(database.events().filter((event) => event.type === startType)).toHaveLength(1)
+          expect(
+            database
+              .events()
+              .some(
+                (event) =>
+                  event.type ===
+                  (stage === 'classification'
+                    ? 'classification-launch-failed'
+                    : 'wayfinder-launch-failed'),
+              ),
+          ).toBe(false)
+          expect(launches.maximumRunning()).toBe(stage === 'classification' ? 1 : 0)
+        } finally {
+          gate.release()
+          await current.application.stop()
+        }
+      },
+    )
+
+    it.each(['start', 'nonlaunch'])(
+      `launches nothing when ${stage} %s append fails without erasing durable truth`,
+      async (failedAppend) => {
+        const sourceProject = project('append-failure', [ticket('1')])
+        const target = { project: sourceProject.key, mapId: 'map', ticketId: '1' }
+        const startType =
+          stage === 'classification' ? 'classification-started' : 'wayfinder-launching'
+        const failureType =
+          stage === 'classification' ? 'classification-launch-failed' : 'wayfinder-launch-failed'
+        const gate = appendGate(startType)
+        const database = memoryAutomationDatabase(
+          stage === 'wayfinder' ? queuedDatabase([target]) : undefined,
+          {
+            beforeAppend: gate.beforeAppend,
+            failAppend: (batch) =>
+              batch.events.some(
+                (event) => event.type === (failedAppend === 'start' ? startType : failureType),
+              ),
+          },
+        )
+        const launches = deferredLauncher()
+        const current = await harness({
+          projects: [sourceProject],
+          launcher: launches.launcher,
+          database,
+          configuration: configuration([sourceProject], { enabled: false }),
+        })
+        try {
+          const pending = current.application.execute({
+            type: 'start-automation-override',
+            expectedConfigurationVersion: 1,
+            target,
+            stage,
+          })
+          await gate.entered
+          if (failedAppend === 'nonlaunch')
+            current.source.push([
+              project('append-failure', [ticket('1', TASK, { isClaimed: true, state: 'claimed' })]),
+            ])
+          gate.release()
+          expect(await pending).toMatchObject({ ok: false, error: { code: 'persistence-failed' } })
+          expect(launches.classifications).toEqual([])
+          expect(launches.dispatches).toEqual([])
+          expect(database.events().some((event) => event.type === startType)).toBe(
+            failedAppend === 'nonlaunch',
+          )
+          expect(database.events().some((event) => event.type === failureType)).toBe(false)
+          if (failedAppend === 'nonlaunch')
+            expect(database.evidence()[0]).toMatchObject(
+              stage === 'classification'
+                ? { classification: { status: 'running', admission: 'override' } }
+                : { wayfinder: { status: 'launching', admission: 'override' } },
+            )
+          expect(current.application.current().automation.evidence).toEqual(database.evidence())
+          current.source.push([sourceProject])
+          expect(
+            await current.application.execute({
+              type: 'start-automation-override',
+              expectedConfigurationVersion: 1,
+              target,
+              stage,
+            }),
+          ).toMatchObject({ ok: false })
+          expect(launches.classifications).toEqual([])
+          expect(launches.dispatches).toEqual([])
+        } finally {
+          gate.release()
+          await current.application.stop()
+        }
+      },
+    )
+  }
+
+  it.each([false, true])(
+    'waits for the exact interruption acknowledgement before enablement persistence, failure=%s',
+    async (fail) => {
+      const sourceProject = project('ack-order', [ticket('1')])
+      const target = { project: sourceProject.key, mapId: 'map', ticketId: '1' }
+      const initial = appendAutomationDatabase(queuedDatabase([target]), {
+        events: [
+          {
+            ...storedEvent('launch', 'opportunity-0'),
+            type: 'wayfinder-launching',
+            admission: 'automatic',
+          },
+          {
+            ...storedEvent('exact-unknown', 'opportunity-0'),
+            type: 'wayfinder-outcome-unknown',
+            reason: 'Stopped.',
+          },
+        ],
+      })
+      const gate = appendGate('wayfinder-outcome-unknown-acknowledged')
+      const database = memoryAutomationDatabase(initial, {
+        beforeAppend: gate.beforeAppend,
+        failAppend: (batch) =>
+          fail &&
+          batch.events.some((event) => event.type === 'wayfinder-outcome-unknown-acknowledged'),
+      })
+      const launches = deferredLauncher()
+      const current = await harness({
+        projects: [sourceProject],
+        launcher: launches.launcher,
+        database,
+        configuration: configuration([sourceProject], { enabledProjects: [] }),
+      })
+      try {
+        const pending = current.application.execute({
+          type: 'set-project-automation-enabled',
+          expectedConfigurationVersion: 1,
+          project: sourceProject.key,
+          enabled: true,
+        })
+        await gate.entered
+        expect(current.configured.writes).toEqual([])
+        expect(database.evidence()[0]?.wayfinder).toMatchObject({
+          status: 'outcome-unknown',
+          acknowledged: false,
+        })
+        expect(launches.dispatches).toEqual([])
+        gate.release()
+        expect(await pending).toMatchObject({ ok: !fail })
+        expect(current.configured.writes).toHaveLength(fail ? 0 : 1)
+        expect(database.evidence()[0]?.wayfinder).toMatchObject({
+          status: 'outcome-unknown',
+          acknowledged: !fail,
+        })
+        expect(current.application.current().automation.evidence).toEqual(database.evidence())
+        if (!fail)
+          expect(
+            database
+              .events()
+              .find((event) => event.type === 'wayfinder-outcome-unknown-acknowledged'),
+          ).toMatchObject({ unknownEventId: 'exact-unknown' })
+        expect(launches.classifications).toEqual([])
+        expect(launches.dispatches).toEqual([])
+      } finally {
+        gate.release()
+        await current.application.stop()
+      }
+    },
+  )
+
+  it('records known Classification nonlaunch when stop closes admission during its durable append', async () => {
+    const sourceProject = project('stop-race', [ticket('1')])
+    const gate = appendGate('classification-started')
+    const database = memoryAutomationDatabase(undefined, { beforeAppend: gate.beforeAppend })
+    const launches = deferredLauncher()
+    const disabled = configuration([sourceProject], { enabled: false })
+    const current = await harness({
+      projects: [sourceProject],
+      launcher: launches.launcher,
+      database,
+      configuration: disabled,
+    })
+    current.configured.emit({
+      ...disabled,
+      configurationVersion: 2,
+      automation: { ...disabled.automation, enabled: true },
+    })
+    await gate.entered
+    const stopping = current.application.stop()
+    gate.release()
+    await stopping
+    expect(launches.classifications).toEqual([])
+    expect(database.events().map((event) => event.type)).toEqual([
+      'classification-started',
+      'classification-launch-failed',
+    ])
+    expect(database.evidence()[0]?.classification).toMatchObject({
+      status: 'launch-failed',
+      admission: 'automatic',
+    })
+  })
+})
 
 describe('RoadmapApplication Automation', () => {
   it('recovers interrupted Sessions before leaving other Projects running on startup', async () => {
@@ -537,6 +1497,129 @@ describe('RoadmapApplication Automation', () => {
     await current.application.stop()
   })
 
+  it('requires a new exact acknowledgement when a later Session becomes unknown after an earlier acknowledgement', async () => {
+    const sourceProject = project('newer-unknown', [ticket('1'), ticket('2'), ticket('3')])
+    const targets = ['1', '2', '3'].map((ticketId) => ({
+      project: sourceProject.key,
+      mapId: 'map',
+      ticketId,
+    }))
+    const initial = appendAutomationDatabase(queuedDatabase(targets), {
+      events: [
+        {
+          ...storedEvent('first-launch', 'opportunity-0'),
+          type: 'wayfinder-launching',
+          admission: 'automatic',
+        },
+        {
+          ...storedEvent('first-unknown', 'opportunity-0'),
+          type: 'wayfinder-outcome-unknown',
+          reason: 'Stopped.',
+        },
+      ],
+    })
+    const database = memoryAutomationDatabase(initial)
+    const launches = deferredLauncher()
+    const current = await harness({
+      projects: [sourceProject],
+      launcher: launches.launcher,
+      database,
+      configuration: configuration([sourceProject], { enabledProjects: [] }),
+    })
+    try {
+      expect(
+        await current.application.execute({
+          type: 'set-project-automation-enabled',
+          expectedConfigurationVersion: 1,
+          project: sourceProject.key,
+          enabled: true,
+        }),
+      ).toMatchObject({ ok: true })
+      await vi.waitFor(() =>
+        expect(
+          database.evidence().filter((entry) => entry.wayfinder?.status === 'running'),
+        ).toHaveLength(1),
+      )
+      const running = database.evidence().find((entry) => entry.wayfinder?.status === 'running')
+      const queued = database.evidence().find((entry) => entry.wayfinder?.status === 'queued')
+      if (!running || !queued) throw new Error('Expected one running and one queued Session.')
+      const runningOpportunity = initial.opportunities.find(
+        (entry) => entry.target.ticketId === running.target.ticketId,
+      )
+      if (!runningOpportunity) throw new Error('The running Session must have an opportunity.')
+      expect(['2', '3']).toContain(running.target.ticketId)
+      expect(['2', '3']).toContain(queued.target.ticketId)
+      expect(launches.dispatches.map((request) => request.environment.ROADMAP_TICKET_ID)).toEqual([
+        running.target.ticketId,
+      ])
+      launches.sessions[0]?.reject(new Error('The second Session result was lost.'))
+      await vi.waitFor(() =>
+        expect(current.application.current().automation.enabledProjects).toEqual([]),
+      )
+      expect(
+        current.application
+          .current()
+          .automation.evidence.find((entry) => entry.target.ticketId === '1')?.wayfinder,
+      ).toMatchObject({ status: 'outcome-unknown', acknowledged: true })
+      expect(
+        current.application
+          .current()
+          .automation.evidence.find((entry) => entry.target.ticketId === running.target.ticketId)
+          ?.wayfinder,
+      ).toMatchObject({ status: 'outcome-unknown', acknowledged: false })
+      const secondUnknown = database
+        .events()
+        .find(
+          (event) =>
+            event.type === 'wayfinder-outcome-unknown' &&
+            event.opportunityId === runningOpportunity.id,
+        )
+      if (!secondUnknown) throw new Error('The lost Session must have durable unknown evidence.')
+      expect(
+        database
+          .events()
+          .filter((event) => event.type === 'wayfinder-outcome-unknown-acknowledged'),
+      ).toMatchObject([{ unknownEventId: 'first-unknown' }])
+      const version = current.application.current().configurationVersion
+      expect(
+        await current.application.execute({
+          type: 'start-automation-override',
+          expectedConfigurationVersion: version,
+          target: queued.target,
+          stage: 'wayfinder',
+        }),
+      ).toMatchObject({ ok: false, error: { code: 'validation' } })
+      expect(launches.dispatches).toHaveLength(1)
+      expect(
+        await current.application.execute({
+          type: 'set-project-automation-enabled',
+          expectedConfigurationVersion: version,
+          project: sourceProject.key,
+          enabled: true,
+        }),
+      ).toMatchObject({ ok: true })
+      expect(
+        database
+          .events()
+          .filter((event) => event.type === 'wayfinder-outcome-unknown-acknowledged'),
+      ).toMatchObject([
+        { opportunityId: 'opportunity-0', unknownEventId: 'first-unknown' },
+        { opportunityId: runningOpportunity.id, unknownEventId: secondUnknown.id },
+      ])
+      await vi.waitFor(() =>
+        expect(
+          launches.dispatches.map((request) => request.environment.ROADMAP_TICKET_ID).sort(),
+        ).toEqual(['2', '3']),
+      )
+      expect(
+        database.evidence().filter((entry) => entry.wayfinder?.status === 'running'),
+      ).toHaveLength(1)
+      expect(launches.classifications).toEqual([])
+    } finally {
+      await current.application.stop()
+    }
+  })
+
   it('does not re-enable when the interruption acknowledgement cannot persist', async () => {
     const sourceProject = project('ack-failure', [ticket('1')])
     const target = { project: sourceProject.key, mapId: 'map', ticketId: '1' }
@@ -623,6 +1706,15 @@ describe('RoadmapApplication Automation', () => {
     expect(
       database.events().find((event) => event.type === 'wayfinder-outcome-unknown-acknowledged'),
     ).toMatchObject({ unknownEventId: unknown.id })
+    expect(
+      current.application
+        .current()
+        .automation.evidence.find((entry) => entry.target.ticketId === '1')?.wayfinder,
+    ).toMatchObject({
+      status: 'outcome-unknown',
+      acknowledged: true,
+    })
+    expect(current.application.current().automation.evidence).toEqual(database.evidence())
     expect(launches.dispatches).toEqual([])
     expect(current.application.current().automation.enabledProjects).toEqual([])
     await current.application.stop()
@@ -1280,9 +2372,8 @@ describe('RoadmapApplication Automation', () => {
       wayfinderCommand: wayfinder,
     })
     configured.projects[0] = {
-      key: sourceProject.key,
+      ref: { integration: 'local', projectId: sourceProject.key.id },
       connectionId: 'local',
-      locator: { integration: 'local', path: root },
       workspace: { path: root },
     }
     const current = await harness({
@@ -1338,9 +2429,8 @@ describe('RoadmapApplication Automation', () => {
     })
     const configured = configuration([sourceProject], { wayfinderCommand: wayfinder })
     configured.projects[0] = {
-      key: sourceProject.key,
+      ref: { integration: 'local', projectId: sourceProject.key.id },
       connectionId: 'local',
-      locator: { integration: 'local', path: root },
       workspace: { path: root },
     }
     const targets = ['1', '2'].map((ticketId) => ({
@@ -1353,7 +2443,7 @@ describe('RoadmapApplication Automation', () => {
     const database = createAutomationDatabaseDocument(databasePath)
     await database.load()
     await database.append({ opportunities: queued.opportunities, events: queued.events })
-    const source = adapter([sourceProject])
+    const source = controlledObservers([sourceProject])
     const configuredDocument = memoryConfiguration(configured)
     const application = createRoadmapApplication({
       configuration: configuredDocument.document,
@@ -1361,7 +2451,8 @@ describe('RoadmapApplication Automation', () => {
         database,
         launcher: createAutomationLauncher({ stopGraceMs: 10 }),
       },
-      createAdapters: () => [source.value],
+      observers: source.observers,
+      admissions: admissionFixtures(),
       serverEpoch: 'automation-series-test',
     })
 

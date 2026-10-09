@@ -1,36 +1,42 @@
-import type { ProjectRegistration } from '@roadmap/contracts'
-import { inspectLocalWorkspace } from '../local/workspace.ts'
+import { realpath } from 'node:fs/promises'
 import { LOCAL_PROJECTS_PATH, readLocalProjectRegistry } from '../local-projects.ts'
-import { CLASSIFICATION_RESULT_SCHEMA_MARKER } from './classification-contract.ts'
 import type {
+  ConfiguredConnection,
   HarnessCommand,
   LegacyHarnessCommand,
-  LegacyRoadmapConfigurationV3,
-  LegacyRoadmapConfigurationV4,
-  RoadmapConfiguration,
-} from './configuration.ts'
+  ProjectConfiguration,
+  ProjectConfigurationIntent,
+} from '../projects/registry.ts'
+import { CLASSIFICATION_RESULT_SCHEMA_MARKER } from './classification-contract.ts'
 import { SESSION_REPORT_SCHEMA_MARKER } from './session-report-contract.ts'
 
-export interface LegacyRoadmapConfiguration {
-  schemaVersion: 1 | 2
+export interface ConfigurationMigrationInput {
+  schemaVersion: 1 | 2 | 3 | 4 | 5
   configurationVersion: number
-  connections: RoadmapConfiguration['connections']
-  projects: ProjectRegistration[]
+  connections: ConfiguredConnection[]
+  projects: ProjectConfigurationIntent[]
+  classification?: {
+    command?: LegacyHarnessCommand
+    enabledProjects: { integration: 'local' | 'github'; id: string }[]
+  }
+  automation?: {
+    enabled: boolean
+    classificationCommand?: LegacyHarnessCommand | HarnessCommand
+    wayfinderCommand?: LegacyHarnessCommand | HarnessCommand
+    enabledProjects: { integration: 'local' | 'github'; id: string }[]
+  }
 }
-
 export interface ConfigurationMigration {
-  document: RoadmapConfiguration
+  document: ProjectConfiguration
   notices: string[]
 }
-
-const LOCAL_CONNECTION: RoadmapConfiguration['connections'][number] = {
+const LOCAL_CONNECTION: ConfiguredConnection = {
   id: 'local',
   integration: 'local',
   name: 'Local',
   builtIn: true,
 }
-
-const LEGACY_CLASSIFICATION_PROMPT_TEMPLATE = `Perform a Roadmap Classification Run for the task ticket below.
+const CLASSIFICATION_PROMPT = `Perform a Roadmap Classification Run for the task ticket below.
 Map pointer: {{roadmap.map}}
 Ticket pointer: {{roadmap.ticket}}
 
@@ -38,8 +44,7 @@ Load both from the tracker. Do not claim, edit, or resolve anything.
 Write only one JSON object to stdout matching this schema:
 ${CLASSIFICATION_RESULT_SCHEMA_MARKER}
 `
-
-const LEGACY_WAYFINDER_PROMPT_TEMPLATE = `Invoke the Wayfinder skill for exactly this map and ticket.
+const WAYFINDER_PROMPT = `Invoke the Wayfinder skill for exactly this map and ticket.
 Map pointer: {{roadmap.map}}
 Ticket pointer: {{roadmap.ticket}}
 
@@ -48,169 +53,110 @@ Write only one JSON object to stdout matching this schema:
 ${SESSION_REPORT_SCHEMA_MARKER}
 `
 
-/** Migrates the one reachable v1 input and reads the legacy Registry only on that path. */
-export async function migrateConfigurationV1(
-  legacy: LegacyRoadmapConfiguration,
-  legacyLocalProjectsPath = LOCAL_PROJECTS_PATH,
+/** Only v1 imports the historical Registry. Missing storage never discards its configured identity. */
+export async function migrateConfiguration(
+  input: ConfigurationMigrationInput,
+  legacyPath = LOCAL_PROJECTS_PATH,
 ): Promise<ConfigurationMigration> {
-  const registry = await readLocalProjectRegistry(legacyLocalProjectsPath)
-  const notices = [...registry.warnings]
-  const legacyLocalConnection = legacy.connections.find(
-    (connection) => connection.integration === 'local',
-  )
-  const connections = migratedConnections(legacy.connections)
-  const localConnection = connections.find((connection) => connection.integration === 'local')
-  if (!localConnection) throw new Error('Local Connection migration invariant failed.')
-
-  const projects = legacy.projects.map((project) => {
-    const connectionId =
-      legacyLocalConnection && project.connectionId === legacyLocalConnection.id
-        ? localConnection.id
-        : !legacyLocalConnection && project.connectionId === 'local'
-          ? 'local-connection'
-          : project.connectionId
-    return connectionId === project.connectionId ? project : { ...project, connectionId }
-  })
-  for (const entry of registry.registrations) {
-    const duplicatePath = projects.find(
-      (project) => canonicalPath(project.workspace.path) === canonicalPath(entry.rootPath),
-    )
-    if (duplicatePath) {
-      notices.push(
-        `Skipped legacy Local Project ${JSON.stringify(entry.id)} because its folder is already registered.`,
-      )
-      continue
+  const notices: string[] = []
+  let connections = input.connections
+  let projects = input.projects
+  if (input.schemaVersion === 1) {
+    const registry = await readLocalProjectRegistry(legacyPath)
+    notices.push(...registry.warnings)
+    const priorLocal = connections.find((item) => item.integration === 'local')
+    const local: ConfiguredConnection =
+      priorLocal?.integration === 'local'
+        ? { ...priorLocal, id: 'local', builtIn: true }
+        : LOCAL_CONNECTION
+    connections = [
+      local,
+      ...connections
+        .filter((item) => item.integration !== 'local')
+        .map((item) => (item.id === 'local' ? { ...item, id: 'local-connection' } : item)),
+    ]
+    projects = projects.map((project) => ({
+      ...project,
+      connectionId:
+        priorLocal && project.connectionId === priorLocal.id
+          ? 'local'
+          : !priorLocal && project.connectionId === 'local'
+            ? 'local-connection'
+            : project.connectionId,
+    }))
+    for (const entry of registry.registrations) {
+      const recordedPath = entry.rootExists
+        ? await realpath(entry.rootPath).catch(() => entry.rootPath)
+        : entry.rootPath
+      if (projects.some((project) => pathKey(project.workspace.path) === pathKey(recordedPath))) {
+        notices.push(
+          `Skipped legacy Local Project ${JSON.stringify(entry.id)} because its folder is already registered.`,
+        )
+        continue
+      }
+      if (
+        projects.some(
+          (project) => project.ref.integration === 'local' && project.ref.projectId === entry.id,
+        )
+      ) {
+        notices.push(
+          `Skipped legacy Local Project ${JSON.stringify(entry.id)} because its route key is already registered.`,
+        )
+        continue
+      }
+      projects.push({
+        ref: { integration: 'local', projectId: entry.id },
+        connectionId: 'local',
+        workspace: { path: recordedPath },
+        ...(entry.displayName ? { displayName: entry.displayName } : {}),
+      })
     }
-    const duplicateKey = projects.find(
-      (project) => project.key.integration === 'local' && project.key.id === entry.id,
-    )
-    if (duplicateKey) {
-      notices.push(
-        `Skipped legacy Local Project ${JSON.stringify(entry.id)} because its route key is already registered.`,
-      )
-      continue
-    }
-
-    const workspace = entry.rootExists
-      ? await inspectLocalWorkspace(entry.rootPath).catch(() => ({ path: entry.rootPath }))
-      : { path: entry.rootPath }
-    projects.push({
-      key: { integration: 'local', id: entry.id },
-      connectionId: localConnection.id,
-      locator: { integration: 'local', path: workspace.path },
-      workspace,
-      ...(entry.displayName ? { displayName: entry.displayName } : {}),
-    })
   }
-
+  let automation: ProjectConfiguration['automation'] = { enabled: false, enabledProjects: [] }
+  if (input.schemaVersion === 3) {
+    if (input.classification?.command)
+      automation.classificationCommand = materialize(
+        input.classification.command,
+        CLASSIFICATION_PROMPT,
+      )
+  } else if (input.schemaVersion === 4 || input.schemaVersion === 5) {
+    if (!input.automation) throw new Error('Decoded Automation migration input is missing.')
+    automation = {
+      enabled: input.automation.enabled,
+      enabledProjects: input.automation.enabledProjects,
+      ...(input.automation.classificationCommand
+        ? {
+            classificationCommand: materialize(
+              input.automation.classificationCommand,
+              CLASSIFICATION_PROMPT,
+            ),
+          }
+        : {}),
+      ...(input.automation.wayfinderCommand
+        ? { wayfinderCommand: materialize(input.automation.wayfinderCommand, WAYFINDER_PROMPT) }
+        : {}),
+    }
+  }
   return {
     document: {
-      schemaVersion: 5,
-      configurationVersion: legacy.configurationVersion + 1,
+      schemaVersion: 6,
+      configurationVersion: input.configurationVersion + 1,
       connections,
       projects,
-      automation: { enabled: false, enabledProjects: [] },
+      automation,
     },
     notices,
   }
 }
-
-/** Adds inert Automation configuration without replaying the one-time Registry import. */
-export function migrateConfigurationV2(legacy: LegacyRoadmapConfiguration): ConfigurationMigration {
-  return {
-    document: {
-      schemaVersion: 5,
-      configurationVersion: legacy.configurationVersion + 1,
-      connections: legacy.connections,
-      projects: legacy.projects,
-      automation: { enabled: false, enabledProjects: [] },
-    },
-    notices: [],
-  }
-}
-
-/** Retains the safe command but resets Classification-only consent during the Automation cutover. */
-export function migrateConfigurationV3(
-  legacy: LegacyRoadmapConfigurationV3,
-): ConfigurationMigration {
-  return {
-    document: {
-      schemaVersion: 5,
-      configurationVersion: legacy.configurationVersion + 1,
-      connections: legacy.connections,
-      projects: legacy.projects,
-      automation: {
-        enabled: false,
-        ...(legacy.classification.command
-          ? {
-              classificationCommand: migrateHarnessCommand(
-                legacy.classification.command,
-                LEGACY_CLASSIFICATION_PROMPT_TEMPLATE,
-              ),
-            }
-          : {}),
-        enabledProjects: [],
-      },
-    },
-    notices: [],
-  }
-}
-
-/** Materializes the formerly built-in prompts while retaining inert Automation consent. */
-export function migrateConfigurationV4(
-  legacy: LegacyRoadmapConfigurationV4,
-): ConfigurationMigration {
-  return {
-    document: {
-      schemaVersion: 5,
-      configurationVersion: legacy.configurationVersion + 1,
-      connections: legacy.connections,
-      projects: legacy.projects,
-      automation: {
-        enabled: legacy.automation.enabled,
-        ...(legacy.automation.classificationCommand
-          ? {
-              classificationCommand: migrateHarnessCommand(
-                legacy.automation.classificationCommand,
-                LEGACY_CLASSIFICATION_PROMPT_TEMPLATE,
-              ),
-            }
-          : {}),
-        ...(legacy.automation.wayfinderCommand
-          ? {
-              wayfinderCommand: migrateHarnessCommand(
-                legacy.automation.wayfinderCommand,
-                LEGACY_WAYFINDER_PROMPT_TEMPLATE,
-              ),
-            }
-          : {}),
-        enabledProjects: legacy.automation.enabledProjects,
-      },
-    },
-    notices: [],
-  }
-}
-
-function migrateHarnessCommand(
-  command: LegacyHarnessCommand,
-  promptTemplate: string,
+function materialize(
+  command: LegacyHarnessCommand | HarnessCommand,
+  template: string,
 ): HarnessCommand {
-  return { ...command, promptTemplate }
+  return {
+    ...command,
+    promptTemplate: 'promptTemplate' in command ? command.promptTemplate : template,
+  }
 }
-
-function migratedConnections(
-  connections: readonly RoadmapConfiguration['connections'][number][],
-): RoadmapConfiguration['connections'] {
-  const local = connections.find((connection) => connection.integration === 'local')
-  const nonLocal = connections.filter((connection) => connection.integration !== 'local')
-  return [
-    local ? { ...local, id: 'local', integration: 'local', builtIn: true } : LOCAL_CONNECTION,
-    ...nonLocal.map((connection) =>
-      connection.id === 'local' ? { ...connection, id: `${connection.id}-connection` } : connection,
-    ),
-  ]
-}
-
-function canonicalPath(path: string): string {
+function pathKey(path: string): string {
   return process.platform === 'darwin' ? path.toLocaleLowerCase() : path
 }

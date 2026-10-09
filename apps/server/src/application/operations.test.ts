@@ -1,33 +1,40 @@
-import type { ApplicationState, ProjectRegistration } from '@roadmap/contracts'
+import type { ProjectKey } from '@roadmap/contracts'
 import { describe, expect, it, vi } from 'vitest'
-import { createApplicationOperations } from './operations.ts'
+import { refineLocalWorkspaceProof, type WorkspaceAdmission } from '../projects/registry.ts'
+import {
+  createApplicationOperations,
+  type OperationCommand,
+  type OperationContext,
+} from './operations.ts'
 
-const LOCAL: ProjectRegistration = {
-  key: { integration: 'local', id: 'demo' },
-  connectionId: 'local',
-  locator: { integration: 'local', path: '/committed/source' },
-  workspace: { path: '/committed/workspace' },
+const PROJECT: ProjectKey = { integration: 'local', id: 'demo' }
+
+function admitted(path = '/current/workspace'): WorkspaceAdmission {
+  const proof = refineLocalWorkspaceProof({
+    inspection: {
+      integration: 'local',
+      path,
+      readable: true,
+      searchable: true,
+    },
+  })
+  if (!proof.ok) throw new Error(proof.error.message)
+  return { status: 'admitted', proof: proof.value }
 }
 
-function state(): ApplicationState {
+function context(workspace: WorkspaceAdmission | undefined = admitted()): OperationContext {
   return {
-    serverEpoch: 'test',
-    stateSequence: 1,
-    configurationVersion: 1,
-    supportedIntegrations: [],
-    connections: [],
-    registrations: [LOCAL],
-    projects: [],
-    authorizationOperations: [],
-    configuration: { valid: true, issues: [], notices: [] },
-    automation: {
-      enabled: false,
-      enabledProjects: [],
-      availability: { status: 'ready' },
-      evidence: [],
-      overrides: [],
+    async refresh() {
+      return true
     },
-    roadmap: { capturedAt: 1, projects: [], unreachable: [] },
+    async workspace(project) {
+      return project.integration === PROJECT.integration && project.id === PROJECT.id
+        ? workspace
+        : undefined
+    },
+    workspaceAdmissionError() {
+      return null
+    },
   }
 }
 
@@ -39,12 +46,12 @@ describe('createApplicationOperations', () => {
       .mockResolvedValueOnce(null)
     const operations = createApplicationOperations({ selectWorkspace })
 
-    await expect(operations.query({ type: 'select-workspace' }, state())).resolves.toEqual({
+    await expect(operations.query({ type: 'select-workspace' })).resolves.toEqual({
       ok: true,
       type: 'workspace-selection',
       path: '/selected/workspace',
     })
-    await expect(operations.query({ type: 'select-workspace' }, state())).resolves.toEqual({
+    await expect(operations.query({ type: 'select-workspace' })).resolves.toEqual({
       ok: true,
       type: 'workspace-selection',
     })
@@ -57,7 +64,7 @@ describe('createApplicationOperations', () => {
       },
     })
 
-    await expect(operations.query({ type: 'select-workspace' }, state())).resolves.toEqual({
+    await expect(operations.query({ type: 'select-workspace' })).resolves.toEqual({
       ok: false,
       error: {
         code: 'selection-failed',
@@ -65,41 +72,93 @@ describe('createApplicationOperations', () => {
       },
     })
   })
-  it('resolves Workspace and source paths only from the committed registration', async () => {
+
+  it('resolves every host action through current private Workspace proof', async () => {
+    const launch = vi.fn(async () => {})
+    const operations = createApplicationOperations({ launch })
+    let workspace = admitted('/first/workspace')
+    const current: OperationContext = {
+      ...context(),
+      async workspace() {
+        return workspace
+      },
+    }
+
+    for (const actionId of ['open-workspace', 'open-terminal', 'reveal-source']) {
+      workspace = admitted(`/current/${actionId}`)
+      expect(
+        await operations.execute(
+          {
+            type: 'launch-action',
+            expectedConfigurationVersion: 1,
+            actionId,
+            project: PROJECT,
+          },
+          current,
+        ),
+      ).toEqual({ ok: true, result: { type: 'action-launched', actionId } })
+    }
+
+    expect(launch.mock.calls).toEqual([
+      ['/usr/bin/open', ['-a', 'Visual Studio Code', '/current/open-workspace']],
+      ['/usr/bin/open', ['-a', 'Terminal', '/current/open-terminal']],
+      ['/usr/bin/open', ['-R', '/current/reveal-source']],
+    ])
+  })
+
+  it.each<WorkspaceAdmission>([
+    { status: 'unverified' },
+    {
+      status: 'unavailable',
+      error: {
+        code: 'admission-failed',
+        field: 'workspace.path',
+        message: 'Workspace is no longer readable.',
+      },
+    },
+  ])('refuses host effects without admitted Workspace proof: $status', async (workspace) => {
     const launch = vi.fn(async () => {})
     const operations = createApplicationOperations({ launch })
 
-    const workspace = await operations.execute(
-      {
-        type: 'launch-action',
-        expectedConfigurationVersion: 1,
-        actionId: 'open-workspace',
-        project: LOCAL.key,
-      },
-      state(),
-    )
-    const source = await operations.execute(
-      {
-        type: 'launch-action',
-        expectedConfigurationVersion: 1,
-        actionId: 'reveal-source',
-        project: LOCAL.key,
-      },
-      state(),
-    )
+    expect(
+      await operations.execute(
+        {
+          type: 'launch-action',
+          expectedConfigurationVersion: 1,
+          actionId: 'open-workspace',
+          project: PROJECT,
+        },
+        context(workspace),
+      ),
+    ).toMatchObject({
+      ok: false,
+      error: { code: 'admission-failed', field: 'workspace.path' },
+    })
+    expect(launch).not.toHaveBeenCalled()
+  })
 
-    expect(workspace).toEqual({
+  it('refreshes the selected active source through the application context', async () => {
+    const refresh = vi
+      .fn<OperationContext['refresh']>()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false)
+    const operations = createApplicationOperations()
+    const current = { ...context(), refresh }
+    const command: OperationCommand = {
+      type: 'refresh-project',
+      expectedConfigurationVersion: 1,
+      project: PROJECT,
+    }
+
+    expect(await operations.execute(command, current)).toEqual({
       ok: true,
-      result: { type: 'action-launched', actionId: 'open-workspace' },
+      result: { type: 'project-refreshed', project: PROJECT },
     })
-    expect(source).toEqual({
-      ok: true,
-      result: { type: 'action-launched', actionId: 'reveal-source' },
+    expect(await operations.execute(command, current)).toMatchObject({
+      ok: false,
+      error: { code: 'validation', field: 'project' },
     })
-    expect(launch.mock.calls).toEqual([
-      ['/usr/bin/open', ['-a', 'Visual Studio Code', '/committed/workspace']],
-      ['/usr/bin/open', ['-R', '/committed/source']],
-    ])
+    expect(refresh.mock.calls).toEqual([[PROJECT], [PROJECT]])
   })
 
   it('rejects unknown actions without launching a client-controlled value', async () => {
@@ -111,9 +170,9 @@ describe('createApplicationOperations', () => {
         type: 'launch-action',
         expectedConfigurationVersion: 1,
         actionId: '/bin/sh',
-        project: LOCAL.key,
+        project: PROJECT,
       },
-      state(),
+      context(),
     )
 
     expect(result).toMatchObject({ ok: false, error: { code: 'validation', field: 'actionId' } })

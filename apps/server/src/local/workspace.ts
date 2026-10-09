@@ -2,23 +2,27 @@ import { execFile } from 'node:child_process'
 import { constants } from 'node:fs'
 import { access, realpath, stat } from 'node:fs/promises'
 import { promisify } from 'node:util'
+import type { LocalWorkspaceInspection } from '../projects/registry.ts'
 
 const execFileAsync = promisify(execFile)
 
-export interface LocalWorkspace {
-  path: string
-  gitIdentity?: string
-}
-
 /** Resolves one readable directory and records a Git-history identity when one exists. */
-export async function inspectLocalWorkspace(requestedPath: string): Promise<LocalWorkspace> {
+export async function inspectLocalWorkspace(
+  requestedPath: string,
+): Promise<LocalWorkspaceInspection> {
   const path = await realpath(requestedPath)
   const metadata = await stat(path)
   if (!metadata.isDirectory()) throw new Error('not a directory')
   await access(path, constants.R_OK | constants.X_OK)
 
   const gitIdentity = await readGitIdentity(path)
-  return { path, ...(gitIdentity ? { gitIdentity } : {}) }
+  return {
+    integration: 'local',
+    path,
+    readable: true,
+    searchable: true,
+    ...(gitIdentity ? { gitIdentity } : {}),
+  }
 }
 
 async function readGitIdentity(path: string): Promise<string | undefined> {

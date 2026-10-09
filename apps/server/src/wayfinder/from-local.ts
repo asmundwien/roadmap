@@ -1,9 +1,10 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { basename, dirname, join, relative } from 'node:path'
+import type { LocalObservationInput } from '../observation/coordinator.ts'
 import type {
-  AdapterSlice,
   Completeness,
   ObservationAttempt,
+  ObservationBatch,
   SourceFailure,
   SourceMapContent,
   SourceMapKey,
@@ -17,11 +18,13 @@ import { failedAttempt, observedAttempt } from '../observation/source.ts'
 import { parseMapBody } from './map-body.ts'
 import { ticketTypeEvidenceFromLabels } from './tickets.ts'
 
-export interface LocalProjectInput {
-  readonly key: SourceProjectKey & { readonly integration: 'local' }
-  readonly rootPath: string
-  readonly name?: string
+export interface LocalProjectReadOptions {
   readonly knownTickets?: readonly { readonly key: SourceTicketKey; readonly path: string }[]
+  readonly now?: () => number
+}
+
+interface LocalReadContext extends Required<LocalProjectReadOptions> {
+  readonly project: SourceProjectKey & { readonly integration: 'local' }
 }
 
 interface ParsedMarkdownFile {
@@ -56,14 +59,22 @@ interface ParsedLocalTicket {
 type TicketRead = { kind: 'readable'; ticket: ParsedLocalTicket } | FailedAttempt
 
 /** Reads admitted local source scopes without turning failed reads into empty content. */
-export async function readLocalProject(input: LocalProjectInput): Promise<AdapterSlice> {
+export async function readLocalProject(
+  input: LocalObservationInput,
+  options: LocalProjectReadOptions = {},
+): Promise<ObservationBatch> {
+  const context: LocalReadContext = {
+    knownTickets: options.knownTickets ?? [],
+    now: options.now ?? Date.now,
+    project: { integration: input.ref.integration, id: input.ref.projectId },
+  }
   const attempts: ObservationAttempt[] = []
-  const attemptedAt = Date.now()
-  const projectScope = { kind: 'project', project: input.key } satisfies SourceScope
-  const rootProvenance = provenance(input.rootPath, 'inspect-root')
+  const attemptedAt = context.now()
+  const projectScope = { kind: 'project', project: context.project } satisfies SourceScope
+  const rootProvenance = provenance(input.workspace.path, 'inspect-root')
   try {
     // Enumeration proves directory readability. A successful stat does not.
-    await readdir(input.rootPath, { withFileTypes: true })
+    await readdir(input.workspace.path, { withFileTypes: true })
   } catch (error) {
     return { attempts: [failed(projectScope, attemptedAt, rootProvenance, error)] }
   }
@@ -72,21 +83,24 @@ export async function readLocalProject(input: LocalProjectInput): Promise<Adapte
       kind: 'observed',
       scope: projectScope,
       attemptedAt,
-      observedAt: Date.now(),
+      observedAt: context.now(),
       provenance: rootProvenance,
       completeness: { kind: 'complete' },
       value: {
-        key: input.key,
-        name: input.name ?? basename(input.rootPath),
-        source: { integration: 'local', path: input.rootPath },
+        key: context.project,
+        name: basename(input.workspace.path),
+        source: { integration: 'local', path: input.workspace.path },
         warnings: [],
       },
     }),
   )
 
-  const wayfinderPath = join(input.rootPath, '.wayfinder')
-  const membershipScope = { kind: 'maps-membership', project: input.key } satisfies SourceScope
-  const enumerationAt = Date.now()
+  const wayfinderPath = join(input.workspace.path, '.wayfinder')
+  const membershipScope = {
+    kind: 'maps-membership',
+    project: context.project,
+  } satisfies SourceScope
+  const enumerationAt = context.now()
   let mapPaths: string[]
   try {
     const entries = await readdir(wayfinderPath, { withFileTypes: true })
@@ -105,29 +119,36 @@ export async function readLocalProject(input: LocalProjectInput): Promise<Adapte
       kind: 'observed',
       scope: membershipScope,
       attemptedAt: enumerationAt,
-      observedAt: Date.now(),
+      observedAt: context.now(),
       provenance: provenance(wayfinderPath, 'enumerate'),
       completeness: { kind: 'complete' },
       value: {
         members: mapPaths.map((path) => ({
-          project: input.key,
-          mapId: displayPath(input.rootPath, path),
+          project: context.project,
+          mapId: displayPath(input.workspace.path, path),
         })),
       },
     }),
   )
-  const maps = await Promise.all(mapPaths.map((path) => readLocalMap(input, path)))
+  const maps = await Promise.all(mapPaths.map((path) => readLocalMap(input, path, context)))
   attempts.push(...maps.flatMap((slice) => slice.attempts))
   return { attempts }
 }
 
-async function readLocalMap(input: LocalProjectInput, mapPath: string): Promise<AdapterSlice> {
-  const mapKey: SourceMapKey = { project: input.key, mapId: displayPath(input.rootPath, mapPath) }
-  const mapRead = await readLocalMapContent(mapKey, mapPath)
+async function readLocalMap(
+  input: LocalObservationInput,
+  mapPath: string,
+  context: LocalReadContext,
+): Promise<ObservationBatch> {
+  const mapKey: SourceMapKey = {
+    project: context.project,
+    mapId: displayPath(input.workspace.path, mapPath),
+  }
+  const mapRead = await readLocalMapContent(mapKey, mapPath, context.now)
   const mapWarnings = mapRead.kind === 'observed' ? [...mapRead.value.warnings] : []
   const ticketsPath = join(dirname(mapPath), 'tickets')
   const membershipScope = { kind: 'tickets-membership', map: mapKey } satisfies SourceScope
-  const enumerationAt = Date.now()
+  const enumerationAt = context.now()
   const attempts: ObservationAttempt[] = []
   let ticketPaths: string[] = []
   let membershipFailure: FailedAttempt | undefined
@@ -144,8 +165,10 @@ async function readLocalMap(input: LocalProjectInput, mapPath: string): Promise<
       provenance(ticketsPath, 'enumerate'),
       error,
     )
-    mapWarnings.push(`Cannot read tickets directory: ${displayPath(input.rootPath, ticketsPath)}.`)
-    ticketPaths = (input.knownTickets ?? [])
+    mapWarnings.push(
+      `Cannot read tickets directory: ${displayPath(input.workspace.path, ticketsPath)}.`,
+    )
+    ticketPaths = context.knownTickets
       .filter(
         (ticket) =>
           ticket.key.map.mapId === mapKey.mapId &&
@@ -154,7 +177,9 @@ async function readLocalMap(input: LocalProjectInput, mapPath: string): Promise<
       )
       .map((ticket) => ticket.path)
   }
-  const results = await Promise.all(ticketPaths.map((path) => readLocalTicket(input, mapKey, path)))
+  const results = await Promise.all(
+    ticketPaths.map((path) => readLocalTicket(mapKey, path, context)),
+  )
   const kept = new Map<string, ParsedLocalTicket>()
   const unidentifiedTickets: SourceMapContent['unidentifiedTickets'][number][] = []
   let membershipIncomplete = false
@@ -166,7 +191,7 @@ async function readLocalMap(input: LocalProjectInput, mapPath: string): Promise<
       membershipIncomplete = true
       attempts.push(result)
       mapWarnings.push(
-        `Cannot read ticket file: ${displayPath(input.rootPath, result.provenance.integration === 'local' ? result.provenance.path : ticketsPath)}.`,
+        `Cannot read ticket file: ${displayPath(input.workspace.path, result.provenance.integration === 'local' ? result.provenance.path : ticketsPath)}.`,
       )
       continue
     }
@@ -184,7 +209,7 @@ async function readLocalMap(input: LocalProjectInput, mapPath: string): Promise<
         raw: ticket.raw,
         warnings: [...ticket.warnings, warning],
       })
-      mapWarnings.push(`Unidentified ${displayPath(input.rootPath, ticket.path)}: ${warning}`)
+      mapWarnings.push(`Unidentified ${displayPath(input.workspace.path, ticket.path)}: ${warning}`)
       continue
     }
     kept.set(ticket.id, ticket)
@@ -200,7 +225,7 @@ async function readLocalMap(input: LocalProjectInput, mapPath: string): Promise<
         kind: 'observed',
         scope: membershipScope,
         attemptedAt: enumerationAt,
-        observedAt: Date.now(),
+        observedAt: context.now(),
         provenance: provenance(ticketsPath, 'enumerate'),
         completeness: membershipIncomplete
           ? { kind: 'incomplete', reason: 'unreadable' }
@@ -242,8 +267,9 @@ async function readLocalMap(input: LocalProjectInput, mapPath: string): Promise<
 async function readLocalMapContent(
   key: SourceMapKey,
   path: string,
+  now: () => number,
 ): Promise<MapAttempt | FailedAttempt> {
-  const attemptedAt = Date.now()
+  const attemptedAt = now()
   let raw: string
   let mtimeMs: number
   try {
@@ -271,7 +297,7 @@ async function readLocalMapContent(
     kind: 'observed',
     scope: { kind: 'map', map: key },
     attemptedAt,
-    observedAt: Date.now(),
+    observedAt: now(),
     provenance: provenance(path, 'read'),
     completeness:
       warnings.length > 0 || body.missingSections.length > 0
@@ -347,11 +373,11 @@ function materializeTickets(
 }
 
 async function readLocalTicket(
-  input: LocalProjectInput,
   map: SourceMapKey,
   path: string,
+  context: LocalReadContext,
 ): Promise<TicketRead> {
-  const attemptedAt = Date.now()
+  const attemptedAt = context.now()
   let raw: string
   let mtimeMs: number
   try {
@@ -359,7 +385,7 @@ async function readLocalTicket(
     raw = text
     mtimeMs = fileStat.mtimeMs
   } catch (error) {
-    const known = input.knownTickets?.find(
+    const known = context.knownTickets.find(
       (ticket) =>
         ticket.path === path &&
         ticket.key.map.mapId === map.mapId &&
@@ -402,7 +428,7 @@ async function readLocalTicket(
       body: parsed.body,
       mtimeMs,
       attemptedAt,
-      observedAt: Date.now(),
+      observedAt: context.now(),
       id: readId(parsed.frontmatter.id),
       title,
       status,

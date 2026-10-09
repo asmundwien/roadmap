@@ -1,0 +1,923 @@
+import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { setImmediate } from 'node:timers/promises'
+import type {
+  ApplicationState,
+  AutomationTarget,
+  Project,
+  Ticket,
+  WayfinderMap,
+} from '@roadmap/contracts'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  type AutomationDatabase,
+  type AutomationDatabaseDocument,
+  type AutomationEvent,
+  appendAutomationDatabase,
+} from '../automation/database.ts'
+import type {
+  AutomationLaunch,
+  AutomationLauncher,
+  ClassificationProcessResult,
+  WayfinderProcessResult,
+} from '../automation/engine.ts'
+import type { ConfigurationDocument, ConfigurationRead } from '../configuration/document.ts'
+import { createGitHubProjectAdmission } from '../github/admission.ts'
+import type { CredentialBundle, GitHubConnectionPort } from '../github/connections.ts'
+import { createGitHubObserverPool } from '../github/observer.ts'
+import { createLocalProjectAdmission } from '../local/admission.ts'
+import type { SourceObserver } from '../observation/source.ts'
+import type { HarnessCommand, ProjectConfiguration } from '../projects/registry.ts'
+import { controlledSourceFixture, sourceFixture } from '../source-test-fixtures.ts'
+import { createRoadmapApplication } from './application.ts'
+import type { CredentialVault } from './credential-vault.ts'
+import { createApplicationOperations } from './operations.ts'
+
+const LOCAL = {
+  id: 'local',
+  integration: 'local',
+  name: 'Local',
+  builtIn: true,
+} satisfies ProjectConfiguration['connections'][number]
+const COMMAND: HarnessCommand = {
+  command: process.execPath,
+  args: [],
+  promptDelivery: 'stdin',
+  promptTemplate: 'Map {{roadmap.map}} ticket {{roadmap.ticket}}',
+}
+
+function memoryConfiguration(initial: ProjectConfiguration) {
+  let current = initial
+  const listeners = new Set<(result: ConfigurationRead) => void>()
+  const document: ConfigurationDocument = {
+    async load() {
+      return { ok: true, document: current }
+    },
+    subscribe(listener) {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    async write(next) {
+      current = next
+      return { ok: true, durability: 'confirmed' }
+    },
+    async stop() {},
+  }
+  return {
+    document,
+    emit(next: ProjectConfiguration) {
+      current = next
+      for (const listener of listeners) listener({ ok: true, document: next })
+    },
+    invalidate() {
+      for (const listener of listeners)
+        listener({ ok: false, issues: [{ path: '$', message: 'Invalid manual configuration.' }] })
+    },
+  }
+}
+
+function localContent(id: string, path: string, withTicket = false): Project {
+  const key = { integration: 'local', id } satisfies Project['key']
+  const ticket: Ticket = {
+    id: '1',
+    displayId: '1',
+    title: 'Retain the current policy',
+    body: 'Do not launch under a superseded policy.',
+    typeEvidence: { kind: 'recognized', value: 'task', labels: ['task'] },
+    state: 'frontier',
+    isClaimed: false,
+    isBlocked: false,
+    assignees: [],
+    blockedBy: [],
+    blockersComplete: true,
+    warnings: [],
+    sourcePath: join(path, '.wayfinder/tickets/1.md'),
+  }
+  const map: WayfinderMap = {
+    project: key,
+    id: '.wayfinder/map.md',
+    title: 'Activation safety',
+    isOpen: true,
+    updatedAt: 1,
+    body: {
+      raw: '',
+      destination: 'Commit the latest policy before admitting work.',
+      notes: [],
+      decisions: [],
+      notYetSpecified: [],
+      notYetSpecifiedNote: '',
+      outOfScope: [],
+      sections: [],
+      missingSections: [],
+    },
+    tickets: [ticket],
+    frontier: [ticket],
+    progress: { total: 1, completed: 0 },
+    ticketsComplete: true,
+    warnings: [],
+    sourcePath: join(path, '.wayfinder/map.md'),
+  }
+  return {
+    key,
+    name: id,
+    sourcePath: path,
+    openMaps: withTicket ? [map] : [],
+    closedMaps: [],
+    warnings: [],
+  }
+}
+
+function queuedDatabase(target: AutomationTarget): AutomationDatabase {
+  const identity = { opportunityId: 'queued-opportunity', recordedAt: '2026-10-01T00:00:00.000Z' }
+  return {
+    schemaVersion: 3,
+    opportunities: [{ id: identity.opportunityId, target }],
+    events: [
+      {
+        ...identity,
+        id: 'classified-start',
+        type: 'classification-started',
+        admission: 'automatic',
+      },
+      {
+        ...identity,
+        id: 'classified-end',
+        type: 'classification-completed',
+        processResult: { status: 'exited', code: 0 },
+        verdict: { value: 'afk', reason: 'Agent-ready.' },
+      },
+    ],
+  }
+}
+
+interface EffectInvocation {
+  stage: 'classification' | 'wayfinder'
+  request: AutomationLaunch
+  state: ApplicationState
+}
+
+// The launcher is an external effect port. All admission, reservation and postappend checks are real.
+function recordingLauncher(
+  current: () => ApplicationState,
+  effects: EffectInvocation[],
+): AutomationLauncher {
+  return {
+    classify(request) {
+      effects.push({ stage: 'classification', request, state: structuredClone(current()) })
+      const completion = Promise.withResolvers<ClassificationProcessResult>()
+      return {
+        completed: completion.promise,
+        async stop() {
+          completion.resolve({ status: 'outcome-unknown', reason: 'Test process stopped.' })
+        },
+      }
+    },
+    async dispatch(request) {
+      effects.push({ stage: 'wayfinder', request, state: structuredClone(current()) })
+      return { completed: Promise.withResolvers<WayfinderProcessResult>().promise }
+    },
+  }
+}
+
+function harmlessHost() {
+  return createApplicationOperations({
+    async launch() {
+      throw new Error('This schedule must not launch a host process.')
+    },
+  })
+}
+
+type HostAdmissionReceipt = 'invalid' | 'workspace' | 'stopping' | 'rename'
+type HostOccupancyReceipt = 'add-alias-project' | 'move-other-workspace-to-alias'
+
+async function hostAdmissionBoundarySchedule(
+  receipt: HostAdmissionReceipt | HostOccupancyReceipt | 'workspace-unavailable' | 'host-failure',
+) {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'roadmap-host-admission-safety-')))
+  const workspacePath = join(root, 'workspace')
+  const replacementPath = join(root, 'replacement')
+  const aliasPath = join(root, 'workspace-alias')
+  const saved: ProjectConfiguration = {
+    schemaVersion: 6,
+    configurationVersion: 1,
+    connections: [LOCAL],
+    projects: [
+      {
+        ref: { integration: 'local', projectId: 'host-target' },
+        connectionId: 'local',
+        workspace: { path: workspacePath },
+      },
+      ...(receipt === 'move-other-workspace-to-alias'
+        ? [
+            {
+              ref: { integration: 'local', projectId: 'other-project' },
+              connectionId: 'local',
+              workspace: { path: replacementPath },
+            } satisfies ProjectConfiguration['projects'][number],
+          ]
+        : []),
+    ],
+    automation: { enabled: false, enabledProjects: [] },
+  }
+  const configuration = memoryConfiguration(saved)
+  const effects: Array<{ executable: string; args: readonly string[]; state: ApplicationState }> =
+    []
+  let atActivationBoundary: (() => void) | undefined
+  let received = false
+  let receivedState: ApplicationState | undefined
+  const application = createRoadmapApplication({
+    configuration: configuration.document,
+    admissions: { local: createLocalProjectAdmission() },
+    operations: createApplicationOperations({
+      async launch(executable, args) {
+        if (receipt === 'host-failure') throw new Error('Private host launcher detail.')
+        effects.push({ executable, args, state: structuredClone(application.current()) })
+      },
+    }),
+    observers: {
+      local(input) {
+        const content = localContent(input.ref.projectId, input.workspace.path)
+        return controlledSourceFixture(content.key, sourceFixture([content], 1_000)).observer
+      },
+      github() {
+        throw new Error('No GitHub source belongs to this schedule.')
+      },
+      reconcileGitHubTopology() {
+        const receive = atActivationBoundary
+        atActivationBoundary = undefined
+        // The public observer port runs inside activation. Receipt follows the synchronous commit,
+        // before the awaited Workspace proof can return to the real host operation.
+        if (receive) queueMicrotask(receive)
+      },
+    },
+    now: () => 1_000,
+    serverEpoch: 'host-admission-boundary',
+  })
+  try {
+    await Promise.all([workspacePath, replacementPath].map((path) => mkdir(path)))
+    await symlink(workspacePath, aliasPath, 'dir')
+    await application.start()
+    const initial = structuredClone(application.current())
+    atActivationBoundary = () => {
+      received = true
+      switch (receipt) {
+        case 'invalid':
+          configuration.invalidate()
+          break
+        case 'workspace':
+          configuration.emit({
+            ...saved,
+            configurationVersion: 2,
+            projects: saved.projects.map((intent) => ({
+              ...intent,
+              workspace: { path: replacementPath },
+            })),
+          })
+          break
+        case 'stopping':
+          void application.stop()
+          break
+        case 'rename':
+          configuration.emit({
+            ...saved,
+            configurationVersion: 2,
+            projects: saved.projects.map((intent) => ({
+              ...intent,
+              displayName: 'Renamed presentation',
+            })),
+          })
+          break
+        case 'add-alias-project':
+          configuration.emit({
+            ...saved,
+            configurationVersion: 2,
+            projects: [
+              ...saved.projects,
+              {
+                ref: { integration: 'local', projectId: 'other-project' },
+                connectionId: 'local',
+                workspace: { path: aliasPath },
+              },
+            ],
+          })
+          break
+        case 'move-other-workspace-to-alias':
+          configuration.emit({
+            ...saved,
+            configurationVersion: 2,
+            projects: saved.projects.map((intent) =>
+              intent.ref.projectId === 'other-project'
+                ? { ...intent, workspace: { path: aliasPath } }
+                : intent,
+            ),
+          })
+          break
+        case 'workspace-unavailable':
+        case 'host-failure':
+          break
+      }
+      receivedState = structuredClone(application.current())
+    }
+    if (receipt === 'workspace-unavailable') await rm(workspacePath, { recursive: true })
+    const outcome = await application.execute({
+      type: 'launch-action',
+      actionId: 'open-workspace',
+      project: { integration: 'local', id: 'host-target' },
+      expectedConfigurationVersion: 1,
+    })
+    let collisionOutcome: typeof outcome | undefined
+    if (receipt === 'add-alias-project' || receipt === 'move-other-workspace-to-alias') {
+      await vi.waitFor(() => expect(application.current().configurationVersion).toBe(2))
+      collisionOutcome = await application.execute({
+        type: 'launch-action',
+        actionId: 'open-workspace',
+        project: { integration: 'local', id: 'host-target' },
+        expectedConfigurationVersion: 2,
+      })
+    }
+    return { received, receivedState, initial, outcome, collisionOutcome, effects, workspacePath }
+  } finally {
+    await application.stop()
+    await rm(root, { recursive: true, force: true })
+  }
+}
+
+async function queuedReversionSchedule(stage: 'classification' | 'wayfinder', holdAppend: boolean) {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'roadmap-activation-safety-')))
+  const targetPath = join(root, 'target')
+  const aPath = join(root, 'source-a')
+  const bPath = join(root, 'source-b')
+  const bGate = Promise.withResolvers<void>()
+  const revertedGate = Promise.withResolvers<void>()
+  const durableGate = Promise.withResolvers<void>()
+  let bRequested = false
+  let reversionRequested = false
+  let aObservations = 0
+  let reservationRequested = false
+  const targetProject = localContent('target', targetPath, true)
+  const target: AutomationTarget = {
+    project: targetProject.key,
+    mapId: '.wayfinder/map.md',
+    ticketId: '1',
+  }
+  const a: ProjectConfiguration = {
+    schemaVersion: 6,
+    configurationVersion: 1,
+    connections: [LOCAL],
+    projects: [
+      {
+        ref: { integration: 'local', projectId: 'target' },
+        connectionId: 'local',
+        workspace: { path: targetPath },
+      },
+      {
+        ref: { integration: 'local', projectId: 'changing-source' },
+        connectionId: 'local',
+        workspace: { path: aPath },
+      },
+    ],
+    automation: {
+      enabled: false,
+      enabledProjects: [target.project],
+      classificationCommand: COMMAND,
+      wayfinderCommand: COMMAND,
+    },
+  }
+  const b: ProjectConfiguration = {
+    ...a,
+    configurationVersion: 2,
+    projects: a.projects.map((intent) =>
+      intent.ref.projectId === 'changing-source'
+        ? { ...intent, workspace: { path: bPath } }
+        : intent,
+    ),
+    automation: { ...a.automation, enabled: true },
+  }
+  const reverted: ProjectConfiguration = { ...a, configurationVersion: 3 }
+  const configuration = memoryConfiguration(a)
+  let stored: AutomationDatabase =
+    stage === 'wayfinder'
+      ? queuedDatabase(target)
+      : { schemaVersion: 3, opportunities: [], events: [] }
+  const startType = stage === 'classification' ? 'classification-started' : 'wayfinder-launching'
+  const writes: AutomationEvent[] = []
+  const database: AutomationDatabaseDocument = {
+    async load() {
+      return stored
+    },
+    async append(batch) {
+      if (batch.events.some((event) => event.type === startType)) {
+        reservationRequested = true
+        if (holdAppend) await durableGate.promise
+      }
+      stored = appendAutomationDatabase(stored, batch)
+      writes.push(...batch.events)
+      return { database: stored, durability: 'confirmed' }
+    },
+  }
+  const states: ApplicationState[] = []
+  const effects: EffectInvocation[] = []
+  const application = createRoadmapApplication({
+    configuration: configuration.document,
+    admissions: { local: createLocalProjectAdmission() },
+    operations: harmlessHost(),
+    observers: {
+      local(input) {
+        let gate: Promise<void> | undefined
+        if (input.workspace.path === bPath) {
+          bRequested = true
+          gate = bGate.promise
+        } else if (input.workspace.path === aPath && ++aObservations > 1) {
+          reversionRequested = true
+          gate = revertedGate.promise
+        }
+        const content =
+          input.ref.projectId === 'target'
+            ? targetProject
+            : localContent(input.ref.projectId, input.workspace.path)
+        return controlledSourceFixture(content.key, sourceFixture([content], 1_000), { gate })
+          .observer
+      },
+      github() {
+        throw new Error('No GitHub source belongs to this schedule.')
+      },
+    },
+    automation: { database, launcher: recordingLauncher(() => application.current(), effects) },
+    now: () => 1_000,
+    serverEpoch: 'queued-activation-safety',
+  })
+  application.subscribe((state) => states.push(structuredClone(state)))
+  try {
+    await Promise.all([targetPath, aPath, bPath].map((path) => mkdir(path)))
+    await application.start()
+    expect(application.current().configurationVersion).toBe(1)
+    expect(application.current().automation.enabled).toBe(false)
+    expect(effects).toEqual([])
+
+    configuration.emit(b)
+    await vi.waitFor(() => expect(bRequested).toBe(true))
+    configuration.emit(reverted)
+    expect(application.current().configurationVersion).toBe(1)
+    bGate.resolve()
+    await vi.waitFor(() =>
+      expect(reversionRequested || application.current().configurationVersion === 3).toBe(true),
+    )
+    // A different source holds v3 pending; this target's source, Workspace, pointers and commands never change.
+    const pending = structuredClone(application.current())
+    expect([2, 3]).toContain(pending.configurationVersion)
+    expect(pending.registrations.find((entry) => entry.key.id === 'target')?.workspace.path).toBe(
+      targetPath,
+    )
+    if (holdAppend) {
+      await setImmediate()
+      expect(writes.some((event) => event.type === startType)).toBe(false)
+      durableGate.resolve()
+    }
+    await setImmediate()
+    const afterAppend = structuredClone(application.current())
+    const effectsWhilePending = [...effects]
+    const writesAfterAppend = [...writes]
+    revertedGate.resolve()
+    await vi.waitFor(() => expect(application.current().configurationVersion).toBe(3))
+    await setImmediate()
+
+    expect(effectsWhilePending).toEqual([])
+    expect(effects).toEqual([])
+    if (afterAppend.configurationVersion === 2)
+      expect(afterAppend.automation.availability.status).toBe('unavailable')
+    expect(application.current().automation.enabled).toBe(false)
+    expect(
+      states
+        .filter((state) => state.configurationVersion === 2)
+        .every((state) => state.automation.availability.status === 'unavailable'),
+    ).toBe(true)
+    if (!holdAppend) {
+      expect(reservationRequested).toBe(false)
+      expect(writes.some((event) => event.type === startType)).toBe(false)
+    } else if (reservationRequested) {
+      // A durable reservation that raced the receipt must settle as known nonlaunch, not execute under B.
+      const failureType =
+        stage === 'classification' ? 'classification-launch-failed' : 'wayfinder-launch-failed'
+      expect(writesAfterAppend.some((event) => event.type === startType)).toBe(true)
+      expect(writesAfterAppend).toEqual(
+        expect.arrayContaining([expect.objectContaining({ type: failureType })]),
+      )
+      expect(afterAppend.automation.evidence[0]?.target).toEqual(target)
+    }
+  } finally {
+    bGate.resolve()
+    revertedGate.resolve()
+    durableGate.resolve()
+    await application.stop()
+    await rm(root, { recursive: true, force: true })
+  }
+}
+
+describe('RoadmapApplication queued activation safety', () => {
+  it.each(['classification', 'wayfinder'] satisfies Array<'classification' | 'wayfinder'>)(
+    'does not launch automatic %s under intermediate B/v2 after A/v3 disabled is queued before B commits',
+    async (stage) => queuedReversionSchedule(stage, false),
+  )
+
+  it.each(['classification', 'wayfinder'] satisfies Array<'classification' | 'wayfinder'>)(
+    'rechecks the same-target queued A/v3 reversion after a deferred durable %s reservation under B/v2',
+    async (stage) => queuedReversionSchedule(stage, true),
+  )
+
+  it.each([
+    ['invalid', 'invalid manual configuration'],
+    ['workspace', 'a queued Local Workspace and source change'],
+    ['stopping', 'application stopping'],
+  ] satisfies Array<[Exclude<HostAdmissionReceipt, 'rename'>, string]>)(
+    'denies the host effect when %s arrives after Workspace proof activation starts (%s)',
+    async (receipt, _description) => {
+      const result = await hostAdmissionBoundarySchedule(receipt)
+
+      expect(result.received).toBe(true)
+      expect(result.receivedState?.configurationVersion).toBe(1)
+      expect(result.effects).toEqual([])
+      expect(result.outcome).toMatchObject({
+        ok: false,
+        error: { code: 'admission-failed', field: 'workspace.path' },
+      })
+      if (receipt === 'invalid') {
+        expect(result.receivedState?.configuration.valid).toBe(false)
+        expect(result.outcome.state.projects).toEqual(result.initial.projects)
+      }
+      if (receipt === 'workspace')
+        expect(result.receivedState?.registrations[0]?.workspace.path).toBe(result.workspacePath)
+    },
+  )
+
+  it.each(['add-alias-project', 'move-other-workspace-to-alias'] satisfies HostOccupancyReceipt[])(
+    'denies the host effect when %s queues canonical occupancy during Workspace proof activation',
+    async (receipt) => {
+      const result = await hostAdmissionBoundarySchedule(receipt)
+
+      expect(result.received).toBe(true)
+      expect(result.receivedState?.configurationVersion).toBe(1)
+      expect(result.receivedState?.configuration.valid).toBe(true)
+      expect(result.effects).toEqual([])
+      expect(result.outcome).toMatchObject({
+        ok: false,
+        error: { code: 'admission-failed', field: 'workspace.path' },
+      })
+      const initialTarget = result.initial.projects.find(
+        (project) => project.key.id === 'host-target',
+      )
+      expect(initialTarget).toMatchObject({
+        key: { integration: 'local', id: 'host-target' },
+        workspace: { path: result.workspacePath },
+        availability: { status: 'available' },
+      })
+      expect(
+        result.outcome.state.projects.find((project) => project.key.id === 'host-target'),
+      ).toMatchObject({
+        key: { integration: 'local', id: 'host-target' },
+        workspace: { path: result.workspacePath },
+        availability: { status: 'available' },
+      })
+      expect(
+        result.outcome.state.registrations.find((project) => project.key.id === 'host-target'),
+      ).toMatchObject({
+        key: { integration: 'local', id: 'host-target' },
+        workspace: { path: result.workspacePath },
+      })
+
+      // Reprove both real directories after v2 commits. The decoded alias cannot grant a
+      // second Local source identity, but its canonical root still occupies A's Workspace.
+      expect(result.collisionOutcome).toMatchObject({
+        ok: false,
+        error: { code: 'admission-failed', field: 'workspace.path' },
+        state: { configurationVersion: 2 },
+      })
+      expect(
+        result.collisionOutcome?.state.projects.find(
+          (project) => project.key.id === 'other-project',
+        ),
+      ).toMatchObject({
+        key: { integration: 'local', id: 'other-project' },
+        availability: { status: 'unavailable' },
+        openMaps: [],
+        closedMaps: [],
+      })
+      expect(
+        result.collisionOutcome?.state.projects.find((project) => project.key.id === 'host-target'),
+      ).toMatchObject({
+        key: { integration: 'local', id: 'host-target' },
+        workspace: { path: result.workspacePath },
+        availability: { status: 'unavailable' },
+      })
+    },
+  )
+
+  it('permits the current Workspace host effect when a neutral presentation rename arrives during proof activation', async () => {
+    const result = await hostAdmissionBoundarySchedule('rename')
+
+    expect(result.received).toBe(true)
+    expect(result.receivedState?.configurationVersion).toBe(1)
+    expect(result.effects).toEqual([
+      {
+        executable: '/usr/bin/open',
+        args: ['-a', 'Visual Studio Code', result.workspacePath],
+        state: result.outcome.state,
+      },
+    ])
+    expect(result.outcome).toMatchObject({
+      ok: true,
+      result: { type: 'action-launched', actionId: 'open-workspace' },
+    })
+  })
+
+  it('preserves configured Project facts and denies the host effect after its Workspace disappears', async () => {
+    const result = await hostAdmissionBoundarySchedule('workspace-unavailable')
+
+    expect(result.effects).toEqual([])
+    expect(result.outcome).toMatchObject({
+      ok: false,
+      error: { code: 'admission-failed', field: 'workspace.path' },
+    })
+    expect(result.outcome.state.registrations).toEqual(result.initial.registrations)
+    expect(result.outcome.state.projects[0]?.key).toEqual({
+      integration: 'local',
+      id: 'host-target',
+    })
+  })
+
+  it('reports an honest safe host failure without a completed effect', async () => {
+    const result = await hostAdmissionBoundarySchedule('host-failure')
+
+    expect(result.effects).toEqual([])
+    expect(result.outcome).toMatchObject({
+      ok: false,
+      error: { code: 'launch-failed', field: 'actionId' },
+    })
+    expect(result.outcome.state.registrations).toEqual(result.initial.registrations)
+    expect(JSON.stringify(result.outcome)).not.toContain('Private host launcher detail.')
+  })
+
+  it('keeps the active old-account capability coherent while a rejected new-account candidate waits for another source baseline', async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'roadmap-account-activation-safety-')))
+    const oldPath = join(root, 'local-old')
+    const candidatePath = join(root, 'local-candidate')
+    const githubPath = join(root, 'github-workspace')
+    const candidateGate = Promise.withResolvers<void>()
+    let candidateRequested = false
+    let clock = 1_000
+    let mapTitle = 'Old-account map content'
+    const githubObservers: SourceObserver[] = []
+    const credentials: CredentialBundle = {
+      accessToken: 'private-valid-old-account-access',
+      refreshToken: 'private-valid-old-account-refresh',
+      accessTokenExpiresAt: 10_000_000,
+      refreshTokenExpiresAt: 20_000_000,
+    }
+    const records = new Map([['github', credentials]])
+    const vault: CredentialVault = {
+      async read(id) {
+        return records.get(id) ?? null
+      },
+      async write(id, value) {
+        records.set(id, value)
+      },
+      async delete(id) {
+        records.delete(id)
+      },
+      async cleanupOrphans(ids) {
+        for (const id of records.keys()) if (!ids.has(id)) records.delete(id)
+      },
+    }
+    const github: GitHubConnectionPort = {
+      integration: {
+        integration: 'github',
+        name: 'GitHub',
+        connectionKind: 'device-authorization',
+        newInstallationUrl: 'https://github.com/apps/roadmap/installations/new',
+        installationsUrl: 'https://github.com/settings/installations',
+        authorizationsUrl: 'https://github.com/settings/connections/applications/test',
+      },
+      async identify(token) {
+        if (token !== credentials.accessToken) throw new Error('Unexpected account credential.')
+        return { id: '42', login: 'old-account' }
+      },
+      async refresh() {
+        throw new Error('The active credential is not expired.')
+      },
+      async beginDeviceAuthorization() {
+        throw new Error('This schedule does not authorize accounts.')
+      },
+      async pollDeviceAuthorization() {
+        throw new Error('This schedule does not authorize accounts.')
+      },
+    }
+    const saved: ProjectConfiguration = {
+      schemaVersion: 6,
+      configurationVersion: 1,
+      connections: [
+        LOCAL,
+        {
+          id: 'github',
+          integration: 'github',
+          name: 'GitHub',
+          builtIn: false,
+          githubIdentity: { id: '42', login: 'old-account' },
+        },
+      ],
+      projects: [
+        {
+          ref: { integration: 'github', projectId: 'remote' },
+          connectionId: 'github',
+          locator: { repositoryId: '84', nameWithOwner: 'owner/roadmap' },
+          workspace: { path: githubPath },
+        },
+        {
+          ref: { integration: 'local', projectId: 'local' },
+          connectionId: 'local',
+          workspace: { path: oldPath },
+        },
+      ],
+      automation: { enabled: false, enabledProjects: [] },
+    }
+    const configuration = memoryConfiguration(saved)
+    const pool = createGitHubObserverPool({
+      now: () => clock,
+      reconcileMs: 1_000_000,
+      logger: { warn() {} },
+    })
+    const states: ApplicationState[] = []
+    const providerReads: Array<{ path: string; token: string }> = []
+    const application = createRoadmapApplication({
+      configuration: configuration.document,
+      credentialVault: vault,
+      github,
+      operations: harmlessHost(),
+      admissions: {
+        local: createLocalProjectAdmission(),
+        github: createGitHubProjectAdmission({
+          async inspectWorkspace(path) {
+            return { path, remotes: [{ name: 'origin', nameWithOwner: 'owner/roadmap' }] }
+          },
+        }),
+      },
+      providerRead(accessToken) {
+        async function authorize(path: string) {
+          const token = await accessToken()
+          if (token !== credentials.accessToken)
+            throw new Error('Provider received an unexpected credential.')
+          providerReads.push({ path, token })
+        }
+        return {
+          async restGet(path) {
+            await authorize(path)
+            if (path === '/repositories/84' || path === '/repos/owner/roadmap')
+              return { id: 84, full_name: 'owner/roadmap' }
+            if (
+              path ===
+              '/repos/owner/roadmap/issues?state=all&labels=wayfinder%3Amap&per_page=100&page=1'
+            )
+              return [{ number: 108 }]
+            throw new Error(`Unexpected provider path ${path}`)
+          },
+          async graphql(_query, variables) {
+            await authorize('map-read')
+            if (variables?.o0 !== 'owner' || variables.n0 !== 'roadmap' || variables.i0 !== 108)
+              throw new Error('Provider map request must match the admitted repository.')
+            return {
+              data: {
+                rateLimit: {
+                  cost: 1,
+                  remaining: 5000,
+                  limit: 5000,
+                  resetAt: '2027-01-01T00:00:00Z',
+                },
+                m0: {
+                  databaseId: 84,
+                  nameWithOwner: 'owner/roadmap',
+                  issue: {
+                    number: 108,
+                    title: mapTitle,
+                    url: 'https://github.com/owner/roadmap/issues/108',
+                    state: 'OPEN',
+                    updatedAt: '2026-10-01T00:00:00Z',
+                    closedAt: null,
+                    body: '## Destination\n\nKeep the active account coherent.\n',
+                    subIssuesSummary: { total: 0, completed: 0, percentCompleted: 0 },
+                    subIssues: { totalCount: 0, pageInfo: { hasNextPage: false }, nodes: [] },
+                  },
+                },
+              },
+              errors: [],
+            }
+          },
+        }
+      },
+      observers: {
+        local(input) {
+          if (input.workspace.path === candidatePath) candidateRequested = true
+          const content = localContent(input.ref.projectId, input.workspace.path)
+          return controlledSourceFixture(content.key, sourceFixture([content], clock), {
+            gate: input.workspace.path === candidatePath ? candidateGate.promise : undefined,
+          }).observer
+        },
+        github(input) {
+          const observer = pool.create(input)
+          githubObservers.push(observer)
+          return observer
+        },
+        reconcileGitHubTopology: (inputs) => pool.reconcileTopology(inputs),
+        stop: () => pool.stop(),
+      },
+      now: () => clock,
+      serverEpoch: 'candidate-account-safety',
+    })
+    application.subscribe((state) => states.push(structuredClone(state)))
+    try {
+      await Promise.all([oldPath, candidatePath, githubPath].map((path) => mkdir(path)))
+      await application.start()
+      const initial = structuredClone(application.current())
+      expect(initial.connections.find((entry) => entry.id === 'github')).toMatchObject({
+        githubIdentity: { id: '42', login: 'old-account' },
+        availability: { status: 'available' },
+      })
+      expect(initial.projects.find((entry) => entry.key.id === 'remote')?.openMaps[0]?.title).toBe(
+        'Old-account map content',
+      )
+      const observer = githubObservers[0]
+      if (!observer) throw new Error('The initial valid GitHub source must own a real observer.')
+      configuration.emit({
+        ...saved,
+        configurationVersion: 2,
+        connections: saved.connections.map((entry) =>
+          entry.integration === 'github'
+            ? { ...entry, githubIdentity: { id: '99', login: 'new-account' } }
+            : entry,
+        ),
+        projects: saved.projects.map((entry) =>
+          entry.ref.integration === 'local'
+            ? { ...entry, workspace: { path: candidatePath } }
+            : entry,
+        ),
+      })
+      await vi.waitFor(() => expect(candidateRequested).toBe(true))
+      const pending = structuredClone(application.current())
+      const beforeRefresh = providerReads.length
+      clock = 2_000
+      mapTitle = 'Active provider update while candidate waits'
+      await observer.refresh()
+      const updatedWhilePending = structuredClone(application.current())
+      candidateGate.resolve()
+      await vi.waitFor(() => expect(application.current().configurationVersion).toBe(2))
+      const committed = structuredClone(application.current())
+
+      expect(pending.configurationVersion).toBe(1)
+      expect(pending.connections.find((entry) => entry.id === 'github')).toMatchObject({
+        githubIdentity: { id: '42', login: 'old-account' },
+        availability: { status: 'available', observedAt: 1_000 },
+      })
+      expect(pending.registrations).toEqual(initial.registrations)
+      expect(pending.projects.find((entry) => entry.key.id === 'remote')).toEqual(
+        initial.projects.find((entry) => entry.key.id === 'remote'),
+      )
+      expect(updatedWhilePending.configurationVersion).toBe(1)
+      expect(updatedWhilePending.connections.find((entry) => entry.id === 'github')).toMatchObject({
+        githubIdentity: { id: '42' },
+        availability: { status: 'available', observedAt: 2_000 },
+      })
+      expect(updatedWhilePending.projects.find((entry) => entry.key.id === 'remote')).toMatchObject(
+        {
+          availability: { status: 'available', observedAt: 2_000 },
+          openMaps: [
+            expect.objectContaining({ title: 'Active provider update while candidate waits' }),
+          ],
+        },
+      )
+      expect(providerReads.slice(beforeRefresh).map((entry) => entry.path)).toContain('map-read')
+      expect(await vault.read('github')).toEqual(credentials)
+      expect(
+        states
+          .filter((state) => state.configurationVersion === 1)
+          .every(
+            (state) =>
+              state.connections.find((entry) => entry.id === 'github')?.availability.status ===
+              'available',
+          ),
+      ).toBe(true)
+      expect(committed.connections.find((entry) => entry.id === 'github')).toMatchObject({
+        githubIdentity: { id: '99', login: 'new-account' },
+        availability: { status: 'authorization-required' },
+      })
+      expect(
+        committed.projects.find((entry) => entry.key.id === 'remote')?.availability.status,
+      ).toBe('unavailable')
+      expect(committed.configuration.valid).toBe(true)
+      const publicStates = JSON.stringify(states)
+      expect(publicStates).not.toContain(credentials.accessToken)
+      expect(publicStates).not.toContain(credentials.refreshToken)
+    } finally {
+      candidateGate.resolve()
+      await application.stop()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+})

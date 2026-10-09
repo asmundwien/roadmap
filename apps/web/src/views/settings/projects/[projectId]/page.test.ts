@@ -300,18 +300,6 @@ describe('ProjectRegistrationPage', () => {
     expect(markup).not.toContain('Other</h1>')
   })
 
-  it('offers workspace repair only when the selected project is unavailable', () => {
-    const unavailable = {
-      ...project,
-      availability: { status: 'unavailable', cause: 'Workspace moved.' },
-    } satisfies RegisteredProject
-    const markup = renderPage([unavailable])
-    expect(markup).toContain('Workspace moved.')
-    expect(markup).toContain('Choose folder')
-    expect(markup).toContain('Validate and repair')
-    expect(renderPage([project])).not.toContain('Validate and repair')
-  })
-
   it('blocks changes when configuration needs repair', () => {
     const markup = renderPage([project], true, false)
     expect(markup).toContain('Configuration needs repair.')

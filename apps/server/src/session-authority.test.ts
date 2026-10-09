@@ -9,13 +9,14 @@ import {
   type SocketLike,
 } from '../../web/src/store/roadmap-store.ts'
 import { createRoadmapApplication, type RoadmapApplication } from './application/application.ts'
-import type {
-  ConfigurationDocument,
-  ConfigurationRead,
-  RoadmapConfiguration,
-} from './application/configuration.ts'
 import { createApplicationOperations } from './application/operations.ts'
-import { sourceFixture } from './source-test-fixtures.ts'
+import type { ConfigurationDocument, ConfigurationRead } from './configuration/document.ts'
+import type { ProjectConfiguration } from './projects/registry.ts'
+import {
+  controlledSourceFixture,
+  fixtureAdmissions,
+  sourceFixture,
+} from './source-test-fixtures.ts'
 import { createRoadmapTransport, type RoadmapTransport } from './transport.ts'
 
 const ORIGIN = 'http://localhost:5173'
@@ -43,15 +44,14 @@ async function until(predicate: () => boolean): Promise<void> {
 }
 
 function memoryConfiguration(epoch: string): ConfigurationDocument {
-  let current: RoadmapConfiguration = {
-    schemaVersion: 5,
+  let current: ProjectConfiguration = {
+    schemaVersion: 6,
     configurationVersion: 1,
     connections: [{ id: 'local', integration: 'local', name: 'Local', builtIn: true }],
     projects: [
       {
-        key: { integration: 'local', id: 'fixture' },
+        ref: { integration: 'local', projectId: 'fixture' },
         connectionId: 'local',
-        locator: { integration: 'local', path: '/disposable-authority-fixture' },
         workspace: { path: '/disposable-authority-fixture' },
         displayName: epoch,
       },
@@ -70,7 +70,7 @@ function memoryConfiguration(epoch: string): ConfigurationDocument {
     async write(next) {
       current = next
       for (const listener of listeners) listener({ ok: true, document: current })
-      return { ok: true }
+      return { ok: true, durability: 'confirmed' }
     },
     async stop() {
       listeners.clear()
@@ -108,28 +108,28 @@ async function backend(epoch: string): Promise<Backend> {
   const application = createRoadmapApplication({
     configuration: memoryConfiguration(epoch),
     serverEpoch: epoch,
-    createAdapters: () => [
-      {
-        type: 'local',
-        start(host) {
-          host.update(
-            sourceFixture(
-              [
-                {
-                  key: { integration: 'local', id: 'fixture' },
-                  name: epoch,
-                  openMaps: [],
-                  closedMaps: [],
-                  warnings: [],
-                },
-              ],
-              100,
-            ),
-          )
-        },
-        stop() {},
+    admissions: fixtureAdmissions,
+    observers: {
+      local: () =>
+        controlledSourceFixture(
+          { integration: 'local', id: 'fixture' },
+          sourceFixture(
+            [
+              {
+                key: { integration: 'local', id: 'fixture' },
+                name: epoch,
+                openMaps: [],
+                closedMaps: [],
+                warnings: [],
+              },
+            ],
+            100,
+          ),
+        ).observer,
+      github() {
+        throw new Error('Unused source')
       },
-    ],
+    },
     operations: createApplicationOperations({
       selectWorkspace: async () => null,
       async launch() {

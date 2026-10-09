@@ -3,9 +3,16 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setImmediate } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AdapterSlice, ObservationAttempt, SourceScope } from '../observation/source.ts'
-import { type LocalProjectInput, readLocalProject } from '../wayfinder/from-local.ts'
-import { createLocalAdapter } from './adapter.ts'
+import type { LocalObservationInput } from '../observation/coordinator.ts'
+import type {
+  ObservationAttempt,
+  ObservationBatch,
+  SourceContribution,
+  SourceScope,
+} from '../observation/source.ts'
+import { createLocalProjectRegistration, refineLocalWorkspaceProof } from '../projects/registry.ts'
+import { type LocalProjectReadOptions, readLocalProject } from '../wayfinder/from-local.ts'
+import { createLocalObserver } from './observer.ts'
 
 const failures = vi.hoisted(() => new Map<string, Error>())
 const readCompletionTimes = vi.hoisted(() => new Map<string, number>())
@@ -32,6 +39,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 })
 
 let rootPath: string
+let admittedInput: LocalObservationInput
 const project = { integration: 'local', id: 'registered-opaque-key' } as const
 const map = { project, mapId: '.wayfinder/known-map/map.md' }
 const NOW = Date.parse('2026-10-08T12:00:00.000Z')
@@ -41,6 +49,7 @@ beforeEach(async () => {
   vi.setSystemTime(NOW)
   rootPath = await mkdtemp(join(tmpdir(), 'roadmap-local-evidence-'))
   await mkdir(join(rootPath, '.wayfinder'))
+  admittedInput = createInput()
 })
 
 afterEach(async () => {
@@ -50,8 +59,26 @@ afterEach(async () => {
   await rm(rootPath, { recursive: true, force: true })
 })
 
+function createInput(): LocalObservationInput {
+  const proof = refineLocalWorkspaceProof({
+    inspection: { integration: 'local', path: rootPath, readable: true, searchable: true },
+  })
+  if (!proof.ok) throw new Error(proof.error.message)
+  const registration = createLocalProjectRegistration({
+    ref: { integration: 'local', projectId: project.id },
+    connection: { id: 'local', integration: 'local', name: 'Local', builtIn: true },
+    workspace: proof.value,
+  })
+  if (!registration.ok) throw new Error(registration.error.message)
+  return {
+    integration: 'local',
+    ref: registration.value.ref,
+    workspace: registration.value.workspace,
+  }
+}
+
 function read() {
-  return readLocalProject({ key: project, rootPath, name: 'Registered project' })
+  return readLocalProject(admittedInput)
 }
 
 function fail(operation: 'enumerate' | 'read', path: string, code: string): void {
@@ -71,7 +98,7 @@ async function writeMap(): Promise<string> {
   return directory
 }
 
-function latest(slice: AdapterSlice | undefined, scope: SourceScope): ObservationAttempt {
+function latest(slice: ObservationBatch | undefined, scope: SourceScope): ObservationAttempt {
   const attempt = slice?.attempts.findLast(
     (item) => JSON.stringify(item.scope) === JSON.stringify(scope),
   )
@@ -80,7 +107,7 @@ function latest(slice: AdapterSlice | undefined, scope: SourceScope): Observatio
 }
 
 function readableMap(
-  slice: AdapterSlice,
+  slice: ObservationBatch,
 ): Extract<ObservationAttempt, { kind: 'observed'; scope: { kind: 'map' } }> {
   const attempt = slice.attempts.find(
     (item): item is Extract<ObservationAttempt, { kind: 'observed'; scope: { kind: 'map' } }> =>
@@ -91,10 +118,10 @@ function readableMap(
 }
 
 function trackedReader() {
-  let pending: Promise<AdapterSlice> = Promise.resolve({ attempts: [] })
+  let pending: Promise<ObservationBatch> = Promise.resolve({ attempts: [] })
   return {
-    read(input: LocalProjectInput) {
-      pending = readLocalProject(input)
+    read(input: LocalObservationInput, options: LocalProjectReadOptions) {
+      pending = readLocalProject(input, options)
       return pending
     },
     async settle() {
@@ -257,17 +284,17 @@ describe('local source evidence', () => {
         join(directory, 'tickets/01-readable.md'),
         '---\nid: 1\ntitle: Readable sibling\nlabels: [wayfinder:task]\nstatus: open\nblocked-by: [99]\n---\n\nIndependent sibling prose.\n',
       )
-      const updates: AdapterSlice[] = []
+      const updates: SourceContribution[] = []
       const reader = trackedReader()
-      const adapter = createLocalAdapter({
-        sources: [{ key: project, rootPath }],
+      const observer = createLocalObserver(admittedInput, {
         readProject: reader.read,
         reconcileMs: 10,
         pathExists: async () => false,
         logger: { info() {}, warn() {} },
       })
       try {
-        await adapter.start({ update: (slice) => updates.push(slice) })
+        observer.subscribe((contribution) => updates.push(contribution))
+        await observer.observe()
         expect(latest(updates[0], { kind: 'ticket', ticket: { map, ticketId: '99' } }).kind).toBe(
           'observed',
         )
@@ -304,7 +331,7 @@ describe('local source evidence', () => {
           },
         })
       } finally {
-        await adapter.stop()
+        await observer.stop()
       }
     },
   )
@@ -326,10 +353,9 @@ describe('local source evidence', () => {
     'retains unaffected scopes when a known %s scope fails and replaces failed evidence on recovery',
     async (operation) => {
       const directory = await writeMap()
-      const updates: AdapterSlice[] = []
+      const updates: SourceContribution[] = []
       const reader = trackedReader()
-      const adapter = createLocalAdapter({
-        sources: [{ key: project, rootPath }],
+      const observer = createLocalObserver(admittedInput, {
         readProject: reader.read,
         reconcileMs: 10,
         pathExists: async () => false,
@@ -340,7 +366,8 @@ describe('local source evidence', () => {
       const path =
         operation === 'enumerate' ? join(rootPath, '.wayfinder') : join(directory, 'map.md')
       try {
-        await adapter.start({ update: (slice) => updates.push(slice) })
+        observer.subscribe((contribution) => updates.push(contribution))
+        await observer.observe()
         const earlierTicketList = latest(updates[0], { kind: 'tickets-membership', map })
         const earlierMap = latest(updates[0], { kind: 'map', map })
         fail(operation, path, 'EACCES')
@@ -366,7 +393,7 @@ describe('local source evidence', () => {
           observedAt: NOW + 20,
         })
       } finally {
-        await adapter.stop()
+        await observer.stop()
       }
     },
   )

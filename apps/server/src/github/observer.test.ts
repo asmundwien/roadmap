@@ -1,12 +1,19 @@
-import type { ProjectRegistration } from '@roadmap/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { ConfiguredConnection } from '../application/configuration.ts'
-import type { AdapterSlice, SourceProjectKey } from '../observation/source.ts'
+import type { GitHubObservationInput } from '../observation/coordinator.ts'
+import type {
+  ObservationBatch,
+  SourceContribution,
+  SourceProjectKey,
+} from '../observation/source.ts'
+import {
+  type GitHubConnection,
+  type GitHubProjectIntent,
+  refineGitHubSourceAccess,
+} from '../projects/registry.ts'
 import { isRecord } from '../type-guards.ts'
-import { createGitHubAdapter } from './adapter.ts'
-import { type GitHubClient, GitHubError } from './client.ts'
-import { GitHubConnectionError } from './connections.ts'
-import type { RawMapIssue } from './map-query.ts'
+import { createGitHubClient, type GitHubClient, GitHubError } from './client.ts'
+import { type RawMapIssue, readMapsResponse } from './map-query.ts'
+import { createGitHubObserverPool, type GitHubObserverOptions } from './observer.ts'
 
 interface FakeRepository {
   id: string
@@ -32,7 +39,23 @@ function rawMap(number: number, title: string): RawMapIssue {
   }
 }
 
-function connection(id: string): ConfiguredConnection {
+function rawBlockedMap(
+  nameWithOwner: string,
+  blockerRepositoryId: string,
+  blockerName: string,
+  includeDatabaseId = true,
+): RawMapIssue {
+  const [owner, repo] = nameWithOwner.split('/')
+  if (!owner || !repo) throw new Error('Blocked map fixture requires a repository name.')
+  const response = readMapsResponse([{ owner, repo, nameWithOwner, number: 1 }], {
+    m0: mapWithBlocker(nameWithOwner, blockerRepositoryId, blockerName, includeDatabaseId),
+  })
+  const fetched = response.maps[0]
+  if (!fetched) throw new Error('Blocked map fixture must contain a valid provider map.')
+  return fetched.issue
+}
+
+function connection(id: string): GitHubConnection {
   return {
     id,
     integration: 'github',
@@ -42,20 +65,63 @@ function connection(id: string): ConfiguredConnection {
   }
 }
 
-function registration(
+function sourceInput(
   connectionId: string,
-  repository: FakeRepository,
-  key = repository.nameWithOwner,
-): ProjectRegistration {
-  return {
-    key: { integration: 'github', id: key },
+  repository: Pick<FakeRepository, 'id' | 'nameWithOwner'>,
+  access: GitHubClient,
+  projectId = repository.nameWithOwner,
+): GitHubObservationInput {
+  const configuredConnection = connection(connectionId)
+  const intent: GitHubProjectIntent = {
+    ref: { integration: 'github', projectId },
     connectionId,
-    locator: {
-      integration: 'github',
+    locator: { repositoryId: repository.id, nameWithOwner: repository.nameWithOwner },
+    workspace: { path: '/not-required-for-source-observation' },
+  }
+  const refined = refineGitHubSourceAccess({
+    intent,
+    connection: configuredConnection,
+    evidence: {
+      connectionId,
+      accountId: configuredConnection.githubIdentity.id,
       repositoryId: repository.id,
-      nameWithOwner: repository.nameWithOwner,
+      access,
     },
-    workspace: { path: `/work/${repository.id}`, gitIdentity: repository.id },
+  })
+  if (!refined.ok) throw new Error(refined.error.message)
+  return { integration: 'github', ref: refined.value.ref, source: refined.value }
+}
+
+async function observeInputs(
+  inputs: GitHubObservationInput[],
+  options: GitHubObserverOptions = {},
+) {
+  const pool = createGitHubObserverPool(options)
+  const current = new Map<string, SourceContribution>()
+  const updates: ObservationBatch[] = []
+  const published = vi.fn<(contribution: SourceContribution) => void>()
+  const observers = inputs.map((input) => {
+    const observer = pool.create(input)
+    observer.subscribe((contribution) => {
+      published(contribution)
+      current.set(contribution.project.id, contribution)
+      updates.push({ attempts: [...current.values()].flatMap((value) => value.attempts) })
+    })
+    return { input, observer }
+  })
+  await Promise.all(observers.map(({ observer }) => observer.observe()))
+  pool.reconcileTopology(inputs)
+  return {
+    pool,
+    observers,
+    updates,
+    published,
+    async refresh(project: SourceProjectKey) {
+      const selected = observers.find(({ input }) => input.ref.projectId === project.id)
+      if (!selected) throw new Error('Project is not in the admitted source topology.')
+      return selected.observer.refresh()
+    },
+    stop: () => pool.stop(),
   }
 }
 
@@ -126,8 +192,8 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('createGitHubAdapter', () => {
-  it('observes admitted stable scopes across isolated Connection clients including complete empty membership', async () => {
+describe('createGitHubObserverPool', () => {
+  it('observes admitted stable scopes across isolated Connection access including complete empty membership', async () => {
     const first = {
       id: '1',
       nameWithOwner: 'acme/renamed',
@@ -139,108 +205,119 @@ describe('createGitHubAdapter', () => {
       nameWithOwner: 'other/roadmap',
       maps: new Map([[7, rawMap(7, 'Other map')]]),
     }
-    const clients = new Map([
-      ['token-one', fakeClient([first, empty])],
-      ['token-two', fakeClient([second])],
+    const firstAccess = fakeClient([first, empty]).client
+    const secondAccess = fakeClient([second]).client
+    const sources = await observeInputs([
+      sourceInput('one', first, firstAccess, 'acme/original'),
+      sourceInput('one', empty, firstAccess),
+      sourceInput('two', second, secondAccess),
     ])
-    const updates: AdapterSlice[] = []
-    const adapter = createGitHubAdapter({
-      connections: [connection('one'), connection('two')],
-      registrations: [
-        registration('one', first, 'acme/original'),
-        registration('one', empty),
-        registration('two', second),
-      ],
-      accessToken: async (id) => `token-${id}`,
-      createClient: (token) => {
-        const found = clients.get(token)
-        if (!found) throw new Error('Unexpected token.')
-        return found.client
-      },
-    })
-    await adapter.start({ update: (slice) => updates.push(slice) })
-    expect(updates.at(-1)?.attempts).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          kind: 'observed',
-          scope: { kind: 'project', project: { integration: 'github', id: 'acme/original' } },
-          value: expect.objectContaining({
-            name: 'acme/renamed',
-            source: expect.objectContaining({
-              repositoryId: '1',
-              url: 'https://github.com/acme/renamed',
+    try {
+      expect(sources.updates.at(-1)?.attempts).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'observed',
+            scope: { kind: 'project', project: { integration: 'github', id: 'acme/original' } },
+            value: expect.objectContaining({
+              name: 'acme/renamed',
+              source: expect.objectContaining({
+                repositoryId: '1',
+                url: 'https://github.com/acme/renamed',
+              }),
             }),
           }),
-        }),
-        expect.objectContaining({
-          kind: 'observed',
-          scope: {
-            kind: 'map',
-            map: { project: { integration: 'github', id: 'acme/original' }, mapId: '16' },
-          },
-          value: expect.objectContaining({ title: 'Current map' }),
-        }),
-        expect.objectContaining({
-          kind: 'observed',
-          scope: { kind: 'maps-membership', project: { integration: 'github', id: 'acme/empty' } },
-          completeness: { kind: 'complete' },
-          value: { members: [] },
-        }),
-        expect.objectContaining({
-          kind: 'observed',
-          scope: { kind: 'project', project: { integration: 'github', id: 'other/roadmap' } },
-        }),
-      ]),
-    )
-    await adapter.stop()
+          expect.objectContaining({
+            kind: 'observed',
+            scope: {
+              kind: 'map',
+              map: { project: { integration: 'github', id: 'acme/original' }, mapId: '16' },
+            },
+            value: expect.objectContaining({ title: 'Current map' }),
+          }),
+          expect.objectContaining({
+            kind: 'observed',
+            scope: {
+              kind: 'maps-membership',
+              project: { integration: 'github', id: 'acme/empty' },
+            },
+            completeness: { kind: 'complete' },
+            value: { members: [] },
+          }),
+          expect.objectContaining({
+            kind: 'observed',
+            scope: { kind: 'project', project: { integration: 'github', id: 'other/roadmap' } },
+          }),
+        ]),
+      )
+      for (const [contribution] of sources.published.mock.calls) {
+        expect(contribution.health).toEqual({ status: 'available', observedAt: expect.any(Number) })
+        expect(contribution.attempts).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              kind: 'observed',
+              scope: { kind: 'project', project: contribution.project },
+            }),
+          ]),
+        )
+      }
+    } finally {
+      await sources.stop()
+    }
   })
 
-  it('contains rejected credentials to one Connection without serializing credential details', async () => {
+  it('contains rejected credentials to one Connection and publishes health with failed attempts without credential details', async () => {
+    const broken = { id: '1', nameWithOwner: 'acme/private', maps: new Map<number, RawMapIssue>() }
     const healthy = {
       id: '2',
       nameWithOwner: 'other/roadmap',
       maps: new Map<number, RawMapIssue>(),
     }
-    const updates: AdapterSlice[] = []
-    const availability = vi.fn()
-    const warn = vi.fn()
-    const adapter = createGitHubAdapter({
-      connections: [connection('broken'), connection('healthy')],
-      registrations: [
-        registration('broken', { id: '1', nameWithOwner: 'acme/private', maps: new Map() }),
-        registration('healthy', healthy),
-      ],
-      accessToken: async (id) => {
-        if (id === 'broken')
-          throw new GitHubConnectionError('bad-refresh-token', 'private credential detail')
-        return 'healthy-token'
+    const rejected: GitHubClient = {
+      restGet: async () => {
+        throw new GitHubError({ kind: 'authorization', proof: 'rejected-credential' })
       },
-      createClient: () => fakeClient([healthy]).client,
-      onConnectionAvailability: availability,
-      logger: { warn },
-    })
-    await adapter.start({ update: (slice) => updates.push(slice) })
-    expect(updates.at(-1)?.attempts).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          kind: 'failed',
-          scope: { kind: 'project', project: { integration: 'github', id: 'acme/private' } },
-          provenance: expect.objectContaining({ stage: 'credentials' }),
-          failure: { kind: 'authorization', proof: 'rejected-credential' },
-        }),
-        expect.objectContaining({
-          kind: 'observed',
-          scope: { kind: 'project', project: { integration: 'github', id: 'other/roadmap' } },
-        }),
-      ]),
+      graphql: async () => {
+        throw new Error('private credential detail')
+      },
+    }
+    const warn = vi.fn()
+    const sources = await observeInputs(
+      [
+        sourceInput('broken', broken, rejected),
+        sourceInput('healthy', healthy, fakeClient([healthy]).client),
+      ],
+      { logger: { warn } },
     )
-    expect(availability).toHaveBeenCalledWith(
-      'broken',
-      expect.objectContaining({ status: 'authorization-required' }),
-    )
-    expect(JSON.stringify(updates)).not.toContain('private credential detail')
-    expect(JSON.stringify(warn.mock.calls)).not.toContain('private credential detail')
-    await adapter.stop()
+    try {
+      expect(sources.published).toHaveBeenCalledWith(
+        expect.objectContaining({
+          project: { integration: 'github', id: 'acme/private' },
+          health: expect.objectContaining({ status: 'authorization-required' }),
+          attempts: expect.arrayContaining([
+            expect.objectContaining({
+              kind: 'failed',
+              scope: { kind: 'project', project: { integration: 'github', id: 'acme/private' } },
+              provenance: expect.objectContaining({ stage: 'credentials' }),
+              failure: { kind: 'authorization', proof: 'rejected-credential' },
+            }),
+          ]),
+        }),
+      )
+      expect(sources.updates.at(-1)?.attempts).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'observed',
+            scope: { kind: 'project', project: { integration: 'github', id: 'other/roadmap' } },
+          }),
+        ]),
+      )
+      expect(JSON.stringify(sources.published.mock.calls)).not.toContain(
+        'private credential detail',
+      )
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('private credential detail')
+    } finally {
+      await sources.stop()
+    }
   })
 
   it('degrades after repeated transient failures while independently successful scopes commit', async () => {
@@ -256,57 +333,62 @@ describe('createGitHubAdapter', () => {
       nameWithOwner: 'acme/second',
       maps: new Map([[2, rawMap(2, 'Second map')]]),
     }
-    const updates: AdapterSlice[] = []
-    const availability = vi.fn()
-    const adapter = createGitHubAdapter({
-      connections: [connection('one')],
-      registrations: [registration('one', first), registration('one', second)],
-      accessToken: async () => 'token',
-      createClient: () => fakeClient([first, second], 4_000).client,
-      onConnectionAvailability: availability,
-      logger: { warn() {} },
-      reconcileMs: 10,
-    })
-    await adapter.start({ update: (slice) => updates.push(slice) })
-    second.failure = new GitHubError({ kind: 'transient', cause: 'server' }, 503)
-    first.maps.set(1, rawMap(1, 'Changed sibling'))
-    await vi.advanceTimersByTimeAsync(10)
-    expect(availability).toHaveBeenLastCalledWith('one', { status: 'available', observedAt: 1_000 })
-    expect(updates.at(-1)?.attempts).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          kind: 'observed',
-          scope: {
-            kind: 'map',
-            map: { project: { integration: 'github', id: 'acme/first' }, mapId: '1' },
-          },
-          observedAt: 1_010,
-          value: expect.objectContaining({ title: 'Changed sibling' }),
-        }),
-        expect.objectContaining({
-          kind: 'failed',
-          scope: { kind: 'project', project: { integration: 'github', id: 'acme/second' } },
-          attemptedAt: 1_010,
-        }),
-        expect.objectContaining({
-          kind: 'observed',
-          scope: {
-            kind: 'map',
-            map: { project: { integration: 'github', id: 'acme/second' }, mapId: '2' },
-          },
-          observedAt: 1_000,
-        }),
-      ]),
+    const access = fakeClient([first, second], 4_000).client
+    const sources = await observeInputs(
+      [sourceInput('one', first, access), sourceInput('one', second, access)],
+      { logger: { warn() {} }, reconcileMs: 10 },
     )
-    await vi.advanceTimersByTimeAsync(10)
-    expect(availability).toHaveBeenLastCalledWith(
-      'one',
-      expect.objectContaining({ status: 'degraded', observedAt: 1_000 }),
-    )
-    second.failure = undefined
-    await vi.advanceTimersByTimeAsync(20)
-    expect(availability).toHaveBeenLastCalledWith('one', { status: 'available', observedAt: 1_040 })
-    await adapter.stop()
+    try {
+      second.failure = new GitHubError({ kind: 'transient', cause: 'server' }, 503)
+      first.maps.set(1, rawMap(1, 'Changed sibling'))
+      await vi.advanceTimersByTimeAsync(10)
+      expect(
+        sources.published.mock.calls
+          .filter(([value]) => value.project.id === 'acme/second')
+          .at(-1)?.[0],
+      ).toMatchObject({ health: { status: 'available', observedAt: 1_000 } })
+      expect(sources.updates.at(-1)?.attempts).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'observed',
+            scope: {
+              kind: 'map',
+              map: { project: { integration: 'github', id: 'acme/first' }, mapId: '1' },
+            },
+            observedAt: 1_010,
+            value: expect.objectContaining({ title: 'Changed sibling' }),
+          }),
+          expect.objectContaining({
+            kind: 'failed',
+            scope: { kind: 'project', project: { integration: 'github', id: 'acme/second' } },
+            attemptedAt: 1_010,
+          }),
+          expect.objectContaining({
+            kind: 'observed',
+            scope: {
+              kind: 'map',
+              map: { project: { integration: 'github', id: 'acme/second' }, mapId: '2' },
+            },
+            observedAt: 1_000,
+          }),
+        ]),
+      )
+      await vi.advanceTimersByTimeAsync(10)
+      expect(
+        sources.published.mock.calls
+          .filter(([value]) => value.project.id === 'acme/second')
+          .at(-1)?.[0],
+      ).toMatchObject({ health: { status: 'degraded', observedAt: 1_000 } })
+      second.failure = undefined
+      await vi.advanceTimersByTimeAsync(20)
+      expect(
+        sources.published.mock.calls
+          .filter(([value]) => value.project.id === 'acme/second')
+          .at(-1)?.[0],
+      ).toMatchObject({ health: { status: 'available', observedAt: 1_040 } })
+    } finally {
+      await sources.stop()
+    }
   })
 
   it('paces each Connection using its own rate budget', async () => {
@@ -323,33 +405,34 @@ describe('createGitHubAdapter', () => {
     }
     const slow = fakeClient([slowRepository], 200)
     const fast = fakeClient([fastRepository], 4000)
-    const updates: AdapterSlice[] = []
-    const adapter = createGitHubAdapter({
-      connections: [connection('slow'), connection('fast')],
-      registrations: [registration('slow', slowRepository), registration('fast', fastRepository)],
-      accessToken: async (id) => id,
-      createClient: (token) => (token === 'slow' ? slow.client : fast.client),
-      reconcileMs: 10,
-    })
-    await adapter.start({ update: (slice) => updates.push(slice) })
-    await vi.advanceTimersByTimeAsync(10)
-    expect(updates.at(-1)?.attempts).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          kind: 'observed',
-          scope: {
-            kind: 'map',
-            map: { project: { integration: 'github', id: 'acme/roadmap' }, mapId: '1' },
-          },
-          observedAt: expect.any(Number),
-        }),
-      ]),
+    const sources = await observeInputs(
+      [
+        sourceInput('slow', slowRepository, slow.client),
+        sourceInput('fast', fastRepository, fast.client),
+      ],
+      { reconcileMs: 10 },
     )
-    expect(slow.graphqlCalls).toHaveLength(1)
-    expect(fast.graphqlCalls).toHaveLength(2)
-    await vi.advanceTimersByTimeAsync(70)
-    expect(slow.graphqlCalls).toHaveLength(2)
-    await adapter.stop()
+    try {
+      await vi.advanceTimersByTimeAsync(10)
+      expect(sources.updates.at(-1)?.attempts).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'observed',
+            scope: {
+              kind: 'map',
+              map: { project: { integration: 'github', id: 'acme/roadmap' }, mapId: '1' },
+            },
+            observedAt: expect.any(Number),
+          }),
+        ]),
+      )
+      expect(slow.graphqlCalls).toHaveLength(1)
+      expect(fast.graphqlCalls).toHaveLength(2)
+      await vi.advanceTimersByTimeAsync(70)
+      expect(slow.graphqlCalls).toHaveLength(2)
+    } finally {
+      await sources.stop()
+    }
   })
 
   it('keeps the most conservative concurrent rate-limit observation', async () => {
@@ -373,18 +456,314 @@ describe('createGitHubAdapter', () => {
       rateLimitRemaining: 100,
     }
     const { client, graphqlCalls } = fakeClient([older, newer])
-    const adapter = createGitHubAdapter({
-      connections: [connection('one')],
-      registrations: [registration('one', older), registration('one', newer)],
-      accessToken: async () => 'token',
-      createClient: () => client,
-    })
-    const start = adapter.start({ update() {} })
+    const pool = createGitHubObserverPool()
+    const inputs = [sourceInput('one', older, client), sourceInput('one', newer, client)]
+    const observers = inputs.map((input) => pool.create(input))
+    const baseline = Promise.all(observers.map((observer) => observer.observe()))
     await vi.waitFor(() => expect(graphqlCalls).toHaveLength(2))
     open()
-    await start
-    expect(adapter.diagnostics().rateLimit?.remaining).toBe(100)
-    await adapter.stop()
+    await baseline
+    pool.reconcileTopology(inputs)
+    expect(pool.diagnostics().rateLimit?.remaining).toBe(100)
+    await pool.stop()
+  })
+
+  it('owns an idempotent baseline and stops only the retired scope on a shared Connection', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const retired = {
+      id: '1',
+      nameWithOwner: 'acme/retired',
+      maps: new Map([[1, rawMap(1, 'Retired map')]]),
+    }
+    const retained = {
+      id: '2',
+      nameWithOwner: 'acme/retained',
+      maps: new Map([[2, rawMap(2, 'Retained map')]]),
+    }
+    const { client, graphqlCalls } = fakeClient([retired, retained], 4_000)
+    const pool = createGitHubObserverPool({ reconcileMs: 10 })
+    const retiredInput = sourceInput('one', retired, client)
+    const retainedInput = sourceInput('one', retained, client)
+    const retiredObserver = pool.create(retiredInput)
+    const retainedObserver = pool.create(retainedInput)
+    const retiredUpdates = vi.fn<(contribution: SourceContribution) => void>()
+    const retainedUpdates = vi.fn<(contribution: SourceContribution) => void>()
+    retiredObserver.subscribe(retiredUpdates)
+    const unsubscribe = retainedObserver.subscribe(retainedUpdates)
+    try {
+      const baseline = retiredObserver.observe()
+      expect(retiredObserver.observe()).toBe(baseline)
+      await Promise.all([baseline, retainedObserver.observe()])
+      pool.reconcileTopology([retiredInput, retainedInput])
+      expect(graphqlCalls).toHaveLength(2)
+      const retiredCount = retiredUpdates.mock.calls.length
+      await retiredObserver.stop()
+      pool.reconcileTopology([retainedInput])
+      retained.maps.set(2, rawMap(2, 'Still supervised'))
+      await vi.advanceTimersByTimeAsync(10)
+      expect(retiredUpdates).toHaveBeenCalledTimes(retiredCount)
+      expect(retainedUpdates).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          project: { integration: 'github', id: 'acme/retained' },
+          health: { status: 'available', observedAt: 1_010 },
+          attempts: expect.arrayContaining([
+            expect.objectContaining({
+              kind: 'observed',
+              value: expect.objectContaining({ title: 'Still supervised' }),
+            }),
+          ]),
+        }),
+      )
+      await expect(retiredObserver.refresh()).rejects.toThrow('stopped')
+      const retainedCount = retainedUpdates.mock.calls.length
+      unsubscribe()
+      vi.setSystemTime(2_000)
+      const refreshed = await retainedObserver.refresh()
+      expect(refreshed.health).toEqual({ status: 'available', observedAt: 2_000 })
+      expect(retainedUpdates).toHaveBeenCalledTimes(retainedCount)
+    } finally {
+      await pool.stop()
+    }
+  })
+
+  it.each(['one', 'two'])(
+    'polls an active owner while a candidate on Connection %s awaits its identity baseline',
+    async (candidateConnection) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(1_000)
+      const active = {
+        id: '1',
+        nameWithOwner: 'acme/active',
+        maps: new Map([[1, rawMap(1, 'Baseline')]]),
+      }
+      const candidate = {
+        id: '2',
+        nameWithOwner: 'acme/candidate',
+        maps: new Map<number, RawMapIssue>(),
+      }
+      const access = fakeClient([active, candidate], 4_000).client
+      const started = Promise.withResolvers<void>()
+      const gate = Promise.withResolvers<void>()
+      const candidateAccess: GitHubClient = {
+        graphql: access.graphql,
+        async restGet(path) {
+          if (path === '/repositories/2') {
+            started.resolve()
+            await gate.promise
+          }
+          return access.restGet(path)
+        },
+      }
+      const pool = createGitHubObserverPool({ reconcileMs: 10 })
+      const activeInput = sourceInput('one', active, access, 'active-key')
+      const candidateInput = sourceInput(
+        candidateConnection,
+        candidate,
+        candidateAccess,
+        'candidate-key',
+      )
+      const activeObserver = pool.create(activeInput)
+      const candidateObserver = pool.create(candidateInput)
+      const updates: SourceContribution[] = []
+      activeObserver.subscribe((value) => updates.push(value))
+      let baseline: Promise<SourceContribution> | null = null
+      try {
+        await activeObserver.observe()
+        pool.reconcileTopology([activeInput])
+        baseline = candidateObserver.observe()
+        await started.promise
+        active.maps.set(1, {
+          ...rawBlockedMap('acme/active', '2', 'acme/candidate'),
+          title: 'Polled while candidate waits',
+        })
+        await vi.advanceTimersByTimeAsync(10)
+        expect(updates.at(-1)).toMatchObject({
+          health: { status: 'available', observedAt: 1_010 },
+          attempts: expect.arrayContaining([
+            expect.objectContaining({
+              kind: 'observed',
+              scope: {
+                kind: 'map',
+                map: { project: { integration: 'github', id: 'active-key' }, mapId: '1' },
+              },
+              value: expect.objectContaining({ title: 'Polled while candidate waits' }),
+            }),
+            expect.objectContaining({
+              kind: 'observed',
+              scope: expect.objectContaining({ kind: 'ticket' }),
+              observedAt: 1_010,
+              value: expect.objectContaining({
+                blockedBy: [
+                  expect.objectContaining({
+                    reference: {
+                      kind: 'external',
+                      integration: 'github',
+                      repositoryId: '2',
+                      nameWithOwner: 'acme/candidate',
+                      ticketId: '20',
+                    },
+                  }),
+                ],
+              }),
+            }),
+          ]),
+        })
+        const published = updates.length
+        gate.resolve()
+        await baseline
+        expect(updates).toHaveLength(published)
+        vi.setSystemTime(2_000)
+        pool.reconcileTopology([activeInput, candidateInput])
+        expect(updates.at(-1)).toMatchObject({
+          health: { status: 'available', observedAt: 1_010 },
+          attempts: expect.arrayContaining([
+            expect.objectContaining({
+              kind: 'observed',
+              scope: expect.objectContaining({ kind: 'ticket' }),
+              observedAt: 1_010,
+              value: expect.objectContaining({
+                blockedBy: [
+                  expect.objectContaining({
+                    reference: {
+                      kind: 'registered',
+                      project: { integration: 'github', id: 'candidate-key' },
+                      ticketId: '20',
+                    },
+                  }),
+                ],
+              }),
+            }),
+          ]),
+        })
+      } finally {
+        gate.resolve()
+        await baseline
+        await pool.stop()
+      }
+    },
+  )
+
+  it('reclassifies cached blockers after another Connection discovers a rename without rereading or advancing source time', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const parent = {
+      id: '1',
+      nameWithOwner: 'acme/parent',
+      maps: new Map([[1, rawBlockedMap('acme/parent', '2', 'acme/renamed', false)]]),
+    }
+    const dependency = {
+      id: '2',
+      nameWithOwner: 'acme/original',
+      maps: new Map<number, RawMapIssue>(),
+    }
+    const parentAccess = fakeClient([parent], 4_000)
+    const dependencyAccess = fakeClient([dependency], 4_000)
+    const sources = await observeInputs([
+      sourceInput('one', parent, parentAccess.client, 'parent-key'),
+      sourceInput('two', dependency, dependencyAccess.client, 'dependency-key'),
+    ])
+    try {
+      expect(
+        sources.published.mock.calls
+          .filter(([value]) => value.project.id === 'parent-key')
+          .at(-1)?.[0],
+      ).toMatchObject({
+        attempts: expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'observed',
+            scope: expect.objectContaining({ kind: 'ticket' }),
+            value: expect.objectContaining({
+              blockedBy: [
+                expect.objectContaining({
+                  reference: expect.objectContaining({ kind: 'external' }),
+                }),
+              ],
+            }),
+          }),
+        ]),
+      })
+      const parentReads = parentAccess.restPaths.length
+      dependency.nameWithOwner = 'acme/renamed'
+      vi.setSystemTime(2_000)
+      await sources.refresh({ integration: 'github', id: 'dependency-key' })
+      expect(parentAccess.restPaths).toHaveLength(parentReads)
+      expect(
+        sources.published.mock.calls
+          .filter(([value]) => value.project.id === 'parent-key')
+          .at(-1)?.[0],
+      ).toMatchObject({
+        health: { status: 'available', observedAt: 1_000 },
+        attempts: expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'observed',
+            scope: expect.objectContaining({ kind: 'ticket' }),
+            observedAt: 1_000,
+            value: expect.objectContaining({
+              blockedBy: [
+                expect.objectContaining({
+                  reference: {
+                    kind: 'registered',
+                    project: { integration: 'github', id: 'dependency-key' },
+                    ticketId: '20',
+                  },
+                }),
+              ],
+            }),
+          }),
+        ]),
+      })
+    } finally {
+      await sources.stop()
+    }
+  })
+
+  it('joins a retired owner read when the pool stops and publishes no retired callback', async () => {
+    const repository = {
+      id: '1',
+      nameWithOwner: 'acme/retired',
+      maps: new Map([[1, rawMap(1, 'Retired')]]),
+    }
+    const access = fakeClient([repository], 4_000).client
+    const started = Promise.withResolvers<void>()
+    const gate = Promise.withResolvers<void>()
+    let readFinished = false
+    const pool = createGitHubObserverPool()
+    const observer = pool.create(
+      sourceInput('one', repository, {
+        restGet: access.restGet,
+        async graphql(query, variables) {
+          started.resolve()
+          await gate.promise
+          const result = await access.graphql(query, variables)
+          readFinished = true
+          return result
+        },
+      }),
+    )
+    const updates: SourceContribution[] = []
+    observer.subscribe((value) => updates.push(value))
+    const baseline = observer.observe().catch(() => null)
+    await started.promise
+    const retirement = observer.stop()
+    let poolStopped = false
+    const stopping = pool.stop().then(() => {
+      poolStopped = true
+    })
+    try {
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(poolStopped).toBe(false)
+      expect(readFinished).toBe(false)
+      gate.resolve()
+      await Promise.all([baseline, retirement, stopping])
+      expect(readFinished).toBe(true)
+      expect(updates).toEqual([])
+      await expect(observer.refresh()).rejects.toThrow('stopped')
+    } finally {
+      gate.resolve()
+      await Promise.all([baseline, retirement, stopping])
+    }
   })
 })
 
@@ -394,6 +773,7 @@ interface HttpRepository {
   nameWithOwner: string
   maps: Map<number, RawMapIssue>
   metadataStatus?: number
+  metadata?: unknown
   listing?: unknown
   secondPage?: unknown
   secondPageStatus?: number
@@ -421,6 +801,7 @@ function stubProvider(repositories: readonly HttpRepository[]): void {
             repository.metadataStatus,
           )
         }
+        if (repository.metadata !== undefined) return providerResponse(repository.metadata)
         return providerResponse({
           id: Number(repository.metadataId ?? repository.id),
           full_name: repository.nameWithOwner,
@@ -485,33 +866,52 @@ function stubProvider(repositories: readonly HttpRepository[]): void {
   )
 }
 
-async function observedAdapter(
+async function observedSources(
   repositories: HttpRepository[],
-  registrations?: ProjectRegistration[],
+  admitted?: GitHubObservationInput[],
 ) {
   vi.useFakeTimers()
   vi.setSystemTime(1_000)
   stubProvider(repositories)
-  const updates: unknown[] = []
-  const availability = vi.fn()
   const warn = vi.fn()
-  const admitted =
-    registrations ?? repositories.map((repository) => registration('one', repository))
-  const adapter = createGitHubAdapter({
-    connections: [...new Set(admitted.map((entry) => entry.connectionId))].map(connection),
-    registrations: admitted,
-    accessToken: async () => 'fixture-token',
-    onConnectionAvailability: availability,
-    logger: { warn },
-    reconcileMs: 10,
-  })
-  await adapter.start({ update: (slice) => updates.push(slice) })
-  return { adapter, updates, availability, warn }
+  const access = createGitHubClient({ token: 'fixture-token' })
+  const inputs =
+    admitted ?? repositories.map((repository) => sourceInput('one', repository, access))
+  const sources = await observeInputs(inputs, { logger: { warn }, reconcileMs: 10 })
+  return { sources, updates: sources.updates, published: sources.published, warn }
 }
 
 describe('GitHub scoped source evidence through the real client', () => {
   const project = { integration: 'github', id: 'acme/roadmap' } satisfies SourceProjectKey
   const mapScope = { kind: 'map', map: { project, mapId: '1' } }
+
+  it.each([{}, { permissions: { pull: true } }])(
+    'does not turn permission-only metadata %j into a successful admitted source read',
+    async (metadata) => {
+      const repository: HttpRepository = {
+        id: '1',
+        nameWithOwner: 'acme/roadmap',
+        maps: new Map([[1, rawMap(1, 'Unread map')]]),
+        metadata,
+      }
+      const { sources, updates, published } = await observedSources([repository])
+      try {
+        expect(updates.at(-1)?.attempts).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              kind: 'failed',
+              scope: { kind: 'project', project },
+              failure: { kind: 'read', cause: 'malformed-response' },
+            }),
+          ]),
+        )
+        expect(updates.at(-1)?.attempts.some((attempt) => attempt.kind === 'observed')).toBe(false)
+        expect(published.mock.calls.at(-1)?.[0].health).toMatchObject({ status: 'unavailable' })
+      } finally {
+        await sources.stop()
+      }
+    },
+  )
 
   it('rejects a mismatched stable metadata identity before reading maps under the admitted key', async () => {
     const repository: HttpRepository = {
@@ -520,7 +920,7 @@ describe('GitHub scoped source evidence through the real client', () => {
       nameWithOwner: 'acme/roadmap',
       maps: new Map([[1, rawMap(1, 'Wrong identity')]]),
     }
-    const { adapter, updates } = await observedAdapter([repository])
+    const { sources, updates } = await observedSources([repository])
     try {
       expect(updates.at(-1)).toHaveProperty(
         'attempts',
@@ -537,29 +937,34 @@ describe('GitHub scoped source evidence through the real client', () => {
         expect.arrayContaining([expect.objectContaining({ kind: 'observed', scope: mapScope })]),
       )
     } finally {
-      await adapter.stop()
+      await sources.stop()
     }
   })
 
-  it('recovers the admitted opaque key after access ambiguity and a repository rename without changing Workspace proof', async () => {
+  it('recovers the admitted opaque key after access ambiguity and a repository rename without requiring Workspace proof', async () => {
     const repository: HttpRepository = {
       id: '1',
       nameWithOwner: 'acme/roadmap',
       maps: new Map([[1, rawMap(1, 'Known map')]]),
     }
-    const admitted = registration('one', repository, 'opaque stable/%2F')
-    const originalWorkspace = admitted.workspace
-    const { adapter, updates } = await observedAdapter([repository], [admitted])
+    const admitted = sourceInput(
+      'one',
+      repository,
+      createGitHubClient({ token: 'fixture-token' }),
+      'opaque stable/%2F',
+    )
+    const key = { integration: 'github', id: admitted.ref.projectId } satisfies SourceProjectKey
+    const { sources, updates } = await observedSources([repository], [admitted])
     try {
       repository.metadataStatus = 404
       vi.setSystemTime(2_000)
-      await adapter.refresh(admitted.key)
+      await sources.refresh(key)
       expect(updates.at(-1)).toHaveProperty(
         'attempts',
         expect.arrayContaining([
           expect.objectContaining({
             kind: 'failed',
-            scope: { kind: 'project', project: admitted.key },
+            scope: { kind: 'project', project: key },
             failure: { kind: 'access-ambiguous', evidence: 'http-404' },
           }),
         ]),
@@ -567,27 +972,30 @@ describe('GitHub scoped source evidence through the real client', () => {
       repository.metadataStatus = undefined
       repository.nameWithOwner = 'acme/renamed'
       vi.setSystemTime(3_000)
-      await adapter.refresh(admitted.key)
+      await sources.refresh(key)
       expect(updates.at(-1)).toHaveProperty(
         'attempts',
         expect.arrayContaining([
           expect.objectContaining({
             kind: 'observed',
-            scope: { kind: 'project', project: admitted.key },
+            scope: { kind: 'project', project: key },
             observedAt: 3_000,
             value: expect.objectContaining({ name: 'acme/renamed' }),
           }),
           expect.objectContaining({
             kind: 'observed',
-            scope: { kind: 'map', map: { project: admitted.key, mapId: '1' } },
+            scope: { kind: 'map', map: { project: key, mapId: '1' } },
             observedAt: 3_000,
           }),
         ]),
       )
-      expect(admitted.workspace).toBe(originalWorkspace)
-      expect(admitted.locator).toMatchObject({ repositoryId: '1', nameWithOwner: 'acme/roadmap' })
+      expect(admitted.source).toMatchObject({
+        repositoryId: '1',
+        locator: { nameWithOwner: 'acme/roadmap' },
+      })
+      expect(admitted).not.toHaveProperty('workspace')
     } finally {
-      await adapter.stop()
+      await sources.stop()
     }
   })
 
@@ -630,7 +1038,7 @@ describe('GitHub scoped source evidence through the real client', () => {
         nameWithOwner: 'acme/roadmap',
         maps: new Map([[1, rawMap(1, 'Known map')]]),
       }
-      const { adapter, updates, warn } = await observedAdapter([repository])
+      const { sources, updates, warn } = await observedSources([repository])
       try {
         expect(updates[0]).toHaveProperty(
           'attempts',
@@ -645,7 +1053,7 @@ describe('GitHub scoped source evidence through the real client', () => {
         )
         repository.graphqlResponse = failureResponse
         vi.setSystemTime(2_000)
-        await adapter.refresh(project)
+        await sources.refresh(project)
 
         expect(updates.at(-1)).toHaveProperty(
           'attempts',
@@ -670,7 +1078,7 @@ describe('GitHub scoped source evidence through the real client', () => {
         repository.graphqlResponse = undefined
         repository.maps.set(1, rawMap(1, 'Recovered map'))
         vi.setSystemTime(3_000)
-        await adapter.refresh(project)
+        await sources.refresh(project)
 
         expect(updates.at(-1)).toHaveProperty(
           'attempts',
@@ -684,7 +1092,7 @@ describe('GitHub scoped source evidence through the real client', () => {
           ]),
         )
       } finally {
-        await adapter.stop()
+        await sources.stop()
       }
     },
   )
@@ -700,14 +1108,14 @@ describe('GitHub scoped source evidence through the real client', () => {
       nameWithOwner: 'acme/failing',
       maps: new Map([[2, rawMap(2, 'Known failing map')]]),
     }
-    const { adapter, updates, availability } = await observedAdapter([healthy, failing])
+    const { sources, updates, published } = await observedSources([healthy, failing])
     try {
       failing.metadataStatus = 503
       healthy.maps.set(1, rawMap(1, 'New healthy map'))
       vi.setSystemTime(2_000)
-      await adapter.refresh({ integration: 'github', id: 'acme/healthy' })
+      await sources.refresh({ integration: 'github', id: 'acme/healthy' })
       vi.setSystemTime(3_000)
-      await adapter.refresh({ integration: 'github', id: 'acme/healthy' })
+      await sources.refresh({ integration: 'github', id: 'acme/healthy' })
 
       expect(updates.at(-1)).toHaveProperty(
         'attempts',
@@ -729,12 +1137,15 @@ describe('GitHub scoped source evidence through the real client', () => {
           }),
         ]),
       )
-      expect(availability.mock.calls.at(-1)?.[1]).toMatchObject({ status: 'degraded' })
       expect(
-        availability.mock.calls.some(([, value]) => value.status === 'authorization-required'),
+        published.mock.calls.filter(([value]) => value.project.id === 'acme/failing').at(-1)?.[0]
+          .health,
+      ).toMatchObject({ status: 'degraded', observedAt: 1_000 })
+      expect(
+        published.mock.calls.some(([value]) => value.health.status === 'authorization-required'),
       ).toBe(false)
     } finally {
-      await adapter.stop()
+      await sources.stop()
     }
   })
 
@@ -746,11 +1157,11 @@ describe('GitHub scoped source evidence through the real client', () => {
         nameWithOwner: 'acme/roadmap',
         maps: new Map([[1, rawMap(1, 'Known map')]]),
       }
-      const { adapter, updates, availability } = await observedAdapter([repository])
+      const { sources, updates, published } = await observedSources([repository])
       try {
         repository.metadataStatus = status
         vi.setSystemTime(2_000)
-        await adapter.refresh(project)
+        await sources.refresh(project)
 
         expect(updates.at(-1)).toHaveProperty(
           'attempts',
@@ -767,12 +1178,24 @@ describe('GitHub scoped source evidence through the real client', () => {
           'attempts',
           expect.arrayContaining([expect.objectContaining({ kind: 'proven-absent' })]),
         )
-        expect(availability.mock.calls.at(-1)?.[1]).not.toMatchObject({
+        expect(published.mock.calls.at(-1)?.[0].health).not.toMatchObject({
           status: 'authorization-required',
         })
+        expect(published.mock.calls.at(-1)?.[0].health).toHaveProperty('observedAt', 1_000)
+        expect(updates.at(-1)).not.toHaveProperty(
+          'attempts',
+          expect.arrayContaining([
+            expect.objectContaining({
+              kind: 'observed',
+              scope: { kind: 'project', project },
+              observedAt: 2_000,
+            }),
+            expect.objectContaining({ kind: 'observed', scope: mapScope, observedAt: 2_000 }),
+          ]),
+        )
         expect(JSON.stringify(updates)).not.toContain('fixture-token')
       } finally {
-        await adapter.stop()
+        await sources.stop()
       }
     },
   )
@@ -783,13 +1206,13 @@ describe('GitHub scoped source evidence through the real client', () => {
       nameWithOwner: 'acme/roadmap',
       maps: new Map([[1, rawMap(1, 'Known map')]]),
     }
-    const { adapter, updates, availability } = await observedAdapter([repository])
+    const { sources, updates, published } = await observedSources([repository])
     try {
       repository.metadataStatus = 401
       vi.setSystemTime(2_000)
-      await adapter.refresh(project)
+      await sources.refresh(project)
 
-      expect(availability.mock.calls.at(-1)?.[1]).toMatchObject({
+      expect(published.mock.calls.at(-1)?.[0].health).toMatchObject({
         status: 'authorization-required',
       })
       expect(updates.at(-1)).toHaveProperty(
@@ -809,7 +1232,7 @@ describe('GitHub scoped source evidence through the real client', () => {
       )
       expect(JSON.stringify(updates)).not.toContain('fixture-token')
     } finally {
-      await adapter.stop()
+      await sources.stop()
     }
   })
 
@@ -837,12 +1260,12 @@ describe('GitHub scoped source evidence through the real client', () => {
           [2, rawMap(2, 'Known second map')],
         ]),
       }
-      const { adapter, updates } = await observedAdapter([repository])
+      const { sources, updates } = await observedSources([repository])
       try {
         repository.aliases = new Map([[2, alias]])
         repository.maps.set(1, rawMap(1, 'Validated first map'))
         vi.setSystemTime(2_000)
-        await adapter.refresh(project)
+        await sources.refresh(project)
 
         expect(updates.at(-1)).toHaveProperty(
           'attempts',
@@ -866,7 +1289,7 @@ describe('GitHub scoped source evidence through the real client', () => {
           expect.arrayContaining([expect.objectContaining({ kind: 'proven-absent' })]),
         )
       } finally {
-        await adapter.stop()
+        await sources.stop()
       }
     },
   )
@@ -882,12 +1305,12 @@ describe('GitHub scoped source evidence through the real client', () => {
         ]),
       ),
     }
-    const { adapter, updates } = await observedAdapter([repository])
+    const { sources, updates } = await observedSources([repository])
     try {
       repository.laterBatchStatus = 503
       repository.maps.set(1, rawMap(1, 'Validated earlier batch'))
       vi.setSystemTime(2_000)
-      await adapter.refresh(project)
+      await sources.refresh(project)
 
       expect(updates.at(-1)).toHaveProperty(
         'attempts',
@@ -907,7 +1330,7 @@ describe('GitHub scoped source evidence through the real client', () => {
         ]),
       )
     } finally {
-      await adapter.stop()
+      await sources.stop()
     }
   })
 
@@ -921,12 +1344,12 @@ describe('GitHub scoped source evidence through the real client', () => {
       nameWithOwner: 'acme/roadmap',
       maps: new Map([[1, rawMap(1, 'Known map')]]),
     }
-    const { adapter, updates } = await observedAdapter([repository])
+    const { sources, updates } = await observedSources([repository])
     try {
       repository.listing = listing
       repository.secondPage = [{}]
       vi.setSystemTime(2_000)
-      await adapter.refresh(project)
+      await sources.refresh(project)
 
       expect(updates.at(-1)).toHaveProperty(
         'attempts',
@@ -944,7 +1367,7 @@ describe('GitHub scoped source evidence through the real client', () => {
         expect.arrayContaining([expect.objectContaining({ kind: 'proven-absent' })]),
       )
     } finally {
-      await adapter.stop()
+      await sources.stop()
     }
   })
 
@@ -954,11 +1377,11 @@ describe('GitHub scoped source evidence through the real client', () => {
       nameWithOwner: 'acme/roadmap',
       maps: new Map([[1, rawMap(1, 'Known map')]]),
     }
-    const { adapter, updates } = await observedAdapter([repository])
+    const { sources, updates } = await observedSources([repository])
     try {
       repository.listing = []
       vi.setSystemTime(2_000)
-      await adapter.refresh(project)
+      await sources.refresh(project)
 
       expect(updates.at(-1)).toHaveProperty(
         'attempts',
@@ -985,7 +1408,7 @@ describe('GitHub scoped source evidence through the real client', () => {
         ]),
       )
     } finally {
-      await adapter.stop()
+      await sources.stop()
     }
   })
 
@@ -1003,15 +1426,24 @@ describe('GitHub scoped source evidence through the real client', () => {
         maps: new Map(),
       }
       const admitted = [
-        registration('one', parent, 'parent opaque/%2F'),
-        registration('two', dependency, 'dependency opaque/%2F'),
+        sourceInput(
+          'one',
+          parent,
+          createGitHubClient({ token: 'fixture-token' }),
+          'parent opaque/%2F',
+        ),
+        sourceInput(
+          'two',
+          dependency,
+          createGitHubClient({ token: 'fixture-token' }),
+          'dependency opaque/%2F',
+        ),
       ]
       dependency.nameWithOwner = 'acme/renamed'
       parent.aliases = new Map([
         [1, mapWithBlocker('acme/parent', '2', 'acme/renamed', includeBlockerDatabaseId)],
       ])
-      const originalWorkspace = admitted[1]?.workspace
-      const { adapter, updates } = await observedAdapter([parent, dependency], admitted)
+      const { sources, updates } = await observedSources([parent, dependency], admitted)
       try {
         expect(updates.at(-1)).toHaveProperty(
           'attempts',
@@ -1040,12 +1472,13 @@ describe('GitHub scoped source evidence through the real client', () => {
             }),
           ]),
         )
-        expect(admitted[1]).toMatchObject({
-          locator: { repositoryId: '2', nameWithOwner: 'acme/original' },
-          workspace: originalWorkspace,
+        expect(admitted[1]?.source).toMatchObject({
+          repositoryId: '2',
+          locator: { nameWithOwner: 'acme/original' },
         })
+        expect(admitted[1]).not.toHaveProperty('workspace')
       } finally {
-        await adapter.stop()
+        await sources.stop()
       }
     },
   )
@@ -1065,10 +1498,15 @@ describe('GitHub scoped source evidence through the real client', () => {
       [1, mapWithBlocker('acme/parent', '999', 'external/looks-registered')],
     ])
     const admitted = [
-      registration('one', parent, 'parent-key'),
-      registration('one', registered, 'external/looks-registered'),
+      sourceInput('one', parent, createGitHubClient({ token: 'fixture-token' }), 'parent-key'),
+      sourceInput(
+        'one',
+        registered,
+        createGitHubClient({ token: 'fixture-token' }),
+        'external/looks-registered',
+      ),
     ]
-    const { adapter, updates } = await observedAdapter([parent, registered], admitted)
+    const { sources, updates } = await observedSources([parent, registered], admitted)
     try {
       expect(updates.at(-1)).toHaveProperty(
         'attempts',
@@ -1101,7 +1539,7 @@ describe('GitHub scoped source evidence through the real client', () => {
         ]),
       )
     } finally {
-      await adapter.stop()
+      await sources.stop()
     }
   })
 
@@ -1116,7 +1554,7 @@ describe('GitHub scoped source evidence through the real client', () => {
     payload.issue.subIssues.totalCount = 2
     payload.issue.subIssuesSummary.total = 2
     parent.aliases = new Map([[1, payload]])
-    const { adapter, updates } = await observedAdapter([parent])
+    const { sources, updates } = await observedSources([parent])
     try {
       expect(updates.at(-1)).toHaveProperty(
         'attempts',
@@ -1152,7 +1590,7 @@ describe('GitHub scoped source evidence through the real client', () => {
         expect.arrayContaining([expect.objectContaining({ kind: 'proven-absent' })]),
       )
     } finally {
-      await adapter.stop()
+      await sources.stop()
     }
   })
 
@@ -1162,13 +1600,13 @@ describe('GitHub scoped source evidence through the real client', () => {
       nameWithOwner: 'acme/roadmap',
       maps: new Map([[1, rawMap(1, 'Known map')]]),
     }
-    const { adapter, updates } = await observedAdapter([repository])
+    const { sources, updates } = await observedSources([repository])
     try {
       repository.listing = Array.from({ length: 100 }, (_, index) => ({ number: index + 1 }))
       repository.secondPage = { message: 'private pagination detail fixture-token' }
       repository.secondPageStatus = 503
       vi.setSystemTime(2_000)
-      await adapter.refresh(project)
+      await sources.refresh(project)
 
       expect(updates.at(-1)).toHaveProperty(
         'attempts',
@@ -1198,7 +1636,7 @@ describe('GitHub scoped source evidence through the real client', () => {
       )
       expect(JSON.stringify(updates)).not.toContain('private pagination detail')
     } finally {
-      await adapter.stop()
+      await sources.stop()
     }
   })
 })

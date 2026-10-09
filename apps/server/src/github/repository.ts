@@ -1,5 +1,5 @@
+import type { GitHubProviderRead } from '../projects/registry.ts'
 import { isRecord } from '../type-guards.ts'
-import type { GitHubClient } from './client.ts'
 import { GitHubError } from './client.ts'
 export interface RepositoryIdentity {
   id: string
@@ -17,7 +17,7 @@ export interface MapRef {
 const PAGE_SIZE = 100
 
 export async function readRepository(
-  client: GitHubClient,
+  client: Pick<GitHubProviderRead, 'restGet'>,
   repositoryId: string,
 ): Promise<RepositoryIdentity> {
   const repository = decodeRepository(
@@ -28,7 +28,7 @@ export async function readRepository(
 }
 
 export async function readRepositoryByName(
-  client: GitHubClient,
+  client: Pick<GitHubProviderRead, 'restGet'>,
   nameWithOwner: string,
 ): Promise<RepositoryIdentity> {
   const [owner, repository, extra] = nameWithOwner.split('/')
@@ -40,7 +40,7 @@ export async function readRepositoryByName(
 }
 
 export async function listRepositoryMaps(
-  client: GitHubClient,
+  client: Pick<GitHubProviderRead, 'restGet'>,
   nameWithOwner: string,
 ): Promise<MapRef[]> {
   const [owner, repo, extra] = nameWithOwner.split('/')

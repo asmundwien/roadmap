@@ -1,18 +1,18 @@
 import { createServer } from 'node:http'
 import { fileURLToPath } from 'node:url'
-import { createProjectAdmission } from './application/admission.ts'
-import { type AdapterRuntime, createRoadmapApplication } from './application/application.ts'
-import { createAutomationLauncher } from './application/automation.ts'
-import { createAutomationDatabaseDocument } from './application/automation-database.ts'
-import { createConfigurationDocument } from './application/configuration.ts'
+import { createRoadmapApplication } from './application/application.ts'
 import { createMacOsCredentialVault } from './application/credential-vault.ts'
 import { createApplicationOperations } from './application/operations.ts'
+import { createAutomationDatabaseDocument } from './automation/database.ts'
+import { createAutomationLauncher } from './automation/engine.ts'
 import { readServerConfig } from './config.ts'
-import { createGitHubAdapter, type GitHubAdapter } from './github/adapter.ts'
+import { createConfigurationDocument } from './configuration/document.ts'
 import { createGitHubProjectAdmission } from './github/admission.ts'
+import { createGitHubClient } from './github/client.ts'
 import { createGitHubConnectionPort } from './github/connections.ts'
-import { createLocalAdapter } from './local/adapter.ts'
+import { createGitHubObserverPool } from './github/observer.ts'
 import { createLocalProjectAdmission } from './local/admission.ts'
+import { createLocalObserver } from './local/observer.ts'
 import { createNotifier } from './notify.ts'
 import { createRoadmapTransport, type RoadmapTransport } from './transport.ts'
 
@@ -34,16 +34,12 @@ async function main(): Promise<void> {
       })
     : undefined
   const credentialVault = github ? createMacOsCredentialVault() : undefined
-  let githubAdapter: GitHubAdapter | null = null
-  const operations = createApplicationOperations({
-    async refreshGitHub(project) {
-      return (await githubAdapter?.refresh(project)) ?? false
-    },
-  })
-  const admission = createProjectAdmission({
+  const githubObservers = createGitHubObserverPool()
+  const operations = createApplicationOperations()
+  const admissions = {
     local: createLocalProjectAdmission(),
-    ...(github ? { github: createGitHubProjectAdmission({ github }) } : {}),
-  })
+    ...(github ? { github: createGitHubProjectAdmission() } : {}),
+  }
 
   const application = createRoadmapApplication({
     configuration: createConfigurationDocument(
@@ -61,35 +57,14 @@ async function main(): Promise<void> {
           credentialVault,
         }
       : {}),
-    admission,
+    admissions,
     operations,
-    createAdapters(configuration, runtime: AdapterRuntime) {
-      const adapters = [
-        createLocalAdapter({
-          sources: configuration.projects.flatMap((registration) =>
-            registration.key.integration === 'local'
-              ? [
-                  {
-                    key: { integration: 'local' as const, id: registration.key.id },
-                    rootPath: registration.workspace.path,
-                  },
-                ]
-              : [],
-          ),
-        }),
-      ]
-      if (github) {
-        githubAdapter = createGitHubAdapter({
-          connections: configuration.connections,
-          registrations: configuration.projects,
-          accessToken: runtime.accessToken,
-          onConnectionAvailability: runtime.setConnectionAvailability,
-        })
-        adapters.push(githubAdapter)
-      } else {
-        githubAdapter = null
-      }
-      return adapters
+    providerRead: (accessToken) => createGitHubClient({ token: accessToken }),
+    observers: {
+      local: (input) => createLocalObserver(input),
+      github: (input) => githubObservers.create(input),
+      reconcileGitHubTopology: (inputs) => githubObservers.reconcileTopology(inputs),
+      stop: () => githubObservers.stop(),
     },
     onChangeEvents: createNotifier(),
   })
@@ -99,7 +74,7 @@ async function main(): Promise<void> {
     if (transport?.handle(request, response)) return
     if (request.method === 'GET' && (request.url === '/' || request.url === '/health')) {
       const state = application.current()
-      const diagnostics = githubAdapter?.diagnostics() ?? { rateLimit: null }
+      const diagnostics = githubObservers.diagnostics()
       response.writeHead(200, { 'Content-Type': 'application/json' })
       response.end(
         JSON.stringify({

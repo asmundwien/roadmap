@@ -2,54 +2,56 @@ import { randomUUID } from 'node:crypto'
 import type {
   ApplicationState,
   AuthorizationOperation,
-  Blocker,
   Command,
   CommandOutcome,
   CommandResult,
-  ConnectionAvailability,
   GitHubConnectionIdentity,
-  Project,
   ProjectKey,
-  ProjectRegistration,
-  ProjectRegistrationCandidate,
   Query,
   QueryResult,
-  RegisteredProject,
   SafeError,
-  Snapshot,
   SupportedIntegration,
-  Ticket,
-  Unreachable,
-  WayfinderMap,
 } from '@roadmap/contracts'
-import { type ChangeEvent, createChangeFeed } from '../change-feed.ts'
+import type { AutomationDatabaseDocument } from '../automation/database.ts'
+import {
+  type AutomationEngine,
+  type AutomationLauncher,
+  createAutomationEngine,
+} from '../automation/engine.ts'
+import { type ChangeEvent, type ChangeFeedInput, createChangeFeed } from '../change-feed.ts'
+import {
+  type ConfigurationDocument,
+  type ConfigurationRead,
+  decodeConfigurationDocument,
+} from '../configuration/document.ts'
 import {
   type CredentialBundle,
   GitHubConnectionError,
   type GitHubConnectionPort,
 } from '../github/connections.ts'
 import {
-  type ObservationAttempt,
-  type SourceBlocker,
-  type SourceFailure,
-  type SourceMapContent,
-  type SourceMapKey,
-  type SourceScope,
-  type SourceSnapshot,
-  type SourceTicketContent,
-  sourceScopeKey,
-  type WayfinderAdapter,
-} from '../observation/source.ts'
-import { createSnapshotStore, type SnapshotStore } from '../store.ts'
-import { type AutomationLauncher, type AutomationLoop, createAutomationLoop } from './automation.ts'
-import type { AutomationDatabaseDocument } from './automation-database.ts'
-import type {
-  ConfigurationDocument,
-  ConfigurationRead,
-  RoadmapConfiguration,
-} from './configuration.ts'
-import { roadmapConfigurationCodec } from './configuration.ts'
+  type AuthorizationUsability,
+  type CommittedObservation,
+  createObservationCoordinator,
+  type SourceObserverFactories,
+} from '../observation/coordinator.ts'
+import {
+  type AdmissionFailure,
+  type ConfiguredConnection,
+  createProjectRegistry,
+  GitHubAccessError,
+  type GitHubAccessFailure,
+  type GitHubConnection,
+  type GitHubConnectionAccess,
+  type GitHubProviderRead,
+  type ProjectAdmission,
+  type ProjectConfiguration,
+  type ProjectRef,
+  type RegistryMutation,
+} from '../projects/registry.ts'
 import { type CredentialVault, CredentialVaultError } from './credential-vault.ts'
+import type { ApplicationOperations } from './operations.ts'
+import { createSourceProjection, projectApplicationState } from './projection.ts'
 
 export interface RoadmapApplication {
   start(): Promise<void>
@@ -59,84 +61,24 @@ export interface RoadmapApplication {
   execute(command: Command): Promise<CommandOutcome>
   stop(): Promise<void>
 }
-
-const REFRESH_LEEWAY_MS = 5 * 60_000
-const SLOW_DOWN_MS = 5_000
-
-interface AdmissionRuntime {
-  accessToken(connectionId: string): Promise<string>
-}
-
-export interface AdmissionPort {
-  admit(
-    candidate: ProjectRegistrationCandidate,
-    configuration: RoadmapConfiguration,
-    runtime: AdmissionRuntime,
-  ): Promise<
-    | { ok: true; registration: ProjectRegistration }
-    | {
-        ok: false
-        error: SafeError
-      }
-  >
-  repair(
-    command: Extract<Command, { type: 'repair-project-workspace' }>,
-    configuration: RoadmapConfiguration,
-    runtime: AdmissionRuntime,
-  ): Promise<
-    | { ok: true; workspace: Extract<Command, { type: 'repair-project-workspace' }>['workspace'] }
-    | { ok: false; error: SafeError }
-  >
-}
-
-export interface AdapterRuntime {
-  accessToken(connectionId: string): Promise<string>
-  setConnectionAvailability(connectionId: string, availability: ConnectionAvailability): void
-}
-
-export interface ApplicationOperations {
-  query(query: Query, state: ApplicationState): Promise<QueryResult>
-  execute(
-    command: Exclude<
-      Command,
-      | { type: 'begin-github-authorization' }
-      | { type: 'cancel-github-authorization' }
-      | { type: 'retry-github-authorization' }
-      | { type: 'rename-connection' }
-      | { type: 'remove-connection' }
-      | { type: 'register-project' }
-      | { type: 'rename-project' }
-      | { type: 'repair-project-workspace' }
-      | { type: 'remove-project' }
-      | { type: 'start-automation-override' }
-    >,
-    state: ApplicationState,
-  ): Promise<{ ok: true; result: CommandResult } | { ok: false; error: SafeError }>
-}
-
 export interface RoadmapApplicationOptions {
   configuration: ConfigurationDocument
-  createAdapters(
-    configuration: RoadmapConfiguration,
-    runtime: AdapterRuntime,
-  ): readonly WayfinderAdapter[]
+  observers: SourceObserverFactories
+  admissions: Partial<Record<'local' | 'github', ProjectAdmission>>
+  providerRead?: (accessToken: () => Promise<string>) => GitHubProviderRead
   supportedIntegrations?: readonly SupportedIntegration[]
   credentialVault?: CredentialVault
   github?: GitHubConnectionPort
-  admission?: AdmissionPort
   operations?: ApplicationOperations
   onChangeEvents?: (events: ChangeEvent[]) => void
   serverEpoch?: string
   now?: () => number
-  automation?: {
-    database: AutomationDatabaseDocument
-    launcher: AutomationLauncher
-  }
+  automation?: { database: AutomationDatabaseDocument; launcher: AutomationLauncher }
 }
-
-const EMPTY_SNAPSHOT: Snapshot = { capturedAt: 0, projects: [], unreachable: [] }
-const EMPTY_CONFIGURATION: RoadmapConfiguration = {
-  schemaVersion: 5,
+const REFRESH_LEEWAY_MS = 5 * 60_000
+const SLOW_DOWN_MS = 5_000
+const EMPTY_CONFIGURATION: ProjectConfiguration = {
+  schemaVersion: 6,
   configurationVersion: 0,
   connections: [{ id: 'local', integration: 'local', name: 'Local', builtIn: true }],
   projects: [],
@@ -147,13 +89,6 @@ const LOCAL_INTEGRATION: SupportedIntegration = {
   name: 'Local',
   connectionKind: 'built-in',
 }
-
-interface ActiveGeneration {
-  id: number
-  store: SnapshotStore
-  unsubscribe: () => void
-}
-
 interface ActiveAuthorization {
   public: AuthorizationOperation
   name: string
@@ -170,51 +105,50 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     ...(options.supportedIntegrations || !options.github ? [] : [options.github.integration]),
   ]
   const listeners = new Set<(state: ApplicationState) => void>()
-  let observedAt = now()
-  let observeRoadmap: (snapshot: Snapshot) => void = () => undefined
-  const changeFeed = createChangeFeed({
-    onChange(listener) {
-      observeRoadmap = listener
-      return () => {
-        observeRoadmap = () => undefined
-      }
-    },
+  const authorizationOwners = new Map<string, string>()
+  const credentialBundles = new Map<string, CredentialBundle>()
+  const validatedAccounts = new Map<string, string>()
+  const rejectedAuthorizations = new Map<
+    string,
+    { accountId: string; failure: 'rejected-credential' | 'account-mismatch' }
+  >()
+  const authorizationUsability = new Map<string, AuthorizationUsability>()
+  const providerAccess = new Map<string, GitHubConnectionAccess>()
+  const refreshes = new Map<string, { credentials: CredentialBundle; result: Promise<string> }>()
+  const authorizationOperations = new Map<string, ActiveAuthorization>()
+  const coordinator = createObservationCoordinator({
+    observers: options.observers,
+    now,
+    revalidateSources: (configuration, connectionIds) =>
+      registry.prepare(configuration, configuration, { revalidateConnections: connectionIds }),
+    scheduleRecovery: (recover) => enqueue(recover),
   })
-  if (options.onChangeEvents) changeFeed.onEvent(options.onChangeEvents)
-  let configuration = EMPTY_CONFIGURATION
+  const registry = createProjectRegistry({
+    admissions: options.admissions,
+    runtime: { github: resolveGitHubAccess },
+  })
+  const sourceProjection = createSourceProjection()
+  const emptyCommitted: CommittedObservation = {
+    registry: { ...EMPTY_CONFIGURATION, admissions: [] },
+    observation: { committedAt: 0, attempts: [] },
+    contributions: [],
+    configurationValid: true,
+    pendingAdmission: false,
+    pendingConfigurations: [],
+    admissionRevision: 0,
+    authorizationUsability: new Map(),
+    classification: { baselineProjects: [] },
+  }
   let configurationStatus: ApplicationState['configuration'] = {
     valid: true,
     issues: [],
     notices: [],
   }
-  let roadmap = EMPTY_SNAPSHOT
-  const successfulScopes = new Map<string, Extract<ObservationAttempt, { kind: 'observed' }>>()
-  let currentScopes = new Map<string, ObservationAttempt>()
-  const mapMembers = new Map<string, readonly SourceMapKey[]>()
-  const ticketMembers = new Map<string, readonly SourceTicketContent['key'][]>()
-  const successfulProjectTimes = new Map<string, number>()
-  const retainedMapOrder = new Map<string, readonly string[]>()
-  const projectedProjects = new Map<string, { trace: Project; available: boolean; cause: string }>()
-  const connectionAvailability = new Map<string, ConnectionAvailability>()
-  const credentialBundles = new Map<string, CredentialBundle>()
-  const refreshes = new Map<string, Promise<string>>()
-  const authorizationOperations = new Map<string, ActiveAuthorization>()
-  const automationLoop: AutomationLoop | null = options.automation
-    ? createAutomationLoop({
-        database: options.automation.database,
-        launcher: options.automation.launcher,
-        source: () => ({ configuration, projects: registeredProjects() }),
-        onEvidenceChange() {
-          publish()
-          void enqueue(disableInterruptedProjects).catch(() => undefined)
-        },
-      })
-    : null
+  let receivedConfigurationValid = true
+  let configurationDurabilityConfirmed = true
+  const pendingConfigurations = new Map<number, ProjectConfiguration>()
+  let configurationReceipt = 0
   let stateSequence = 0
-  let state = buildState()
-  let stateFingerprint = semanticFingerprint(state)
-  let active: ActiveGeneration | null = null
-  let nextGeneration = 0
   let started = false
   let stopped = false
   let stopping = false
@@ -222,412 +156,128 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
   let startPromise: Promise<void> | null = null
   let unsubscribeConfiguration: (() => void) | null = null
   let mutationLane: Promise<void> = Promise.resolve()
-  let ownWriteVersion: number | null = null
+  let credentialMutationLane: Promise<void> = Promise.resolve()
+  let ownWriteDocument: ProjectConfiguration | null = null
+  let lastBaselineRegistry: CommittedObservation['registry'] | null = null
+  let observeNotifications: (input: ChangeFeedInput) => void = () => undefined
+  const changeFeed = createChangeFeed({
+    onChange(listener) {
+      observeNotifications = listener
+      return () => {
+        observeNotifications = () => undefined
+      }
+    },
+  })
+  if (options.onChangeEvents) changeFeed.onEvent(options.onChangeEvents)
+  const automationEngine: AutomationEngine | null = options.automation
+    ? createAutomationEngine({
+        database: options.automation.database,
+        launcher: options.automation.launcher,
+        source: () => coordinator.current(),
+        onEvidenceChange() {
+          publish()
+          void enqueue(disableInterruptedProjects).catch(() => undefined)
+        },
+      })
+    : null
+  let state = buildState()
+  let stateFingerprint = semanticFingerprint(state)
+  const unsubscribeObservation = coordinator.subscribe(() => {
+    publish()
+    automationEngine?.reconcile()
+  })
 
+  function currentConfiguration(): CommittedObservation['registry'] {
+    return coordinator.current()?.registry ?? emptyCommitted.registry
+  }
   function buildState(): ApplicationState {
-    return {
+    const committed = coordinator.current() ?? emptyCommitted
+    return projectApplicationState({
+      committed,
+      source: sourceProjection.commit(committed),
       serverEpoch,
       stateSequence,
-      configurationVersion: configuration.configurationVersion,
-      supportedIntegrations: [...supportedIntegrations],
-      connections: configuration.connections.map((connection) => ({
-        ...connection,
-        availability:
-          connectionAvailability.get(connection.id) ??
-          (connection.integration === 'local'
-            ? { status: 'available' as const, observedAt }
-            : { status: 'authorization-required' as const, cause: 'Authorization is required.' }),
-      })),
-      registrations: configuration.projects,
-      projects: registeredProjects(),
+      supportedIntegrations,
       authorizationOperations: [...authorizationOperations.values()].map((operation) => ({
         ...operation.public,
       })),
       configuration: configurationStatus,
       automation: automationState(),
-      roadmap,
-    }
+    })
   }
   function automationState(): ApplicationState['automation'] {
+    const configuration = currentConfiguration()
     return {
       enabled: configuration.automation.enabled,
       enabledProjects: [...configuration.automation.enabledProjects],
       availability: automationAvailability(),
-      evidence: automationLoop?.evidence() ?? [],
-      overrides: automationLoop?.overrides() ?? [],
+      evidence: automationEngine?.evidence() ?? [],
+      overrides: automationEngine?.overrides() ?? [],
     }
   }
-
   function automationAvailability(): ApplicationState['automation']['availability'] {
-    if (!configurationStatus.valid) {
-      const commandIssue = configurationStatus.issues.find(
-        (issue) =>
-          issue.path.startsWith('$.automation.classificationCommand') ||
-          issue.path.startsWith('$.automation.wayfinderCommand'),
-      )
-      return {
-        status: 'unavailable',
-        cause: commandIssue
-          ? `Harness Command is invalid: ${commandIssue.path} ${commandIssue.message}`
-          : 'roadmap.config.json is invalid; repair it before enabling Automation.',
-      }
-    }
-    const missing = [
-      configuration.automation.classificationCommand ? null : 'Classification Harness Command',
-      configuration.automation.wayfinderCommand ? null : 'Wayfinder Session Command',
-    ].filter((name): name is string => name !== null)
-    if (missing.length > 0) {
-      return {
-        status: 'unavailable',
-        cause: `Configure ${missing.join(' and ')} in roadmap.config.json.`,
-      }
-    }
-    return { status: 'ready' }
-  }
-
-  function registeredProjects(): RegisteredProject[] {
-    return configuration.projects.map((registration) => {
-      const key = projectKey(registration.key)
-      const projected = projectedProjects.get(key)
-      const known = projected?.trace
-      const observed = successfulProjectTimes.get(key)
-      return {
-        ...registration,
-        name: registration.displayName ?? known?.name ?? registration.key.id,
-        availability:
-          projected?.available && observed !== undefined
-            ? { status: 'available' as const, observedAt: observed }
-            : {
-                status: 'unavailable' as const,
-                cause: projected?.cause ?? 'Project has no current successful source observation.',
-                ...(observed === undefined ? {} : { observedAt: observed }),
-              },
-        openMaps: known?.openMaps ?? [],
-        closedMaps: known?.closedMaps ?? [],
-        warnings: known?.warnings ?? [],
-        actions: projectActions(registration, known),
-      }
-    })
-  }
-
-  function retainObservation(attempt: ObservationAttempt): void {
-    if (attempt.kind !== 'observed') return
-    const key = sourceScopeKey(attempt.scope)
-    successfulScopes.set(key, attempt)
-    const maps = observedMaps(attempt)
-    if (maps)
-      mapMembers.set(
-        key,
-        mergeMembers(
-          mapMembers.get(key) ?? [],
-          maps.value.members,
-          maps.completeness.kind === 'complete',
-          (map) => map.mapId,
-        ),
-      )
-    const tickets = observedTickets(attempt)
-    if (tickets)
-      ticketMembers.set(
-        key,
-        mergeMembers(
-          ticketMembers.get(key) ?? [],
-          tickets.value.members,
-          tickets.completeness.kind === 'complete',
-          (ticket) => ticket.ticketId,
-        ),
-      )
-  }
-
-  function acceptSnapshot(snapshot: SourceSnapshot): void {
-    currentScopes = new Map(
-      snapshot.attempts.map((attempt) => [sourceScopeKey(attempt.scope), attempt]),
-    )
-    for (const attempt of snapshot.attempts) retainObservation(attempt)
-    const projects: Project[] = []
-    const unreachable: Unreachable[] = []
-    projectedProjects.clear()
-    const sourceProjects = new Map<string, ProjectKey>()
-    for (const attempt of successfulScopes.values()) {
-      const project = sourceProject(attempt.scope)
-      sourceProjects.set(projectKey(project), project)
-    }
-    for (const attempt of snapshot.attempts) {
-      const project = sourceProject(attempt.scope)
-      sourceProjects.set(projectKey(project), project)
-    }
-    for (const registration of configuration.projects)
-      sourceProjects.set(projectKey(registration.key), registration.key)
-    for (const project of sourceProjects.values()) {
-      const result = projectSource(project)
-      projectedProjects.set(projectKey(project), result)
-      if (result.current) projects.push(result.current)
-      unreachable.push(...result.unreachable)
-    }
-    projects.sort(
-      (a, b) =>
-        Number(b.openMaps.length > 0) - Number(a.openMaps.length > 0) ||
-        a.name.localeCompare(b.name),
-    )
-    unreachable.sort(
-      (a, b) =>
-        projectKey(a.project).localeCompare(projectKey(b.project)) ||
-        (a.mapId ?? '').localeCompare(b.mapId ?? '') ||
-        a.reason.localeCompare(b.reason),
-    )
-    roadmap = { capturedAt: snapshot.capturedAt, projects, unreachable }
-    automationLoop?.reconcile()
-  }
-
-  function projectTickets(map: SourceMapKey) {
-    const membershipScope: SourceScope = { kind: 'tickets-membership', map }
-    const membership = observedTickets(currentScopes.get(sourceScopeKey(membershipScope)))
-    const retainedKeys = new Map<string, SourceTicketContent['key']>()
-    for (const ticket of ticketMembers.get(sourceScopeKey(membershipScope)) ?? [])
-      retainedKeys.set(ticket.ticketId, ticket)
-    for (const attempt of successfulScopes.values()) {
-      if (attempt.scope.kind === 'ticket' && sameSourceMap(attempt.scope.ticket.map, map))
-        retainedKeys.set(attempt.scope.ticket.ticketId, attempt.scope.ticket)
-    }
-    const trace: Ticket[] = []
-    const current: Ticket[] = []
-    let valid = membership?.completeness.kind === 'complete'
-    const currentIds = new Set(membership?.value.members.map((ticket) => ticket.ticketId) ?? [])
-    for (const ticket of retainedKeys.values()) {
-      const scope: SourceScope = { kind: 'ticket', ticket }
-      const retained = observedTicket(successfulScopes.get(sourceScopeKey(scope)))
-      const live = observedTicket(currentScopes.get(sourceScopeKey(scope)))
-      const included =
-        !!membership &&
-        (membership.completeness.kind !== 'complete' || currentIds.has(ticket.ticketId))
-      const ticketValid =
-        !!live &&
-        live.completeness.kind === 'complete' &&
-        live.value.status !== 'unknown' &&
-        live.value.blockersComplete
-      if (retained) trace.push(projectTicket(retained.value, included && ticketValid))
-      if (live && included) current.push(projectTicket(live.value, ticketValid))
-      if (
-        (included && !ticketValid) ||
-        (retained && !included && retained.value.status !== 'closed')
-      )
-        valid = false
-    }
-    return { trace, current, valid }
-  }
-
-  function projectScopedMap(map: SourceMapKey, included: boolean, absent: boolean) {
-    const scope: SourceScope = { kind: 'map', map }
-    const retained = observedMap(successfulScopes.get(sourceScopeKey(scope)))
-    const latest = currentScopes.get(sourceScopeKey(scope))
-    const live = observedMap(latest)
-    const tickets = projectTickets(map)
-    const valid =
-      !!live &&
-      included &&
-      live.completeness.kind === 'complete' &&
-      live.value.status !== 'unknown' &&
-      live.value.progress !== null &&
-      tickets.valid
-    const ticketScope: SourceScope = { kind: 'tickets-membership', map }
-    const ticketAttempt = currentScopes.get(sourceScopeKey(ticketScope))
-    const failedTicket = [...currentScopes.values()].find(
-      (attempt) =>
-        attempt.kind === 'failed' &&
-        attempt.scope.kind === 'ticket' &&
-        sameSourceMap(attempt.scope.ticket.map, map),
-    )
-    let reason: string | undefined
-    if (absent || latest?.kind === 'proven-absent')
-      reason = 'Map is absent from the complete current source membership.'
-    else if (latest?.kind === 'failed') reason = sourceFailureMessage(latest.failure)
-    else if (ticketAttempt?.kind === 'failed') reason = sourceFailureMessage(ticketAttempt.failure)
-    else if (failedTicket?.kind === 'failed') reason = sourceFailureMessage(failedTicket.failure)
-    else if (!live && retained) reason = 'Map has no current successful source observation.'
-    else if (!valid) reason = 'Map source evidence is incomplete.'
-    return {
-      valid,
-      reason,
-      retained,
-      trace: retained ? projectMap(retained.value, tickets.trace, valid) : undefined,
-      current: live && included ? projectMap(live.value, tickets.current, valid) : undefined,
-    }
-  }
-
-  function projectMaps(
-    project: ProjectKey,
-    projectName: string | undefined,
-    membership: ReturnType<typeof observedMaps>,
-  ) {
-    const membershipKey = sourceScopeKey({ kind: 'maps-membership', project })
-    const known = new Map<string, SourceMapKey>()
-    for (const map of mapMembers.get(membershipKey) ?? []) known.set(map.mapId, map)
-    for (const attempt of successfulScopes.values()) {
-      if (attempt.scope.kind === 'map' && sameProject(attempt.scope.map.project, project))
-        known.set(attempt.scope.map.mapId, attempt.scope.map)
-    }
-    const trace: WayfinderMap[] = []
-    const current: WayfinderMap[] = []
-    const failures: Unreachable[] = []
-    let complete = membership?.completeness.kind === 'complete'
-    const currentIds = new Set(membership?.value.members.map((map) => map.mapId) ?? [])
-    for (const map of known.values()) {
-      const absent = membership?.completeness.kind === 'complete' && !currentIds.has(map.mapId)
-      const result = projectScopedMap(map, !!membership && !absent, absent)
-      if (!result.valid) complete = false
-      if (result.trace) trace.push(result.trace)
-      if (result.current) current.push(result.current)
-      if (result.reason)
-        failures.push({
-          integration: project.integration,
-          project,
-          projectName,
-          mapId: map.mapId,
-          ...(result.retained?.value.displayId === undefined
-            ? {}
-            : { mapDisplayId: result.retained.value.displayId }),
-          ...(result.retained?.value.title === undefined
-            ? {}
-            : { mapTitle: result.retained.value.title }),
-          reason: result.reason,
-        })
-    }
-    return { trace, current, complete, failures, currentIds }
-  }
-
-  function orderRetainedMaps(key: string, maps: WayfinderMap[], complete: boolean): WayfinderMap[] {
-    const open = maps.filter((map) => map.isOpen)
-    if (complete) {
-      open.sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id))
-      retainedMapOrder.set(
-        key,
-        open.map((map) => map.id),
-      )
-    } else {
-      const positions = new Map((retainedMapOrder.get(key) ?? []).map((id, index) => [id, index]))
-      open.sort(
-        (a, b) =>
-          (positions.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
-            (positions.get(b.id) ?? Number.MAX_SAFE_INTEGER) ||
-          b.updatedAt - a.updatedAt ||
-          a.id.localeCompare(b.id),
-      )
-    }
-    return open
-  }
-
-  function projectSource(project: ProjectKey): {
-    trace: Project
-    current?: Project
-    available: boolean
-    cause: string
-    unreachable: Unreachable[]
-  } {
-    const key = projectKey(project)
-    const projectScope: SourceScope = { kind: 'project', project }
-    const listScope: SourceScope = { kind: 'maps-membership', project }
-    const metadata = observedProject(successfulScopes.get(sourceScopeKey(projectScope)))
-    const liveMetadata = observedProject(currentScopes.get(sourceScopeKey(projectScope)))
-    const liveList = observedMaps(currentScopes.get(sourceScopeKey(listScope)))
-    const membershipKey = sourceScopeKey(listScope)
-    const maps = projectMaps(project, metadata?.value.name, liveList)
-    const { trace: traceMaps, current: currentMaps, failures, currentIds } = maps
-    const complete = liveMetadata?.completeness.kind === 'complete' && maps.complete
-    const projectAttempt = currentScopes.get(sourceScopeKey(projectScope))
-    const listAttempt = currentScopes.get(membershipKey)
-    const projectCause = projectEvidenceCause(projectAttempt, listAttempt, complete)
     if (
-      !liveMetadata ||
-      !liveList ||
-      liveMetadata.completeness.kind !== 'complete' ||
-      liveList.completeness.kind !== 'complete'
-    ) {
-      failures.push({
-        integration: project.integration,
-        project,
-        projectName: metadata?.value.name,
-        reason: projectCause || 'Project source membership is incomplete.',
-      })
-    }
-    const open = orderRetainedMaps(key, traceMaps, complete)
-    if (complete && liveMetadata && liveList)
-      successfulProjectTimes.set(key, Math.max(liveMetadata.observedAt, liveList.observedAt))
-    const trace = projectTrace(
-      project,
-      metadata,
-      traceMaps,
-      open,
-      liveList?.completeness.kind === 'complete' && currentIds.size === 0,
+      !configurationStatus.valid ||
+      !configurationDurabilityConfirmed ||
+      pendingConfigurations.size > 0
     )
-    const current =
-      liveMetadata && liveList
-        ? {
-            ...trace,
-            openMaps: orderCurrentMaps(
-              currentMaps.filter((map) => map.isOpen),
-              open.map((map) => map.id),
-            ),
-            closedMaps: currentMaps
-              .filter((map) => !map.isOpen)
-              .sort(
-                (a, b) =>
-                  (b.closedAt ?? b.updatedAt) - (a.closedAt ?? a.updatedAt) ||
-                  a.id.localeCompare(b.id),
-              ),
-          }
-        : undefined
-    return {
-      trace,
-      ...(current ? { current } : {}),
-      available: complete,
-      cause: projectCause,
-      unreachable: failures,
-    }
+      return {
+        status: 'unavailable',
+        cause: !configurationDurabilityConfirmed
+          ? 'Configuration durability is unconfirmed; Automation cannot launch.'
+          : pendingConfigurations.size > 0
+            ? 'An admission-affecting configuration update is pending.'
+            : 'roadmap.config.json is invalid; repair it before enabling Automation.',
+      }
+    const policy = currentConfiguration().automation
+    const missing = [
+      policy.classificationCommand ? null : 'Classification Harness Command',
+      policy.wayfinderCommand ? null : 'Wayfinder Session Command',
+    ].filter((name): name is string => name !== null)
+    return missing.length > 0
+      ? {
+          status: 'unavailable',
+          cause: `Configure ${missing.join(' and ')} in roadmap.config.json.`,
+        }
+      : { status: 'ready' }
   }
-
-  function publish(observe = true): void {
+  function publish(): void {
+    if (stopped) return
     const candidate = buildState()
+    const committed = coordinator.current()
+    const baselineProjects =
+      committed && lastBaselineRegistry !== committed.registry
+        ? committed.classification.baselineProjects
+        : []
+    if (committed) lastBaselineRegistry = committed.registry
     const fingerprint = semanticFingerprint(candidate)
-    if (fingerprint === stateFingerprint) return
-    stateSequence += 1
-    state = { ...candidate, stateSequence }
-    stateFingerprint = fingerprint
-    for (const listener of listeners) listener(state)
-    if (observe) observeRoadmap(roadmap)
-  }
-
-  async function installGeneration(nextConfiguration: RoadmapConfiguration): Promise<void> {
-    const id = ++nextGeneration
-    const runtime: AdapterRuntime = {
-      accessToken: ensureAccessToken,
-      setConnectionAvailability(connectionId, availability) {
-        if (id !== nextGeneration) return
-        setAvailability(connectionId, availability)
-        if (active?.id === id) publish()
-      },
+    if (fingerprint !== stateFingerprint) {
+      stateSequence += 1
+      state = { ...candidate, stateSequence }
+      stateFingerprint = fingerprint
+      for (const listener of listeners) listener(state)
     }
-    const store = createSnapshotStore(options.createAdapters(nextConfiguration, runtime))
-    await store.start()
-    if (stopped || id !== nextGeneration) {
-      await store.stop()
-      return
-    }
-
-    observedAt = now()
-    const previous = active
-    configuration = nextConfiguration
-    acceptSnapshot(store.snapshot())
-    changeFeed.reset(roadmap)
-    active = { id, store, unsubscribe: () => undefined }
-    active.unsubscribe = store.onChange((snapshot) => {
-      if (active?.id !== id) return
-      acceptSnapshot(snapshot)
-      publish()
-    })
-    previous?.unsubscribe()
-    await previous?.store.stop()
-    publish()
+    if (committed)
+      observeNotifications({
+        attempts: committed.observation.attempts,
+        projects: candidate.projects.map((project) => ({ key: project.key, name: project.name })),
+        baselineProjects,
+        order: candidate.roadmap.projects.flatMap((project) =>
+          [...project.openMaps, ...project.closedMaps].map((map) => ({
+            map: { project: map.project, mapId: map.id },
+            tickets: map.tickets.map((ticket) => ticket.id),
+          })),
+        ),
+      })
   }
-
+  function updateAdmissionValidity(): void {
+    coordinator.receiveConfigurationValidity(
+      receivedConfigurationValid && configurationDurabilityConfirmed && !stopping,
+      pendingConfigurations.size > 0,
+      [...pendingConfigurations.values()],
+    )
+    automationEngine?.reconcile()
+  }
   function enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const run = mutationLane.then(operation, operation)
     mutationLane = run.then(
@@ -636,194 +286,269 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     )
     return run
   }
-
+  function mutateCredentials<T>(operation: () => Promise<T>): Promise<T> {
+    const run = credentialMutationLane.then(operation, operation)
+    credentialMutationLane = run.then(
+      () => undefined,
+      () => undefined,
+    )
+    return run
+  }
   async function disableInterruptedProjects(): Promise<void> {
-    if (!automationLoop || !configurationStatus.valid) return
-    const interrupted = automationLoop.interruptedProjects()
-    if (interrupted.length === 0) return
+    if (
+      !automationEngine ||
+      !configurationStatus.valid ||
+      pendingConfigurations.size > 0 ||
+      !configurationDurabilityConfirmed
+    )
+      return
+    const interrupted = automationEngine.interruptedProjects()
+    const configuration = currentConfiguration()
     const enabledProjects = configuration.automation.enabledProjects.filter(
       (project) => !interrupted.some((candidate) => sameProject(candidate, project)),
     )
-    if (enabledProjects.length === configuration.automation.enabledProjects.length) return
-    await persistConfiguration({
-      ...configuration,
-      automation: { ...configuration.automation, enabledProjects },
-    })
+    if (enabledProjects.length !== configuration.automation.enabledProjects.length)
+      await persistConfiguration({
+        ...configuration,
+        automation: { ...configuration.automation, enabledProjects },
+      })
   }
-
-  function setAvailability(connectionId: string, availability: ConnectionAvailability): void {
-    connectionAvailability.set(connectionId, availability)
+  function authorizationFacts(
+    configuration: ProjectConfiguration,
+  ): ReadonlyMap<string, AuthorizationUsability> {
+    const facts = new Map<string, AuthorizationUsability>()
+    for (const connection of configuration.connections) {
+      const usability = authorizationUsability.get(authorizationScopeKey(connection))
+      if (usability) facts.set(connection.id, usability)
+    }
+    return facts
   }
-
-  async function cleanupOrphanCredentials(nextConfiguration: RoadmapConfiguration): Promise<void> {
+  function publishAuthorizationFacts(): void {
+    coordinator.updateAuthorizationUsability(authorizationFacts(currentConfiguration()))
+  }
+  function setUsability(scope: string, usability: AuthorizationUsability): void {
+    authorizationUsability.set(scope, usability)
+    publishAuthorizationFacts()
+  }
+  async function cleanupOrphanCredentials(configuration: ProjectConfiguration): Promise<void> {
     if (!options.credentialVault) return
     try {
       await options.credentialVault.cleanupOrphans(
-        new Set(nextConfiguration.connections.map((connection) => connection.id)),
+        new Set(configuration.connections.map((connection) => connection.id)),
       )
     } catch (error) {
       const notice = safeAuthorizationMessage(error)
-      if (!configurationStatus.notices.includes(notice)) {
+      if (!configurationStatus.notices.includes(notice))
         configurationStatus = {
           ...configurationStatus,
           notices: [...configurationStatus.notices, notice],
         }
-      }
     }
   }
-
-  async function synchronizeCredentials(nextConfiguration: RoadmapConfiguration): Promise<void> {
-    const knownIds = new Set(nextConfiguration.connections.map((connection) => connection.id))
-    forgetRemovedConnections(knownIds)
-    for (const connection of nextConfiguration.connections) {
-      await synchronizeConnection(connection)
+  function forgetRemovedConnections(): void {
+    const knownScopes = new Set(
+      [currentConfiguration(), ...pendingConfigurations.values()].flatMap((configuration) =>
+        configuration.connections.map(authorizationScopeKey),
+      ),
+    )
+    for (const [scope] of authorizationOwners) {
+      if (knownScopes.has(scope)) continue
+      authorizationOwners.delete(scope)
+      credentialBundles.delete(scope)
+      validatedAccounts.delete(scope)
+      providerAccess.delete(scope)
+      authorizationUsability.delete(scope)
+      rejectedAuthorizations.delete(scope)
     }
+    publishAuthorizationFacts()
   }
-
-  function forgetRemovedConnections(knownIds: ReadonlySet<string>): void {
-    for (const connectionId of connectionAvailability.keys()) {
-      if (!knownIds.has(connectionId)) connectionAvailability.delete(connectionId)
-    }
-    for (const connectionId of credentialBundles.keys()) {
-      if (!knownIds.has(connectionId)) credentialBundles.delete(connectionId)
-    }
+  async function synchronizeCredentials(configuration: ProjectConfiguration): Promise<void> {
+    for (const connection of configuration.connections) await synchronizeConnection(connection)
   }
-
   async function synchronizeConnection(
-    connection: RoadmapConfiguration['connections'][number],
-  ): Promise<void> {
+    connection: ConfiguredConnection,
+  ): Promise<GitHubAccessFailure | null> {
+    const scope = authorizationScopeKey(connection)
+    authorizationOwners.set(scope, connection.id)
     if (connection.integration === 'local') {
-      setAvailability(connection.id, { status: 'available', observedAt })
-      return
+      setUsability(scope, { status: 'usable' })
+      return null
     }
-    const github = options.github
-    const credentialVault = options.credentialVault
-    if (!github || !credentialVault) {
-      setAvailability(connection.id, {
+    if (
+      validatedAccounts.get(scope) === connection.githubIdentity.id &&
+      credentialBundles.has(scope) &&
+      authorizationUsability.get(scope)?.status === 'usable'
+    )
+      return null
+    const rejected = rejectedAuthorizations.get(scope)
+    if (rejected) {
+      setUsability(scope, {
         status: 'authorization-required',
-        cause: 'GitHub authorization is not configured.',
+        cause: 'GitHub authorization must be renewed for this Connection.',
       })
-      return
+      return rejected.failure
     }
-    if (credentialBundles.has(connection.id)) return
-
+    if (!options.github || !options.credentialVault) {
+      setUsability(scope, {
+        status: 'unavailable',
+        cause: 'GitHub access is not configured.',
+      })
+      return 'unavailable'
+    }
     try {
-      const credentials = await credentialVault.read(connection.id)
-      if (!credentials || credentials.refreshTokenExpiresAt <= now()) {
-        setAvailability(connection.id, {
-          status: 'authorization-required',
-          cause: 'GitHub authorization must be renewed.',
-        })
-        return
+      const credentials =
+        credentialBundles.get(scope) ?? (await options.credentialVault.read(connection.id))
+      if (!credentials || credentials.refreshTokenExpiresAt <= now())
+        throw new GitHubAccessError('authorization-required')
+      // A bundle already identified for another account cannot become this candidate's credential.
+      for (const [knownScope, knownCredentials] of credentialBundles) {
+        if (
+          authorizationOwners.get(knownScope) === connection.id &&
+          validatedAccounts.has(knownScope) &&
+          validatedAccounts.get(knownScope) !== connection.githubIdentity.id &&
+          knownCredentials.accessToken === credentials.accessToken &&
+          knownCredentials.refreshToken === credentials.refreshToken
+        )
+          throw new GitHubAccessError('account-mismatch')
       }
-      credentialBundles.set(connection.id, credentials)
-      const accessToken = await ensureAccessToken(connection.id)
-      const identity = await github.identify(accessToken)
-      if (identity.id !== connection.githubIdentity?.id) {
-        credentialBundles.delete(connection.id)
-        setAvailability(connection.id, {
-          status: 'authorization-required',
-          cause: 'Stored GitHub authorization does not match this Connection.',
-        })
-        return
-      }
-      setAvailability(connection.id, { status: 'available', observedAt: now() })
+      const token = await tokenFromCredentials(connection, credentials)
+      if (
+        validatedAccounts.get(scope) === connection.githubIdentity.id &&
+        credentialBundles.get(scope)?.accessToken === token
+      )
+        return null
+      const identity = await options.github.identify(token)
+      if (identity.id !== connection.githubIdentity.id)
+        throw new GitHubAccessError('account-mismatch')
+      // Refresh may have installed a rotated bundle. Never restore its superseded predecessor.
+      if (!credentialBundles.has(scope)) credentialBundles.set(scope, credentials)
+      validatedAccounts.set(scope, identity.id)
+      setUsability(scope, { status: 'usable' })
+      return null
     } catch (error) {
-      applyCredentialFailure(connection.id, error)
+      const failure = classifyGitHubAccessFailure(error)
+      if (failure === 'rejected-credential' || failure === 'account-mismatch')
+        rejectedAuthorizations.set(scope, { accountId: connection.githubIdentity.id, failure })
+      credentialBundles.delete(scope)
+      validatedAccounts.delete(scope)
+      providerAccess.delete(scope)
+      applyCredentialFailure(connection, error)
+      return failure
     }
   }
-
-  async function ensureAccessToken(connectionId: string): Promise<string> {
-    const cached = credentialBundles.get(connectionId)
-    const credentials = cached ?? (await options.credentialVault?.read(connectionId))
-    if (!credentials) {
-      setAvailability(connectionId, {
-        status: 'authorization-required',
-        cause: 'GitHub authorization is required.',
-      })
-      throw new GitHubConnectionError('unauthorized', 'GitHub authorization is required.')
+  async function resolveGitHubAccess(
+    connection: GitHubConnection,
+  ): Promise<GitHubConnectionAccess> {
+    const failure = await synchronizeConnection(connection)
+    if (failure) throw new GitHubAccessError(failure)
+    if (!options.providerRead) throw new GitHubAccessError('unavailable')
+    const scope = authorizationScopeKey(connection)
+    const existing = providerAccess.get(scope)
+    if (existing) return existing
+    const access: GitHubConnectionAccess = {
+      connectionId: connection.id,
+      accountId: connection.githubIdentity.id,
+      access: options.providerRead(() => ensureAccessToken(connection)),
     }
-    credentialBundles.set(connectionId, credentials)
-    if (credentials.refreshTokenExpiresAt <= now()) {
-      credentialBundles.delete(connectionId)
-      setAvailability(connectionId, {
-        status: 'authorization-required',
-        cause: 'GitHub authorization must be renewed.',
-      })
-      throw new GitHubConnectionError('bad-refresh-token', 'GitHub authorization must be renewed.')
-    }
-    if (credentials.accessTokenExpiresAt > now() + REFRESH_LEEWAY_MS) {
-      return credentials.accessToken
-    }
-
-    const activeRefresh = refreshes.get(connectionId)
-    if (activeRefresh) return activeRefresh
-    const refresh = refreshAccessToken(connectionId, credentials)
-    refreshes.set(connectionId, refresh)
-    try {
-      return await refresh
-    } finally {
-      refreshes.delete(connectionId)
-    }
+    providerAccess.set(scope, access)
+    return access
   }
-
-  async function refreshAccessToken(
-    connectionId: string,
+  async function ensureAccessToken(connection: GitHubConnection): Promise<string> {
+    const scope = authorizationScopeKey(connection)
+    const credentials = credentialBundles.get(scope)
+    if (
+      !credentials ||
+      validatedAccounts.get(scope) !== connection.githubIdentity.id ||
+      authorizationUsability.get(scope)?.status === 'authorization-required'
+    )
+      throw new GitHubAccessError(
+        rejectedAuthorizations.get(scope)?.failure ??
+          (authorizationUsability.get(scope)?.status === 'authorization-required'
+            ? 'authorization-required'
+            : 'unavailable'),
+      )
+    return tokenFromCredentials(connection, credentials)
+  }
+  async function tokenFromCredentials(
+    connection: GitHubConnection,
     credentials: CredentialBundle,
   ): Promise<string> {
-    if (!options.github || !options.credentialVault) {
-      throw new GitHubConnectionError('unauthorized', 'GitHub authorization is not configured.')
-    }
-    try {
-      const refreshed = await options.github.refresh(credentials.refreshToken)
-      try {
-        await options.credentialVault.write(connectionId, refreshed)
-      } catch {
-        credentialBundles.delete(connectionId)
-        setAvailability(connectionId, {
-          status: 'authorization-required',
-          cause: 'Refreshed GitHub authorization could not be saved; authorize again.',
-        })
-        publish()
-        throw new GitHubConnectionError(
-          'bad-refresh-token',
-          'Refreshed GitHub authorization could not be saved; authorize again.',
-        )
-      }
-      credentialBundles.set(connectionId, refreshed)
-      setAvailability(connectionId, { status: 'available', observedAt: now() })
-      publish()
-      return refreshed.accessToken
-    } catch (error) {
-      applyCredentialFailure(connectionId, error)
-      publish()
+    const scope = authorizationScopeKey(connection)
+    if (credentials.refreshTokenExpiresAt <= now()) {
+      const error = new GitHubAccessError('authorization-required')
+      applyCredentialFailure(connection, error)
       throw error
     }
+    if (credentials.accessTokenExpiresAt > now() + REFRESH_LEEWAY_MS) return credentials.accessToken
+    const activeRefresh = refreshes.get(scope)
+    if (activeRefresh?.credentials === credentials) return activeRefresh.result
+    const refresh = { credentials, result: refreshAccessToken(connection, credentials) }
+    refreshes.set(scope, refresh)
+    try {
+      return await refresh.result
+    } finally {
+      if (refreshes.get(scope) === refresh) refreshes.delete(scope)
+    }
   }
-
-  function applyCredentialFailure(connectionId: string, error: unknown): void {
+  async function refreshAccessToken(
+    connection: GitHubConnection,
+    credentials: CredentialBundle,
+  ): Promise<string> {
+    const { github, credentialVault } = options
+    if (!github || !credentialVault) throw new GitHubAccessError('unavailable')
+    const scope = authorizationScopeKey(connection)
+    const startingCredentials = credentialBundles.get(scope)
+    try {
+      const refreshed = await github.refresh(credentials.refreshToken)
+      if (credentialBundles.get(scope) !== startingCredentials) return ensureAccessToken(connection)
+      if ((await github.identify(refreshed.accessToken)).id !== connection.githubIdentity.id)
+        throw new GitHubAccessError('account-mismatch')
+      const token = await mutateCredentials(async () => {
+        if (credentialBundles.get(scope) !== startingCredentials) return null
+        try {
+          await credentialVault.write(connection.id, refreshed)
+        } catch {
+          throw new GitHubAccessError('authorization-required')
+        }
+        if (credentialBundles.get(scope) !== startingCredentials) return null
+        credentialBundles.set(scope, refreshed)
+        validatedAccounts.set(scope, connection.githubIdentity.id)
+        setUsability(scope, { status: 'usable' })
+        return refreshed.accessToken
+      })
+      return token ?? ensureAccessToken(connection)
+    } catch (error) {
+      const superseded = await mutateCredentials(async () => {
+        if (credentialBundles.get(scope) !== startingCredentials) return true
+        applyCredentialFailure(connection, error)
+        return false
+      })
+      if (superseded) return ensureAccessToken(connection)
+      throw new GitHubAccessError(classifyGitHubAccessFailure(error))
+    }
+  }
+  function applyCredentialFailure(connection: GitHubConnection, error: unknown): void {
+    const scope = authorizationScopeKey(connection)
+    const failure = classifyGitHubAccessFailure(error)
     if (
-      (error instanceof GitHubConnectionError &&
-        (error.kind === 'unauthorized' || error.kind === 'bad-refresh-token')) ||
-      (error instanceof CredentialVaultError && error.kind === 'invalid')
+      failure === 'rejected-credential' ||
+      failure === 'account-mismatch' ||
+      failure === 'authorization-required'
     ) {
-      credentialBundles.delete(connectionId)
-      setAvailability(connectionId, {
+      if (failure === 'rejected-credential' || failure === 'account-mismatch')
+        rejectedAuthorizations.set(scope, { accountId: connection.githubIdentity.id, failure })
+      credentialBundles.delete(scope)
+      validatedAccounts.delete(scope)
+      providerAccess.delete(scope)
+      setUsability(scope, {
         status: 'authorization-required',
-        cause: error.message,
-        observedAt: now(),
+        cause: new GitHubAccessError(failure).message,
       })
       return
     }
-    const previous = connectionAvailability.get(connectionId)
-    if (previous?.status === 'available' || previous?.status === 'degraded') return
-    setAvailability(connectionId, {
-      status: 'unavailable',
-      cause: safeAuthorizationMessage(error),
-      observedAt: now(),
-    })
+    if (authorizationUsability.get(scope)?.status !== 'usable')
+      setUsability(scope, { status: 'unavailable', cause: new GitHubAccessError(failure).message })
   }
-
   async function beginAuthorization(
     command: Extract<Command, { type: 'begin-github-authorization' }>,
   ): Promise<CommandResolution> {
@@ -833,7 +558,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     const name = command.name.trim()
     if (!name) return invalid('name', 'Connection name cannot be empty.')
     if (command.connectionId) {
-      const connection = configuration.connections.find(
+      const connection = currentConfiguration().connections.find(
         (candidate) => candidate.id === command.connectionId,
       )
       if (connection?.integration !== 'github') {
@@ -887,7 +612,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
 
   async function restartAuthorization(operation: ActiveAuthorization): Promise<void> {
     if (!options.github) return
-    if (operation.timer) clearTimeout(operation.timer)
+    clearTimeout(operation.timer ?? undefined)
     operation.timer = null
     try {
       const device = await options.github.beginDeviceAuthorization()
@@ -963,11 +688,17 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     if (!authorizationIdentityIsValid(operation, identity)) return
 
     const update = configurationWithAuthorizedConnection(operation, identity)
-    if (!(await stageCredentials(operation, update.connectionId, credentials))) return
+    if (!(await stageCredentials(operation, update.connectionId, credentials, identity.id))) return
 
-    const outcome = await persistConfiguration(update.configuration)
+    const outcome = await persistConfiguration(update.configuration, [update.connectionId])
     if (!outcome.ok) {
-      if (!update.reauthorizing) await discardStagedCredentials(update.connectionId)
+      if (
+        !update.reauthorizing &&
+        !currentConfiguration().connections.some(
+          (connection) => connection.id === update.connectionId,
+        )
+      )
+        await discardStagedCredentials(update.connectionId)
       finishAuthorization(operation, 'failed', outcome.error.message)
       return
     }
@@ -983,30 +714,30 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     operation: ActiveAuthorization,
     identity: GitHubConnectionIdentity,
   ): {
-    configuration: RoadmapConfiguration
+    configuration: ProjectConfiguration
     connectionId: string
     reauthorizing: boolean
   } {
     const existingId = operation.public.connectionId
     const existing = existingId
-      ? configuration.connections.find((connection) => connection.id === existingId)
+      ? currentConfiguration().connections.find((connection) => connection.id === existingId)
       : undefined
     const connectionId = existingId ?? randomUUID()
-    const nextConnection = {
+    const nextConnection: GitHubConnection = {
       id: connectionId,
-      integration: 'github' as const,
+      integration: 'github',
       name: existing?.name ?? operation.name,
       builtIn: false,
       githubIdentity: identity,
     }
     return {
       configuration: {
-        ...configuration,
+        ...currentConfiguration(),
         connections: existing
-          ? configuration.connections.map((connection) =>
+          ? currentConfiguration().connections.map((connection) =>
               connection.id === connectionId ? nextConnection : connection,
             )
-          : [...configuration.connections, nextConnection],
+          : [...currentConfiguration().connections, nextConnection],
       },
       connectionId,
       reauthorizing: existing !== undefined,
@@ -1032,13 +763,13 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
   ): boolean {
     const existingId = operation.public.connectionId
     const existing = existingId
-      ? configuration.connections.find((connection) => connection.id === existingId)
+      ? currentConfiguration().connections.find((connection) => connection.id === existingId)
       : undefined
     if (existingId && existing?.integration !== 'github') {
       finishAuthorization(operation, 'failed', 'GitHub Connection no longer exists.')
       return false
     }
-    if (existing?.githubIdentity?.id !== undefined && existing.githubIdentity.id !== identity.id) {
+    if (existing?.integration === 'github' && existing.githubIdentity.id !== identity.id) {
       finishAuthorization(
         operation,
         'failed',
@@ -1046,10 +777,10 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       )
       return false
     }
-    const duplicate = configuration.connections.some(
+    const duplicate = currentConfiguration().connections.some(
       (connection) =>
         connection.integration === 'github' &&
-        connection.githubIdentity?.id === identity.id &&
+        connection.githubIdentity.id === identity.id &&
         connection.id !== existingId,
     )
     if (!duplicate) return true
@@ -1065,22 +796,38 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     operation: ActiveAuthorization,
     connectionId: string,
     credentials: CredentialBundle,
+    accountId: string,
   ): Promise<boolean> {
-    if (!options.credentialVault) return false
+    const credentialVault = options.credentialVault
+    if (!credentialVault) return false
     try {
-      await options.credentialVault.write(connectionId, credentials)
+      await mutateCredentials(async () => {
+        await credentialVault.write(connectionId, credentials)
+        const scope = githubAuthorizationScopeKey(connectionId, accountId)
+        authorizationOwners.set(scope, connectionId)
+        credentialBundles.set(scope, credentials)
+        validatedAccounts.set(scope, accountId)
+        rejectedAuthorizations.delete(scope)
+        setUsability(scope, { status: 'usable' })
+      })
     } catch {
       finishAuthorization(operation, 'failed', 'GitHub authorization could not be saved.')
       return false
     }
-    credentialBundles.set(connectionId, credentials)
-    setAvailability(connectionId, { status: 'available', observedAt: now() })
     return true
   }
 
   async function discardStagedCredentials(connectionId: string): Promise<void> {
-    credentialBundles.delete(connectionId)
-    connectionAvailability.delete(connectionId)
+    for (const [scope, ownerId] of authorizationOwners) {
+      if (ownerId !== connectionId) continue
+      authorizationOwners.delete(scope)
+      credentialBundles.delete(scope)
+      authorizationUsability.delete(scope)
+      validatedAccounts.delete(scope)
+      rejectedAuthorizations.delete(scope)
+      providerAccess.delete(scope)
+    }
+    publishAuthorizationFacts()
     try {
       await options.credentialVault?.delete(connectionId)
     } catch {
@@ -1108,7 +855,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     status: Exclude<AuthorizationOperation['status'], 'waiting' | 'granted'>,
     cause: string,
   ): void {
-    if (operation.timer) clearTimeout(operation.timer)
+    clearTimeout(operation.timer ?? undefined)
     operation.timer = null
     operation.deviceCode = ''
     operation.public = {
@@ -1119,170 +866,261 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     }
     publish()
   }
-
   function receiveConfiguration(result: ConfigurationRead): void {
-    void enqueue(() => applyConfigurationUpdate(result))
+    if (stopping || stopped) return
+    if (
+      result.ok &&
+      ownWriteDocument &&
+      result.document.configurationVersion === ownWriteDocument.configurationVersion &&
+      compareConfigurations(ownWriteDocument, result.document) === 'same'
+    )
+      return
+    const receipt = ++configurationReceipt
+    const different =
+      result.ok && compareConfigurations(currentConfiguration(), result.document) !== 'same'
+    const stale =
+      result.ok &&
+      different &&
+      result.document.configurationVersion <= currentConfiguration().configurationVersion
+    const relevant =
+      result.ok &&
+      [currentConfiguration(), ...pendingConfigurations.values()].some(
+        (configuration) =>
+          admissionConfigurationKey(configuration) !== admissionConfigurationKey(result.document),
+      )
+    receivedConfigurationValid = result.ok && !stale
+    if (!result.ok) configurationStatus = { valid: false, issues: result.issues, notices: [] }
+    else if (stale) rejectStaleConfiguration()
+    else if (!configurationStatus.valid)
+      configurationStatus = {
+        ...configurationStatus,
+        valid: true,
+        issues: [],
+        notices: result.notices ?? [],
+      }
+    if (relevant && !stale && result.ok) pendingConfigurations.set(receipt, result.document)
+    updateAdmissionValidity()
+    publish()
+    void enqueue(async () => {
+      try {
+        await applyConfigurationUpdate(result, receipt, stale)
+      } finally {
+        pendingConfigurations.delete(receipt)
+        updateAdmissionValidity()
+        publish()
+      }
+    })
   }
-
-  async function applyConfigurationUpdate(result: ConfigurationRead): Promise<void> {
-    if (stopped) return
-    if (!result.ok) {
-      configurationStatus = { valid: false, issues: result.issues, notices: [] }
-      publish()
+  async function applyConfigurationUpdate(
+    result: ConfigurationRead,
+    receipt: number,
+    stale: boolean,
+  ): Promise<void> {
+    if (stopped || stopping || !result.ok || stale) return
+    if (
+      compareConfigurations(currentConfiguration(), result.document) === 'same' &&
+      result.document.configurationVersion <= currentConfiguration().configurationVersion
+    ) {
+      if (receipt === configurationReceipt)
+        configurationStatus = {
+          valid: receivedConfigurationValid,
+          issues: [],
+          notices: result.notices ?? [],
+        }
       return
     }
-    if (result.document.configurationVersion === ownWriteVersion) {
-      ownWriteVersion = null
+    if (result.document.configurationVersion <= currentConfiguration().configurationVersion) {
+      if (receipt === configurationReceipt) {
+        receivedConfigurationValid = false
+        rejectStaleConfiguration()
+      }
       return
     }
-    if (compareConfigurations(configuration, result.document) === 'same') {
-      configurationStatus = { valid: true, issues: [], notices: result.notices ?? [] }
-      publish()
-      return
-    }
-    if (result.document.configurationVersion <= configuration.configurationVersion) {
-      rejectStaleConfiguration()
-      return
-    }
-
-    configurationStatus = { valid: true, issues: [], notices: result.notices ?? [] }
     await synchronizeCredentials(result.document)
-    await installGeneration(result.document)
+    const prepared = await registry.prepare(result.document, currentConfiguration())
+    if (stopped || stopping) return
+    if (receipt === configurationReceipt) {
+      configurationDurabilityConfirmed = result.durability !== 'unconfirmed'
+      configurationStatus = {
+        valid: receivedConfigurationValid,
+        issues: [],
+        notices: result.notices ?? [],
+      }
+    }
+    await coordinator.activate(prepared, () => authorizationFacts(prepared))
+    forgetRemovedConnections()
     await disableInterruptedProjects()
     await cleanupOrphanCredentials(result.document)
   }
-
   function rejectStaleConfiguration(): void {
     configurationStatus = {
       valid: false,
       issues: [
         {
           path: '$.configurationVersion',
-          message: `Must be greater than ${configuration.configurationVersion} for a semantic edit.`,
+          message: `Must be greater than ${currentConfiguration().configurationVersion} for a semantic edit.`,
         },
       ],
       notices: [],
     }
-    publish()
   }
-
   async function start(): Promise<void> {
     if (startPromise) return startPromise
     startPromise = (async () => {
-      if (stopped) throw new Error('RoadmapApplication cannot restart after stop().')
+      if (stopped || stopping) throw new Error('RoadmapApplication cannot restart after stop().')
       const loaded = await options.configuration.load()
-      if (loaded.ok) {
-        configuration = loaded.document
-        configurationStatus = { valid: true, issues: [], notices: loaded.notices ?? [] }
-      } else configurationStatus = { valid: false, issues: loaded.issues, notices: [] }
+      if (stopped || stopping) return
+      const configuration = loaded.ok ? loaded.document : EMPTY_CONFIGURATION
+      receivedConfigurationValid = loaded.ok
+      configurationDurabilityConfirmed = !loaded.ok || loaded.durability !== 'unconfirmed'
+      configurationStatus = loaded.ok
+        ? { valid: true, issues: [], notices: loaded.notices ?? [] }
+        : { valid: false, issues: loaded.issues, notices: [] }
+      updateAdmissionValidity()
       unsubscribeConfiguration = options.configuration.subscribe(receiveConfiguration)
       await cleanupOrphanCredentials(configuration)
       await synchronizeCredentials(configuration)
-      await installGeneration(configuration)
-      await automationLoop?.start()
+      if (stopped || stopping) return
+      const prepared = await registry.prepare(configuration)
+      if (stopped || stopping) return
+      await coordinator.activate(prepared, () => authorizationFacts(prepared))
+      if (stopped || stopping) return
+      await automationEngine?.start()
       await mutationLane
       started = true
+      publish()
     })()
     return startPromise
   }
-
   async function query(query: Query): Promise<QueryResult> {
-    if (!started || stopped) return failedQuery('not-supported', 'Roadmap is not running.')
+    if (!started || stopping || stopped)
+      return failedQuery('not-supported', 'Roadmap is not running.')
     if (!options.operations) return failedQuery('not-supported', 'This query is not available yet.')
-    return options.operations.query(query, state)
+    return options.operations.query(query)
   }
-
   function execute(command: Command): Promise<CommandOutcome> {
     return enqueue(() => executeCommand(command))
   }
-
   async function executeCommand(command: Command): Promise<CommandOutcome> {
     if (!started || stopping || stopped) return failure('not-supported', 'Roadmap is not running.')
-    if (!configurationStatus.valid) {
+    if (!configurationStatus.valid || !receivedConfigurationValid || pendingConfigurations.size > 0)
       return failure(
         'configuration-invalid',
-        'roadmap.config.json is invalid; repair it before making in-app changes.',
+        'roadmap.config.json is invalid or an admission-affecting update is pending; repair it before making in-app changes.',
       )
-    }
-    if (command.expectedConfigurationVersion !== configuration.configurationVersion) {
+    if (command.expectedConfigurationVersion !== currentConfiguration().configurationVersion)
       return failure(
         'conflict',
-        `Configuration changed to version ${configuration.configurationVersion}; retry from current state.`,
+        `Configuration changed to version ${currentConfiguration().configurationVersion}; retry from current state.`,
       )
-    }
-
     const resolved = await resolveCommand(command)
     if (!resolved.ok) return { ok: false, error: resolved.error, state }
     if ('result' in resolved) return { ok: true, result: resolved.result, state }
-
     const outcome = await persistConfiguration(resolved.configuration)
-    return finalizePersistedCommand(command, outcome)
-  }
-
-  async function finalizePersistedCommand(
-    command: Command,
-    outcome: CommandOutcome,
-  ): Promise<CommandOutcome> {
-    if (!outcome.ok || command.type !== 'remove-connection') return outcome
-    credentialBundles.delete(command.connectionId)
-    connectionAvailability.delete(command.connectionId)
-    try {
-      await options.credentialVault?.delete(command.connectionId)
-    } catch {
-      configurationStatus = {
-        ...configurationStatus,
-        notices: [
-          ...configurationStatus.notices,
-          'The removed Connection credential will be cleaned from Keychain on next startup.',
-        ],
+    if (
+      command.type === 'remove-connection' &&
+      !currentConfiguration().connections.some(
+        (connection) => connection.id === command.connectionId,
+      )
+    ) {
+      try {
+        await options.credentialVault?.delete(command.connectionId)
+      } catch {
+        configurationStatus = {
+          ...configurationStatus,
+          notices: [
+            ...configurationStatus.notices,
+            'The removed Connection credential will be cleaned from Keychain on next startup.',
+          ],
+        }
+        publish()
       }
-      publish()
     }
-    return outcome
+    return { ...outcome, state }
   }
-
-  async function persistConfiguration(candidate: RoadmapConfiguration): Promise<CommandOutcome> {
-    const decoded = roadmapConfigurationCodec.decode({
-      ...candidate,
-      configurationVersion: configuration.configurationVersion + 1,
+  async function persistConfiguration(
+    candidate: ProjectConfiguration,
+    revalidateConnections: readonly string[] = [],
+  ): Promise<CommandOutcome> {
+    if (!receivedConfigurationValid || pendingConfigurations.size > 0)
+      return failure('configuration-invalid', 'Current configuration no longer permits this write.')
+    const decoded = decodeConfigurationDocument({
+      schemaVersion: 6,
+      configurationVersion: currentConfiguration().configurationVersion + 1,
+      connections: candidate.connections,
+      projects: candidate.projects,
+      automation: candidate.automation,
     })
-    if (!decoded.ok) {
+    if (!decoded.ok)
+      return failure(
+        'validation',
+        decoded.issues.map((issue) => `${issue.path}: ${issue.message}`).join(' '),
+      )
+    ownWriteDocument = decoded.value
+    if (
+      admissionConfigurationKey(currentConfiguration()) !== admissionConfigurationKey(decoded.value)
+    )
+      pendingConfigurations.set(-1, decoded.value)
+    updateAdmissionValidity()
+    try {
+      const persisted = await options.configuration.write(decoded.value)
+      if (!persisted.ok)
+        return failure(
+          persisted.kind === 'conflict' ? 'conflict' : 'persistence-failed',
+          persisted.message,
+        )
+      configurationDurabilityConfirmed = persisted.durability === 'confirmed'
+      if (receivedConfigurationValid)
+        configurationStatus = {
+          valid: true,
+          issues: [],
+          notices:
+            persisted.durability === 'unconfirmed'
+              ? [
+                  persisted.message ??
+                    'Configuration was replaced, but its durability is unconfirmed.',
+                ]
+              : [],
+        }
+      updateAdmissionValidity()
+      await synchronizeCredentials(decoded.value)
+      const prepared = await registry.prepare(candidate, currentConfiguration(), {
+        revalidateConnections,
+      })
+      await coordinator.activate({ ...decoded.value, admissions: prepared.admissions }, () =>
+        authorizationFacts(decoded.value),
+      )
+      forgetRemovedConnections()
+      if (persisted.durability === 'unconfirmed')
+        return failure(
+          'persistence-failed',
+          persisted.message ??
+            'Configuration was replaced, but its durability is unconfirmed. Automation remains inhibited.',
+        )
       return {
-        ok: false,
-        error: {
-          code: 'validation',
-          message: decoded.issues.map((issue) => `${issue.path}: ${issue.message}`).join(' '),
+        ok: true,
+        result: {
+          type: 'configuration-updated',
+          configurationVersion: decoded.value.configurationVersion,
         },
         state,
       }
-    }
-
-    ownWriteVersion = decoded.value.configurationVersion
-    const persisted = await options.configuration.write(decoded.value)
-    if (!persisted.ok) {
-      ownWriteVersion = null
-      return failure(
-        persisted.kind === 'conflict' ? 'conflict' : 'persistence-failed',
-        persisted.message,
-      )
-    }
-    configurationStatus = { valid: true, issues: [], notices: [] }
-    await installGeneration(decoded.value)
-    return {
-      ok: true,
-      result: {
-        type: 'configuration-updated',
-        configurationVersion: decoded.value.configurationVersion,
-      },
-      state,
+    } finally {
+      ownWriteDocument = null
+      pendingConfigurations.delete(-1)
+      updateAdmissionValidity()
+      publish()
     }
   }
-
   type CommandResolution =
     | { ok: true; result: CommandResult }
-    | { ok: true; configuration: RoadmapConfiguration }
+    | { ok: true; configuration: ProjectConfiguration }
     | { ok: false; error: SafeError }
-
+  function translateMutation(mutation: RegistryMutation): CommandResolution {
+    return mutation.ok
+      ? { ok: true, configuration: mutation.value.configuration }
+      : { ok: false, error: admissionError(mutation.error) }
+  }
   async function resolveCommand(command: Command): Promise<CommandResolution> {
     switch (command.type) {
       case 'begin-github-authorization':
@@ -1296,50 +1134,127 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       case 'remove-connection':
         return removeConnection(command)
       case 'register-project':
-        return registerProject(command)
+        return translateMutation(
+          await registry.admit(
+            {
+              integration: command.candidate.integration,
+              connectionId: command.candidate.connectionId,
+              path: command.candidate.workspace.path,
+              ...(command.candidate.displayName === undefined
+                ? {}
+                : { displayName: command.candidate.displayName }),
+            },
+            currentConfiguration(),
+          ),
+        )
       case 'rename-project':
-        return renameProject(command)
-      case 'repair-project-workspace':
-        return repairProjectWorkspace(command)
+        return translateMutation(
+          registry.rename(
+            { project: projectRef(command.project), displayName: command.name },
+            currentConfiguration(),
+          ),
+        )
+      case 'repair-project-workspace': {
+        const record = currentConfiguration().admissions.find((record) =>
+          sameRef(record.intent.ref, projectRef(command.project)),
+        )
+        if (!record) return invalid('project', 'Project does not exist.')
+        return translateMutation(
+          await registry.repair(
+            { project: projectRef(command.project), path: command.workspace.path },
+            currentConfiguration(),
+          ),
+        )
+      }
       case 'remove-project':
-        return removeProject(command)
+        return translateMutation(
+          registry.remove(projectRef(command.project), currentConfiguration()),
+        )
       case 'set-automation-enabled':
         return setAutomationEnabled(command)
       case 'set-project-automation-enabled':
         return setProjectAutomationEnabled(command)
       case 'start-automation-override':
         return startAutomationOverride(command)
-      default:
+      case 'refresh-project':
+      case 'launch-action': {
         if (!options.operations) return unsupported('This operation is not available yet.')
-        return options.operations.execute(command, state)
+        let workspaceProofDependency: { ref: ProjectRef; value: string } | null = null
+        function workspaceAdmissionError(project: ProjectKey): AdmissionFailure | null {
+          const ref = projectRef(project)
+          const expected = workspaceProofDependency
+          if (
+            !expected ||
+            !sameRef(expected.ref, ref) ||
+            !receivedConfigurationValid ||
+            stopping ||
+            workspaceDependency(currentConfiguration(), ref) !== expected.value ||
+            [...pendingConfigurations.values()].some(
+              (pending) => workspaceDependency(pending, ref) !== expected.value,
+            )
+          )
+            return {
+              code: 'admission-failed',
+              field: 'workspace.path',
+              message: 'Current configuration no longer admits this Workspace operation.',
+            }
+          return null
+        }
+        return options.operations.execute(command, {
+          workspaceAdmissionError,
+          async refresh(project) {
+            try {
+              await coordinator.refresh(project)
+              return true
+            } catch {
+              return false
+            }
+          },
+          async workspace(project) {
+            const ref = projectRef(project)
+            const before = currentConfiguration()
+            if (!before.projects.some((intent) => sameRef(intent.ref, ref))) return undefined
+            const workspace = await registry.resolveWorkspace(ref, before)
+            workspaceProofDependency = { ref, value: workspaceDependency(before, ref) }
+            const error = workspaceAdmissionError(project)
+            if (error) return { status: 'unavailable', error }
+            const current = currentConfiguration()
+            await coordinator.activate({
+              ...current,
+              admissions: current.admissions.map((record) =>
+                sameRef(record.intent.ref, ref) ? { ...record, workspace } : record,
+              ),
+            })
+            return workspace
+          },
+        })
+      }
     }
   }
-
   async function startAutomationOverride(
     command: Extract<Command, { type: 'start-automation-override' }>,
   ): Promise<CommandResolution> {
-    if (!automationLoop) return unsupported('Automation is not available.')
-    const outcome = await automationLoop.startOverride(command.target, command.stage)
-    if (!outcome.ok) return outcome
-    return {
-      ok: true,
-      result: {
-        type: 'automation-override-started',
-        target: command.target,
-        stage: command.stage,
-      },
-    }
+    if (!automationEngine) return unsupported('Automation is not available.')
+    const outcome = await automationEngine.startOverride(command.target, command.stage)
+    return outcome.ok
+      ? {
+          ok: true,
+          result: {
+            type: 'automation-override-started',
+            target: command.target,
+            stage: command.stage,
+          },
+        }
+      : outcome
   }
-
   function renameConnection(
     command: Extract<Command, { type: 'rename-connection' }>,
   ): CommandResolution {
     const name = command.name.trim()
     if (!name) return invalid('name', 'Connection name cannot be empty.')
-    const found = configuration.connections.some(
-      (connection) => connection.id === command.connectionId,
-    )
-    if (!found) return invalid('connectionId', 'Connection does not exist.')
+    const configuration = currentConfiguration()
+    if (!configuration.connections.some((connection) => connection.id === command.connectionId))
+      return invalid('connectionId', 'Connection does not exist.')
     return {
       ok: true,
       configuration: {
@@ -1350,12 +1265,12 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       },
     }
   }
-
   function removeConnection(
     command: Extract<Command, { type: 'remove-connection' }>,
   ): CommandResolution {
+    const configuration = currentConfiguration()
     const connection = configuration.connections.find(
-      (candidate) => candidate.id === command.connectionId,
+      (connection) => connection.id === command.connectionId,
     )
     if (!connection) return invalid('connectionId', 'Connection does not exist.')
     if (connection.builtIn)
@@ -1363,123 +1278,35 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     const dependents = configuration.projects.filter(
       (project) => project.connectionId === command.connectionId,
     )
-    if (dependents.length > 0) {
+    if (dependents.length > 0)
       return {
         ok: false,
         error: {
           code: 'dependency',
           message: 'Remove every dependent Project before removing this Connection.',
-          dependentProjects: dependents.map((project) => project.key),
+          dependentProjects: dependents.map((project) => ({
+            integration: project.ref.integration,
+            id: project.ref.projectId,
+          })),
         },
       }
-    }
     return {
       ok: true,
       configuration: {
         ...configuration,
         connections: configuration.connections.filter(
-          (candidate) => candidate.id !== command.connectionId,
+          (connection) => connection.id !== command.connectionId,
         ),
       },
     }
   }
-
-  async function registerProject(
-    command: Extract<Command, { type: 'register-project' }>,
-  ): Promise<CommandResolution> {
-    if (!options.admission) return unsupported('Project admission is not available yet.')
-    const admitted = await options.admission.admit(command.candidate, configuration, {
-      accessToken: ensureAccessToken,
-    })
-    if (!admitted.ok) return admitted
-    return {
-      ok: true,
-      configuration: {
-        ...configuration,
-        projects: [...configuration.projects, admitted.registration],
-      },
-    }
-  }
-
-  function renameProject(command: Extract<Command, { type: 'rename-project' }>): CommandResolution {
-    const name = command.name.trim()
-    if (!name) return invalid('name', 'Project name cannot be empty.')
-    if (!hasProject(configuration, command.project)) {
-      return invalid('project', 'Project does not exist.')
-    }
-    return {
-      ok: true,
-      configuration: {
-        ...configuration,
-        projects: configuration.projects.map((project) =>
-          sameProject(project.key, command.project) ? { ...project, displayName: name } : project,
-        ),
-      },
-    }
-  }
-
-  async function repairProjectWorkspace(
-    command: Extract<Command, { type: 'repair-project-workspace' }>,
-  ): Promise<CommandResolution> {
-    if (!options.admission) return unsupported('Workspace repair is not available yet.')
-    const projected = state.projects.find((project) => sameProject(project.key, command.project))
-    if (!projected) return invalid('project', 'Project does not exist.')
-    if (projected.availability.status !== 'unavailable') {
-      return invalid(
-        'project',
-        'Workspace repair is available only while the Project is unavailable.',
-      )
-    }
-    const repaired = await options.admission.repair(command, configuration, {
-      accessToken: ensureAccessToken,
-    })
-    if (!repaired.ok) return repaired
-    return {
-      ok: true,
-      configuration: {
-        ...configuration,
-        projects: configuration.projects.map((project) => {
-          if (!sameProject(project.key, command.project)) return project
-          return project.locator.integration === 'local'
-            ? {
-                ...project,
-                locator: { integration: 'local' as const, path: repaired.workspace.path },
-                workspace: repaired.workspace,
-              }
-            : { ...project, workspace: repaired.workspace }
-        }),
-      },
-    }
-  }
-
-  function removeProject(command: Extract<Command, { type: 'remove-project' }>): CommandResolution {
-    if (!hasProject(configuration, command.project)) {
-      return invalid('project', 'Project does not exist.')
-    }
-    return {
-      ok: true,
-      configuration: {
-        ...configuration,
-        projects: configuration.projects.filter(
-          (project) => !sameProject(project.key, command.project),
-        ),
-        automation: {
-          ...configuration.automation,
-          enabledProjects: configuration.automation.enabledProjects.filter(
-            (project) => !sameProject(project, command.project),
-          ),
-        },
-      },
-    }
-  }
-
   function setAutomationEnabled(
     command: Extract<Command, { type: 'set-automation-enabled' }>,
   ): CommandResolution {
     const availability = automationAvailability()
-    if (command.enabled && availability.status === 'unavailable') {
+    if (command.enabled && availability.status === 'unavailable')
       return invalid('enabled', availability.cause)
-    }
+    const configuration = currentConfiguration()
     return {
       ok: true,
       configuration: {
@@ -1488,17 +1315,20 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       },
     }
   }
-
   async function setProjectAutomationEnabled(
     command: Extract<Command, { type: 'set-project-automation-enabled' }>,
   ): Promise<CommandResolution> {
-    if (!hasProject(configuration, command.project)) {
+    if (
+      !currentConfiguration().projects.some((project) =>
+        sameRef(project.ref, projectRef(command.project)),
+      )
+    )
       return invalid('project', 'Project does not exist.')
-    }
-    if (command.enabled && automationLoop) {
-      const acknowledged = await automationLoop.acknowledgeProjectInterruption(command.project)
+    if (command.enabled && automationEngine) {
+      const acknowledged = await automationEngine.acknowledgeProjectInterruption(command.project)
       if (!acknowledged.ok) return acknowledged
     }
+    const configuration = currentConfiguration()
     const retained = configuration.automation.enabledProjects.filter(
       (project) => !sameProject(project, command.project),
     )
@@ -1513,11 +1343,9 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       },
     }
   }
-
   function failure(code: SafeError['code'], message: string): CommandOutcome {
     return { ok: false, error: { code, message }, state }
   }
-
   return {
     start,
     current: () => state,
@@ -1531,240 +1359,24 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     stop() {
       if (stopPromise) return stopPromise
       stopping = true
+      updateAdmissionValidity()
       stopPromise = (async () => {
-        nextGeneration += 1
         for (const operation of authorizationOperations.values()) {
-          if (operation.timer) clearTimeout(operation.timer)
+          clearTimeout(operation.timer ?? undefined)
           operation.timer = null
         }
         unsubscribeConfiguration?.()
-        await automationLoop?.stop()
+        await automationEngine?.stop()
+        await startPromise
         await mutationLane
         stopped = true
-        active?.unsubscribe()
-        await active?.store.stop()
+        unsubscribeObservation()
+        await coordinator.stop()
+        changeFeed.stop()
         await options.configuration.stop()
       })()
       return stopPromise
     },
-  }
-}
-
-function projectEvidenceCause(
-  project: ObservationAttempt | undefined,
-  membership: ObservationAttempt | undefined,
-  complete: boolean,
-): string {
-  if (project?.kind === 'failed') return sourceFailureMessage(project.failure)
-  if (membership?.kind === 'failed') return sourceFailureMessage(membership.failure)
-  if (project?.kind !== 'observed' || membership?.kind !== 'observed')
-    return 'Project has no current successful source observation.'
-  return complete ? '' : 'Project source ordering or active map evidence is incomplete.'
-}
-
-function projectTrace(
-  project: ProjectKey,
-  metadata: ReturnType<typeof observedProject>,
-  maps: WayfinderMap[],
-  openMaps: WayfinderMap[],
-  emptyMembership: boolean,
-): Project {
-  const details = metadata?.value
-  const warnings = [...(details?.warnings ?? [])]
-  if (emptyMembership) warnings.push('No maps found for this project.')
-  return {
-    key: project,
-    name: details?.name ?? project.id,
-    openMaps,
-    closedMaps: maps
-      .filter((map) => !map.isOpen)
-      .sort(
-        (a, b) =>
-          (b.closedAt ?? b.updatedAt) - (a.closedAt ?? a.updatedAt) || a.id.localeCompare(b.id),
-      ),
-    warnings,
-    ...(details?.source.integration === 'local' ? { sourcePath: details.source.path } : {}),
-    ...(details?.source.integration === 'github' ? { sourceUrl: details.source.url } : {}),
-  }
-}
-
-type ObservedSource = Extract<ObservationAttempt, { kind: 'observed' }>
-
-function isObservedScope<K extends SourceScope['kind']>(
-  attempt: ObservationAttempt | undefined,
-  kind: K,
-): attempt is Extract<ObservedSource, { scope: { kind: K } }> {
-  return attempt?.kind === 'observed' && attempt.scope.kind === kind
-}
-
-function observedProject(attempt: ObservationAttempt | undefined) {
-  return isObservedScope(attempt, 'project') ? attempt : undefined
-}
-
-function observedMaps(attempt: ObservationAttempt | undefined) {
-  return isObservedScope(attempt, 'maps-membership') ? attempt : undefined
-}
-
-function observedMap(attempt: ObservationAttempt | undefined) {
-  return isObservedScope(attempt, 'map') ? attempt : undefined
-}
-
-function observedTickets(attempt: ObservationAttempt | undefined) {
-  return isObservedScope(attempt, 'tickets-membership') ? attempt : undefined
-}
-
-function observedTicket(attempt: ObservationAttempt | undefined) {
-  return isObservedScope(attempt, 'ticket') ? attempt : undefined
-}
-
-function sourceProject(scope: SourceScope): ProjectKey {
-  switch (scope.kind) {
-    case 'project':
-    case 'maps-membership':
-      return scope.project
-    case 'map':
-    case 'tickets-membership':
-      return scope.map.project
-    case 'ticket':
-      return scope.ticket.map.project
-  }
-}
-
-function sameSourceMap(a: SourceMapKey, b: SourceMapKey): boolean {
-  return sameProject(a.project, b.project) && a.mapId === b.mapId
-}
-
-function mergeMembers<T>(
-  previous: readonly T[],
-  next: readonly T[],
-  complete: boolean,
-  identity: (member: T) => string,
-): readonly T[] {
-  if (complete) return next
-  const members = new Map(previous.map((member) => [identity(member), member]))
-  for (const member of next) members.set(identity(member), member)
-  return [...members.values()]
-}
-
-function orderCurrentMaps(maps: WayfinderMap[], order: readonly string[]): WayfinderMap[] {
-  const positions = new Map(order.map((id, index) => [id, index]))
-  return maps.sort(
-    (a, b) =>
-      (positions.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
-      (positions.get(b.id) ?? Number.MAX_SAFE_INTEGER),
-  )
-}
-
-function projectBlocker(blocker: SourceBlocker): Blocker {
-  const { ticketId, ...reference } = blocker.reference
-  return {
-    reference,
-    ticketId,
-    state: blocker.state,
-    ...(blocker.displayId === undefined ? {} : { displayId: blocker.displayId }),
-    ...(blocker.title === undefined ? {} : { title: blocker.title }),
-    ...(blocker.url === undefined ? {} : { url: blocker.url }),
-  }
-}
-
-function projectTicket(ticket: SourceTicketContent, current: boolean): Ticket {
-  const blockedBy = ticket.blockedBy.map(projectBlocker)
-  const blockersComplete = current && ticket.status !== 'unknown' && ticket.blockersComplete
-  const isBlocked = !blockersComplete || blockedBy.some((blocker) => blocker.state !== 'closed')
-  const state =
-    ticket.status === 'closed'
-      ? 'closed'
-      : isBlocked
-        ? 'blocked'
-        : ticket.isClaimed
-          ? 'claimed'
-          : 'frontier'
-  const typeEvidence: Ticket['typeEvidence'] =
-    ticket.typeEvidence.kind === 'missing'
-      ? { kind: 'missing', labels: [] }
-      : ticket.typeEvidence.kind === 'recognized'
-        ? {
-            kind: 'recognized',
-            value: ticket.typeEvidence.value,
-            labels: [...ticket.typeEvidence.labels],
-          }
-        : { kind: ticket.typeEvidence.kind, labels: [...ticket.typeEvidence.labels] }
-  return {
-    id: ticket.key.ticketId,
-    ...(ticket.displayId === undefined ? {} : { displayId: ticket.displayId }),
-    ...(ticket.title === undefined ? {} : { title: ticket.title }),
-    ...(ticket.source.kind === 'issue'
-      ? { url: ticket.source.url }
-      : { sourcePath: ticket.source.path }),
-    body: ticket.body,
-    typeEvidence,
-    state,
-    isClaimed: ticket.isClaimed,
-    isBlocked,
-    ...(ticket.createdAt === undefined ? {} : { createdAt: ticket.createdAt }),
-    ...(ticket.closedAt === undefined ? {} : { closedAt: ticket.closedAt }),
-    assignees: ticket.assignees.map((assignee) => ({ ...assignee })),
-    blockedBy,
-    blockersComplete,
-    warnings: [...ticket.warnings],
-  }
-}
-
-function projectMap(map: SourceMapContent, tickets: Ticket[], current: boolean): WayfinderMap {
-  return {
-    project: map.key.project,
-    id: map.key.mapId,
-    ...(map.displayId === undefined ? {} : { displayId: map.displayId }),
-    ...(map.title === undefined ? {} : { title: map.title }),
-    ...(map.source.kind === 'issue' ? { url: map.source.url } : { sourcePath: map.source.path }),
-    isOpen: map.status !== 'closed',
-    updatedAt: map.updatedAt,
-    ...(map.closedAt === undefined ? {} : { closedAt: map.closedAt }),
-    body: {
-      ...map.body,
-      notes: [...map.body.notes],
-      decisions: map.body.decisions.map((decision) => ({ ...decision })),
-      notYetSpecified: [...map.body.notYetSpecified],
-      outOfScope: [...map.body.outOfScope],
-      sections: map.body.sections.map((section) => ({ ...section, items: [...section.items] })),
-      missingSections: [...map.body.missingSections],
-    },
-    tickets,
-    frontier: current ? tickets.filter((ticket) => ticket.state === 'frontier') : [],
-    progress: map.progress === null ? null : { ...map.progress },
-    ticketsComplete: current,
-    warnings: [...map.warnings, ...map.unidentifiedTickets.flatMap((ticket) => ticket.warnings)],
-  }
-}
-
-function sourceFailureMessage(failure: SourceFailure): string {
-  switch (failure.kind) {
-    case 'filesystem':
-      if (failure.operation === 'inspect-root')
-        return failure.code === 'EACCES'
-          ? 'Workspace read permission was denied.'
-          : 'Workspace cannot be read.'
-      return failure.code === 'ENOENT'
-        ? 'Source path is currently missing.'
-        : failure.code === 'EACCES'
-          ? 'Source read permission was denied.'
-          : 'Source path cannot be read.'
-    case 'transient':
-      return failure.cause === 'rate-limit'
-        ? 'GitHub rate limit prevents this read.'
-        : 'GitHub is temporarily unreachable.'
-    case 'execution':
-      return 'GitHub could not execute this source read.'
-    case 'read':
-      return failure.cause === 'response-read'
-        ? 'GitHub response could not be read.'
-        : 'Source response is malformed.'
-    case 'authorization':
-      return 'GitHub authorization is required.'
-    case 'access-ambiguous':
-      return 'GitHub source is inaccessible; absence is not proven.'
-    case 'identity-mismatch':
-      return 'GitHub repository identity does not match the admitted Project.'
   }
 }
 
@@ -1781,67 +1393,105 @@ function semanticFingerprint(state: ApplicationState): string {
     roadmap: { projects: state.roadmap.projects, unreachable: state.roadmap.unreachable },
   })
 }
-
 function compareConfigurations(
-  current: RoadmapConfiguration,
-  candidate: RoadmapConfiguration,
+  current: ProjectConfiguration,
+  candidate: ProjectConfiguration,
 ): 'same' | 'different' {
-  const withoutVersion = (value: RoadmapConfiguration) => ({
+  const facts = (value: ProjectConfiguration) => ({
     schemaVersion: value.schemaVersion,
     connections: value.connections,
     projects: value.projects,
     automation: value.automation,
   })
-  return JSON.stringify(withoutVersion(current)) === JSON.stringify(withoutVersion(candidate))
-    ? 'same'
-    : 'different'
+  return JSON.stringify(facts(current)) === JSON.stringify(facts(candidate)) ? 'same' : 'different'
 }
-
-function projectActions(registration: RoadmapConfiguration['projects'][number], known?: Project) {
-  const roadmapHref = `/projects/${registration.key.integration}/${encodeURIComponent(registration.key.id)}`
-  const actions: RegisteredProject['actions'] = [
-    { id: 'open-roadmap', label: 'Open in Roadmap', kind: 'roadmap', href: roadmapHref },
-    { id: 'open-workspace', label: 'Open in VS Code', kind: 'server-launch' },
-    { id: 'open-terminal', label: 'Open Terminal', kind: 'server-launch' },
-  ]
-  actions.push({ id: 'reveal-source', label: 'View source folder', kind: 'server-launch' })
-  if (registration.locator.integration === 'github') {
-    actions.push({
-      id: 'open-source',
-      label: 'Open on GitHub',
-      kind: 'external-link',
-      href: known?.sourceUrl ?? `https://github.com/${registration.locator.nameWithOwner}`,
-    })
-  }
-  return actions
+function authorizationScopeKey(connection: ConfiguredConnection): string {
+  return connection.integration === 'github'
+    ? githubAuthorizationScopeKey(connection.id, connection.githubIdentity.id)
+    : JSON.stringify([connection.id, 'local'])
 }
-
-function hasProject(configuration: RoadmapConfiguration, key: ProjectKey): boolean {
-  return configuration.projects.some((project) => sameProject(project.key, key))
+function githubAuthorizationScopeKey(connectionId: string, accountId: string): string {
+  return JSON.stringify([connectionId, 'github', accountId])
 }
-
+function admissionConfigurationKey(configuration: ProjectConfiguration): string {
+  return JSON.stringify({
+    connections: configuration.connections.map((connection) => ({
+      id: connection.id,
+      integration: connection.integration,
+      ...(connection.integration === 'github' ? { account: connection.githubIdentity.id } : {}),
+    })),
+    projects: configuration.projects.map((project) => ({
+      ref: project.ref,
+      connectionId: project.connectionId,
+      workspace: project.workspace,
+      ...('locator' in project ? { repositoryId: project.locator.repositoryId } : {}),
+    })),
+    automation: configuration.automation,
+  })
+}
+function workspaceDependency(configuration: ProjectConfiguration, ref: ProjectRef): string {
+  return JSON.stringify({
+    project: ref,
+    projects: configuration.projects.map((intent) => ({
+      ref: intent.ref,
+      connectionId: intent.connectionId,
+      workspace: intent.workspace,
+      ...('locator' in intent ? { repositoryId: intent.locator.repositoryId } : {}),
+    })),
+    connections: configuration.connections.map((connection) => ({
+      id: connection.id,
+      integration: connection.integration,
+      ...(connection.integration === 'github' ? { accountId: connection.githubIdentity.id } : {}),
+    })),
+  })
+}
+function projectRef(project: ProjectKey): ProjectRef {
+  return { integration: project.integration, projectId: project.id }
+}
+function sameRef(a: ProjectRef, b: ProjectRef): boolean {
+  return a.integration === b.integration && a.projectId === b.projectId
+}
 function sameProject(a: ProjectKey, b: ProjectKey): boolean {
   return a.integration === b.integration && a.id === b.id
 }
-
-function projectKey(project: ProjectKey): string {
-  return `${project.integration}:${project.id}`
+function classifyGitHubAccessFailure(error: unknown): GitHubAccessFailure {
+  if (error instanceof GitHubAccessError) return error.failure
+  if (error instanceof GitHubConnectionError) {
+    switch (error.kind) {
+      case 'network':
+        return 'network'
+      case 'invalid-response':
+        return 'malformed-response'
+      case 'unauthorized':
+      case 'bad-refresh-token':
+        return 'rejected-credential'
+    }
+  }
+  if (error instanceof CredentialVaultError && error.kind === 'invalid')
+    return 'authorization-required'
+  return 'unavailable'
 }
 
+function admissionError(error: AdmissionFailure): SafeError {
+  return {
+    code: error.code,
+    message: error.message,
+    ...(error.field === undefined ? {} : { field: error.field }),
+  }
+}
 function invalid(field: string, message: string): { ok: false; error: SafeError } {
   return { ok: false, error: { code: 'validation', field, message } }
 }
-
 function unsupported(message: string): { ok: false; error: SafeError } {
   return { ok: false, error: { code: 'not-supported', message } }
 }
-
 function failedQuery(code: SafeError['code'], message: string): QueryResult {
   return { ok: false, error: { code, message } }
 }
-
 function safeAuthorizationMessage(error: unknown): string {
-  return error instanceof GitHubConnectionError || error instanceof CredentialVaultError
+  return error instanceof GitHubConnectionError ||
+    error instanceof CredentialVaultError ||
+    error instanceof GitHubAccessError
     ? error.message
     : 'GitHub authorization is temporarily unavailable.'
 }

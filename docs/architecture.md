@@ -92,11 +92,41 @@ Web source files use `@/` for imports outside their current directory. The alias
 
 ## Server
 
-`apps/server/src/application/application.ts` composes the transport-agnostic `RoadmapApplication`. It owns a consistent `ApplicationState`, adapter generations, serialized configuration changes, and the current roadmap without exposing adapter mechanics. Its public interface is `start/current/subscribe/query/execute/stop`; callers and tests use only that interface.
+`apps/server/src/application/application.ts` composes the transport-agnostic `RoadmapApplication`. Its public interface is `start/current/subscribe/query/execute/stop`. It serializes configuration mutations, manages credentials and account-scoped authorization usability, and publishes the existing public application state through `application/projection.ts`.
 
-`application/configuration.ts` owns the strict `roadmap.config.json` codec and live validation. It writes through a temporary file in the same directory, flushes it, and atomically renames it. An invalid manual save leaves the last valid runtime active and blocks writes until the configuration is repaired.
+`configuration/document.ts` owns the strict version 6 `roadmap.config.json` intent codec, storage, file watching, and migration from versions 1 through 5. Persisted intent contains no runtime proofs or provider clients. Invalid manual input retains the committed runtime and inhibits admission and configuration writes until repaired.
 
-Integration readers live in `github` and `local`; `wayfinder` parses source content. They produce private scoped attempts from `observation/source.ts`, not public Projects, maps, or tickets. `store.ts` validates each Slice against that contract, waits for a baseline from every Adapter, and publishes private source snapshots. `RoadmapApplication` retains scoped evidence and translates it into the current public read model. `change-feed.ts` compares consecutive public snapshots.
+`projects/registry.ts` is a private candidate and refinement owner, not active configuration authority. It produces immutable candidates with separate source and Workspace admissions. `observation/coordinator.ts` activates candidates after replacement owners have scoped baseline evidence, commits the registry and observation together, and retires replaced owners. Integration readers in `github/observer.ts` and `local/observer.ts` implement `SourceObserver`; `wayfinder` parses source content. They produce private attempts from `observation/source.ts`, not public Projects, maps, or tickets. `change-feed.ts` compares committed scoped attempts for notifications, not public snapshots.
+
+### Registration, activation, and source lifetimes
+
+A Local registration has one canonical Workspace path, which is also its source path. Local admission requires a readable, searchable directory, not Git or an existing map. Repair or saved-source reproof at the exact same resolved canonical path needs no Git-history identity. Rebinding to a different canonical path requires the recorded Git-history identity. Case-insensitive duplicate detection on macOS does not prove that differently cased resolved paths are the same directory. A verified canonical path can establish occupancy even when identity checks deny Workspace and source authority.
+
+GitHub source access and Workspace proof are independent refinements. Source access binds the Connection account and stable repository ID to a provider reader. Workspace proof binds a local Git worktree to that repository. A missing or colliding Workspace denies host use without discarding valid remote GitHub observation. Admission obtains Connection access once and shares it with its source and Workspace checks; the observer consumes verified input rather than repeating provider admission preflight.
+
+Before a worktree-dependent host effect, the application reproves canonical Workspace occupancy. Its final guard includes every inspected Project and Connection, so pending registration or Workspace changes cannot bypass a collision through a symlink. Invalid configuration and shutdown also prevent the effect. Presentation-only renames remain allowed.
+
+Registry preparation reuses admission evidence whose dependencies have not changed. The coordinator independently reuses each source owner whose source dependency is unchanged. A display rename or unrelated Project update does not replace every observer. GitHub source owners share Connection-level request pacing, cache, and rate budget through the observer pool. Pending owners can collect baseline evidence but cannot publish active state or alter active pool topology before commit. Retired callbacks cannot regain authority.
+
+The application records admission-affecting input as pending when it arrives, before its serialized mutation runs. Queued reversions remain pending too; comparing only with the currently committed input would miss them. Committed attempts, validity, pending inputs, and account-scoped authorization usability remain separate facts. Authorization facts use Connection and account identity, so an old account's failure cannot authorize or disable a different account.
+
+Each token refresh belongs to the credential bundle that started it. Credential writes and cache installation share one serialized mutation lane. A superseded refresh cannot revoke a replacement authorization or overwrite its persisted bundle; its observer request resolves against current credentials instead. A same-account authorization grant does not advance source-observation time.
+
+Source-access failures distinguish `network`, `malformed-response`, and `unavailable` from `authorization-required`, `rejected-credential`, and `account-mismatch`. The coordinator supervises only committed sources without an admitted observer. GitHub operational access reproof runs every 30 seconds; Local filesystem reproof backs off from two to ten seconds. Manual refresh can reprove either observerless source. Recovery uses the application mutation lane and checks that its starting registry is still current before activation. Once input is admitted, the SourceObserver owns cadence and recovery. Shutdown clears supervision timers and joins running reproof; the coordinator does not add a second poller for admitted sources.
+
+The GitHub pool's admitted-source interval begins at 30 seconds and follows Connection budget and failure backoff. Manual refresh of an active GitHub source reads the active owners sharing its Connection. Local observers debounce filesystem changes, reconcile every five minutes, and supervise unavailable paths with recovery backoff from two to ten seconds. These are observer lifetimes, not whole-configuration polling generations.
+
+### Configuration input classification
+
+| Change | Input classification | Activation and notification comparison |
+| --- | --- | --- |
+| Project or Connection display name | Presentation only | Reproject committed facts; retain observers and comparison evidence. |
+| Automation enablement, preferences, or Harness Commands | Policy | Revalidate affected admission; retain source observers and comparison evidence. |
+| Project registration or removal | Topology | Add or retire affected owners; establish a quiet baseline only for new or changed sources. |
+| Local Workspace repair | Source and host input | Reprove identity. Reuse an unchanged canonical source; replace only a changed admitted source input. |
+| GitHub Workspace repair | Host input | Reprove repository and canonical occupancy; retain unchanged remote observer and source evidence. |
+| Connection account or source-access change | Access and source input | Revalidate affected scope; activate its configuration and source baseline together. Same-account token rotation does not itself prove observation success. |
+| Invalid manual configuration | Admission validity | Retain honest last-valid observations; reject mutation, automatic admission, overrides, and host effects until repaired. |
 
 ### Source evidence and scoped retention
 
@@ -107,29 +137,39 @@ Integration readers live in `github` and `local`; `wayfinder` parses source cont
 | Readable observation | Commit the validated named scope with its actual attempt and successful-read times. Incomplete content retains raw prose, warnings, and unknown blockers. |
 | Transient, provider execution, response-read, or malformed-response failure | Record the named failed attempt and retain its prior successful content and source time. Failure is not a fresh empty observation. |
 | HTTP 401 or rejected credential | Record proven authorization loss. Do not infer it from a generic 403. |
+| Missing or expired credentials, or a mismatched Connection account | Record the specific authorization requirement without claiming a provider rejection or repository identity mismatch. |
+| Credential access unavailable before a provider request | Record access unavailability without inventing a network, provider-execution, or successful-read result. |
 | HTTP 403/404, missing alias, or null provider resource | Record ambiguous access failure, not deletion. |
 | Local root, enumeration, or file failure | Keep the filesystem operation and ENOENT, EACCES, or other error category. A known file's ENOENT is not membership or deletion proof. |
 | Complete successful parent membership | Prove only that omitted maps or tickets are absent from that parent scope. Keep their identities and last-known trace. |
 
 Partial success commits by named scope. A readable sibling can advance while a failed alias or file retains its own history. Failed or incomplete enumeration retains prior membership and cannot certify a fresh empty collection. Scope constructors reject cross-parent content, contradictory provenance or provider identity, duplicate members, invalid absence proofs, and fabricated successful time on failures. Public failure descriptions are fixed safe text, not raw provider exceptions.
 
-GitHub readers validate unknown responses instead of trusting `graphql<T>` assertions. Before cross-repository blockers are projected, the Adapter refreshes current names for all admitted repositories and resolves provider identity to the existing opaque Project key. Renames change source names, not registered identity or Workspace proof. Unregistered source references remain explicitly external; unidentified references remain unresolved. They cannot become registered keys by copying a repository name. The public blocker union has one Zod schema in `packages/contracts/src/blocker.ts`, with its inferred type and decoder available through the supported contracts entrypoints.
+GitHub readers validate unknown responses instead of trusting `graphql<T>` assertions. Before cross-repository blockers are projected, the SourceObserver pool refreshes current names for admitted repositories and resolves provider identity to the existing opaque Project key. Renames change source names, not registered identity or Workspace proof. Unregistered source references remain explicitly external; unidentified references remain unresolved. They cannot become registered keys by copying a repository name. The public blocker union has one Zod schema in `packages/contracts/src/blocker.ts`, with its inferred type and decoder available through the supported contracts entrypoints.
 
 Known unavailable or scoped-absent maps and tickets remain addressable. They are not fresh admission evidence. Missing membership, unreadable active-map evidence, incomplete tickets, and unknown blockers prevent Automation admission. `MapProgress` is `null` when aggregate counts are unknown. Map and Overview consumers display unknown counts instead of zero and continue to render retained graph and ticket prose under the pinned URL.
 
-The obsolete `toProjects` and `activeMapOf` assembler, its implementation-only tests, and public Adapter/source contracts are removed. This cutover does not install the later observation coordinator, ResourceCatalog, full public-read schema replacement, or repository-wide import enforcement. Scoped compiler, import, runtime-refinement, and production-browser graph proofs cover the changed owners; the public-read cutover owns the permanent full dependency gate.
+Source health reports genuine successful-read times and retained source times. Attempt time, coordinator commit time, and public publication time are separate and do not make retained content fresh. Failure can advance attempt evidence without advancing the last successful source read.
+
+### Notification comparison
+
+The Change feed consumes committed source attempts with configured presentation metadata and per-Project baseline classification. It retains comparison evidence across failed reads, omitted scopes, and incomplete membership. An unknown first membership establishes a quiet baseline rather than a successful empty collection. Only explicit proven absence or complete successful parent membership removes known presence. Ticket absence can produce a frontier departure; map absence removes that map's comparison and does not invent ticket claim or close events. Reappearance uses the resulting presence history.
+
+Initial activation is quiet. A changed source establishes a new baseline only for the affected Project; unrelated sources keep their comparison evidence. Recovery after failure compares against retained evidence instead of treating recovered content as an empty-to-full transition. Map IDs are scoped by Project, and ticket IDs by Project and map. JSON tuple keys preserve opaque IDs without delimiter ambiguity. Automation consumes committed observation directly and does not depend on notification events.
+
+### Implemented module boundaries and remaining cutovers
+
+The implemented source-lifetime modules are `projects/registry.ts`, `configuration/document.ts`, `observation/source.ts`, `observation/coordinator.ts`, the Local and GitHub observers, `automation/model.ts`, `automation/database.ts`, `automation/engine.ts`, `application/projection.ts`, and the application composition root. Registry intent and refinements do not use public Snapshot comparison as admission authority. Projection owns the existing public presentation model; Automation derives admission from private committed attempts.
+
+The obsolete whole-Adapter Slice/store composition is removed. ResourceCatalog, the full public state/schema/export replacement, permanent repository-wide dependency enforcement, and the remaining lifecycle cutover belong to issues 110, 112, and 111 respectively. The current modules do not claim those future boundaries are complete. Generic UI, documentation application, and URL ownership remain unchanged.
 
 ### Automation
 
-`application/automation-database.ts` owns the strict schema version 3 Automation database. It
-persists immutable opportunities and append-only events atomically, rejects invalid histories, and
-replays valid history into current public evidence. An AFK Classification Verdict projects a queued
-Wayfinder Session before launch admission; interruption acknowledgement remains evidence without
-changing the unknown outcome. `application/automation.ts` owns event-driven reconciliation and
-process launch behavior. Classification stays in one global lane; Wayfinder Sessions use one lane
-per Project so separate Projects can run concurrently. Queued Sessions survive disabled Project
-Automation. Reconciliation chooses a currently eligible Session without exposing a position or
-ordering promise. Every transition is appended before its process side effect.
+`automation/database.ts` owns the strict schema version 3 Automation database. It persists immutable opportunities and append-only events, rejects invalid histories, and replays them into current evidence. An AFK Classification Verdict projects a queued Wayfinder Session before launch admission. `automation/engine.ts` reconciles committed observation and launches processes. Classification has one global lane; Wayfinder Sessions have one lane per Project. Queued Sessions survive disabled Project Automation and have no promised order.
+
+The engine appends the stage reservation before launch, requires storage-confirmed durability, then validates current source, configuration, authorization, Workspace, command, and reservation ownership again. If dependencies changed during append, it records a nonlaunch result and never starts the process. Recorded reservation evidence is not proof that a process launched.
+
+Both configuration and Automation storage write a same-directory temporary file, sync and close it, rename it, then sync the parent directory. Failure before rename leaves the old file authoritative. Rename followed by failure to confirm directory sync means replacement occurred but durability is unconfirmed. A close failure after successful directory sync does not undo confirmed durability. Unconfirmed Automation append installs the observed database but faults launch admission; unconfirmed configuration replacement activates the replacement facts but inhibits Automation and reports persistence failure rather than pretending the old input survived.
 
 An unacknowledged interrupted Session blocks only its Project. Roadmap removes that Project from
 Automation enablement. Project settings render the ordinary switch off and disabled, with an explicit
@@ -138,7 +178,11 @@ existing enable command appends acknowledgement of each specific unknown event b
 enablement, so either persistence failure remains fail-closed. Acknowledgement does not change the
 unknown outcome. Public Automation evidence distinguishes queued, launching, running, terminal, and
 outcome-unknown states, preserves each admitted stage's `automatic` or `override` reason, and marks
-whether an unknown Session outcome has been acknowledged.
+whether an unknown Session outcome has been acknowledged. Acknowledgement names the exact unknown event and does not prove completion, launch success, or recovery.
+
+Host actions reprove the current Workspace, capture its admission dependencies, and synchronously revalidate current configuration validity, shutdown, committed dependencies, and relevant pending changes immediately before invoking the host adapter. This final check follows all awaited proof and activation work. Presentation-only changes do not revoke the proof. Canonical occupancy collisions deny host authority, including collisions discovered during reproof; GitHub remote source access remains independent.
+
+GitHub authorization identifies and validates the account before staging credentials in Keychain, then persists and activates Connection intent. A failed new Connection save discards its staged credentials when no committed Connection owns them. Configuration success is not reported before credential and admission synchronization. Credentials never cross the persisted intent or browser contract.
 
 `transport.ts` owns HTTP acceptance, bounded body reading, JSON parsing, request decoding, application dispatch, outgoing validation and serialization, and response writes and failures. It also provides a full-state WebSocket with exact origin checks. `main.ts` composes modules and binds loopback.
 

@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { SourceFailure } from '../observation/source.ts'
+import { GitHubAccessError, type GitHubAccessFailure } from '../projects/registry.ts'
 import { createGitHubClient, GitHubError } from './client.ts'
 
 const CONFIG = { token: 't0ken', user: 'asmundwien' }
@@ -16,6 +18,166 @@ function jsonResponse(body: unknown, init: { status?: number; etag?: string } = 
 
 afterEach(() => {
   vi.unstubAllGlobals()
+})
+
+describe('Connection token resolution', () => {
+  const accessFailures: { failure: GitHubAccessFailure; expected: SourceFailure }[] = [
+    { failure: 'network', expected: { kind: 'transient', cause: 'network' } },
+    { failure: 'malformed-response', expected: { kind: 'read', cause: 'malformed-response' } },
+    { failure: 'unavailable', expected: { kind: 'access-unavailable' } },
+    {
+      failure: 'authorization-required',
+      expected: { kind: 'authorization', proof: 'authorization-required' },
+    },
+    {
+      failure: 'rejected-credential',
+      expected: { kind: 'authorization', proof: 'rejected-credential' },
+    },
+    {
+      failure: 'account-mismatch',
+      expected: { kind: 'authorization', proof: 'account-mismatch' },
+    },
+  ]
+
+  it.each(accessFailures)(
+    'preserves classified $failure without a provider request or private token error detail',
+    async ({ failure, expected }) => {
+      const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse({ data: {} }))
+      vi.stubGlobal('fetch', fetchMock)
+      const classified = new GitHubAccessError(failure)
+      classified.message = 'private token-resolution detail harmless-secret'
+      const client = createGitHubClient({
+        token: async () => {
+          throw classified
+        },
+      })
+
+      for (const read of [
+        () => client.restGet('/repositories/84'),
+        () => client.graphql('query {}'),
+      ]) {
+        const error = await read().catch((caught: unknown) => caught)
+        expect(error).toBeInstanceOf(GitHubError)
+        expect(error).toHaveProperty('failure', expected)
+        expect(error).not.toHaveProperty('cause')
+        expect(error instanceof Error ? error.message : '').not.toContain(
+          'private token-resolution',
+        )
+        expect(JSON.stringify(error)).not.toContain('harmless-secret')
+      }
+      expect(fetchMock).not.toHaveBeenCalled()
+    },
+  )
+
+  it('contains unclassified token failures before any provider request', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse({ data: {} }))
+    vi.stubGlobal('fetch', fetchMock)
+    const client = createGitHubClient({
+      token: async () => {
+        throw new Error('private vault detail harmless-secret')
+      },
+    })
+
+    const error = await client.restGet('/repositories/84').catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(GitHubError)
+    expect(error).toHaveProperty('failure', { kind: 'access-unavailable' })
+    expect(error instanceof Error ? error.message : '').not.toContain('private vault')
+    expect(JSON.stringify(error)).not.toContain('harmless-secret')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('does not replay cached content while credentials fail and preserves the stable token cache after recovery', async () => {
+    let unavailable = false
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ items: ['retained'] }, { etag: 'W/"retained"' }))
+      .mockResolvedValueOnce(new Response(null, { status: 304 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const client = createGitHubClient({
+      token: async () => {
+        if (unavailable) throw new GitHubAccessError('unavailable')
+        return 'harmless-stable-token'
+      },
+    })
+
+    await client.restGet('/repositories/84')
+    unavailable = true
+    await expect(client.restGet('/repositories/84')).rejects.toMatchObject({
+      failure: { kind: 'access-unavailable' },
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    unavailable = false
+    await expect(client.restGet('/repositories/84')).resolves.toEqual({ items: ['retained'] })
+    expect(new Headers(fetchMock.mock.calls[1]?.[1]?.headers).get('If-None-Match')).toBe(
+      'W/"retained"',
+    )
+  })
+
+  it('uses current credentials for both read methods while retaining a stable token conditional cache', async () => {
+    let token = 'harmless-first-token'
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ items: ['first-account'] }, { etag: 'W/"first"' }))
+      .mockResolvedValueOnce(new Response(null, { status: 304 }))
+      .mockResolvedValueOnce(jsonResponse({ data: { viewer: 'second-account' } }))
+      .mockResolvedValueOnce(jsonResponse({ items: ['second-account'] }, { etag: 'W/"second"' }))
+      .mockResolvedValueOnce(new Response(null, { status: 304 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const client = createGitHubClient({ token: async () => token })
+
+    await expect(client.restGet('/repositories/84')).resolves.toEqual({ items: ['first-account'] })
+    await expect(client.restGet('/repositories/84')).resolves.toEqual({ items: ['first-account'] })
+    token = 'harmless-second-token'
+    await expect(client.graphql('query {}')).resolves.toEqual({
+      data: { viewer: 'second-account' },
+      errors: [],
+    })
+    await expect(client.restGet('/repositories/84')).resolves.toEqual({ items: ['second-account'] })
+    await expect(client.restGet('/repositories/84')).resolves.toEqual({ items: ['second-account'] })
+    expect(
+      fetchMock.mock.calls.map((call) => new Headers(call[1]?.headers).get('Authorization')),
+    ).toEqual([
+      'Bearer harmless-first-token',
+      'Bearer harmless-first-token',
+      'Bearer harmless-second-token',
+      'Bearer harmless-second-token',
+      'Bearer harmless-second-token',
+    ])
+    expect(
+      fetchMock.mock.calls.map((call) => new Headers(call[1]?.headers).get('If-None-Match')),
+    ).toEqual([null, 'W/"first"', null, null, 'W/"second"'])
+  })
+
+  it('does not install a retired token response in the current credential cache', async () => {
+    let token = 'harmless-first-token'
+    const oldResponse = Promise.withResolvers<Response>()
+    const oldRequestStarted = Promise.withResolvers<void>()
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementationOnce(() => {
+        oldRequestStarted.resolve()
+        return oldResponse.promise
+      })
+      .mockResolvedValueOnce(jsonResponse({ items: ['current-account'] }, { etag: 'W/"current"' }))
+      .mockResolvedValueOnce(new Response(null, { status: 304 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const client = createGitHubClient({ token: async () => token })
+
+    const retiredRead = client.restGet('/repositories/84')
+    await oldRequestStarted.promise
+    token = 'harmless-second-token'
+    await expect(client.restGet('/repositories/84')).resolves.toEqual({
+      items: ['current-account'],
+    })
+    oldResponse.resolve(jsonResponse({ items: ['retired-account'] }, { etag: 'W/"retired"' }))
+    await retiredRead
+    await expect(client.restGet('/repositories/84')).resolves.toEqual({
+      items: ['current-account'],
+    })
+    expect(new Headers(fetchMock.mock.calls[2]?.[1]?.headers).get('If-None-Match')).toBe(
+      'W/"current"',
+    )
+  })
 })
 
 describe('graphql', () => {

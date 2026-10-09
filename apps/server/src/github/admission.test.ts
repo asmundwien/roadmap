@@ -1,297 +1,248 @@
 import { execFile } from 'node:child_process'
-import { mkdtemp, realpath, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import type { ProjectRegistration, ProjectRegistrationCandidate } from '@roadmap/contracts'
 import { describe, expect, it } from 'vitest'
-import type { RoadmapConfiguration } from '../application/configuration.ts'
+import type {
+  AdmissionRuntime,
+  GitHubConnection,
+  GitHubProjectIntent,
+  GitHubProviderRead,
+  ProjectAdmissionRequest,
+} from '../projects/registry.ts'
 import { createGitHubProjectAdmission } from './admission.ts'
-import { type GitHubClient, GitHubError } from './client.ts'
-import type { GitHubConnectionPort } from './connections.ts'
-import type { RepositoryIdentity } from './repository.ts'
+import { GitHubError } from './client.ts'
 
 const execFileAsync = promisify(execFile)
-
-const REPOSITORY: RepositoryIdentity = {
-  id: '42',
-  nameWithOwner: 'Acme/Roadmap',
+const CONNECTION: GitHubConnection = {
+  id: 'github-one',
+  integration: 'github',
+  name: 'Work',
+  builtIn: false,
+  githubIdentity: { id: '7', login: 'octocat' },
 }
-const UPSTREAM: RepositoryIdentity = {
-  id: '99',
-  nameWithOwner: 'Upstream/Roadmap',
-}
-
-const CONFIGURATION: RoadmapConfiguration = {
-  schemaVersion: 5,
-  configurationVersion: 1,
-  connections: [
-    {
-      id: 'github-one',
-      integration: 'github',
-      name: 'Work',
-      builtIn: false,
-      githubIdentity: { id: '7', login: 'octocat' },
-    },
-  ],
-  projects: [],
-  automation: { enabled: false, enabledProjects: [] },
+const INTENT: GitHubProjectIntent = {
+  ref: { integration: 'github', projectId: 'stable/route' },
+  connectionId: CONNECTION.id,
+  locator: { repositoryId: '42', nameWithOwner: 'Acme/Roadmap' },
+  workspace: { path: '/missing' },
 }
 
-function github(): GitHubConnectionPort {
-  return {
-    integration: {
-      integration: 'github',
-      name: 'GitHub',
-      connectionKind: 'device-authorization',
-      newInstallationUrl: 'https://github.com/apps/roadmap/installations/new',
-      installationsUrl: 'https://github.com/settings/installations',
-      authorizationsUrl: 'https://github.com/settings/connections/applications/client',
-    },
-    beginDeviceAuthorization: async () => {
-      throw new Error('not used')
-    },
-    pollDeviceAuthorization: async () => ({ status: 'pending' }),
-    identify: async () => ({ id: '7', login: 'octocat' }),
-    refresh: async () => {
-      throw new Error('not used')
-    },
-  }
+function request(path: string): ProjectAdmissionRequest {
+  return { integration: 'github', connection: CONNECTION, path }
 }
 
-function registration(overrides: Partial<ProjectRegistration> = {}): ProjectRegistration {
-  return {
-    key: { integration: 'github', id: 'client-supplied' },
-    connectionId: 'github-one',
-    locator: { integration: 'github', repositoryId: '42', nameWithOwner: 'stale/name' },
-    workspace: { path: '/chosen/path' },
-    ...overrides,
-  }
-}
-function candidate(
-  overrides: Partial<ProjectRegistrationCandidate> = {},
-): ProjectRegistrationCandidate {
-  return {
-    integration: 'github',
-    connectionId: 'github-one',
-    workspace: { path: '/chosen/path' },
-    ...overrides,
-  }
-}
-
-function repositoryClient(repositories: RepositoryIdentity[] = [REPOSITORY]): GitHubClient {
+function repositoryClient(): GitHubProviderRead {
   return {
     graphql: async () => {
       throw new Error('not used')
     },
-    restGet: async (path: string): Promise<unknown> => {
-      const match = /^\/repos\/([^/]+)\/([^/]+)$/.exec(path)
-      const nameWithOwner = match
-        ? `${decodeURIComponent(match[1] ?? '')}/${decodeURIComponent(match[2] ?? '')}`
-        : ''
-      const repository = repositories.find(
-        (candidate) =>
-          candidate.nameWithOwner.toLocaleLowerCase() === nameWithOwner.toLocaleLowerCase(),
-      )
-      if (!repository) throw new Error('not accessible')
-      return {
-        id: repository.id,
-        full_name: repository.nameWithOwner,
+    restGet: async (path) => {
+      if (path === '/repos/Acme/Roadmap' || path === '/repositories/42') {
+        return { id: 42, full_name: 'Acme/Roadmap' }
       }
+      if (path === '/repos/Upstream/Roadmap' || path === '/repositories/99') {
+        return { id: 99, full_name: 'Upstream/Roadmap' }
+      }
+      throw new GitHubError({ kind: 'access-ambiguous', evidence: 'http-404' }, 404)
     },
   }
 }
 
+function runtime(access: GitHubProviderRead = repositoryClient()): AdmissionRuntime {
+  return { github: async () => ({ connectionId: CONNECTION.id, accountId: '7', access }) }
+}
+
+async function withWorkspace(run: (path: string) => Promise<void>): Promise<void> {
+  const path = await mkdtemp(join(tmpdir(), 'roadmap-github-admission-'))
+  try {
+    await execFileAsync('/usr/bin/git', ['-C', path, 'init'])
+    await execFileAsync('/usr/bin/git', [
+      '-C',
+      path,
+      'remote',
+      'add',
+      'origin',
+      'git@github.com:Acme/Roadmap.git',
+    ])
+    await execFileAsync('/usr/bin/git', [
+      '-C',
+      path,
+      'remote',
+      'add',
+      'upstream',
+      'https://github.com/Upstream/Roadmap.git',
+    ])
+    await run(path)
+  } finally {
+    await rm(path, { recursive: true, force: true })
+  }
+}
+
 describe('GitHub Project admission', () => {
-  it('derives canonical repository identity from the selected Workspace', async () => {
-    const admission = createGitHubProjectAdmission({
-      github: github(),
-      createClient: () => repositoryClient([REPOSITORY, UPSTREAM]),
-      inspectWorkspace: async () => ({
-        path: '/canonical/workspace',
-        remotes: [
-          { name: 'origin', nameWithOwner: 'Acme/Roadmap' },
-          { name: 'upstream', nameWithOwner: 'Upstream/Roadmap' },
-        ],
-      }),
-    })
+  it('uses the actual Git origin and selected Connection to produce canonical repository evidence', async () => {
+    await withWorkspace(async (path) => {
+      const access = repositoryClient()
+      const result = await createGitHubProjectAdmission({}).admit(request(path), runtime(access))
 
-    const result = await admission.admit(
-      candidate({ displayName: '  My project  ' }),
-      CONFIGURATION,
-      {
-        accessToken: async () => 'secret',
-      },
-    )
-
-    expect(result).toEqual({
-      ok: true,
-      registration: {
-        key: { integration: 'github', id: 'Acme/Roadmap' },
-        connectionId: 'github-one',
-        locator: {
-          integration: 'github',
-          repositoryId: '42',
-          nameWithOwner: 'Acme/Roadmap',
+      expect(result).toEqual({
+        integration: 'github',
+        source: {
+          ok: true,
+          value: { connectionId: CONNECTION.id, accountId: '7', repositoryId: '42', access },
         },
-        workspace: { path: '/canonical/workspace', gitIdentity: '42' },
-
-        displayName: 'My project',
-      },
+        workspace: {
+          ok: true,
+          value: {
+            integration: 'github',
+            path: await realpath(path),
+            readable: true,
+            searchable: true,
+            worktreeRoot: true,
+            matchedRepositoryId: '42',
+            verifiedConnectionId: CONNECTION.id,
+            nameWithOwner: 'Acme/Roadmap',
+          },
+        },
+        locator: { repositoryId: '42', nameWithOwner: 'Acme/Roadmap' },
+      })
     })
   })
-  it('reads repository identity from an actual Git origin remote', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'roadmap-github-admission-'))
-    const canonicalWorkspace = await realpath(workspace)
-    try {
-      await execFileAsync('/usr/bin/git', ['-C', workspace, 'init'])
-      await execFileAsync('/usr/bin/git', [
-        '-C',
-        workspace,
-        'remote',
-        'add',
-        'origin',
-        'git@github.com:Acme/Roadmap.git',
-      ])
-      await execFileAsync('/usr/bin/git', [
-        '-C',
-        workspace,
-        'remote',
-        'add',
-        'upstream',
-        'https://github.com/Upstream/Roadmap.git',
-      ])
-      const admission = createGitHubProjectAdmission({
-        github: github(),
-        createClient: () => repositoryClient([REPOSITORY, UPSTREAM]),
-      })
 
-      const result = await admission.admit(
-        candidate({ workspace: { path: workspace } }),
-        CONFIGURATION,
-        { accessToken: async () => 'secret' },
-      )
-
-      expect(result).toMatchObject({
-        ok: true,
-        registration: {
-          locator: { repositoryId: '42', nameWithOwner: 'Acme/Roadmap' },
-          workspace: { path: canonicalWorkspace, gitIdentity: '42' },
-        },
+  it('does not claim worktree-root evidence for a directory inside the actual Git worktree', async () => {
+    await withWorkspace(async (path) => {
+      const nested = join(path, 'nested')
+      await mkdir(nested)
+      await expect(
+        createGitHubProjectAdmission({}).admit(request(nested), runtime()),
+      ).resolves.toMatchObject({
+        integration: 'github',
+        workspace: { ok: false, error: { code: 'admission-failed', field: 'workspace.path' } },
       })
-    } finally {
-      await rm(workspace, { recursive: true, force: true })
-    }
+    })
   })
 
-  it('rejects duplicate and inaccessible Workspace repositories before persistence', async () => {
-    const existing = registration({
-      key: { integration: 'github', id: 'existing' },
-      locator: { integration: 'github', repositoryId: '42', nameWithOwner: 'Acme/Roadmap' },
-      workspace: { path: '/other' },
-    })
-    const duplicate = createGitHubProjectAdmission({
-      github: github(),
-      createClient: () => repositoryClient(),
-      inspectWorkspace: async () => ({
-        path: '/canonical',
-        remotes: [{ name: 'origin', nameWithOwner: 'Acme/Roadmap' }],
-      }),
-    })
-    await expect(
-      duplicate.admit(
-        candidate(),
-        { ...CONFIGURATION, projects: [existing] },
-        {
-          accessToken: async () => 'secret',
-        },
-      ),
-    ).resolves.toMatchObject({
-      ok: false,
-      error: { field: 'workspace.path', code: 'admission-failed' },
-    })
-
-    const mismatched = createGitHubProjectAdmission({
-      github: github(),
-      createClient: () => ({
+  it('does not claim repository access when the provider cannot verify the origin through the selected Connection', async () => {
+    await withWorkspace(async (path) => {
+      const access: GitHubProviderRead = {
         graphql: async () => {
           throw new Error('not used')
         },
         restGet: async () => {
           throw new GitHubError({ kind: 'access-ambiguous', evidence: 'http-404' }, 404)
         },
-      }),
-      inspectWorkspace: async () => ({
-        path: '/canonical',
-        remotes: [{ name: 'origin', nameWithOwner: 'other/repository' }],
-      }),
+      }
+      await expect(
+        createGitHubProjectAdmission({}).admit(request(path), runtime(access)),
+      ).resolves.toMatchObject({
+        integration: 'github',
+        source: { ok: false },
+        workspace: { ok: false, error: { code: 'admission-failed', field: 'workspace.path' } },
+      })
+    })
+  })
+
+  it('repairs a moved actual worktree only when a remote identifies the recorded repository id', async () => {
+    await withWorkspace(async (path) => {
+      const admission = createGitHubProjectAdmission({})
+      const repair = { intent: INTENT, connection: CONNECTION, path }
+      await expect(admission.repair(repair, runtime())).resolves.toMatchObject({
+        integration: 'github',
+        source: { ok: true, value: { repositoryId: '42', connectionId: CONNECTION.id } },
+        workspace: {
+          ok: true,
+          value: {
+            path: await realpath(path),
+            matchedRepositoryId: '42',
+            verifiedConnectionId: CONNECTION.id,
+          },
+        },
+      })
+      await expect(
+        admission.repair(
+          {
+            ...repair,
+            intent: {
+              ...INTENT,
+              locator: { repositoryId: '123', nameWithOwner: 'Other/Repository' },
+            },
+          },
+          runtime(),
+        ),
+      ).resolves.toMatchObject({
+        integration: 'github',
+        workspace: { ok: false, error: { code: 'admission-failed', field: 'workspace.path' } },
+      })
+    })
+  })
+
+  it('retains Connection-bound source access when the saved Workspace cannot be inspected', async () => {
+    const access = repositoryClient()
+    const admission = createGitHubProjectAdmission({
+      inspectWorkspace: async () => {
+        throw new Error('missing worktree')
+      },
     })
     await expect(
-      mismatched.admit(candidate(), CONFIGURATION, { accessToken: async () => 'secret' }),
+      admission.revalidate(
+        {
+          intent: INTENT,
+          connection: CONNECTION,
+          path: '/missing',
+        },
+        runtime(access),
+      ),
     ).resolves.toMatchObject({
-      ok: false,
-      error: {
-        field: 'workspace.path',
-        code: 'admission-failed',
-        message:
-          'The selected Connection cannot access this Workspace repository. Install Roadmap for that repository on GitHub, then try again.',
+      integration: 'github',
+      source: {
+        ok: true,
+        value: { connectionId: CONNECTION.id, accountId: '7', repositoryId: '42', access },
+      },
+      workspace: {
+        ok: false,
+        error: {
+          code: 'admission-failed',
+          field: 'workspace.path',
+        },
       },
     })
   })
 
-  it('repairs to a canonical Workspace only when it proves the same repository id', async () => {
-    const existing = registration({
-      key: { integration: 'github', id: 'stable/route' },
-      locator: { integration: 'github', repositoryId: '42', nameWithOwner: 'Acme/Roadmap' },
-      workspace: { path: '/missing', gitIdentity: '42' },
+  it('rejects runtime access bound to another Connection or canonical account', async () => {
+    await withWorkspace(async (path) => {
+      for (const binding of [
+        { connectionId: 'github-other', accountId: '7' },
+        { connectionId: CONNECTION.id, accountId: 'other-account' },
+      ]) {
+        const mismatched: AdmissionRuntime = {
+          github: async () => ({ ...binding, access: repositoryClient() }),
+        }
+        await expect(
+          createGitHubProjectAdmission({}).admit(request(path), mismatched),
+        ).resolves.toMatchObject({
+          integration: 'github',
+          source: { ok: false, error: { code: 'authorization-failed', field: 'connectionId' } },
+          workspace: { ok: false },
+        })
+      }
     })
-
-    const admission = createGitHubProjectAdmission({
-      github: github(),
-      createClient: () => repositoryClient(),
-      inspectWorkspace: async () => ({
-        path: '/moved',
-        remotes: [{ name: 'origin', nameWithOwner: 'Acme/Roadmap' }],
-      }),
-    })
-
-    await expect(
-      admission.repair(
-        {
-          type: 'repair-project-workspace',
-          project: existing.key,
-          workspace: { path: '/candidate' },
-          expectedConfigurationVersion: 1,
-        },
-        { ...CONFIGURATION, projects: [existing] },
-        { accessToken: async () => 'secret' },
-      ),
-    ).resolves.toEqual({ ok: true, workspace: { path: '/moved', gitIdentity: '42' } })
   })
-  it('adds a stable suffix only when the readable route key is already occupied', async () => {
-    const occupied = registration({
-      key: { integration: 'github', id: 'Acme/Roadmap' },
-      locator: { integration: 'github', repositoryId: '99', nameWithOwner: 'old/repository' },
-      workspace: { path: '/existing' },
-    })
-    const admission = createGitHubProjectAdmission({
-      github: github(),
-      createClient: () => repositoryClient(),
-      inspectWorkspace: async () => ({
-        path: '/new',
-        remotes: [{ name: 'origin', nameWithOwner: 'Acme/Roadmap' }],
-      }),
-    })
 
-    const result = await admission.admit(
-      candidate(),
-      { ...CONFIGURATION, projects: [occupied] },
-      { accessToken: async () => 'secret' },
-    )
-
-    expect(result).toMatchObject({
-      ok: true,
-      registration: { key: { integration: 'github', id: 'Acme/Roadmap~42' } },
+  it('keeps authorization failure separate from successful source or Workspace evidence', async () => {
+    await withWorkspace(async (path) => {
+      const unavailable: AdmissionRuntime = {
+        github: async () => {
+          throw new Error('private credential failure')
+        },
+      }
+      await expect(
+        createGitHubProjectAdmission({}).admit(request(path), unavailable),
+      ).resolves.toMatchObject({
+        integration: 'github',
+        source: { ok: false, error: { code: 'authorization-failed', field: 'connectionId' } },
+        workspace: { ok: false },
+      })
     })
   })
 })

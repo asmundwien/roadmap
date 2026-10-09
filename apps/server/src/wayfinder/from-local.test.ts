@@ -1,8 +1,10 @@
 import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { AdapterSlice, ObservationAttempt } from '../observation/source.ts'
+import type { LocalObservationInput } from '../observation/coordinator.ts'
+import type { ObservationAttempt, ObservationBatch } from '../observation/source.ts'
+import { createLocalProjectRegistration, refineLocalWorkspaceProof } from '../projects/registry.ts'
 import { readLocalProject } from './from-local.ts'
 
 const fixtureRoots: string[] = []
@@ -26,7 +28,7 @@ describe('readLocalProject', () => {
       '## Decisions\n\n- [Story](tickets/02-ticket.md)\n',
     )
     const before = Date.now()
-    const slice = await readLocalProject({ key, rootPath: root, name: 'Registered project' })
+    const slice = await readLocalProject(input(root))
     const map = onlyMap(slice)
 
     expect(slice.attempts).toContainEqual(
@@ -35,7 +37,7 @@ describe('readLocalProject', () => {
         scope: { kind: 'project', project: key },
         value: {
           key,
-          name: 'Registered project',
+          name: basename(root),
           source: { integration: 'local', path: root },
           warnings: [],
         },
@@ -75,7 +77,7 @@ describe('readLocalProject', () => {
       join(finished, 'map.md'),
       '---\ntitle: Finished\nlabels: [wayfinder:map]\nstatus: closed\n---\n\n# Finished\n',
     )
-    const slice = await readLocalProject({ key, rootPath: root })
+    const slice = await readLocalProject(input(root))
     const maps = slice.attempts.filter(
       (attempt): attempt is MapAttempt =>
         attempt.kind === 'observed' && attempt.scope.kind === 'map',
@@ -121,7 +123,7 @@ describe('readLocalProject', () => {
         `---\nid: ${ticket.id}\ntitle: Incomplete ${ticket.id}\nlabels: [wayfinder:task]\n${ticket.fields}blocked-by: []\n---\n\nReadable prose ${ticket.id}.\n`,
       )
     }
-    const slice = await readLocalProject({ key, rootPath: root })
+    const slice = await readLocalProject(input(root))
 
     expect(onlyMap(slice).completeness.kind).toBe('incomplete')
     expect(onlyMap(slice).value.progress).toBeNull()
@@ -182,7 +184,7 @@ describe('readLocalProject', () => {
       join(directory, 'tickets/99-incomplete.md'),
       '---\nid: 99\ntitle: Incomplete blocker\nlabels: [wayfinder:task]\nblocked-by: []\n---\n\nRaw incomplete blocker prose must survive.\n',
     )
-    const slice = await readLocalProject({ key, rootPath: root })
+    const slice = await readLocalProject(input(root))
 
     expect(onlyMap(slice).value.body.raw).toBe(rawMap)
     expect(onlyMap(slice).value.status).toBe('unknown')
@@ -209,7 +211,7 @@ describe('readLocalProject', () => {
     const duplicate = '---\nid: 1\ntitle: Duplicate\nstatus: open\n---\n\nDuplicate prose.\n'
     await writeFile(join(tickets, '02-no-id.md'), missing)
     await writeFile(join(tickets, '03-duplicate.md'), duplicate)
-    const slice = await readLocalProject({ key, rootPath: root })
+    const slice = await readLocalProject(input(root))
 
     expect(byId(slice, '1').value.body).toBe('First identity prose.')
     expect(onlyMap(slice).value.progress).toBeNull()
@@ -233,7 +235,7 @@ describe('readLocalProject', () => {
 type MapAttempt = Extract<ObservationAttempt, { kind: 'observed'; scope: { kind: 'map' } }>
 type TicketAttempt = Extract<ObservationAttempt, { kind: 'observed'; scope: { kind: 'ticket' } }>
 
-function onlyMap(slice: AdapterSlice): MapAttempt {
+function onlyMap(slice: ObservationBatch): MapAttempt {
   const map = slice.attempts.find(
     (attempt): attempt is MapAttempt => attempt.kind === 'observed' && attempt.scope.kind === 'map',
   )
@@ -241,7 +243,7 @@ function onlyMap(slice: AdapterSlice): MapAttempt {
   return map
 }
 
-function byId(slice: AdapterSlice, id: string): TicketAttempt {
+function byId(slice: ObservationBatch, id: string): TicketAttempt {
   const ticket = slice.attempts.find(
     (attempt): attempt is TicketAttempt =>
       attempt.kind === 'observed' &&
@@ -250,6 +252,24 @@ function byId(slice: AdapterSlice, id: string): TicketAttempt {
   )
   if (!ticket) throw new Error(`Expected readable ticket ${id}.`)
   return ticket
+}
+
+function input(path: string): LocalObservationInput {
+  const proof = refineLocalWorkspaceProof({
+    inspection: { integration: 'local', path, readable: true, searchable: true },
+  })
+  if (!proof.ok) throw new Error(proof.error.message)
+  const registration = createLocalProjectRegistration({
+    ref: { integration: 'local', projectId: key.id },
+    connection: { id: 'local', integration: 'local', name: 'Local', builtIn: true },
+    workspace: proof.value,
+  })
+  if (!registration.ok) throw new Error(registration.error.message)
+  return {
+    integration: 'local',
+    ref: registration.value.ref,
+    workspace: registration.value.workspace,
+  }
 }
 
 async function latestRelevantMtime(rootPath: string, mapId: string): Promise<number> {

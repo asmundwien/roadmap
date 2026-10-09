@@ -14,13 +14,13 @@ ignorance (fog rendered distinctly from confident empty canvas).
 _Avoid_: pipeline, board, backlog, dashboard
 
 **Ground covered**:
-The route already travelled — the closed tickets and the decisions they produced, drawn as an
-accumulating trace behind the traveller.
+The closed tickets and the decisions they produced, drawn as an accumulating trace of the route
+already travelled.
 _Avoid_: done column, completed items
 
 **Fog**:
-What the effort knows it cannot yet see — undrawn territory ahead, visible as ignorance but never
-measured. Fog has extent on screen, not magnitude.
+What the effort knows it cannot yet see, drawn distinctly from known empty territory.
+Fog has extent on screen, not magnitude.
 _Avoid_: remaining work, backlog, todo
 
 **Progress**:
@@ -29,21 +29,20 @@ denominator unknowable, so progress is never a fraction, a percentage, or a dist
 _Avoid_: percent complete, completion, burn-down
 
 **Destination**:
-What reaching the end of a map looks like — pinned in view as the thing travelled toward, not a
+What reaching the end of a map looks like, pinned in view as the thing travelled toward, not a
 status to compute.
 _Avoid_: goal state, 100%
 
 **Active map**:
-The map a project is currently travelling — its most recently updated open map. A project aspires
+The map a project is currently travelling, its most recently updated open map. A project aspires
 to one open map at a time; when several are open, one is active and the others are live but
-secondary. A project's future past its active map is not fog — it is unimagined, and nothing is
-drawn there.
+secondary. A project's future past its active map is unimagined, not fog, and nothing is drawn there.
 _Avoid_: current map, default map, main map
 
 **Change feed**:
-The stream of domain events derived by diffing consecutive snapshots of roadmap state. Source-blind
-by construction: which Integration or observation mechanism found a change is invisible to
-consumers. Triggers subscribe to the feed, never to transports.
+Notifications of map appearances, ticket claims and closures, and frontier changes that Roadmap can
+establish from source observations. Unreadable or incomplete evidence does not erase known history;
+changing a source begins a new comparison baseline for that Project without reporting false activity.
 _Avoid_: integration event stream, event log, activity feed
 
 **Automation**:
@@ -132,14 +131,13 @@ per-Project command profiles do not exist.
 _Avoid_: Project command, command profile, automation hook
 
 **Resting**:
-The state of a project whose maps are all closed — between efforts, its trace intact. A legitimate,
-visible state, not an error or an empty case.
+The state of a project whose maps are all closed, between efforts with its trace intact.
+It is a legitimate visible state, not an error or an empty case.
 _Avoid_: archived, inactive, finished, empty
 
 **Integration**:
-The kind of source a project reaches roadmap through — GitHub, local markdown. A project has
-exactly one, named by a tag on the wire (`github`, `local`); the badge shows it at project level
-and it is invisible everywhere below.
+The kind of source through which a Project reaches Roadmap, GitHub or local Markdown. Each Project
+has exactly one Integration, shown at Project level rather than on each map or ticket.
 _Avoid_: source, provider, backend, connector
 
 **Connection**:
@@ -166,38 +164,36 @@ operation can establish a relevant fact; missing evidence does not prove failure
 _Avoid_: failed command, retryable command
 
 **Project registration**:
-Roadmap's durable declaration of one Project: an immutable admitted coupling of Connection,
-Integration-specific locator, and required Workspace, plus separately editable presentation
-metadata. Runtime unavailability never unregisters it.
-_Avoid_: discovered project, registry entry, bookmark
+Roadmap's durable declaration of a Project's identity, Connection, source, and local Workspace,
+with separately editable presentation metadata. Temporary source or Workspace unavailability does
+not unregister the Project.
+_Avoid_: discovered project, bookmark
 
-**Adapter**:
-The code-role counterpart of an integration: the server module satisfying the seam's interface for
-one integration, with everything source-specific — transports, watching, cadence, budget valves —
-hidden behind it. Views never meet adapters; they see integrations.
-_Avoid_: plugin, driver, service
+**Source observation**:
+Evidence about a named Project, map, ticket, or their membership at the source. A readable but
+incomplete observation, a failed read, and proven absence have different meanings.
+_Avoid_: fresh snapshot, successful empty result
 
-**Slice**:
-One adapter's whole contribution to the snapshot — its projects and its unreachables, delivered
-entire whenever the adapter decides something changed. The store composes slices; it never fetches.
-_Avoid_: partial snapshot, patch, delta
+**Observation provenance**:
+The source identity and read context that establish which Project, map, or ticket an observation
+describes. Retained observations preserve their original successful-read time rather than acquiring
+the time of a later failure or display update.
+_Avoid_: publication time, freshness guess
 
 **Capability**:
-Something an integration may express but need not — linking out is the canonical example. A
-capability is optional data on the wire, never an optional method at the seam; absence renders
-gracefully, it is not an error.
+An optional source affordance, such as a link to the original ticket. Its absence is not an error.
 _Avoid_: feature flag, extension point
 
 **Registry**:
-The historical hand-edited `local-projects.json` input. Configuration migration imports it once;
-Project registrations are authoritative afterward, and Integration Adapters never read it.
+The historical hand-edited list of Local Projects that Roadmap imports into Project registrations.
+It is not the current authority for registered Projects.
 _Avoid_: current project list, steady-state configuration
 
 **Workspace**:
-The required local directory in every Project registration. Roadmap admits it only after proving
-that it belongs to the registration's locator through its Connection. A moved Workspace may be
-repaired only by proving the same Project identity. Wayfinder-map presence is a separate fact.
-_Avoid_: optional checkout, source path
+The local directory associated with a registered Project for host actions and Wayfinder Sessions.
+For Local Projects it is also the source directory and need not use Git; for GitHub Projects its
+identity must match the remote repository, whose readability is a separate fact.
+_Avoid_: optional checkout
 
 **Degraded**:
 The state of a Connection whose observations have repeatedly failed while Roadmap retains known

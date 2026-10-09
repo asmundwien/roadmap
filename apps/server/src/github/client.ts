@@ -1,4 +1,5 @@
 import type { SourceFailure } from '../observation/source.ts'
+import { GitHubAccessError } from '../projects/registry.ts'
 import { isRecord } from '../type-guards.ts'
 
 const API_ROOT = 'https://api.github.com'
@@ -11,20 +12,22 @@ export interface RateLimit {
   resetAt: string
 }
 
-/** The current access token for one Connection. */
+/** Resolves the current access token for one Connection before each provider request. */
 export interface GitHubAuth {
-  token: string
+  token: string | (() => Promise<string>)
 }
 
 export class GitHubError extends Error {
   readonly failure: SourceFailure
   readonly status: number
+  readonly stage: 'credentials' | 'provider'
 
-  constructor(failure: SourceFailure, status = 0) {
+  constructor(failure: SourceFailure, status = 0, stage: 'credentials' | 'provider' = 'provider') {
     super(`GitHub source read failed (${failure.kind}).`)
     this.name = 'GitHubError'
     this.failure = failure
     this.status = status
+    this.stage = stage
   }
 }
 
@@ -45,12 +48,30 @@ interface CacheEntry {
   body: unknown
 }
 
-export function createGitHubClient(config: GitHubAuth): GitHubClient {
-  const conditionalCache = new Map<string, CacheEntry>()
+interface TokenState {
+  token: string
+  conditionalCache: Map<string, CacheEntry>
+}
 
-  function authHeaders(): Record<string, string> {
+export function createGitHubClient(config: GitHubAuth): GitHubClient {
+  let current: TokenState | null = null
+
+  async function resolveToken(): Promise<TokenState> {
+    let token: string
+    try {
+      token = typeof config.token === 'string' ? config.token : await config.token()
+    } catch (error) {
+      throw new GitHubError(tokenFailure(error), 0, 'credentials')
+    }
+    if (!current || current.token !== token) {
+      current = { token, conditionalCache: new Map() }
+    }
+    return current
+  }
+
+  function authHeaders(token: string): Record<string, string> {
     return {
-      Authorization: `Bearer ${config.token}`,
+      Authorization: `Bearer ${token}`,
       Accept: 'application/vnd.github+json',
     }
   }
@@ -67,9 +88,10 @@ export function createGitHubClient(config: GitHubAuth): GitHubClient {
     query: string,
     variables: Record<string, unknown> = {},
   ): Promise<GraphQLResult> {
+    const { token } = await resolveToken()
     const response = await request(`${API_ROOT}/graphql`, {
       method: 'POST',
-      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
       body: JSON.stringify({ query, variables }),
     })
     if (!response.ok) throw new GitHubError(httpFailure(response), response.status)
@@ -78,10 +100,11 @@ export function createGitHubClient(config: GitHubAuth): GitHubClient {
   }
 
   async function restGet(path: string): Promise<unknown> {
+    const { token, conditionalCache } = await resolveToken()
     const url = path.startsWith('http') ? path : `${API_ROOT}${path}`
     const cached = conditionalCache.get(url)
     const headers: Record<string, string> = {
-      ...authHeaders(),
+      ...authHeaders(token),
       'X-GitHub-Api-Version': REST_API_VERSION,
     }
     if (cached) headers['If-None-Match'] = cached.etag
@@ -97,6 +120,26 @@ export function createGitHubClient(config: GitHubAuth): GitHubClient {
   }
 
   return { graphql, restGet }
+}
+
+function tokenFailure(error: unknown): SourceFailure {
+  if (error instanceof GitHubAccessError) {
+    switch (error.failure) {
+      case 'network':
+        return { kind: 'transient', cause: 'network' }
+      case 'malformed-response':
+        return { kind: 'read', cause: 'malformed-response' }
+      case 'unavailable':
+        return { kind: 'access-unavailable' }
+      case 'authorization-required':
+        return { kind: 'authorization', proof: 'authorization-required' }
+      case 'rejected-credential':
+        return { kind: 'authorization', proof: 'rejected-credential' }
+      case 'account-mismatch':
+        return { kind: 'authorization', proof: 'account-mismatch' }
+    }
+  }
+  return { kind: 'access-unavailable' }
 }
 
 /** Refines only the transport envelope and strips provider messages from retained evidence. */

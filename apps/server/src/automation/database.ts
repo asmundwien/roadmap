@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { open, readFile, rename, unlink } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
+import type { SourceProjectKey as ProjectKey } from '../observation/source.ts'
+import { isRecord } from '../type-guards.ts'
 import type {
   AutomationAdmission,
   AutomationEvidence,
@@ -8,11 +10,9 @@ import type {
   AutomationTarget,
   ClassificationAttempt,
   ClassificationVerdict,
-  ProjectKey,
   SessionReportEvidence,
   WayfinderSession,
-} from '@roadmap/contracts'
-import { isRecord } from '../type-guards.ts'
+} from './model.ts'
 
 interface AutomationEventIdentity {
   readonly id: string
@@ -118,7 +118,13 @@ export interface AutomationProjection {
 
 export interface AutomationDatabaseDocument {
   load(): Promise<AutomationDatabase>
-  append(batch: AutomationAppend): Promise<AutomationDatabase>
+  append(batch: AutomationAppend): Promise<AutomationAppendResult>
+}
+
+interface AutomationAppendResult {
+  database: AutomationDatabase
+  durability: 'confirmed' | 'unconfirmed'
+  message?: string
 }
 
 interface MutableAutomationRecord {
@@ -159,9 +165,9 @@ export function createAutomationDatabaseDocument(path: string): AutomationDataba
     async append(batch) {
       if (!current) throw new Error('The Automation database must be loaded before appending.')
       const next = appendAutomationDatabase(current, batch)
-      await atomicWrite(path, `${JSON.stringify(next, null, 2)}\n`)
+      const outcome = await atomicWrite(path, `${JSON.stringify(next, null, 2)}\n`)
       current = next
-      return next
+      return { database: next, ...outcome }
     },
   }
 }
@@ -586,10 +592,16 @@ export function automationTargetKey(target: AutomationTarget): string {
   return `${target.project.integration}:${target.project.id}\u0000${target.mapId}\u0000${target.ticketId}`
 }
 
-async function atomicWrite(path: string, raw: string): Promise<void> {
+async function atomicWrite(
+  path: string,
+  raw: string,
+): Promise<Pick<AutomationAppendResult, 'durability' | 'message'>> {
   const directory = dirname(path)
   const temporary = join(directory, `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`)
   let handle: Awaited<ReturnType<typeof open>> | null = null
+  let directoryHandle: Awaited<ReturnType<typeof open>> | null = null
+  let replaced = false
+  let directorySynced = false
   try {
     handle = await open(temporary, 'wx', 0o600)
     await handle.writeFile(raw, 'utf8')
@@ -597,21 +609,27 @@ async function atomicWrite(path: string, raw: string): Promise<void> {
     await handle.close()
     handle = null
     await rename(temporary, path)
-    try {
-      const directoryHandle = await open(directory, 'r')
-      try {
-        await directoryHandle.sync()
-      } finally {
-        await directoryHandle.close()
-      }
-    } catch {
-      // The file has already been atomically replaced; some filesystems cannot fsync directories.
-    }
+    replaced = true
+    directoryHandle = await open(directory, 'r')
+    await directoryHandle.sync()
+    directorySynced = true
+    await directoryHandle.close()
+    directoryHandle = null
   } catch (error) {
     if (handle) await handle.close().catch(() => undefined)
-    await unlink(temporary).catch(() => undefined)
-    throw error
+    if (directoryHandle) await directoryHandle.close().catch(() => undefined)
+    if (!replaced) {
+      await unlink(temporary).catch(() => undefined)
+      throw error
+    }
   }
+  return directorySynced
+    ? { durability: 'confirmed' }
+    : {
+        durability: 'unconfirmed',
+        message:
+          'Automation history was replaced, but its directory durability could not be confirmed.',
+      }
 }
 
 function isMissing(error: unknown): boolean {

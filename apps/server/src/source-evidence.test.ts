@@ -1,11 +1,22 @@
 import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type { ApplicationState, Project } from '@roadmap/contracts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRoadmapApplication, type RoadmapApplication } from './application/application.ts'
-import type { ConfigurationDocument, RoadmapConfiguration } from './application/configuration.ts'
-import { createLocalAdapter } from './local/adapter.ts'
-import { refineObservationAttempt } from './observation/source.ts'
+import type { ConfigurationDocument } from './configuration/document.ts'
+import { createLocalObserver } from './local/observer.ts'
+import {
+  type ObservationBatch,
+  refineObservationAttempt,
+  type SourceObservationHealth,
+} from './observation/source.ts'
+import type { ProjectConfiguration } from './projects/registry.ts'
+import {
+  controlledSourceFixture,
+  fixtureAdmissions,
+  sourceFixture,
+} from './source-test-fixtures.ts'
 
 const roots: string[] = []
 const applications: RoadmapApplication[] = []
@@ -33,15 +44,14 @@ async function workspace(): Promise<string> {
 }
 
 function configuration(root: string, id: string): ConfigurationDocument {
-  const document: RoadmapConfiguration = {
-    schemaVersion: 5,
+  const document: ProjectConfiguration = {
+    schemaVersion: 6,
     configurationVersion: 1,
     connections: [{ id: 'local', integration: 'local', name: 'Local', builtIn: true }],
     projects: [
       {
-        key: { integration: 'local', id },
+        ref: { integration: 'local', projectId: id },
         connectionId: 'local',
-        locator: { integration: 'local', path: root },
         workspace: { path: root },
       },
     ],
@@ -67,23 +77,18 @@ async function startApplication(
 ): Promise<RoadmapApplication> {
   const application = createRoadmapApplication({
     configuration: configuration(root, id),
-    createAdapters: (document) => [
-      createLocalAdapter({
-        sources: document.projects.flatMap((registration) =>
-          registration.key.integration === 'local'
-            ? [
-                {
-                  key: { integration: 'local' as const, id: registration.key.id },
-                  rootPath: registration.workspace.path,
-                },
-              ]
-            : [],
-        ),
-        reconcileMs: 100,
-        watchDirectory: () => ({ close() {} }),
-        logger: { info() {}, warn() {} },
-      }),
-    ],
+    admissions: fixtureAdmissions,
+    observers: {
+      local: (input) =>
+        createLocalObserver(input, {
+          reconcileMs: 100,
+          watchDirectory: () => ({ close() {} }),
+          logger: { info() {}, warn() {} },
+        }),
+      github() {
+        throw new Error('Unused source')
+      },
+    },
     serverEpoch: 'source-evidence-test',
   })
   applications.push(application)
@@ -131,7 +136,232 @@ async function reconcile(application: RoadmapApplication, time = 2_000): Promise
   }
 }
 
+async function controlledEvidenceApplication() {
+  const local: Project = {
+    key: { integration: 'local', id: 'local-evidence' },
+    name: 'Local evidence',
+    sourcePath: '/tmp/local-evidence',
+    openMaps: [],
+    closedMaps: [],
+    warnings: [],
+  }
+  const github: Project = {
+    key: { integration: 'github', id: 'remote-evidence' },
+    name: 'acme/remote',
+    sourceUrl: 'https://github.com/acme/remote',
+    openMaps: [],
+    closedMaps: [],
+    warnings: [],
+  }
+  let remoteHealth: SourceObservationHealth = { status: 'available', observedAt: 900 }
+  const document: ProjectConfiguration = {
+    schemaVersion: 6,
+    configurationVersion: 1,
+    connections: [
+      { id: 'local', integration: 'local', name: 'Local', builtIn: true },
+      {
+        id: 'github',
+        integration: 'github',
+        name: 'GitHub',
+        builtIn: false,
+        githubIdentity: { id: '7', login: 'octocat' },
+      },
+    ],
+    projects: [
+      {
+        ref: { integration: 'local', projectId: local.key.id },
+        connectionId: 'local',
+        workspace: { path: '/tmp/local-evidence' },
+      },
+      {
+        ref: { integration: 'github', projectId: github.key.id },
+        connectionId: 'github',
+        locator: { repositoryId: 'remote-evidence', nameWithOwner: 'acme/remote' },
+        workspace: { path: '/tmp/remote-evidence' },
+      },
+    ],
+    automation: { enabled: false, enabledProjects: [] },
+  }
+  const localControl = controlledSourceFixture(local.key, sourceFixture([local], 800, document))
+  const remoteControl = controlledSourceFixture(github.key, sourceFixture([github], 900, document))
+  const states: ApplicationState[] = []
+  const application = createRoadmapApplication({
+    configuration: {
+      async load() {
+        return { ok: true, document }
+      },
+      subscribe() {
+        return () => undefined
+      },
+      async write() {
+        throw new Error('Evidence schedules do not mutate configuration')
+      },
+      async stop() {},
+    },
+    admissions: fixtureAdmissions,
+    observers: { local: () => localControl.observer, github: () => remoteControl.observer },
+    serverEpoch: 'controlled-source-evidence',
+  })
+  applications.push(application)
+  application.subscribe((state) => states.push(state))
+  await application.start()
+  return {
+    application,
+    states,
+    local,
+    github,
+    configuration: document,
+    push(integration: 'local' | 'github', batch: ObservationBatch) {
+      if (integration === 'local') localControl.push(batch)
+      else remoteControl.push(batch, remoteHealth)
+    },
+    setGitHubAvailability(health: SourceObservationHealth) {
+      remoteHealth = health
+    },
+  }
+}
+
 describe('source evidence through RoadmapApplication', () => {
+  it('advances only the successfully observed source when unchanged content is read again', async () => {
+    const controlled = await controlledEvidenceApplication()
+    const { application, local, github, states, configuration } = controlled
+    vi.setSystemTime(2_000)
+    controlled.push(
+      'local',
+      sourceFixture([{ ...local, warnings: ['Local-only content change.'] }], 1_800),
+    )
+    expect(
+      application.current().projects.find((project) => project.key.integration === 'local')
+        ?.availability.observedAt,
+    ).toBe(1_800)
+    expect(
+      application.current().projects.find((project) => project.key.integration === 'github')
+        ?.availability.observedAt,
+    ).toBe(900)
+    expect(application.current().roadmap.capturedAt).toBe(2_000)
+
+    vi.setSystemTime(3_000)
+    controlled.push('github', sourceFixture([github], 2_500, configuration))
+    expect(
+      application.current().projects.find((project) => project.key.integration === 'github')
+        ?.availability.observedAt,
+    ).toBe(2_500)
+    expect(
+      application.current().projects.find((project) => project.key.integration === 'local')
+        ?.availability.observedAt,
+    ).toBe(1_800)
+    expect(
+      application.current().connections.find((connection) => connection.id === 'github')
+        ?.availability.observedAt,
+    ).toBe(900)
+    expect(application.current().roadmap.capturedAt).toBe(3_000)
+    expect(
+      states.map((state) => ({
+        publication: state.roadmap.capturedAt,
+        local: state.projects.find((project) => project.key.integration === 'local')?.availability
+          .observedAt,
+        github: state.projects.find((project) => project.key.integration === 'github')?.availability
+          .observedAt,
+      })),
+    ).toEqual([
+      { publication: 1_000, local: 800, github: 900 },
+      { publication: 2_000, local: 1_800, github: 900 },
+      { publication: 3_000, local: 1_800, github: 2_500 },
+    ])
+    for (const state of states) {
+      expect(state.projects.find((project) => project.key.integration === 'github')).toMatchObject({
+        key: { integration: 'github', id: 'remote-evidence' },
+        name: 'acme/remote',
+      })
+    }
+  })
+
+  it('retains successful source time until ordinary recovery commits its unchanged replacement content', async () => {
+    const controlled = await controlledEvidenceApplication()
+    const { application, local, github, states, configuration } = controlled
+    vi.setSystemTime(2_000)
+    controlled.setGitHubAvailability({
+      status: 'unavailable',
+      cause: 'Provider read failed.',
+      observedAt: 900,
+    })
+    controlled.push('github', {
+      attempts: [
+        {
+          kind: 'failed',
+          scope: { kind: 'project', project: github.key },
+          attemptedAt: 1_900,
+          provenance: {
+            integration: 'github',
+            connectionId: 'github',
+            repositoryId: 'remote-evidence',
+            stage: 'repository',
+          },
+          failure: { kind: 'read', cause: 'response-read' },
+        },
+      ],
+    })
+    vi.setSystemTime(3_000)
+    controlled.setGitHubAvailability({ status: 'available', observedAt: 2_900 })
+    controlled.push(
+      'local',
+      sourceFixture(
+        [{ ...local, warnings: ['Independent Local observation during recovery.'] }],
+        2_800,
+      ),
+    )
+
+    const beforeRecovery = application
+      .current()
+      .projects.find((project) => project.key.integration === 'github')
+    expect(beforeRecovery).toMatchObject({
+      name: 'acme/remote',
+      availability: { status: 'unavailable', observedAt: 900 },
+    })
+    expect(
+      application.current().roadmap.projects.map((project) => project.key.integration),
+    ).toEqual(['local'])
+    for (const state of states.slice(1)) {
+      expect(state.projects.find((project) => project.key.integration === 'github')).toMatchObject({
+        name: 'acme/remote',
+        availability: { status: 'unavailable', observedAt: 900 },
+      })
+      expect(state.roadmap.projects.some((project) => project.key.integration === 'github')).toBe(
+        false,
+      )
+    }
+
+    const recoveryBoundary = states.length
+    vi.setSystemTime(4_000)
+    const recovery = sourceFixture([github], 3_800, configuration)
+    controlled.push('github', {
+      attempts: recovery.attempts.map((attempt) =>
+        attempt.kind === 'observed' && attempt.scope.kind === 'maps-membership'
+          ? { ...attempt, attemptedAt: 2_900, observedAt: 2_900 }
+          : attempt,
+      ),
+    })
+    expect(states.length).toBeGreaterThan(recoveryBoundary)
+    for (const state of states.slice(recoveryBoundary)) {
+      expect(state.projects.find((project) => project.key.integration === 'github')).toMatchObject({
+        key: { integration: 'github', id: 'remote-evidence' },
+        name: 'acme/remote',
+        availability: { status: 'available', observedAt: 3_800 },
+      })
+      expect(
+        state.roadmap.projects.find((project) => project.key.integration === 'github')?.name,
+      ).toBe('acme/remote')
+      expect(state.roadmap.capturedAt).toBe(4_000)
+      expect(
+        state.projects.find((project) => project.key.integration === 'local')?.availability
+          .observedAt,
+      ).toBe(2_800)
+      expect(
+        state.connections.find((connection) => connection.id === 'github')?.availability.observedAt,
+      ).toBe(2_900)
+    }
+  })
+
   it('retains an unreadable active map while committing an independently readable sibling', async () => {
     const root = await workspace()
     await writeMap(root, 'primary', 'Original primary prose.', 200)

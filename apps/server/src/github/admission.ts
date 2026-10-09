@@ -1,10 +1,22 @@
 import { execFile } from 'node:child_process'
-import { realpath, stat } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import { access, realpath, stat } from 'node:fs/promises'
 import { promisify } from 'node:util'
-import type { ProjectRegistration, SafeError, Workspace } from '@roadmap/contracts'
-import type { AdmissionPort } from '../application/application.ts'
-import { createGitHubClient, type GitHubClient, GitHubError } from './client.ts'
-import type { GitHubConnectionPort } from './connections.ts'
+import type {
+  AdmissionFailure,
+  AdmissionOutcome,
+  AdmissionRuntime,
+  EvidenceResult,
+  GitHubConnection,
+  GitHubConnectionAccess,
+  GitHubProviderRead,
+  GitHubSourceAccessEvidence,
+  GitHubWorkspaceInspection,
+  ProjectAdmission,
+  ProjectRevalidationRequest,
+} from '../projects/registry.ts'
+import { GitHubAccessError } from '../projects/registry.ts'
+import { GitHubError } from './client.ts'
 import { type RepositoryIdentity, readRepositoryByName } from './repository.ts'
 
 const execFileAsync = promisify(execFile)
@@ -14,121 +26,105 @@ interface WorkspaceRemote {
   nameWithOwner: string
 }
 
-interface WorkspaceIdentity {
+interface GitHubWorktreeInspection {
   path: string
   remotes: WorkspaceRemote[]
 }
 
 export interface GitHubAdmissionOptions {
-  github: GitHubConnectionPort
-  createClient?: (accessToken: string) => GitHubClient
-  inspectWorkspace?: (path: string) => Promise<WorkspaceIdentity>
+  inspectWorkspace?: (path: string) => Promise<GitHubWorktreeInspection>
 }
 
-export function createGitHubProjectAdmission(options: GitHubAdmissionOptions): AdmissionPort {
-  const createClient =
-    options.createClient ?? ((accessToken) => createGitHubClient({ token: accessToken }))
+type GitHubOutcome = Extract<AdmissionOutcome, { integration: 'github' }>
+
+/** Translates inspected worktrees and Connection-bound access into registry evidence. */
+export function createGitHubProjectAdmission(
+  options: GitHubAdmissionOptions = {},
+): ProjectAdmission {
   const inspectWorkspace = options.inspectWorkspace ?? inspectGitWorkspace
 
+  async function inspectExpected(
+    request: ProjectRevalidationRequest,
+    runtime: AdmissionRuntime,
+  ): Promise<GitHubOutcome> {
+    const { intent, connection } = request
+    if (
+      !('locator' in intent) ||
+      connection.integration !== 'github' ||
+      intent.connectionId !== connection.id
+    ) {
+      return unavailable('connectionId', 'GitHub Project and Connection do not agree.')
+    }
+    const authorized = await authorizedAccess(connection, runtime)
+    const source: EvidenceResult<GitHubSourceAccessEvidence> = authorized.ok
+      ? { ok: true, value: { ...authorized.value, repositoryId: intent.locator.repositoryId } }
+      : authorized
+    // Source authority is independent of worktree access. No repository/content preflight is
+    // needed to admit the actual stable-ID provider observation.
+    const workspace = await expectedWorkspace(
+      request.path,
+      intent.locator.repositoryId,
+      authorized,
+      inspectWorkspace,
+    )
+    return {
+      integration: 'github',
+      source,
+      workspace,
+      ...(workspace.ok
+        ? {
+            locator: {
+              repositoryId: workspace.value.matchedRepositoryId,
+              nameWithOwner: workspace.value.nameWithOwner,
+            },
+          }
+        : {}),
+    }
+  }
+
   return {
-    async admit(candidate, configuration, runtime) {
-      if (candidate.integration !== 'github') {
-        return failed('integration', 'This admission path accepts only GitHub Projects.')
+    async admit(request, runtime) {
+      const connection = request.connection
+      if (request.integration !== 'github' || connection.integration !== 'github') {
+        return unavailable('integration', 'This admission path accepts only GitHub Projects.')
       }
-      const connection = configuration.connections.find(
-        (connection) => connection.id === candidate.connectionId,
-      )
-      if (connection?.integration !== 'github') {
-        return failed('connectionId', 'GitHub Connection does not exist.')
-      }
-
-      let inspected: WorkspaceIdentity
+      const authorized = await authorizedAccess(connection, runtime)
+      if (!authorized.ok)
+        return { integration: 'github', source: authorized, workspace: authorized }
+      let inspected: GitHubWorktreeInspection
       try {
-        inspected = await inspectWorkspace(candidate.workspace.path)
+        inspected = await inspectWorkspace(request.path)
       } catch {
-        return failed('workspace.path', 'Workspace must be a readable Git worktree root.')
+        return unavailable('workspace.path', 'Workspace must be a readable Git worktree root.')
       }
-      if (hasWorkspace(configuration.projects, inspected.path)) {
-        return failed('workspace.path', 'That Workspace is already registered.')
-      }
-
-      const accessToken = await authorizedToken(runtime.accessToken, connection.id)
-      if (!accessToken.ok) return accessToken
-      const repository = await repositoryFromWorkspace(inspected, accessToken.value, createClient)
-      if (!repository.ok) return repository
-      if (hasRepository(configuration.projects, repository.value.id)) {
-        return failed('workspace.path', 'That GitHub repository is already registered.')
-      }
-
-      const normalized: ProjectRegistration = {
-        key: {
-          integration: 'github',
-          id: availableProjectId(
-            repository.value.nameWithOwner,
-            repository.value.id,
-            configuration.projects,
-          ),
+      const repository = await repositoryFromWorkspace(inspected, authorized.value.access)
+      if (!repository.ok)
+        return { integration: 'github', source: repository, workspace: repository }
+      return {
+        integration: 'github',
+        source: { ok: true, value: { ...authorized.value, repositoryId: repository.value.id } },
+        workspace: {
+          ok: true,
+          value: workspaceEvidence(inspected.path, connection.id, repository.value),
         },
-        connectionId: connection.id,
         locator: {
-          integration: 'github',
           repositoryId: repository.value.id,
           nameWithOwner: repository.value.nameWithOwner,
         },
-        workspace: { path: inspected.path, gitIdentity: repository.value.id },
-        ...optionalDisplayName(candidate.displayName),
       }
-      return { ok: true, registration: normalized }
     },
-
-    async repair(command, configuration, runtime) {
-      const registration = configuration.projects.find(
-        (project) =>
-          project.key.integration === command.project.integration &&
-          project.key.id === command.project.id,
-      )
-      if (registration?.locator.integration !== 'github') {
-        return failed('project', 'GitHub Project does not exist.')
-      }
-      const connection = configuration.connections.find(
-        (candidate) => candidate.id === registration.connectionId,
-      )
-      if (connection?.integration !== 'github') {
-        return failed('connectionId', 'GitHub Connection does not exist.')
-      }
-      const accessToken = await authorizedToken(runtime.accessToken, connection.id)
-      if (!accessToken.ok) return accessToken
-      const workspace = await validWorkspace(
-        command.workspace.path,
-        registration.locator.repositoryId,
-        accessToken.value,
-        createClient,
-        inspectWorkspace,
-      )
-      if (!workspace.ok) return workspace
-      if (
-        configuration.projects.some(
-          (project) =>
-            project !== registration &&
-            canonicalPath(project.workspace.path) === canonicalPath(workspace.value.path),
-        )
-      ) {
-        return failed('workspace.path', 'That Workspace is already registered.')
-      }
-      return { ok: true, workspace: workspace.value }
-    },
+    repair: inspectExpected,
+    revalidate: inspectExpected,
   }
 }
 
 async function repositoryFromWorkspace(
-  workspace: WorkspaceIdentity,
-  accessToken: string,
-  createClient: (accessToken: string) => GitHubClient,
-): Promise<{ ok: true; value: RepositoryIdentity } | { ok: false; error: SafeError }> {
-  const origin = workspace.remotes.filter((remote) => remote.name.toLocaleLowerCase() === 'origin')
+  workspace: GitHubWorktreeInspection,
+  client: GitHubProviderRead,
+): Promise<EvidenceResult<RepositoryIdentity>> {
+  const origin = workspace.remotes.filter((remote) => remote.name.toLowerCase() === 'origin')
   const candidates = origin.length > 0 ? origin : workspace.remotes
   const repositories = new Map<string, RepositoryIdentity>()
-  const client = createClient(accessToken)
   let inaccessible = false
   for (const remote of candidates) {
     try {
@@ -136,7 +132,6 @@ async function repositoryFromWorkspace(
       repositories.set(repository.id, repository)
     } catch (error) {
       inaccessible ||= error instanceof GitHubError && error.status === 404
-      // Another remote may be accessible. Raw GitHub errors stay private.
     }
   }
   if (repositories.size === 0) {
@@ -159,56 +154,89 @@ async function repositoryFromWorkspace(
     : failed('workspace.path', 'Workspace Git remote could not be resolved.')
 }
 
-async function validWorkspace(
-  requestedPath: string,
+async function expectedWorkspace(
+  path: string,
   repositoryId: string,
-  accessToken: string,
-  createClient: (accessToken: string) => GitHubClient,
-  inspectWorkspace: (path: string) => Promise<WorkspaceIdentity>,
-): Promise<{ ok: true; value: Workspace } | { ok: false; error: SafeError }> {
-  let workspace: WorkspaceIdentity
+  authorized: EvidenceResult<GitHubConnectionAccess>,
+  inspectWorkspace: (path: string) => Promise<GitHubWorktreeInspection>,
+): Promise<EvidenceResult<GitHubWorkspaceInspection>> {
+  let workspace: GitHubWorktreeInspection
   try {
-    workspace = await inspectWorkspace(requestedPath)
+    workspace = await inspectWorkspace(path)
   } catch {
     return failed('workspace.path', 'Workspace must be a readable Git worktree root.')
   }
-
-  const client = createClient(accessToken)
+  if (!authorized.ok) return authorized
   for (const remote of workspace.remotes) {
     try {
-      const repository = await readRepositoryByName(client, remote.nameWithOwner)
+      const repository = await readRepositoryByName(authorized.value.access, remote.nameWithOwner)
       if (repository.id === repositoryId) {
-        return { ok: true, value: { path: workspace.path, gitIdentity: repositoryId } }
+        return {
+          ok: true,
+          value: workspaceEvidence(workspace.path, authorized.value.connectionId, repository),
+        }
       }
     } catch {
-      // Another remote may be the registered repository. Raw Git and GitHub errors stay private.
+      // A different remote may prove the admitted stable repository. Provider errors stay private.
     }
   }
   return failed('workspace.path', 'Workspace Git remotes do not identify this GitHub repository.')
 }
 
-async function authorizedToken(
-  accessToken: (connectionId: string) => Promise<string>,
+function workspaceEvidence(
+  path: string,
   connectionId: string,
-): Promise<{ ok: true; value: string } | { ok: false; error: SafeError }> {
+  repository: RepositoryIdentity,
+): GitHubWorkspaceInspection {
+  return {
+    integration: 'github',
+    path,
+    readable: true,
+    searchable: true,
+    worktreeRoot: true,
+    matchedRepositoryId: repository.id,
+    verifiedConnectionId: connectionId,
+    nameWithOwner: repository.nameWithOwner,
+  }
+}
+
+async function authorizedAccess(
+  connection: GitHubConnection,
+  runtime: AdmissionRuntime,
+): Promise<EvidenceResult<GitHubConnectionAccess>> {
   try {
-    return { ok: true, value: await accessToken(connectionId) }
-  } catch {
+    const value = await runtime.github(connection)
+    if (value.accountId !== connection.githubIdentity.id) {
+      throw new GitHubAccessError('account-mismatch')
+    }
+    if (
+      value.connectionId !== connection.id ||
+      typeof value.access?.restGet !== 'function' ||
+      typeof value.access.graphql !== 'function'
+    ) {
+      throw new GitHubAccessError('unavailable')
+    }
+    return { ok: true, value }
+  } catch (error) {
+    const failure =
+      error instanceof GitHubAccessError ? error : new GitHubAccessError('unavailable')
     return {
       ok: false,
       error: {
         code: 'authorization-failed',
         field: 'connectionId',
-        message: 'GitHub authorization is unavailable for this Connection.',
+        message: failure.message,
+        githubAccessFailure: failure.failure,
       },
     }
   }
 }
 
-async function inspectGitWorkspace(path: string): Promise<WorkspaceIdentity> {
+async function inspectGitWorkspace(path: string): Promise<GitHubWorktreeInspection> {
   const canonical = await realpath(path)
   const metadata = await stat(canonical)
   if (!metadata.isDirectory()) throw new Error('not a directory')
+  await access(canonical, constants.R_OK | constants.X_OK)
   const { stdout: rootOutput } = await execFileAsync('/usr/bin/git', [
     '-C',
     canonical,
@@ -235,7 +263,7 @@ async function inspectGitWorkspace(path: string): Promise<WorkspaceIdentity> {
     ])
     for (const url of stdout.split('\n')) {
       const nameWithOwner = githubNameFromRemote(url.trim())
-      const key = `${remote}\0${nameWithOwner?.toLocaleLowerCase()}`
+      const key = `${remote}\0${nameWithOwner?.toLowerCase()}`
       if (nameWithOwner && !seen.has(key)) {
         seen.add(key)
         remotes.push({ name: remote, nameWithOwner })
@@ -254,47 +282,11 @@ function githubNameFromRemote(value: string): string | null {
   return match?.[1] ?? null
 }
 
-function availableProjectId(
-  nameWithOwner: string,
-  repositoryId: string,
-  projects: readonly ProjectRegistration[],
-): string {
-  const occupied = new Set(
-    projects
-      .filter((project) => project.key.integration === 'github')
-      .map((project) => project.key.id.toLocaleLowerCase()),
-  )
-  if (!occupied.has(nameWithOwner.toLocaleLowerCase())) return nameWithOwner
-  const suffix = repositoryId.replace(/[^a-zA-Z0-9]/g, '').slice(-8) || 'repository'
-  let candidate = `${nameWithOwner}~${suffix}`
-  let sequence = 2
-  while (occupied.has(candidate.toLocaleLowerCase())) {
-    candidate = `${nameWithOwner}~${suffix}-${sequence}`
-    sequence += 1
-  }
-
-  return candidate
-}
-function hasRepository(projects: readonly ProjectRegistration[], repositoryId: string): boolean {
-  return projects.some(
-    (project) =>
-      project.locator.integration === 'github' && project.locator.repositoryId === repositoryId,
-  )
-}
-
-function hasWorkspace(projects: readonly ProjectRegistration[], path: string): boolean {
-  return projects.some((project) => canonicalPath(project.workspace.path) === canonicalPath(path))
-}
-
-function optionalDisplayName(displayName: string | undefined): { displayName?: string } {
-  const normalized = displayName?.trim()
-  return normalized ? { displayName: normalized } : {}
-}
-
-function canonicalPath(path: string): string {
-  return process.platform === 'darwin' ? path.toLocaleLowerCase() : path
-}
-
-function failed(field: string, message: string): { ok: false; error: SafeError } {
+function failed(field: string, message: string): { ok: false; error: AdmissionFailure } {
   return { ok: false, error: { code: 'admission-failed', field, message } }
+}
+
+function unavailable(field: string, message: string): GitHubOutcome {
+  const failure = failed(field, message)
+  return { integration: 'github', source: failure, workspace: failure }
 }

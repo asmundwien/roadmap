@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { FetchedMap, RawSubIssue } from '../github/map-query.ts'
-import type { AdapterSlice, SourceMapContent, SourceTicketContent } from '../observation/source.ts'
+import type {
+  ObservationBatch,
+  SourceMapContent,
+  SourceTicketContent,
+} from '../observation/source.ts'
 import { observeGitHubMap } from './from-github.ts'
 
 const project = {
@@ -56,13 +60,13 @@ function fetchedMap(children: RawSubIssue[], overrides: Partial<FetchedMap> = {}
   }
 }
 
-function mapContent(slice: AdapterSlice): SourceMapContent {
+function mapContent(slice: ObservationBatch): SourceMapContent {
   for (const attempt of slice.attempts)
     if (attempt.kind === 'observed' && 'progress' in attempt.value) return attempt.value
   throw new Error('Expected map evidence.')
 }
 
-function ticketContents(slice: AdapterSlice): SourceTicketContent[] {
+function ticketContents(slice: ObservationBatch): SourceTicketContent[] {
   return slice.attempts.flatMap((attempt) =>
     attempt.kind === 'observed' && 'blockedBy' in attempt.value ? [attempt.value] : [],
   )

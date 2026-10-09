@@ -13,9 +13,12 @@ lifecycle](https://github.com/asmundwien/roadmap/issues/49).
 ## Repository access
 
 Project admission inspects the selected local Git worktree and derives its repository from the
-`origin` remote. It then fetches that repository through the selected Connection, proving both App
-installation access and Workspace identity before persisting GitHub's stable repository ID. The
-browser neither lists nor selects repositories.
+`origin` remote. Connection-bound provider access proves the App account and stable repository ID;
+Workspace inspection separately proves the worktree belongs to that repository. Admission shares
+one authorized provider access result across those checks. The SourceObserver receives refined
+source access and does not repeat admission preflight. The browser neither lists nor selects
+repositories. Later Workspace failure or canonical path collision denies host actions without
+discarding independently valid remote source access.
 
 Roadmap does not search an account for Wayfinder maps. Each committed Project registration names
 one stable repository ID. Reconciliation fetches that repository by ID, then reads its
@@ -84,15 +87,40 @@ by](https://docs.github.com/en/rest/issues/issue-dependencies#list-dependencies-
 
 ## Polling and rate limits
 
-Each GitHub Connection owns its own API client, conditional REST cache, and rate budget. The
-Adapter polls registered repositories every 30 seconds. It lengthens that interval when the
-GraphQL budget drops below 2,000, 1,000, or 300 remaining points. A manual refresh reconciles only
-the selected Project's Connection.
+Each GitHub Connection has its own API client, conditional REST cache, and rate budget. Per-source
+SourceObservers share a Connection worker in `github/observer.ts`. The pool polls active admitted
+sources every 30 seconds, doubles the interval below 2,000 remaining GraphQL points, quadruples it
+below 1,000, and multiplies it by eight below 300. Operational failures also back off, up to five
+minutes. Manual refresh of an active Project reconciles the active sources sharing its Connection,
+not every Connection. A pending source refresh reads only that source.
+
+The client resolves the current server-owned token before every provider request. It retains its
+conditional cache while that token is unchanged. Rotation creates a separate cache, and a response
+still in flight under the previous token cannot overwrite the current cache. Failed token resolution
+starts no provider request. These failures retain credential-stage provenance even when their cause
+is a network or malformed response. Classified failures retain their safe meanings; raw exceptions
+and credentials do not enter source evidence.
 
 REST conditional requests replay the cached body on `304 Not Modified`. GraphQL responses include
-`rateLimit { cost remaining limit resetAt }`, which drives the Adapter's throttle. Later polls and
-Local filesystem updates enter the same source-blind Change feed. Configuration topology changes
-establish a new baseline and do not create false Wayfinder activity.
+`rateLimit { cost remaining limit resetAt }`, which drives Connection pacing. Map requests batch up
+to ten aliases; response refinement preserves successful aliases while recording failed aliases
+and incomplete membership separately. Failure retains prior content and its successful-read time,
+not a fresh empty graph.
+
+The committed source topology controls cross-repository blocker resolution. Current repository
+names resolve to opaque registered Project keys; a repository rename changes presentation and
+source links without changing identity. Pending candidates do not alter active topology. An
+unchanged source owner survives unrelated configuration changes.
+
+The coordinator's separate 30-second recovery supervises only committed GitHub sources whose
+operational source-access failure left them without verified observer input. Authorization-required,
+rejected-credential, and account-mismatch failures do not enter that operational retry. After
+admission, the SourceObserver pool owns polling and failure recovery.
+
+GitHub polls and Local filesystem observations enter the same notification Change feed as committed
+scoped evidence. Failed reads and incomplete membership retain comparison history. Source changes
+establish a quiet baseline only for the affected Project; they do not fabricate Wayfinder activity.
+Automation consumes committed observations directly, not notification events.
 
 Official references:
 

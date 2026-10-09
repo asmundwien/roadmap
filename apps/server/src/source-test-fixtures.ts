@@ -1,39 +1,88 @@
+import { dirname, join, resolve } from 'node:path'
 import type { Project, Ticket, WayfinderMap } from '@roadmap/contracts'
 import type {
-  AdapterSlice,
   ObservationAttempt,
+  ObservationBatch,
+  SourceObservationHealth,
+  SourceObserver,
   SourceProjectContent,
+  SourceProjectKey,
   SourceProvenance,
   SourceTicketContent,
 } from './observation/source.ts'
+import type {
+  GitHubProjectIntent,
+  GitHubProviderRead,
+  LocalProjectIntent,
+  ProjectAdmission,
+} from './projects/registry.ts'
 
 // Public DTOs are controlled test input, never production source authority.
-export function sourceFixture(projects: readonly Project[], observedAt: number): AdapterSlice {
+export function sourceFixture(
+  projects: readonly Project[],
+  observedAt: number,
+  configuration?: {
+    readonly projects: readonly (
+      | LocalProjectIntent
+      | Pick<GitHubProjectIntent, 'ref' | 'connectionId' | 'locator'>
+    )[]
+  },
+): ObservationBatch {
   const attempts: ObservationAttempt[] = []
   for (const project of projects) {
-    const source: SourceProjectContent['source'] =
-      project.key.integration === 'local'
-        ? { integration: 'local', path: project.sourcePath ?? `/tmp/${project.key.id}` }
-        : {
-            integration: 'github',
-            repositoryId: project.key.id,
-            nameWithOwner: project.name,
-            url: project.sourceUrl ?? `https://github.com/${project.name}`,
-          }
-    const provenance: SourceProvenance =
-      source.integration === 'local'
-        ? { integration: 'local', path: source.path, operation: 'read' }
-        : {
-            integration: 'github',
-            connectionId: 'github',
-            repositoryId: source.repositoryId,
-            stage: 'map-read',
-          }
+    const registration = configuration?.projects.find(
+      (intent) =>
+        intent.ref.integration === project.key.integration &&
+        intent.ref.projectId === project.key.id,
+    )
+    let source: SourceProjectContent['source']
+    if (project.key.integration === 'local') {
+      source = {
+        integration: 'local',
+        path: resolve(
+          project.sourcePath ??
+            (registration && 'workspace' in registration
+              ? registration.workspace.path
+              : undefined) ??
+            `/tmp/${project.key.id}`,
+        ),
+      }
+    } else {
+      if (!registration || !('locator' in registration))
+        throw new Error('Test GitHub Project requires its configured repository binding.')
+      source = {
+        integration: 'github',
+        repositoryId: registration.locator.repositoryId,
+        nameWithOwner: project.name,
+        url: project.sourceUrl ?? `https://github.com/${project.name}`,
+      }
+    }
+    const provenance = (
+      path: string | undefined,
+      operation: Extract<SourceProvenance, { integration: 'local' }>['operation'],
+      stage: Extract<SourceProvenance, { integration: 'github' }>['stage'],
+    ): SourceProvenance => {
+      if (source.integration === 'local') {
+        if (!path) throw new Error('Test Local scope requires an explicit source path.')
+        return { integration: 'local', path: resolve(path), operation }
+      }
+      if (!registration) throw new Error('Test GitHub Project requires its configured Connection.')
+      return {
+        integration: 'github',
+        connectionId: registration.connectionId,
+        repositoryId: source.repositoryId,
+        stage,
+      }
+    }
     const common = {
       kind: 'observed',
       attemptedAt: observedAt,
       observedAt,
-      provenance,
+      provenance: provenance(
+        source.integration === 'local' ? source.path : undefined,
+        'inspect-root',
+        'repository',
+      ),
       completeness: { kind: 'complete' },
     } as const
     attempts.push({
@@ -44,20 +93,31 @@ export function sourceFixture(projects: readonly Project[], observedAt: number):
     const maps = [...project.openMaps, ...project.closedMaps]
     attempts.push({
       ...common,
+      provenance: provenance(
+        source.integration === 'local' ? join(source.path, '.wayfinder') : undefined,
+        'enumerate',
+        'map-list',
+      ),
       scope: { kind: 'maps-membership', project: project.key },
       value: { members: maps.map((map) => ({ project: project.key, mapId: map.id })) },
     })
     for (const map of maps) {
       const key = { project: project.key, mapId: map.id }
+      const destination = mapSource(map)
       attempts.push(
         {
           ...common,
+          provenance: provenance(
+            destination.kind === 'file' ? destination.path : undefined,
+            'read',
+            'map-read',
+          ),
           scope: { kind: 'map', map: key },
           value: {
             key,
             displayId: map.displayId,
             title: map.title,
-            source: mapSource(map),
+            source: destination,
             status: map.isOpen ? 'open' : 'closed',
             updatedAt: map.updatedAt,
             closedAt: map.closedAt,
@@ -69,6 +129,13 @@ export function sourceFixture(projects: readonly Project[], observedAt: number):
         },
         {
           ...common,
+          provenance: provenance(
+            source.integration === 'local'
+              ? join(dirname(resolve(source.path, map.id)), 'tickets')
+              : undefined,
+            'enumerate',
+            'map-read',
+          ),
           scope: { kind: 'tickets-membership', map: key },
           completeness: map.ticketsComplete
             ? { kind: 'complete' }
@@ -78,14 +145,21 @@ export function sourceFixture(projects: readonly Project[], observedAt: number):
       )
       for (const ticket of map.tickets) {
         const ticketKey = { map: key, ticketId: ticket.id }
+        const destination = ticketSource(ticket)
+        const ticketProvenance = provenance(
+          destination.kind === 'file' ? destination.path : undefined,
+          'read',
+          'map-read',
+        )
         attempts.push({
           ...common,
+          provenance: ticketProvenance,
           scope: { kind: 'ticket', ticket: ticketKey },
           value: {
             key: ticketKey,
             displayId: ticket.displayId,
             title: ticket.title,
-            source: ticketSource(ticket),
+            source: destination,
             body: ticket.body,
             typeEvidence: ticket.typeEvidence,
             status: ticket.state === 'closed' ? 'closed' : 'open',
@@ -99,7 +173,7 @@ export function sourceFixture(projects: readonly Project[], observedAt: number):
               title: blocker.title,
               url: blocker.url,
               state: blocker.state,
-              provenance,
+              provenance: ticketProvenance,
             })),
             blockersComplete: ticket.blockersComplete,
             warnings: ticket.warnings,
@@ -123,4 +197,145 @@ function ticketSource(ticket: Ticket): SourceTicketContent['source'] {
   if (ticket.sourcePath) return { kind: 'file', path: ticket.sourcePath }
   if (ticket.url) return { kind: 'issue', url: ticket.url }
   throw new Error('Test ticket requires an explicit source destination.')
+}
+
+const fixtureProvider: GitHubProviderRead = {
+  async restGet() {
+    return {}
+  },
+  async graphql() {
+    return { data: {}, errors: [] }
+  },
+}
+
+export const fixtureAdmissions: Partial<Record<'local' | 'github', ProjectAdmission>> = {
+  local: {
+    async admit(request) {
+      return {
+        integration: 'local',
+        workspace: {
+          ok: true,
+          value: { integration: 'local', path: request.path, readable: true, searchable: true },
+        },
+      }
+    },
+    async repair(request) {
+      return {
+        integration: 'local',
+        workspace: {
+          ok: true,
+          value: { integration: 'local', path: request.path, readable: true, searchable: true },
+        },
+      }
+    },
+    async revalidate(request) {
+      return {
+        integration: 'local',
+        workspace: {
+          ok: true,
+          value: {
+            integration: 'local',
+            path: request.path,
+            readable: true,
+            searchable: true,
+            ...('gitIdentity' in request.intent.workspace
+              ? { gitIdentity: request.intent.workspace.gitIdentity }
+              : {}),
+          },
+        },
+      }
+    },
+  },
+  github: {
+    async admit() {
+      throw new Error('GitHub registration is not used by this fixture')
+    },
+    async repair(request) {
+      return this.revalidate(request, {
+        github: async () => {
+          throw new Error('Unused runtime')
+        },
+      })
+    },
+    async revalidate(request) {
+      if (
+        request.intent.ref.integration !== 'github' ||
+        !('locator' in request.intent) ||
+        request.connection.integration !== 'github'
+      )
+        throw new Error('Expected GitHub intent')
+      return {
+        integration: 'github',
+        source: {
+          ok: true,
+          value: {
+            connectionId: request.connection.id,
+            accountId: request.connection.githubIdentity.id,
+            repositoryId: request.intent.locator.repositoryId,
+            access: fixtureProvider,
+          },
+        },
+        workspace: {
+          ok: true,
+          value: {
+            integration: 'github',
+            path: request.path,
+            readable: true,
+            searchable: true,
+            worktreeRoot: true,
+            matchedRepositoryId: request.intent.locator.repositoryId,
+            verifiedConnectionId: request.connection.id,
+            nameWithOwner: request.intent.locator.nameWithOwner,
+          },
+        },
+      }
+    },
+  },
+}
+
+export function controlledSourceFixture(
+  project: SourceProjectKey,
+  baseline: ObservationBatch,
+  options: { gate?: Promise<void>; health?: SourceObservationHealth } = {},
+) {
+  const observed = baseline.attempts.find((attempt) => attempt.kind === 'observed')
+  let current = {
+    project,
+    attempts: baseline.attempts,
+    health: options.health ?? {
+      status: 'available' as const,
+      ...(observed ? { observedAt: observed.observedAt } : {}),
+    },
+  }
+  const listeners = new Set<Parameters<SourceObserver['subscribe']>[0]>()
+  const starting = Promise.withResolvers<void>()
+  let stopped = false
+  const observer: SourceObserver = {
+    async observe() {
+      starting.resolve()
+      await options.gate
+      return current
+    },
+    subscribe(listener) {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    async refresh() {
+      return current
+    },
+    async stop() {
+      stopped = true
+    },
+  }
+  return {
+    observer,
+    started: starting.promise,
+    push(batch: ObservationBatch, health: SourceObservationHealth = current.health) {
+      current = { project, attempts: batch.attempts, health }
+      for (const listener of listeners) listener(current)
+    },
+    get stopped() {
+      return stopped
+    },
+  }
 }

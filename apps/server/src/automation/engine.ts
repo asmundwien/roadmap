@@ -1,21 +1,29 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import type {
-  AutomationAdmission,
-  AutomationEvidence,
-  AutomationOverrideAvailability,
-  AutomationOverrideControl,
-  AutomationOverrideStage,
-  AutomationProcessResult,
-  AutomationTarget,
-  ClassificationAttempt,
-  ProjectKey,
-  RegisteredProject,
+  AutomationEvidence as PublicAutomationEvidence,
+  AutomationOverrideControl as PublicAutomationOverrideControl,
   SafeError,
-  SessionReportEvidence,
-  Ticket,
-  WayfinderMap,
 } from '@roadmap/contracts'
+import {
+  CLASSIFICATION_RESULT_SCHEMA_MARKER,
+  classificationResultSchemaJson,
+  decodeClassificationResult,
+} from '../application/classification-contract.ts'
+import {
+  decodeSessionReport,
+  SESSION_REPORT_SCHEMA_MARKER,
+  sessionReportSchemaJson,
+} from '../application/session-report-contract.ts'
+import type { CommittedObservation } from '../observation/coordinator.ts'
+import {
+  type ObservationAttempt,
+  type SourceProjectKey as ProjectKey,
+  type SourceScope,
+  type SourceTicketTypeEvidence,
+  sourceScopeKey,
+} from '../observation/source.ts'
+import type { HarnessCommand, ProjectConfiguration } from '../projects/registry.ts'
 import {
   type AutomationAppend,
   type AutomationDatabase,
@@ -25,18 +33,18 @@ import {
   type AutomationRecord,
   automationTargetKey,
   replayAutomationDatabase,
-} from './automation-database.ts'
-import {
-  CLASSIFICATION_RESULT_SCHEMA_MARKER,
-  classificationResultSchemaJson,
-  decodeClassificationResult,
-} from './classification-contract.ts'
-import type { HarnessCommand, RoadmapConfiguration } from './configuration.ts'
-import {
-  decodeSessionReport,
-  SESSION_REPORT_SCHEMA_MARKER,
-  sessionReportSchemaJson,
-} from './session-report-contract.ts'
+} from './database.ts'
+import type {
+  AutomationAdmission,
+  AutomationEvidence,
+  AutomationOverrideAvailability,
+  AutomationOverrideControl,
+  AutomationOverrideStage,
+  AutomationProcessResult,
+  AutomationTarget,
+  ClassificationAttempt,
+  SessionReportEvidence,
+} from './model.ts'
 
 const PROMPT_MARKER = '{{roadmap.prompt}}'
 const STDOUT_LIMIT = 16 * 1024
@@ -80,14 +88,46 @@ export interface AutomationLauncher {
 }
 
 interface AutomationSource {
-  configuration: RoadmapConfiguration
-  projects: readonly RegisteredProject[]
+  valid: boolean
+  pendingAdmission: boolean
+  pendingConfigurations: readonly ProjectConfiguration[]
+  configuration: Pick<ProjectConfiguration, 'automation'>
+  projects: readonly AutomationProjectInput[]
 }
 
-export interface AutomationLoop {
+interface AutomationProjectInput {
+  key: ProjectKey
+  sourceDependency: string
+  configuredDependency: string | null
+  workspace: { path: string }
+  available: boolean
+  openMaps: readonly AutomationMapInput[]
+  closedMaps: readonly AutomationMapInput[]
+}
+
+interface AutomationMapInput {
+  id: string
+  pointer: string
+  updatedAt: number
+  ticketsComplete: boolean
+  tickets: readonly AutomationTicketInput[]
+  frontier: readonly AutomationTicketInput[]
+}
+
+interface AutomationTicketInput {
+  id: string
+  pointer: string
+  typeEvidence: SourceTicketTypeEvidence
+  status: 'open' | 'closed' | 'unknown'
+  blockersComplete: boolean
+  isBlocked: boolean
+  isClaimed: boolean
+}
+
+export interface AutomationEngine {
   start(): Promise<void>
-  evidence(): AutomationEvidence[]
-  overrides(): AutomationOverrideControl[]
+  evidence(): PublicAutomationEvidence[]
+  overrides(): PublicAutomationOverrideControl[]
   interruptedProjects(): ProjectKey[]
   acknowledgeProjectInterruption(
     project: ProjectKey,
@@ -104,8 +144,7 @@ interface Candidate {
   target: AutomationTarget
   mapPointer: string
   ticketPointer: string
-  project: RegisteredProject
-  ticket: Ticket
+  project: AutomationProjectInput
 }
 type CandidateResolution =
   | { ok: true; target: AutomationTarget; candidate: Candidate }
@@ -121,12 +160,24 @@ interface ActiveWayfinder {
   target: AutomationTarget
   process: WayfinderProcess
 }
-export function createAutomationLoop(options: {
+
+type LaunchResult =
+  | { kind: 'admitted' }
+  | { kind: 'rejected'; reason: string }
+  | { kind: 'persistence-failed' }
+
+interface PreparedLaunch {
+  candidate: Candidate
+  command: HarnessCommand
+}
+
+type LaunchPreparation = { ok: true; prepared: PreparedLaunch } | { ok: false; reason: string }
+export function createAutomationEngine(options: {
   database: AutomationDatabaseDocument
   launcher: AutomationLauncher
-  source(): AutomationSource
+  source(): CommittedObservation | null
   onEvidenceChange?(): void
-}): AutomationLoop {
+}): AutomationEngine {
   let records = new Map<string, AutomationRecord>()
   let currentEvidence: readonly AutomationEvidence[] = []
   let activeClassification: ActiveClassification | null = null
@@ -135,6 +186,10 @@ export function createAutomationLoop(options: {
   let accepting = true
   let faulted = false
   let lane: Promise<void> = Promise.resolve()
+
+  function sourceNow(): AutomationSource {
+    return admissionSource(options.source())
+  }
 
   function enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const next = lane.then(operation, operation)
@@ -156,8 +211,10 @@ export function createAutomationLoop(options: {
 
   async function append(batch: AutomationAppend): Promise<boolean> {
     try {
-      install(await options.database.append(batch))
-      return true
+      const result = await options.database.append(batch)
+      if (result.durability !== 'confirmed') faulted = true
+      install(result.database)
+      return result.durability === 'confirmed'
     } catch {
       faulted = true
       options.onEvidenceChange?.()
@@ -195,40 +252,42 @@ export function createAutomationLoop(options: {
   }
 
   async function reconcileClassification(): Promise<void> {
-    const source = options.source()
-    for (const candidate of selectCandidates(source)) {
-      if (projectHasUnacknowledgedInterruption(candidate.target.project)) continue
-      if (records.has(automationTargetKey(candidate.target))) continue
-      const launched = await beginClassification(
-        candidate,
-        source.configuration.automation.classificationCommand,
-        'automatic',
-      )
-      if (launched || !accepting || faulted) return
+    for (const candidate of selectCandidates(sourceNow())) {
+      const result = await beginClassification(candidate.target, 'automatic')
+      if (result.kind === 'admitted' || !accepting || faulted) return
     }
   }
 
   async function beginClassification(
-    candidate: Candidate,
-    command: HarnessCommand | undefined,
+    target: AutomationTarget,
     admission: AutomationAdmission,
-  ): Promise<boolean> {
-    if (!command || records.has(automationTargetKey(candidate.target))) return false
-    const opportunity: AutomationOpportunity = { id: randomUUID(), target: candidate.target }
+  ): Promise<LaunchResult> {
+    const initial = prepareLaunch(target, 'classification', admission)
+    if (!initial.ok) return { kind: 'rejected', reason: initial.reason }
+    const { candidate, command } = initial.prepared
+    const opportunity: AutomationOpportunity = { id: randomUUID(), target }
     const startedEvent = {
       ...eventIdentity(opportunity.id),
       type: 'classification-started',
       admission,
     } satisfies AutomationEvent
-    if (!(await append({ opportunities: [opportunity], events: [startedEvent] })) || !accepting) {
-      return false
+    if (!(await append({ opportunities: [opportunity], events: [startedEvent] }))) {
+      return { kind: 'persistence-failed' }
     }
 
+    const current = prepareLaunch(target, 'classification', admission, opportunity.id)
+    if (!current.ok || !samePreparedLaunch(initial.prepared, current.prepared)) {
+      return settleNonlaunch(
+        opportunity.id,
+        'classification',
+        current.ok ? 'Prepared launch dependencies changed.' : current.reason,
+      )
+    }
     let process: ClassificationProcess
     try {
       process = options.launcher.classify(launchRequest(candidate, command, 'classification'))
     } catch {
-      const replaced = await append({
+      const persisted = await append({
         events: [
           {
             ...eventIdentity(opportunity.id),
@@ -237,8 +296,7 @@ export function createAutomationLoop(options: {
           },
         ],
       })
-      if (replaced) await reconcileNow()
-      return replaced
+      return persisted ? { kind: 'admitted' } : { kind: 'persistence-failed' }
     }
 
     const launched: ActiveClassification = {
@@ -258,7 +316,7 @@ export function createAutomationLoop(options: {
           }),
         ),
     )
-    return true
+    return { kind: 'admitted' }
   }
 
   async function finishClassification(
@@ -281,24 +339,11 @@ export function createAutomationLoop(options: {
   async function beginDispatch(
     target: AutomationTarget,
     admission: AutomationAdmission,
-  ): Promise<boolean> {
-    if (projectHasUnacknowledgedInterruption(target.project)) return false
-    const source = options.source()
-    if (admission === 'automatic' && !isEffectivelyEnabled(source.configuration, target.project)) {
-      return false
-    }
-    const resolved = resolveTarget(source, target)
-    if (!resolved.ok) return false
-    const key = automationTargetKey(target)
-    const record = records.get(key)
-    const command = source.configuration.automation.wayfinderCommand
-    if (
-      !command ||
-      record?.wayfinder?.status !== 'queued' ||
-      projectHasActiveWayfinder(target.project)
-    ) {
-      return false
-    }
+  ): Promise<LaunchResult> {
+    const initial = prepareLaunch(target, 'wayfinder', admission)
+    if (!initial.ok) return { kind: 'rejected', reason: initial.reason }
+    const record = records.get(automationTargetKey(target))
+    if (!record) return { kind: 'rejected', reason: 'Run Classification first.' }
     if (
       !(await append({
         events: [
@@ -308,24 +353,147 @@ export function createAutomationLoop(options: {
             admission,
           },
         ],
-      })) ||
-      !accepting
-    ) {
-      return false
-    }
+      }))
+    )
+      return { kind: 'persistence-failed' }
 
+    const current = prepareLaunch(target, 'wayfinder', admission, record.opportunity.id)
+    if (!current.ok || !samePreparedLaunch(initial.prepared, current.prepared)) {
+      return settleNonlaunch(
+        record.opportunity.id,
+        'wayfinder',
+        current.ok ? 'Prepared launch dependencies changed.' : current.reason,
+      )
+    }
     let dispatch: Promise<WayfinderProcess>
     try {
-      dispatch = options.launcher.dispatch(launchRequest(resolved.candidate, command, 'wayfinder'))
+      dispatch = options.launcher.dispatch(
+        launchRequest(initial.prepared.candidate, initial.prepared.command, 'wayfinder'),
+      )
     } catch {
       await finishWayfinderLaunchFailure(target)
-      return true
+      return faulted ? { kind: 'persistence-failed' } : { kind: 'admitted' }
     }
     void dispatch.then(
       (process) => enqueue(() => markWayfinderRunning(target, process)),
       () => enqueue(() => finishWayfinderLaunchFailure(target)),
     )
-    return true
+    return { kind: 'admitted' }
+  }
+
+  async function settleNonlaunch(
+    opportunityId: string,
+    stage: AutomationOverrideStage,
+    reason: string,
+  ): Promise<LaunchResult> {
+    const persisted = await append({
+      events: [
+        {
+          ...eventIdentity(opportunityId),
+          type:
+            stage === 'classification' ? 'classification-launch-failed' : 'wayfinder-launch-failed',
+          reason: `Admission changed before launch. No process was launched. ${reason}`,
+        },
+      ],
+    })
+    return persisted ? { kind: 'rejected', reason } : { kind: 'persistence-failed' }
+  }
+
+  function prepareLaunch(
+    target: AutomationTarget,
+    stage: AutomationOverrideStage,
+    admission: AutomationAdmission,
+    reservationId?: string,
+  ): LaunchPreparation {
+    if (!accepting) return { ok: false, reason: 'Roadmap is stopping.' }
+    if (faulted) return { ok: false, reason: 'Automation evidence could not be persisted.' }
+    const source = sourceNow()
+    if (!source.valid)
+      return { ok: false, reason: 'Current configuration cannot admit Automation.' }
+    const pendingReason = pendingIneligibility(source, target, stage, admission)
+    if (pendingReason) return { ok: false, reason: pendingReason }
+    if (projectHasUnacknowledgedInterruption(target.project)) {
+      return {
+        ok: false,
+        reason: 'A Wayfinder Session interruption must be acknowledged for this Project.',
+      }
+    }
+    if (admission === 'automatic' && !isEffectivelyEnabled(source.configuration, target.project)) {
+      return { ok: false, reason: 'Automatic Automation is disabled for this Project.' }
+    }
+    const resolved = resolveTarget(source, target)
+    if (!resolved.ok) return resolved
+    const policy = source.configuration.automation
+    const command =
+      stage === 'classification' ? policy.classificationCommand : policy.wayfinderCommand
+    if (!command) return { ok: false, reason: 'Configure the stage Harness Command.' }
+    const record = records.get(automationTargetKey(target))
+    if (stage === 'classification') {
+      if (admission === 'automatic') {
+        const selected = selectCandidate(resolved.candidate.project)
+        if (
+          !policy.wayfinderCommand ||
+          !selected ||
+          automationTargetKey(selected.target) !== automationTargetKey(target)
+        ) {
+          return {
+            ok: false,
+            reason: 'This ticket is no longer the automatic Classification selection.',
+          }
+        }
+      }
+      if (reservationId) {
+        if (
+          record?.opportunity.id !== reservationId ||
+          record.classification.status !== 'running' ||
+          record.classification.admission !== admission
+        ) {
+          return {
+            ok: false,
+            reason: 'The Classification reservation is no longer owned by this admission.',
+          }
+        }
+      } else if (record) {
+        return { ok: false, reason: 'This Automation opportunity has already been classified.' }
+      }
+      if (
+        activeClassification ||
+        [...records.values()].some(
+          (entry) =>
+            entry.classification.status === 'running' && entry.opportunity.id !== reservationId,
+        )
+      ) {
+        return { ok: false, reason: 'Another Classification Run is in progress.' }
+      }
+    } else {
+      if (
+        record?.classification.status !== 'completed' ||
+        record.classification.verdict.value !== 'afk'
+      ) {
+        return { ok: false, reason: 'Classification did not produce an AFK Verdict.' }
+      }
+      if (reservationId) {
+        if (
+          record.opportunity.id !== reservationId ||
+          record.wayfinder?.status !== 'launching' ||
+          record.wayfinder.admission !== admission
+        ) {
+          return {
+            ok: false,
+            reason: 'The Wayfinder reservation is no longer owned by this admission.',
+          }
+        }
+      } else if (record.wayfinder?.status !== 'queued') {
+        return {
+          ok: false,
+          reason: 'A Wayfinder Session is already recorded for this opportunity.',
+        }
+      }
+      if (projectHasActiveWayfinder(target.project, reservationId)) {
+        return { ok: false, reason: 'Another Wayfinder Session is in progress for this Project.' }
+      }
+    }
+    return { ok: true, prepared: { candidate: resolved.candidate, command } }
   }
 
   async function markWayfinderRunning(
@@ -422,10 +590,11 @@ export function createAutomationLoop(options: {
     return activeWayfinders.get(projectKey(launched.target.project)) === launched
   }
 
-  function projectHasActiveWayfinder(project: ProjectKey): boolean {
+  function projectHasActiveWayfinder(project: ProjectKey, reservationId?: string): boolean {
     for (const record of records.values()) {
       if (
         sameProject(record.opportunity.target.project, project) &&
+        record.opportunity.id !== reservationId &&
         (record.wayfinder?.status === 'launching' || record.wayfinder?.status === 'running')
       ) {
         return true
@@ -435,7 +604,7 @@ export function createAutomationLoop(options: {
   }
 
   function overrideControls(): AutomationOverrideControl[] {
-    const source = options.source()
+    const source = sourceNow()
     return source.projects.flatMap((project) =>
       [...project.openMaps, ...project.closedMaps].flatMap((map) =>
         map.tickets.map((ticket) => {
@@ -453,10 +622,12 @@ export function createAutomationLoop(options: {
   function overrideAvailability(
     stage: AutomationOverrideStage,
     resolved: CandidateResolution,
-    configuration: RoadmapConfiguration,
+    configuration: AutomationSource['configuration'],
   ): AutomationOverrideAvailability {
     const unavailable = commonOverrideIneligibility(resolved)
     if (unavailable) return unavailable
+    const pendingReason = pendingIneligibility(sourceNow(), resolved.target, stage, 'override')
+    if (pendingReason) return ineligible(pendingReason)
     if (projectHasUnacknowledgedInterruption(resolved.target.project)) {
       return ineligible('A Wayfinder Session interruption must be acknowledged for this Project.')
     }
@@ -472,11 +643,12 @@ export function createAutomationLoop(options: {
   ): AutomationOverrideAvailability | null {
     if (!accepting) return ineligible('Roadmap is stopping.')
     if (faulted) return ineligible('Automation evidence could not be persisted; restart Roadmap.')
+    if (!sourceNow().valid) return ineligible('Current configuration cannot admit Automation.')
     return resolved.ok ? null : ineligible(resolved.reason)
   }
 
   function classificationOverrideAvailability(
-    configuration: RoadmapConfiguration,
+    configuration: AutomationSource['configuration'],
     record: AutomationRecord | undefined,
   ): AutomationOverrideAvailability {
     if (!configuration.automation.classificationCommand) {
@@ -493,7 +665,7 @@ export function createAutomationLoop(options: {
   }
 
   function wayfinderOverrideAvailability(
-    configuration: RoadmapConfiguration,
+    configuration: AutomationSource['configuration'],
     record: AutomationRecord | undefined,
   ): AutomationOverrideAvailability {
     if (!configuration.automation.wayfinderCommand) {
@@ -572,40 +744,21 @@ export function createAutomationLoop(options: {
     target: AutomationTarget,
     stage: AutomationOverrideStage,
   ): Promise<{ ok: true } | { ok: false; error: SafeError }> {
-    const source = options.source()
-    const resolved = resolveTarget(source, target)
-    const availability = overrideAvailability(stage, resolved, source.configuration)
-    if (availability.status === 'ineligible') {
-      return { ok: false, error: overrideError(availability.reason) }
-    }
-    if (!resolved.ok) return { ok: false, error: overrideError(resolved.reason) }
-
-    const launched = await launchOverride(resolved.candidate, stage, source.configuration)
-    if (launched) {
+    const result =
+      stage === 'classification'
+        ? await beginClassification(target, 'override')
+        : await beginDispatch(target, 'override')
+    if (result.kind === 'admitted') {
       await reconcileNow()
       return { ok: true }
     }
     return {
       ok: false,
-      error: faulted
-        ? overrideError('Automation evidence could not be persisted.', 'persistence-failed')
-        : overrideError('Automation is no longer accepting overrides.', 'not-supported'),
+      error:
+        result.kind === 'persistence-failed'
+          ? overrideError('Automation evidence could not be persisted.', 'persistence-failed')
+          : overrideError(result.reason),
     }
-  }
-
-  async function launchOverride(
-    candidate: Candidate,
-    stage: AutomationOverrideStage,
-    configuration: RoadmapConfiguration,
-  ): Promise<boolean> {
-    if (stage === 'classification') {
-      return beginClassification(
-        candidate,
-        configuration.automation.classificationCommand,
-        'override',
-      )
-    }
-    return beginDispatch(candidate.target, 'override')
   }
 
   return {
@@ -617,8 +770,8 @@ export function createAutomationLoop(options: {
       started = true
       await enqueue(reconcileNow)
     },
-    evidence: () => [...currentEvidence],
-    overrides: overrideControls,
+    evidence: () => currentEvidence.map(publicEvidence),
+    overrides: () => overrideControls().map(publicOverride),
     interruptedProjects() {
       const projects = new Map<string, ProjectKey>()
       for (const record of records.values()) {
@@ -655,9 +808,282 @@ export function createAutomationLoop(options: {
   }
 }
 
+function admissionSource(committed: CommittedObservation | null): AutomationSource {
+  if (!committed)
+    return {
+      valid: false,
+      pendingAdmission: false,
+      pendingConfigurations: [],
+      configuration: { automation: { enabled: false, enabledProjects: [] } },
+      projects: [],
+    }
+  const scopes = new Map(
+    committed.observation.attempts.map((attempt) => [sourceScopeKey(attempt.scope), attempt]),
+  )
+  const projects = committed.registry.admissions.map((record): AutomationProjectInput => {
+    const intent = record.intent
+    const key: ProjectKey = { integration: intent.ref.integration, id: intent.ref.projectId }
+    const projectAttempt = scopes.get(sourceScopeKey({ kind: 'project', project: key }))
+    const membership = scopes.get(sourceScopeKey({ kind: 'maps-membership', project: key }))
+    const maps: Array<AutomationMapInput & { status: 'open' | 'closed' | 'unknown' }> = []
+    let complete =
+      isCompleteScope(projectAttempt, 'project') && isCompleteScope(membership, 'maps-membership')
+    if (isObservedScope(membership, 'maps-membership')) {
+      for (const mapKey of membership.value.members) {
+        const mapAttempt = scopes.get(sourceScopeKey({ kind: 'map', map: mapKey }))
+        if (!isObservedScope(mapAttempt, 'map')) {
+          complete = false
+          continue
+        }
+        if (mapAttempt.completeness.kind !== 'complete' || mapAttempt.value.status === 'unknown')
+          complete = false
+        const ticketMembership = scopes.get(
+          sourceScopeKey({ kind: 'tickets-membership', map: mapKey }),
+        )
+        let ticketsComplete = isCompleteScope(ticketMembership, 'tickets-membership')
+        const tickets: AutomationTicketInput[] = []
+        if (isObservedScope(ticketMembership, 'tickets-membership')) {
+          for (const ticketKey of ticketMembership.value.members) {
+            const attempt = scopes.get(sourceScopeKey({ kind: 'ticket', ticket: ticketKey }))
+            if (!isObservedScope(attempt, 'ticket')) {
+              ticketsComplete = false
+              continue
+            }
+            const value = attempt.value
+            const blockersComplete =
+              attempt.completeness.kind === 'complete' &&
+              value.status !== 'unknown' &&
+              value.blockersComplete
+            if (!blockersComplete) ticketsComplete = false
+            tickets.push({
+              id: value.key.ticketId,
+              pointer: value.source.kind === 'file' ? value.source.path : value.source.url,
+              typeEvidence: value.typeEvidence,
+              status: value.status,
+              blockersComplete,
+              isClaimed: value.isClaimed,
+              isBlocked:
+                !blockersComplete || value.blockedBy.some((blocker) => blocker.state !== 'closed'),
+            })
+          }
+        }
+        if (!ticketsComplete) complete = false
+        maps.push({
+          id: mapKey.mapId,
+          pointer:
+            mapAttempt.value.source.kind === 'file'
+              ? mapAttempt.value.source.path
+              : mapAttempt.value.source.url,
+          status: mapAttempt.value.status,
+          updatedAt: mapAttempt.value.updatedAt,
+          ticketsComplete,
+          tickets,
+          frontier: tickets.filter(
+            (ticket) => ticket.status === 'open' && !ticket.isBlocked && !ticket.isClaimed,
+          ),
+        })
+      }
+    }
+    const usability = committed.authorizationUsability.get(intent.connectionId)
+    const sourceReady = record.source.status === 'ready'
+    const workspaceReady = record.workspace.status === 'admitted'
+    const workspace = workspaceReady ? record.workspace.proof.path : intent.workspace.path
+    const sourceDependency =
+      intent.ref.integration === 'local'
+        ? JSON.stringify([
+            'local',
+            intent.connectionId,
+            workspace,
+            'gitIdentity' in intent.workspace ? intent.workspace.gitIdentity : null,
+          ])
+        : JSON.stringify([
+            'github',
+            intent.connectionId,
+            'locator' in intent ? intent.locator.repositoryId : null,
+            record.source.status === 'ready' && 'accountId' in record.source.value
+              ? record.source.value.accountId
+              : null,
+          ])
+    return {
+      key,
+      sourceDependency,
+      configuredDependency: configurationDependency(committed.registry, key),
+      workspace: { path: workspace },
+      available:
+        complete &&
+        sourceReady &&
+        workspaceReady &&
+        (intent.ref.integration === 'local' || usability?.status === 'usable'),
+      openMaps: maps
+        .filter((map) => map.status === 'open')
+        .sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id)),
+      closedMaps: maps.filter((map) => map.status === 'closed'),
+    }
+  })
+  return {
+    valid: committed.configurationValid,
+    pendingAdmission: committed.pendingAdmission,
+    pendingConfigurations: committed.pendingConfigurations,
+    configuration: committed.registry,
+    projects,
+  }
+}
+
+type ObservedSource = Extract<ObservationAttempt, { kind: 'observed' }>
+
+function isObservedScope<K extends SourceScope['kind']>(
+  attempt: ObservationAttempt | undefined,
+  kind: K,
+): attempt is Extract<ObservedSource, { scope: { kind: K } }> {
+  return attempt?.kind === 'observed' && attempt.scope.kind === kind
+}
+
+function isCompleteScope<K extends SourceScope['kind']>(
+  attempt: ObservationAttempt | undefined,
+  kind: K,
+): boolean {
+  return isObservedScope(attempt, kind) && attempt.completeness.kind === 'complete'
+}
+
+function samePreparedLaunch(before: PreparedLaunch, current: PreparedLaunch): boolean {
+  const left = before.command
+  const right = current.command
+  return (
+    before.candidate.project.sourceDependency === current.candidate.project.sourceDependency &&
+    before.candidate.project.workspace.path === current.candidate.project.workspace.path &&
+    before.candidate.mapPointer === current.candidate.mapPointer &&
+    before.candidate.ticketPointer === current.candidate.ticketPointer &&
+    sameCommand(left, right)
+  )
+}
+
+function sameCommand(left: HarnessCommand | undefined, right: HarnessCommand | undefined): boolean {
+  if (!left || !right) return left === right
+  return (
+    left.command === right.command &&
+    left.promptDelivery === right.promptDelivery &&
+    left.promptTemplate === right.promptTemplate &&
+    left.args.length === right.args.length &&
+    left.args.every((argument, index) => argument === right.args[index])
+  )
+}
+
+function configurationDependency(
+  configuration: ProjectConfiguration,
+  project: ProjectKey,
+): string | null {
+  const intent = configuration.projects.find(
+    (candidate) =>
+      candidate.ref.integration === project.integration && candidate.ref.projectId === project.id,
+  )
+  if (!intent) return null
+  const connection = configuration.connections.find(
+    (candidate) => candidate.id === intent.connectionId,
+  )
+  return JSON.stringify([
+    intent.ref.integration,
+    intent.connectionId,
+    intent.workspace.path,
+    'gitIdentity' in intent.workspace ? intent.workspace.gitIdentity : null,
+    'locator' in intent ? intent.locator.repositoryId : null,
+    connection?.integration,
+    connection?.integration === 'github' ? connection.githubIdentity.id : null,
+  ])
+}
+
+function pendingIneligibility(
+  source: AutomationSource,
+  target: AutomationTarget,
+  stage: AutomationOverrideStage,
+  admission: AutomationAdmission,
+): string | null {
+  if (!source.pendingAdmission) return null
+  if (source.pendingConfigurations.length === 0) return 'Configuration admission is not confirmed.'
+  const project = source.projects.find((candidate) => sameProject(candidate.key, target.project))
+  const currentCommand =
+    stage === 'classification'
+      ? source.configuration.automation.classificationCommand
+      : source.configuration.automation.wayfinderCommand
+  for (const pending of source.pendingConfigurations) {
+    if (
+      !project ||
+      project.configuredDependency !== configurationDependency(pending, target.project)
+    ) {
+      return 'The target Source or Workspace configuration is awaiting admission.'
+    }
+    const pendingCommand =
+      stage === 'classification'
+        ? pending.automation.classificationCommand
+        : pending.automation.wayfinderCommand
+    if (!sameCommand(currentCommand, pendingCommand))
+      return 'The stage Harness Command is awaiting activation.'
+    if (admission === 'automatic') {
+      if (!isEffectivelyEnabled(pending, target.project))
+        return 'Automatic Automation is disabled for this Project.'
+      if (stage === 'classification' && !pending.automation.wayfinderCommand)
+        return 'The Wayfinder Session Command is not configured.'
+    }
+  }
+  return null
+}
+
+function publicEvidence(evidence: AutomationEvidence): PublicAutomationEvidence {
+  const classification = evidence.classification
+  const publicClassification: PublicAutomationEvidence['classification'] =
+    classification.status === 'completed'
+      ? {
+          ...classification,
+          processResult: { ...classification.processResult },
+          verdict: { ...classification.verdict },
+        }
+      : classification.status === 'failed'
+        ? { ...classification, processResult: { ...classification.processResult } }
+        : { ...classification }
+  const wayfinder = evidence.wayfinder
+  const publicWayfinder: PublicAutomationEvidence['wayfinder'] =
+    wayfinder?.status === 'finished'
+      ? {
+          ...wayfinder,
+          processResult: { ...wayfinder.processResult },
+          report:
+            wayfinder.report.status === 'received'
+              ? { status: 'received', report: { ...wayfinder.report.report } }
+              : { ...wayfinder.report },
+        }
+      : wayfinder
+        ? { ...wayfinder }
+        : undefined
+  return {
+    target: {
+      project: { ...evidence.target.project },
+      mapId: evidence.target.mapId,
+      ticketId: evidence.target.ticketId,
+    },
+    classification: publicClassification,
+    ...(publicWayfinder ? { wayfinder: publicWayfinder } : {}),
+  }
+}
+
+function publicOverride(control: AutomationOverrideControl): PublicAutomationOverrideControl {
+  return {
+    target: {
+      project: { ...control.target.project },
+      mapId: control.target.mapId,
+      ticketId: control.target.ticketId,
+    },
+    classification: { ...control.classification },
+    wayfinder: { ...control.wayfinder },
+  }
+}
+
 function selectCandidates(source: AutomationSource): Candidate[] {
   const automation = source.configuration.automation
-  if (!automation.enabled || !automation.classificationCommand || !automation.wayfinderCommand) {
+  if (
+    !source.valid ||
+    !automation.enabled ||
+    !automation.classificationCommand ||
+    !automation.wayfinderCommand
+  ) {
     return []
   }
   const projects = new Map(source.projects.map((project) => [projectKey(project.key), project]))
@@ -667,7 +1093,7 @@ function selectCandidates(source: AutomationSource): Candidate[] {
   })
 }
 
-function selectCandidate(project: RegisteredProject | undefined): Candidate | null {
+function selectCandidate(project: AutomationProjectInput | undefined): Candidate | null {
   const map = project?.openMaps[0]
   const ticket = map?.frontier[0]
   if (!project || !map || !ticket) return null
@@ -676,6 +1102,8 @@ function selectCandidate(project: RegisteredProject | undefined): Candidate | nu
 }
 
 function resolveTarget(source: AutomationSource, target: AutomationTarget): CandidateResolution {
+  if (!source.valid)
+    return { ok: false, target, reason: 'Current configuration cannot admit Automation.' }
   const project = source.projects.find((candidate) => sameProject(candidate.key, target.project))
   if (!project) return { ok: false, target, reason: 'Project does not exist.' }
   const map = [...project.openMaps, ...project.closedMaps].find(
@@ -688,39 +1116,42 @@ function resolveTarget(source: AutomationSource, target: AutomationTarget): Cand
 }
 
 function resolveCandidate(
-  project: RegisteredProject,
-  map: WayfinderMap,
-  ticket: Ticket,
+  project: AutomationProjectInput,
+  map: AutomationMapInput,
+  ticket: AutomationTicketInput,
 ): CandidateResolution {
   const target = { project: project.key, mapId: map.id, ticketId: ticket.id }
-  if (project.availability.status !== 'available') {
+  if (!project.available) {
     return { ok: false, target, reason: 'Project is unavailable.' }
   }
   if (project.openMaps[0]?.id !== map.id) {
-    return { ok: false, target, reason: 'Ticket is not on the Project’s active map.' }
+    return { ok: false, target, reason: "Ticket is not on the Project's active map." }
   }
   if (!map.ticketsComplete) {
-    return { ok: false, target, reason: 'The active map’s ticket list is incomplete.' }
+    return { ok: false, target, reason: "The active map's ticket list is incomplete." }
   }
   const ineligibility = ticketIneligibility(map, ticket)
   if (ineligibility) return { ok: false, target, reason: ineligibility }
-  const mapPointer = map.url ?? map.sourcePath
-  const ticketPointer = ticket.url ?? ticket.sourcePath
+  const mapPointer = map.pointer
+  const ticketPointer = ticket.pointer
   if (!mapPointer || !ticketPointer) {
     return { ok: false, target, reason: 'The Integration cannot provide map and ticket pointers.' }
   }
   return {
     ok: true,
     target,
-    candidate: { target, mapPointer, ticketPointer, project, ticket },
+    candidate: { target, mapPointer, ticketPointer, project },
   }
 }
-function ticketIneligibility(map: WayfinderMap, ticket: Ticket): string | null {
+function ticketIneligibility(
+  map: AutomationMapInput,
+  ticket: AutomationTicketInput,
+): string | null {
   if (!ticket.blockersComplete) return 'Ticket blocker data is incomplete.'
   if (ticket.typeEvidence.kind !== 'recognized' || ticket.typeEvidence.value !== 'task') {
     return 'Only task tickets can use Automation.'
   }
-  if (ticket.state === 'closed') return 'Ticket is already decided.'
+  if (ticket.status === 'closed') return 'Ticket is already decided.'
   if (ticket.isBlocked && ticket.isClaimed) return 'Ticket is blocked and claimed.'
   if (ticket.isBlocked) return 'Ticket is blocked.'
   if (ticket.isClaimed) return 'Ticket is already claimed.'
@@ -738,7 +1169,10 @@ function overrideError(message: string, code: SafeError['code'] = 'validation'):
   return { code, message, field: 'target' }
 }
 
-function isEffectivelyEnabled(configuration: RoadmapConfiguration, project: ProjectKey): boolean {
+function isEffectivelyEnabled(
+  configuration: AutomationSource['configuration'],
+  project: ProjectKey,
+): boolean {
   return (
     configuration.automation.enabled &&
     configuration.automation.enabledProjects.some((candidate) => sameProject(candidate, project))

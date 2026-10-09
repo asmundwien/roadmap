@@ -1,7 +1,7 @@
 import type { FetchedMap, RawSubIssue } from '../github/map-query.ts'
 import type {
-  AdapterSlice,
   Completeness,
+  ObservationBatch,
   SourceBlocker,
   SourceMapContent,
   SourceProjectKey,
@@ -23,7 +23,7 @@ interface GitHubMapContext {
 }
 
 /** Constructs private evidence only after the provider has refined a named map response. */
-export function observeGitHubMap(fetched: FetchedMap, context: GitHubMapContext): AdapterSlice {
+export function observeGitHubMap(fetched: FetchedMap, context: GitHubMapContext): ObservationBatch {
   if (
     context.project.integration !== 'github' ||
     fetched.issue.number !== fetched.ref.number ||

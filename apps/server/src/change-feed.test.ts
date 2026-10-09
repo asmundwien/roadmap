@@ -1,6 +1,7 @@
-import type { Snapshot, Ticket, TicketState, WayfinderMap } from '@roadmap/contracts'
+import type { ProjectKey, Snapshot, Ticket, TicketState, WayfinderMap } from '@roadmap/contracts'
 import { describe, expect, it } from 'vitest'
-import { createChangeFeed, diffSnapshots } from './change-feed.ts'
+import { type ChangeEvent, type ChangeFeedInput, createChangeFeed } from './change-feed.ts'
+import { sourceFixture } from './source-test-fixtures.ts'
 
 function ticket(id: string, state: TicketState, overrides: Partial<Ticket> = {}): Ticket {
   return {
@@ -16,7 +17,16 @@ function ticket(id: string, state: TicketState, overrides: Partial<Ticket> = {})
     createdAt: 1,
     closedAt: state === 'closed' ? 2 : undefined,
     assignees: [],
-    blockedBy: [],
+    blockedBy:
+      state === 'blocked'
+        ? [
+            {
+              reference: { kind: 'external', integration: 'github', nameWithOwner: 'a/other' },
+              ticketId: 'blocker',
+              state: 'open',
+            },
+          ]
+        : [],
     blockersComplete: true,
     warnings: [],
     ...overrides,
@@ -67,17 +77,76 @@ function snapshot(maps: WayfinderMap[]): Snapshot {
   }
 }
 
-describe('diffSnapshots', () => {
+function notificationInput(
+  current: Snapshot,
+  baselineProjects: readonly ProjectKey[] = [],
+): ChangeFeedInput {
+  const configuration = {
+    projects: current.projects.flatMap((project) =>
+      project.key.integration === 'github'
+        ? [
+            {
+              ref: { integration: 'github' as const, projectId: project.key.id },
+              connectionId: 'github',
+              locator: { repositoryId: project.key.id, nameWithOwner: project.name },
+            },
+          ]
+        : [],
+    ),
+  }
+  return {
+    attempts: sourceFixture(current.projects, current.capturedAt, configuration).attempts,
+    projects: current.projects.map((project) => ({ key: project.key, name: project.name })),
+    baselineProjects,
+    order: current.projects.flatMap((project) =>
+      [...project.openMaps, ...project.closedMaps].map((map) => ({
+        map: { project: map.project, mapId: map.id },
+        tickets: map.tickets.map((ticket) => ticket.id),
+      })),
+    ),
+  }
+}
+
+function fakeSource() {
+  const listeners = new Set<(current: ChangeFeedInput) => void>()
+  return {
+    onChange(listener: (current: ChangeFeedInput) => void) {
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
+      }
+    },
+    push(current: Snapshot, baselineProjects: readonly ProjectKey[] = []) {
+      this.pushInput(notificationInput(current, baselineProjects))
+    },
+    pushInput(current: ChangeFeedInput) {
+      for (const listener of listeners) listener(current)
+    },
+  }
+}
+
+function compareObservations(previous: Snapshot, next: Snapshot): ChangeEvent[] {
+  const source = fakeSource()
+  const feed = createChangeFeed(source)
+  const events: ChangeEvent[] = []
+  feed.onEvent((batch) => events.push(...batch))
+  source.push(previous)
+  source.push(next)
+  feed.stop()
+  return events
+}
+
+describe('notification comparison', () => {
   it('emits nothing when nothing changed', () => {
     const before = snapshot([wayfinderMap('1', [ticket('2', 'frontier')])])
     const after = snapshot([wayfinderMap('1', [ticket('2', 'frontier')])])
-    expect(diffSnapshots(before, after)).toEqual([])
+    expect(compareObservations(before, after)).toEqual([])
   })
 
   it('emits ticket-claimed when a takeable ticket is claimed', () => {
     const before = snapshot([wayfinderMap('1', [ticket('2', 'frontier')])])
     const after = snapshot([wayfinderMap('1', [ticket('2', 'claimed')])])
-    const events = diffSnapshots(before, after)
+    const events = compareObservations(before, after)
     expect(events).toContainEqual({
       type: 'ticket-claimed',
       ticket: {
@@ -97,14 +166,14 @@ describe('diffSnapshots', () => {
   it('emits ticket-closed when an open ticket closes', () => {
     const before = snapshot([wayfinderMap('1', [ticket('2', 'claimed')])])
     const after = snapshot([wayfinderMap('1', [ticket('2', 'closed')])])
-    const events = diffSnapshots(before, after)
+    const events = compareObservations(before, after)
     expect(events.map((event) => event.type)).toContain('ticket-closed')
   })
 
   it('emits closed, not claimed, when a claim and close land in one diff', () => {
     const before = snapshot([wayfinderMap('1', [ticket('2', 'frontier')])])
     const after = snapshot([wayfinderMap('1', [ticket('2', 'closed', { isClaimed: true })])])
-    const types = diffSnapshots(before, after).map((event) => event.type)
+    const types = compareObservations(before, after).map((event) => event.type)
     expect(types).toContain('ticket-closed')
     expect(types).not.toContain('ticket-claimed')
   })
@@ -112,7 +181,7 @@ describe('diffSnapshots', () => {
   it('emits frontier-changed with entered and left tickets', () => {
     const before = snapshot([wayfinderMap('1', [ticket('2', 'frontier'), ticket('3', 'blocked')])])
     const after = snapshot([wayfinderMap('1', [ticket('2', 'claimed'), ticket('3', 'frontier')])])
-    const events = diffSnapshots(before, after)
+    const events = compareObservations(before, after)
     const frontier = events.find((event) => event.type === 'frontier-changed')
     expect(frontier).toBeDefined()
     if (frontier?.type !== 'frontier-changed') return
@@ -123,7 +192,7 @@ describe('diffSnapshots', () => {
   it('emits map-appeared for a new map, without ticket events for its tickets', () => {
     const before = snapshot([])
     const after = snapshot([wayfinderMap('1', [ticket('2', 'closed'), ticket('3', 'frontier')])])
-    const events = diffSnapshots(before, after)
+    const events = compareObservations(before, after)
     expect(events).toEqual([
       {
         type: 'map-appeared',
@@ -142,27 +211,12 @@ describe('diffSnapshots', () => {
   it('stays silent about tickets on a map that vanished', () => {
     const before = snapshot([wayfinderMap('1', [ticket('2', 'frontier')])])
     const after = snapshot([])
-    expect(diffSnapshots(before, after)).toEqual([])
+    expect(compareObservations(before, after)).toEqual([])
   })
 })
 
 describe('createChangeFeed', () => {
-  function fakeSource() {
-    const listeners = new Set<(current: Snapshot) => void>()
-    return {
-      onChange(listener: (current: Snapshot) => void) {
-        listeners.add(listener)
-        return () => {
-          listeners.delete(listener)
-        }
-      },
-      push(current: Snapshot) {
-        for (const listener of listeners) listener(current)
-      },
-    }
-  }
-
-  it('treats the first snapshot as the baseline — no events fire from it', () => {
+  it('treats the first committed observation as a quiet baseline', () => {
     const source = fakeSource()
     const feed = createChangeFeed(source)
     const batches: unknown[] = []
@@ -171,7 +225,7 @@ describe('createChangeFeed', () => {
     expect(batches).toEqual([])
   })
 
-  it('diffs each later snapshot against the previous one', () => {
+  it('compares each later committed observation with known notification evidence', () => {
     const source = fakeSource()
     const feed = createChangeFeed(source)
     const types: string[] = []
@@ -184,19 +238,69 @@ describe('createChangeFeed', () => {
     expect(types).toEqual(['ticket-claimed', 'frontier-changed', 'ticket-closed'])
   })
 
-  it('resets topology baselines without emitting false Wayfinder activity', () => {
+  it('establishes a replacement baseline without losing unaffected project activity', () => {
     const source = fakeSource()
     const feed = createChangeFeed(source)
-    const types: string[] = []
+    const batches: { type: string; projectId: string }[][] = []
     feed.onEvent((events) => {
-      for (const event of events) types.push(event.type)
+      batches.push(
+        events.map((event) => ({
+          type: event.type,
+          projectId: 'ticket' in event ? event.ticket.project.id : event.map.project.id,
+        })),
+      )
     })
-    source.push(snapshot([wayfinderMap('1', [ticket('2', 'frontier')])]))
+    function withUnaffectedProject(current: Snapshot, state: TicketState): Snapshot {
+      return {
+        ...current,
+        projects: [
+          ...current.projects,
+          {
+            key: { integration: 'local', id: 'unaffected' },
+            name: 'Unaffected Local project',
+            openMaps: [
+              {
+                ...wayfinderMap('5', [
+                  ticket('6', state, {
+                    url: undefined,
+                    sourcePath: '/tmp/unaffected/tickets/6.md',
+                  }),
+                ]),
+                project: { integration: 'local', id: 'unaffected' },
+                url: undefined,
+                sourcePath: '/tmp/unaffected/5.md',
+              },
+            ],
+            closedMaps: [],
+            warnings: [],
+          },
+        ],
+      }
+    }
+    source.push(
+      withUnaffectedProject(snapshot([wayfinderMap('1', [ticket('2', 'frontier')])]), 'frontier'),
+    )
 
-    feed.reset(snapshot([wayfinderMap('3', [ticket('4', 'frontier')])]))
-    source.push(snapshot([wayfinderMap('3', [ticket('4', 'claimed')])]))
+    const replacement = withUnaffectedProject(
+      snapshot([wayfinderMap('3', [ticket('4', 'frontier')])]),
+      'claimed',
+    )
+    expect(batches).toEqual([])
+    source.push(replacement, [{ integration: 'github', id: 'a/roadmap' }])
+    source.push(
+      withUnaffectedProject(snapshot([wayfinderMap('3', [ticket('4', 'claimed')])]), 'claimed'),
+    )
 
-    expect(types).toEqual(['ticket-claimed', 'frontier-changed'])
+    expect(batches).toEqual([
+      [
+        { type: 'ticket-claimed', projectId: 'unaffected' },
+        { type: 'frontier-changed', projectId: 'unaffected' },
+      ],
+      [
+        { type: 'ticket-claimed', projectId: 'a/roadmap' },
+        { type: 'frontier-changed', projectId: 'a/roadmap' },
+      ],
+    ])
   })
 
   it('skips listeners entirely when a change produced no events', () => {
@@ -210,5 +314,229 @@ describe('createChangeFeed', () => {
     source.push(same)
     source.push(same)
     expect(calls).toBe(0)
+  })
+
+  it('establishes a quiet recovery baseline after the first source attempt failed', () => {
+    const source = fakeSource()
+    const feed = createChangeFeed(source)
+    const events: ChangeEvent[] = []
+    feed.onEvent((batch) => events.push(...batch))
+    const current = snapshot([wayfinderMap('1', [ticket('2', 'frontier')])])
+    const recovered = notificationInput(current)
+    source.pushInput({
+      ...recovered,
+      order: [],
+      attempts: recovered.attempts.map((attempt) => ({
+        kind: 'failed',
+        scope: attempt.scope,
+        attemptedAt: 2,
+        provenance: attempt.provenance,
+        failure: { kind: 'transient', cause: 'network' },
+      })),
+    })
+    source.push(current)
+    expect(events).toEqual([])
+    source.push(snapshot([wayfinderMap('1', [ticket('2', 'claimed')])]))
+    expect(events.map((event) => event.type)).toEqual(['ticket-claimed', 'frontier-changed'])
+  })
+
+  it('keeps a failed affected-source replacement baseline unknown until readable recovery', () => {
+    const source = fakeSource()
+    const feed = createChangeFeed(source)
+    const events: ChangeEvent[] = []
+    feed.onEvent((batch) => events.push(...batch))
+    source.push(snapshot([wayfinderMap('1', [ticket('2', 'frontier')])]))
+    const replacement = snapshot([wayfinderMap('3', [ticket('4', 'frontier')])])
+    const input = notificationInput(replacement, [{ integration: 'github', id: 'a/roadmap' }])
+    source.pushInput({
+      ...input,
+      order: [],
+      attempts: input.attempts.map((attempt) => ({
+        kind: 'failed',
+        scope: attempt.scope,
+        attemptedAt: 2,
+        provenance: attempt.provenance,
+        failure: { kind: 'transient', cause: 'network' },
+      })),
+    })
+    source.push(replacement)
+    expect(events).toEqual([])
+    source.push(snapshot([wayfinderMap('3', [ticket('4', 'claimed')])]))
+    expect(events.map((event) => event.type)).toEqual(['ticket-claimed', 'frontier-changed'])
+  })
+
+  it('does not treat an incomplete initial map membership as a complete empty baseline', () => {
+    const source = fakeSource()
+    const feed = createChangeFeed(source)
+    const events: ChangeEvent[] = []
+    feed.onEvent((batch) => events.push(...batch))
+    const baseline = notificationInput(snapshot([]))
+    source.pushInput({
+      ...baseline,
+      attempts: baseline.attempts.map((attempt) =>
+        attempt.kind === 'observed' && attempt.scope.kind === 'maps-membership'
+          ? { ...attempt, completeness: { kind: 'incomplete', reason: 'pagination' } }
+          : attempt,
+      ),
+    })
+    source.push(snapshot([wayfinderMap('1', [ticket('2', 'frontier')])]))
+    expect(events).toEqual([])
+    source.push(snapshot([wayfinderMap('1', [ticket('2', 'frontier')]), wayfinderMap('3', [])]))
+    expect(events.map((event) => event.type)).toEqual(['map-appeared'])
+  })
+
+  it('keeps a known frontier through incomplete blocker evidence and identical recovery', () => {
+    const source = fakeSource()
+    const feed = createChangeFeed(source)
+    const events: ChangeEvent[] = []
+    feed.onEvent((batch) => events.push(...batch))
+    const current = snapshot([wayfinderMap('1', [ticket('2', 'frontier')])])
+    source.push(current)
+    const incomplete = notificationInput(
+      snapshot([
+        wayfinderMap('1', [
+          ticket('2', 'blocked', {
+            blockedBy: [],
+            blockersComplete: false,
+          }),
+        ]),
+      ]),
+    )
+    source.pushInput({
+      ...incomplete,
+      attempts: incomplete.attempts.map((attempt) =>
+        attempt.kind === 'observed' && attempt.scope.kind === 'ticket'
+          ? { ...attempt, completeness: { kind: 'incomplete', reason: 'unreadable' } }
+          : attempt,
+      ),
+    })
+    source.push(current)
+    expect(events).toEqual([])
+  })
+
+  it('uses positive closure evidence even when ticket blockers are incomplete', () => {
+    const source = fakeSource()
+    const feed = createChangeFeed(source)
+    const events: ChangeEvent[] = []
+    feed.onEvent((batch) => events.push(...batch))
+    source.push(snapshot([wayfinderMap('1', [ticket('2', 'frontier')])]))
+    const closed = notificationInput(
+      snapshot([
+        wayfinderMap('1', [
+          ticket('2', 'closed', {
+            blockersComplete: false,
+            isClaimed: true,
+          }),
+        ]),
+      ]),
+    )
+    source.pushInput({
+      ...closed,
+      attempts: closed.attempts.map((attempt) =>
+        attempt.kind === 'observed' && attempt.scope.kind === 'ticket'
+          ? { ...attempt, completeness: { kind: 'incomplete', reason: 'unreadable' } }
+          : attempt,
+      ),
+    })
+    expect(events.map((event) => event.type)).toEqual(['ticket-closed', 'frontier-changed'])
+  })
+
+  it.each(['failed', 'incomplete', 'complete'] as const)(
+    'uses %s ticket membership omission without inventing absence',
+    (kind) => {
+      const source = fakeSource()
+      const feed = createChangeFeed(source)
+      const events: ChangeEvent[] = []
+      feed.onEvent((batch) => events.push(...batch))
+      const current = snapshot([wayfinderMap('1', [ticket('2', 'frontier')])])
+      source.push(current)
+      const omitted = notificationInput(snapshot([wayfinderMap('1', [])]))
+      source.pushInput({
+        ...omitted,
+        attempts: omitted.attempts.map((attempt) => {
+          if (attempt.kind !== 'observed' || attempt.scope.kind !== 'tickets-membership')
+            return attempt
+          if (kind === 'failed')
+            return {
+              kind: 'failed',
+              scope: attempt.scope,
+              attemptedAt: 2,
+              provenance: attempt.provenance,
+              failure: { kind: 'transient', cause: 'network' },
+            }
+          return {
+            ...attempt,
+            completeness:
+              kind === 'complete'
+                ? { kind: 'complete' }
+                : { kind: 'incomplete', reason: 'pagination' },
+          }
+        }),
+      })
+      source.push(current)
+      if (kind !== 'complete') {
+        expect(events).toEqual([])
+        return
+      }
+      expect(events.map((event) => event.type)).toEqual(['frontier-changed', 'frontier-changed'])
+      const [removed, restored] = events
+      if (removed?.type !== 'frontier-changed' || restored?.type !== 'frontier-changed')
+        throw new Error('Expected scoped frontier changes')
+      expect(removed.left.map((entry) => entry.id)).toEqual(['2'])
+      expect(removed.entered).toEqual([])
+      expect(restored.entered.map((entry) => entry.id)).toEqual(['2'])
+      expect(restored.left).toEqual([])
+    },
+  )
+
+  it('batches activity in presentation order, not source attempt order', () => {
+    const source = fakeSource()
+    const feed = createChangeFeed(source)
+    const batches: ChangeEvent[][] = []
+    feed.onEvent((batch) => batches.push(batch))
+    source.push(
+      snapshot([
+        wayfinderMap('1', [ticket('2', 'frontier')]),
+        wayfinderMap('3', [ticket('4', 'frontier')]),
+      ]),
+    )
+    const next = notificationInput(
+      snapshot([
+        wayfinderMap('5', []),
+        wayfinderMap('3', [ticket('4', 'claimed')]),
+        wayfinderMap('1', [ticket('2', 'claimed')]),
+      ]),
+    )
+    source.pushInput({ ...next, attempts: [...next.attempts].reverse() })
+    expect(batches).toHaveLength(1)
+    expect(
+      batches[0]?.map((event) => ({
+        type: event.type,
+        mapId: 'ticket' in event ? event.ticket.mapId : event.map.id,
+      })),
+    ).toEqual([
+      { type: 'map-appeared', mapId: '5' },
+      { type: 'ticket-claimed', mapId: '3' },
+      { type: 'ticket-claimed', mapId: '1' },
+      { type: 'frontier-changed', mapId: '3' },
+      { type: 'frontier-changed', mapId: '1' },
+    ])
+  })
+
+  it('unsubscribes individual listeners and stops consuming source callbacks', () => {
+    const source = fakeSource()
+    const feed = createChangeFeed(source)
+    const removed: ChangeEvent[][] = []
+    const active: ChangeEvent[][] = []
+    const unsubscribe = feed.onEvent((batch) => removed.push(batch))
+    feed.onEvent((batch) => active.push(batch))
+    source.push(snapshot([wayfinderMap('1', [ticket('2', 'frontier')])]))
+    unsubscribe()
+    source.push(snapshot([wayfinderMap('1', [ticket('2', 'claimed')])]))
+    feed.stop()
+    source.push(snapshot([wayfinderMap('1', [ticket('2', 'closed')])]))
+    expect(removed).toEqual([])
+    expect(active).toHaveLength(1)
+    expect(active[0]?.map((event) => event.type)).toEqual(['ticket-claimed', 'frontier-changed'])
   })
 })

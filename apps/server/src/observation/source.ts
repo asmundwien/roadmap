@@ -1,6 +1,5 @@
 import type { Integration, ProjectKey } from '@roadmap/contracts'
 
-export type SourceIntegration = Integration
 export type SourceProjectKey = ProjectKey
 export interface SourceMapKey {
   readonly project: SourceProjectKey
@@ -46,8 +45,16 @@ export type SourceFailure =
     }
   | { readonly kind: 'transient'; readonly cause: 'network' | 'rate-limit' | 'server' }
   | { readonly kind: 'execution'; readonly cause: 'provider' }
+  | { readonly kind: 'access-unavailable' }
   | { readonly kind: 'read'; readonly cause: 'response-read' | 'malformed-response' }
-  | { readonly kind: 'authorization'; readonly proof: 'http-401' | 'rejected-credential' }
+  | {
+      readonly kind: 'authorization'
+      readonly proof:
+        | 'http-401'
+        | 'rejected-credential'
+        | 'authorization-required'
+        | 'account-mismatch'
+    }
   | {
       readonly kind: 'access-ambiguous'
       readonly evidence: 'http-403' | 'http-404' | 'null-resource' | 'missing-alias'
@@ -247,20 +254,37 @@ export interface SourceTicketContent {
   readonly warnings: readonly string[]
 }
 
-export interface AdapterSlice {
+/** Scoped reader output. Observation times belong to the attempts, not this batch. */
+export interface ObservationBatch {
   readonly attempts: readonly ObservationAttempt[]
 }
-export interface AdapterHost {
-  update(slice: AdapterSlice): void
+
+/**
+ * Connection health is independent of resource completeness and credential usability.
+ * observedAt is an actual successful scoped read selected by the source owner, or its
+ * retained last successful time. No successful evidence means no observation time.
+ */
+export type SourceObservationHealth =
+  | { readonly status: 'available'; readonly observedAt?: number }
+  | { readonly status: 'degraded'; readonly cause: string; readonly observedAt: number }
+  | {
+      readonly status: 'authorization-required'
+      readonly cause: string
+      readonly observedAt?: number
+    }
+  | { readonly status: 'unavailable'; readonly cause: string; readonly observedAt?: number }
+
+export interface SourceContribution extends ObservationBatch {
+  readonly project: SourceProjectKey
+  readonly health: SourceObservationHealth
 }
-export interface WayfinderAdapter {
-  readonly type: SourceIntegration
-  start(host: AdapterHost): void | Promise<void>
-  stop(): void | Promise<void>
-}
-export interface SourceSnapshot {
-  readonly capturedAt: number
-  readonly attempts: readonly ObservationAttempt[]
+
+export interface SourceObserver {
+  /** Starts supervision and resolves after an honest scoped baseline attempt. */
+  observe(): Promise<SourceContribution>
+  subscribe(listener: (contribution: SourceContribution) => void): () => void
+  refresh(): Promise<SourceContribution>
+  stop(): Promise<void>
 }
 
 type ObservedAttempt = Extract<ObservationAttempt, { kind: 'observed' }>
@@ -307,6 +331,82 @@ export function absentAttempt(attempt: AbsentAttempt): AbsentAttempt {
 
 export function refineObservationAttempt(input: unknown): ObservationAttempt | null {
   return isObservationAttempt(input) ? input : null
+}
+
+/** previous must be this source owner's last accepted contribution, never a pending source. */
+export function refineSourceContribution(
+  input: unknown,
+  previous?: SourceContribution | null,
+): SourceContribution | null {
+  return isSourceContribution(input, previous) ? input : null
+}
+
+function isSourceContribution(
+  value: unknown,
+  previous?: SourceContribution | null,
+): value is SourceContribution {
+  if (
+    !record(value) ||
+    !onlyKeys(value, ['project', 'attempts', 'health']) ||
+    !projectIdentity(value.project) ||
+    !Array.isArray(value.attempts) ||
+    !isObservationHealth(value.health)
+  )
+    return false
+  const scopes = new Set<string>()
+  let hasProjectAttempt = false
+  const observedAt = value.health.observedAt
+  let hasSuccessfulTime = observedAt === undefined
+  if (previous && sameProject(previous.project, value.project)) {
+    hasSuccessfulTime ||=
+      previous.health.observedAt === observedAt ||
+      previous.attempts.some(
+        (attempt) => attempt.kind !== 'failed' && attempt.observedAt === observedAt,
+      )
+  }
+  for (const attempt of value.attempts) {
+    if (
+      !isObservationAttempt(attempt) ||
+      !sameProject(scopeProject(attempt.scope), value.project)
+    ) {
+      return false
+    }
+    const key =
+      attempt.kind === 'failed' &&
+      attempt.scope.kind === 'tickets-membership' &&
+      attempt.provenance.integration === 'local' &&
+      attempt.provenance.operation === 'read'
+        ? JSON.stringify([sourceScopeKey(attempt.scope), attempt.provenance.path])
+        : sourceScopeKey(attempt.scope)
+    if (scopes.has(key)) return false
+    scopes.add(key)
+    if (attempt.scope.kind === 'project') hasProjectAttempt = true
+    if (attempt.kind !== 'failed' && attempt.observedAt === observedAt) hasSuccessfulTime = true
+  }
+  return hasProjectAttempt && hasSuccessfulTime
+}
+
+function isObservationHealth(value: unknown): value is SourceObservationHealth {
+  if (!record(value)) return false
+  switch (value.status) {
+    case 'available':
+      return onlyKeys(value, ['status', 'observedAt']) && optionalTime(value.observedAt)
+    case 'degraded':
+      return (
+        onlyKeys(value, ['status', 'cause', 'observedAt']) &&
+        text(value.cause) &&
+        finite(value.observedAt)
+      )
+    case 'authorization-required':
+    case 'unavailable':
+      return (
+        onlyKeys(value, ['status', 'cause', 'observedAt']) &&
+        text(value.cause) &&
+        optionalTime(value.observedAt)
+      )
+    default:
+      return false
+  }
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -458,7 +558,10 @@ function isFailure(value: unknown): value is SourceFailure {
     case 'authorization':
       return (
         onlyKeys(value, ['kind', 'proof']) &&
-        (value.proof === 'http-401' || value.proof === 'rejected-credential')
+        (value.proof === 'http-401' ||
+          value.proof === 'rejected-credential' ||
+          value.proof === 'authorization-required' ||
+          value.proof === 'account-mismatch')
       )
     case 'access-ambiguous':
       return (
@@ -468,6 +571,7 @@ function isFailure(value: unknown): value is SourceFailure {
           value.evidence === 'null-resource' ||
           value.evidence === 'missing-alias')
       )
+    case 'access-unavailable':
     case 'identity-mismatch':
       return onlyKeys(value, ['kind'])
     default:
@@ -501,7 +605,7 @@ function isDestination(value: unknown): value is SourceDestination {
   )
 }
 
-function isSource(value: unknown, integration: SourceIntegration): boolean {
+function isSource(value: unknown, integration: Integration): boolean {
   return (
     record(value) &&
     (integration === 'local'
@@ -591,7 +695,7 @@ function isTypeEvidence(value: unknown): value is SourceTicketTypeEvidence {
   }
 }
 
-function isBlocker(value: unknown, integration: SourceIntegration): value is SourceBlocker {
+function isBlocker(value: unknown, integration: Integration): value is SourceBlocker {
   if (
     !record(value) ||
     !onlyKeys(value, ['reference', 'displayId', 'title', 'url', 'state', 'provenance']) ||
