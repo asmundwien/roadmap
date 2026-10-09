@@ -25,8 +25,14 @@ import type {
   SourceMapContent,
   SourceTicketContent,
 } from '../observation/source.ts'
-import type { ProjectAdmissionRecord, ProjectConfigurationIntent } from '../projects/registry.ts'
 import type {
+  ConfiguredConnection,
+  ProjectAdmissionRecord,
+  ProjectConfiguration,
+  ProjectConfigurationIntent,
+} from '../projects/registry.ts'
+import type {
+  CatalogMap,
   MapResourceResult as CatalogMapResult,
   CatalogProject,
   ProjectResourceResult as CatalogProjectResult,
@@ -41,13 +47,49 @@ export interface PublicSourceProjection {
   projects: RegisteredProject[]
 }
 
-/** Translates one committed catalog without retaining or reconstructing source facts. */
-export function projectResources(snapshot: ResourceCatalogSnapshot): PublicSourceProjection {
-  const registrations = snapshot.projects.map((project) =>
-    projectConfiguredRegistration(project.intent),
-  )
-  const projects = snapshot.projects.map((project, index): RegisteredProject => {
-    const registration = registrations[index] ?? projectConfiguredRegistration(project.intent)
+export function projectResourceCounts(snapshot: ResourceCatalogSnapshot | null): {
+  projects: number | null
+  maps: number | null
+  unavailable: number | null
+  absent: number | null
+} {
+  if (!snapshot) return { projects: null, maps: null, unavailable: null, absent: null }
+  let maps: number | null = 0
+  let unavailable = 0
+  let absent = 0
+  for (const project of snapshot.projects) {
+    if (project.resource.kind === 'proven-absent') absent += 1
+    else if (
+      project.resource.kind === 'retained-unavailable' ||
+      (project.resource.kind === 'never-observed' && project.resource.current !== null)
+    )
+      unavailable += 1
+    if (project.mapsMembership.kind !== 'current-complete') maps = null
+    else if (maps !== null) maps += project.mapsMembership.observation.value.members.length
+  }
+  return { projects: snapshot.projects.length, maps, unavailable, absent }
+}
+
+/** Projects persisted intent against real source evidence, without activating source owners. */
+export function projectResources(
+  snapshot: ResourceCatalogSnapshot,
+  configuration: ProjectConfiguration = snapshot.committed.registry,
+  sourceLifetimeOwned = true,
+): PublicSourceProjection {
+  const existing =
+    configuration === snapshot.committed.registry
+      ? null
+      : new Map(snapshot.projects.map((project) => [projectKey(project.key), project]))
+  const registrations = configuration.projects.map(projectConfiguredRegistration)
+  const projects = configuration.projects.map((intent, index): RegisteredProject => {
+    const registration = registrations[index] ?? projectConfiguredRegistration(intent)
+    const prior = existing ? existing.get(projectKey(registration.key)) : snapshot.projects[index]
+    const project = prior
+      ? !existing ||
+        sameSourceIntent(prior.intent, intent, snapshot.committed.registry, configuration)
+        ? prior
+        : withoutCurrentSource(prior)
+      : unobservedProject(intent)
     const admission = snapshot.committed.registry.admissions.find((record) =>
       sameProject(projectRefKey(record.intent), project.key),
     )
@@ -71,11 +113,16 @@ export function projectResources(snapshot: ResourceCatalogSnapshot): PublicSourc
         closedMapIds: [...project.displayOrder.closedMapIds],
       },
       activeMap: projectActiveMap(project.activeMap),
-      managementWarnings:
-        admission?.workspace.status === 'unavailable'
+      managementWarnings: !sourceLifetimeOwned
+        ? ['Roadmap is not running; Workspace admission is unavailable.']
+        : admission?.workspace.status === 'unavailable'
           ? [`Workspace unavailable: ${admission.workspace.error.message}`]
           : [],
-      actions: projectActions(registration, admission, known?.value.source),
+      actions: projectActions(
+        registration,
+        sourceLifetimeOwned ? admission : undefined,
+        known?.value.source,
+      ),
     }
   })
   return {
@@ -83,6 +130,155 @@ export function projectResources(snapshot: ResourceCatalogSnapshot): PublicSourc
     registrations,
     projects,
   }
+}
+
+function unobservedProject(intent: ProjectConfigurationIntent): CatalogProject {
+  const key = projectRefKey(intent)
+  return {
+    key,
+    intent,
+    resource: { kind: 'never-observed', scope: { kind: 'project', project: key }, current: null },
+    mapsMembership: { kind: 'never-observed', current: null },
+    maps: [],
+    displayOrder: { openMapIds: [], closedMapIds: [] },
+    activeMap: {
+      kind: 'uncertain',
+      lastKnown: { kind: 'none' },
+      reason: 'never-observed',
+      cause: 'Active map has never been established.',
+    },
+  }
+}
+
+function sameSourceIntent(
+  a: ProjectConfigurationIntent,
+  b: ProjectConfigurationIntent,
+  previous: ProjectConfiguration,
+  next: ProjectConfiguration,
+): boolean {
+  if (a.connectionId !== b.connectionId) return false
+  if ('locator' in a && 'locator' in b) {
+    const oldConnection = previous.connections.find(
+      (connection) => connection.id === a.connectionId,
+    )
+    const newConnection = next.connections.find((connection) => connection.id === b.connectionId)
+    return (
+      a.locator.repositoryId === b.locator.repositoryId &&
+      oldConnection?.integration === 'github' &&
+      newConnection?.integration === 'github' &&
+      oldConnection.githubIdentity.id === newConnection.githubIdentity.id
+    )
+  }
+  return !('locator' in a) && !('locator' in b) && a.workspace.path === b.workspace.path
+}
+
+/** A saved binding change has no new read evidence and does not mutate catalog authority. */
+function withoutCurrentSource(project: CatalogProject): CatalogProject {
+  return {
+    ...project,
+    resource: withoutCurrentResource(project.resource),
+    mapsMembership: withoutCurrentMembership(project.mapsMembership),
+    maps: project.maps.map((map) => ({
+      ...map,
+      resource: withoutCurrentResource(map.resource),
+      ticketsMembership: withoutCurrentMembership(map.ticketsMembership),
+      tickets: map.tickets.map((ticket) => ({
+        ...ticket,
+        resource: withoutCurrentResource(ticket.resource),
+      })),
+    })),
+    activeMap: {
+      kind: 'uncertain',
+      lastKnown:
+        project.activeMap.kind === 'uncertain' ? project.activeMap.lastKnown : project.activeMap,
+      reason: 'project-unavailable',
+      cause: 'Project source is currently unavailable.',
+    },
+  }
+}
+
+type CatalogResourceResult = CatalogProjectResult | CatalogMapResult | CatalogTicketResult
+type CatalogMembershipResult = CatalogProject['mapsMembership'] | CatalogMap['ticketsMembership']
+
+function withoutCurrentResource(resource: CatalogProjectResult): CatalogProjectResult
+function withoutCurrentResource(resource: CatalogMapResult): CatalogMapResult
+function withoutCurrentResource(resource: CatalogTicketResult): CatalogTicketResult
+function withoutCurrentResource(resource: CatalogResourceResult): CatalogResourceResult {
+  const scope =
+    resource.kind === 'never-observed'
+      ? resource.scope
+      : resource.kind === 'current-readable'
+        ? resource.observation.scope
+        : resource.kind === 'retained-unavailable'
+          ? resource.lastSuccessful.scope
+          : resource.absence.scope
+  const unavailable: CatalogUnavailable = {
+    kind: 'no-current-evidence',
+    scope,
+    readSequence: null,
+    cause: 'No current source observation is available.',
+  }
+  const lastSuccessful =
+    resource.kind === 'current-readable'
+      ? resource.observation
+      : resource.kind === 'retained-unavailable'
+        ? resource.lastSuccessful
+        : resource.kind === 'proven-absent' && resource.trace.kind === 'last-successful-trace'
+          ? resource.trace.lastSuccessful
+          : null
+  if (lastSuccessful) {
+    if (isObservationScope(lastSuccessful, 'project'))
+      return { kind: 'retained-unavailable', lastSuccessful, unavailable }
+    if (isObservationScope(lastSuccessful, 'map'))
+      return { kind: 'retained-unavailable', lastSuccessful, unavailable }
+    if (isObservationScope(lastSuccessful, 'ticket'))
+      return { kind: 'retained-unavailable', lastSuccessful, unavailable }
+    const exhaustive: never = lastSuccessful
+    return exhaustive
+  }
+  switch (scope.kind) {
+    case 'project':
+      return { kind: 'never-observed', scope, current: unavailable }
+    case 'map':
+      return { kind: 'never-observed', scope, current: unavailable }
+    case 'ticket':
+      return { kind: 'never-observed', scope, current: unavailable }
+  }
+}
+
+function withoutCurrentMembership(
+  membership: CatalogProject['mapsMembership'],
+): CatalogProject['mapsMembership']
+function withoutCurrentMembership(
+  membership: CatalogMap['ticketsMembership'],
+): CatalogMap['ticketsMembership']
+function withoutCurrentMembership(membership: CatalogMembershipResult): CatalogMembershipResult {
+  const lastComplete =
+    membership.kind === 'current-complete'
+      ? membership.observation
+      : membership.kind === 'current-incomplete' || membership.kind === 'unavailable'
+        ? membership.lastComplete
+        : null
+  if (!lastComplete) return { kind: 'never-observed', current: null }
+  const unavailable: CatalogUnavailable = {
+    kind: 'no-current-evidence',
+    scope: lastComplete.scope,
+    readSequence: null,
+    cause: 'No current source observation is available.',
+  }
+  if (isObservationScope(lastComplete, 'maps-membership'))
+    return { kind: 'unavailable', lastComplete, unavailable }
+  if (isObservationScope(lastComplete, 'tickets-membership'))
+    return { kind: 'unavailable', lastComplete, unavailable }
+  const exhaustive: never = lastComplete
+  return exhaustive
+}
+
+function isObservationScope<A extends Observed, K extends A['scope']['kind']>(
+  observation: A,
+  kind: K,
+): observation is Extract<A, { scope: { kind: K } }> {
+  return observation.scope.kind === kind
 }
 
 function projectProjectResult(resource: CatalogProjectResult): ProjectResourceResult {
@@ -467,6 +663,8 @@ function projectMapValue(map: SourceMapContent): MapResourceValue {
 
 export function projectApplicationState(input: {
   committed: CommittedObservation
+  intent: ProjectConfiguration
+  retainedConnections: readonly ApplicationState['connections'][number][] | null
   source: PublicSourceProjection
   serverEpoch: string
   stateSequence: number
@@ -478,11 +676,16 @@ export function projectApplicationState(input: {
   return {
     serverEpoch: input.serverEpoch,
     stateSequence: input.stateSequence,
-    configurationVersion: input.committed.registry.configurationVersion,
+    configurationVersion: input.intent.configurationVersion,
     supportedIntegrations: [...input.supportedIntegrations],
-    connections: input.committed.registry.connections.map((connection) => ({
+    connections: input.intent.connections.map((connection) => ({
       ...connection,
-      availability: connectionHealth(input.committed, connection.id, connection.integration),
+      availability:
+        input.retainedConnections === null
+          ? connectionHealth(input.committed, connection)
+          : (input.retainedConnections.find((retained) =>
+              sameConnectionAccount(retained, connection),
+            )?.availability ?? unobservedConnectionAvailability()),
     })),
     registrations: input.source.registrations,
     projects: input.source.projects,
@@ -492,11 +695,34 @@ export function projectApplicationState(input: {
     roadmap: input.source.roadmap,
   }
 }
+type ConnectionIdentity = Pick<
+  ApplicationState['connections'][number],
+  'id' | 'integration' | 'githubIdentity'
+>
+
+function sameConnectionAccount(a: ConnectionIdentity, b: ConnectionIdentity): boolean {
+  return (
+    a.id === b.id &&
+    a.integration === b.integration &&
+    (a.integration === 'local' ||
+      (a.githubIdentity !== undefined && a.githubIdentity.id === b.githubIdentity?.id))
+  )
+}
+
+function unobservedConnectionAvailability(): ConnectionAvailability {
+  return {
+    status: 'unavailable',
+    cause: 'No current evidence is available for this configured Connection.',
+  }
+}
+
 function connectionHealth(
   committed: CommittedObservation,
-  id: string,
-  integration: string,
+  connection: ConfiguredConnection,
 ): ConnectionAvailability {
+  if (!committed.registry.connections.some((prior) => sameConnectionAccount(prior, connection)))
+    return unobservedConnectionAvailability()
+  const { id, integration } = connection
   const usability = committed.authorizationUsability.get(id)
   const projectIds = new Set(
     committed.registry.projects

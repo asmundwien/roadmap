@@ -1,6 +1,5 @@
 import { createServer } from 'node:http'
 import { fileURLToPath } from 'node:url'
-import type { ApplicationState } from '@roadmap/contracts'
 import { createRoadmapApplication } from './application/application.ts'
 import { createMacOsCredentialVault } from './application/credential-vault.ts'
 import { createApplicationOperations } from './application/operations.ts'
@@ -15,24 +14,7 @@ import { createGitHubObserverPool } from './github/observer.ts'
 import { createLocalProjectAdmission } from './local/admission.ts'
 import { createLocalObserver } from './local/observer.ts'
 import { createNotifier } from './notify.ts'
-import { createRoadmapTransport, type RoadmapTransport } from './transport.ts'
-
-function resourceCounts(state: ApplicationState) {
-  let maps: number | null = 0
-  let unavailable = 0
-  let absent = 0
-  for (const project of state.projects) {
-    if (project.mapsMembership.kind !== 'current-complete') maps = null
-    else if (maps !== null) maps += project.mapsMembership.observation.value.members.length
-    if (
-      project.resource.kind === 'never-observed' ||
-      project.resource.kind === 'retained-unavailable'
-    )
-      unavailable += 1
-    else if (project.resource.kind === 'proven-absent') absent += 1
-  }
-  return { projects: state.projects.length, maps, unavailable, absent }
-}
+import { createRoadmapTransport } from './transport.ts'
 
 async function main(): Promise<void> {
   loadRootEnv()
@@ -40,7 +22,8 @@ async function main(): Promise<void> {
   const result = readServerConfig(process.env)
   if (!result.ok) {
     console.error(result.message)
-    process.exit(1)
+    process.exitCode = 1
+    return
   }
   const { config, warnings } = result
   for (const warning of warnings) console.warn(warning)
@@ -87,63 +70,104 @@ async function main(): Promise<void> {
     onChangeEvents: createNotifier(),
   })
 
-  let transport: RoadmapTransport | null = null
   const server = createServer((request, response) => {
-    if (transport?.handle(request, response)) return
-    if (request.method === 'GET' && (request.url === '/' || request.url === '/health')) {
-      const state = application.current()
-      const diagnostics = githubObservers.diagnostics()
-      response.writeHead(200, { 'Content-Type': 'application/json' })
-      response.end(
-        JSON.stringify({
-          capturedAt: state.roadmap.capturedAt,
-          ...resourceCounts(state),
-          rateLimit: diagnostics.rateLimit,
-          githubConnections: state.connections.filter(
-            (connection) => connection.integration === 'github',
-          ).length,
-          clients: transport?.clientCount() ?? 0,
-        }),
-      )
-      return
-    }
+    if (transport.handle(request, response)) return
     response.writeHead(404, { 'Content-Type': 'text/plain' })
     response.end('not found')
   })
 
-  transport = createRoadmapTransport({
+  const transport = createRoadmapTransport({
     server,
     application,
     allowedOrigin: config.allowedOrigin,
   })
 
-  application.subscribe((state) => {
-    const counts = resourceCounts(state)
+  const unsubscribe = application.subscribe((state) => {
+    const counts = application.diagnostics()
     console.info(
-      `state ${state.stateSequence}: ${counts.projects} registered projects, ` +
-        `${counts.maps ?? 'unknown'} current maps, ${counts.unavailable} unavailable projects, ` +
-        `${counts.absent} absent projects, ${transport?.clientCount() ?? 0} clients`,
+      `state ${state.stateSequence}: ${counts.projects ?? 'unknown'} registered projects, ` +
+        `${counts.maps ?? 'unknown'} current maps, ${counts.unavailable ?? 'unknown'} unavailable projects, ` +
+        `${counts.absent ?? 'unknown'} absent projects, ${transport.clientCount()} clients`,
     )
   })
 
-  await new Promise<void>((resolve) => server.listen(config.port, '127.0.0.1', resolve))
-  await application.start()
-  console.info(
-    `listening on http://127.0.0.1:${config.port} ` +
-      `(operations: /api/query + /api/command, state: /ws)`,
-  )
-
-  let shuttingDown = false
-  const shutdown = (): void => {
-    if (shuttingDown) return
-    shuttingDown = true
+  const listening = new AbortController()
+  let shutdownTask: Promise<void> | undefined
+  const shutdown = (): Promise<void> => {
+    if (shutdownTask) return shutdownTask
     console.info('shutting down')
-    transport?.close()
-    server.close()
-    void application.stop().finally(() => process.exit(0))
+    // Close listener admission first. Transport drains replies before reaping newly idle sockets.
+    // Join listener closure too; never force-close admitted effects or an active response.
+    const serverClosed = new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error && !('code' in error && error.code === 'ERR_SERVER_NOT_RUNNING')) reject(error)
+        else resolve()
+      })
+    })
+    const transportClosed = transport.close()
+    listening.abort()
+    shutdownTask = Promise.resolve().then(async () => {
+      const results = await Promise.allSettled([
+        serverClosed,
+        Promise.resolve().then(() => application.stop()),
+        transportClosed,
+        Promise.resolve().then(unsubscribe),
+      ])
+      process.off('SIGINT', signalShutdown)
+      process.off('SIGTERM', signalShutdown)
+      if (results.some((result) => result.status === 'rejected')) {
+        process.exitCode = 1
+        console.error('Roadmap shutdown failed.')
+        throw new Error('Roadmap shutdown failed.')
+      }
+    })
+    return shutdownTask
   }
-  process.on('SIGINT', shutdown)
-  process.on('SIGTERM', shutdown)
+  const signalShutdown = (): void => {
+    void shutdown().catch(() => undefined)
+  }
+  process.on('SIGINT', signalShutdown)
+  process.on('SIGTERM', signalShutdown)
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const cleanup = (): void => {
+        server.off('listening', onListening)
+        server.off('close', onClosed)
+        server.off('error', onError)
+      }
+      const onListening = (): void => {
+        cleanup()
+        resolve()
+      }
+      const onClosed = (): void => {
+        cleanup()
+        resolve()
+      }
+      const onError = (): void => {
+        cleanup()
+        reject(new Error('Listener startup failed.'))
+      }
+      server.once('listening', onListening)
+      server.once('close', onClosed)
+      server.once('error', onError)
+      server.listen({ port: config.port, host: '127.0.0.1', signal: listening.signal })
+    })
+    if (!shutdownTask) await application.start()
+    if (!shutdownTask) {
+      console.info(
+        `listening on http://127.0.0.1:${config.port} ` +
+          '(operations: /api/query + /api/command, state: /ws, diagnostics: /health + /ready)',
+      )
+    }
+  } catch {
+    if (!shutdownTask) {
+      process.exitCode = 1
+      console.error('Roadmap startup failed.')
+    }
+    await shutdown().catch(() => undefined)
+  }
+  if (shutdownTask) await shutdownTask.catch(() => undefined)
 }
 
 /** `.env.local` lives at the repo root, shared with the web app; absent is fine (CI, tests). */
@@ -155,4 +179,7 @@ function loadRootEnv(): void {
   }
 }
 
-await main()
+await main().catch(() => {
+  process.exitCode = 1
+  console.error('Roadmap startup failed.')
+})

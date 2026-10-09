@@ -1,3 +1,4 @@
+import { setImmediate } from 'node:timers/promises'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { GitHubObservationInput } from '../observation/coordinator.ts'
 import type {
@@ -193,6 +194,64 @@ afterEach(() => {
 })
 
 describe('createGitHubObserverPool', () => {
+  it.each(['baseline', 'refresh'] as const)(
+    'joins a pending %s read for repeated owner and pool stop without late publication',
+    async (phase) => {
+      const repository: FakeRepository = {
+        id: '1',
+        nameWithOwner: 'acme/lifetime',
+        maps: new Map([[1, rawMap(1, 'Pending source read')]]),
+      }
+      const access = fakeClient([repository])
+      const entered = Promise.withResolvers<void>()
+      const release = Promise.withResolvers<void>()
+      let gated = phase === 'baseline'
+      const client: GitHubClient = {
+        restGet: access.client.restGet,
+        async graphql(query, variables) {
+          if (gated) {
+            entered.resolve()
+            await release.promise
+          }
+          return access.client.graphql(query, variables)
+        },
+      }
+      const pool = createGitHubObserverPool()
+      const input = sourceInput('lifetime', repository, client)
+      const observer = pool.create(input)
+      const publications: SourceContribution[] = []
+      observer.subscribe((value) => publications.push(value))
+      let read: Promise<unknown> = Promise.resolve()
+      const stops: Promise<void>[] = []
+      try {
+        if (phase === 'refresh') {
+          await observer.observe()
+          pool.reconcileTopology([input])
+          gated = true
+        }
+        read = (phase === 'baseline' ? observer.observe() : observer.refresh()).then(
+          () => 'resolved',
+          () => 'rejected',
+        )
+        await entered.promise
+        const beforeStop = publications.length
+        const settled: number[] = []
+        stops.push(observer.stop(), observer.stop(), pool.stop(), pool.stop())
+        stops.forEach((stop, index) => void stop.then(() => settled.push(index)))
+        await setImmediate()
+        expect(settled).toEqual([])
+        release.resolve()
+        await Promise.all([...stops, read])
+        expect(publications).toHaveLength(beforeStop)
+        await expect(observer.refresh()).rejects.toThrow('stopped')
+      } finally {
+        release.resolve()
+        await read
+        await Promise.all([...stops, pool.stop()])
+      }
+    },
+  )
+
   it('publishes distinct actual reads when source time and payload stay identical', async () => {
     const repository = {
       id: '1',
@@ -533,7 +592,9 @@ describe('createGitHubObserverPool', () => {
     }
   })
 
-  it('keeps the most conservative concurrent rate-limit observation', async () => {
+  it('paces polling by the lower concurrent budget after an older response arrives late', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
     let open: () => void = () => {
       throw new Error('Gate not initialized.')
     }
@@ -553,17 +614,36 @@ describe('createGitHubObserverPool', () => {
       maps: new Map([[2, rawMap(2, 'Newer response')]]),
       rateLimitRemaining: 100,
     }
-    const { client, graphqlCalls } = fakeClient([older, newer])
-    const pool = createGitHubObserverPool()
-    const inputs = [sourceInput('one', older, client), sourceInput('one', newer, client)]
-    const observers = inputs.map((input) => pool.create(input))
-    const baseline = Promise.all(observers.map((observer) => observer.observe()))
-    await vi.waitFor(() => expect(graphqlCalls).toHaveLength(2))
-    open()
-    await baseline
-    pool.reconcileTopology(inputs)
-    expect(pool.diagnostics().rateLimit?.remaining).toBe(100)
-    await pool.stop()
+    const access = fakeClient([older, newer])
+    const requestTimes: number[] = []
+    const client: GitHubClient = {
+      ...access.client,
+      graphql(query, variables) {
+        requestTimes.push(Date.now())
+        return access.client.graphql(query, variables)
+      },
+    }
+    const pool = createGitHubObserverPool({ reconcileMs: 10 })
+    const olderInput = sourceInput('one', older, client)
+    const newerInput = sourceInput('one', newer, client)
+    const olderObserver = pool.create(olderInput)
+    const newerObserver = pool.create(newerInput)
+    const baseline = Promise.all([olderObserver.observe(), newerObserver.observe()])
+    try {
+      await newerObserver.observe()
+      expect(requestTimes).toEqual([1_000, 1_000])
+      open()
+      await baseline
+      pool.reconcileTopology([olderInput, newerInput])
+      await vi.advanceTimersByTimeAsync(79)
+      expect(requestTimes).toEqual([1_000, 1_000])
+      await vi.advanceTimersByTimeAsync(1)
+      expect(requestTimes).toEqual([1_000, 1_000, 1_080, 1_080])
+    } finally {
+      open()
+      await baseline
+      await pool.stop()
+    }
   })
 
   it('owns an idempotent baseline and stops only the retired scope on a shared Connection', async () => {

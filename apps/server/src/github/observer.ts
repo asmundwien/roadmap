@@ -62,6 +62,8 @@ interface Owner {
   contribution: SourceContribution | null
   baseline: Promise<SourceContribution> | null
   chain: Promise<void>
+  readonly tasks: Set<Promise<void>>
+  stopPromise: Promise<void> | null
   reading: boolean
   lastSuccessfulAt: number | null
   transientFailures: number
@@ -84,7 +86,6 @@ export interface GitHubObserverPool {
   create(input: GitHubObservationInput): SourceObserver
   /** Called only after the coordinator has selected its complete active source topology. */
   reconcileTopology(inputs: readonly GitHubObservationInput[]): void
-  diagnostics(): { rateLimit: RateLimit | null }
   stop(): Promise<void>
 }
 
@@ -97,6 +98,8 @@ export function createGitHubObserverPool(options: GitHubObserverOptions = {}): G
   const owners = new Set<Owner>()
   let topology: readonly GitHubObservationInput[] = []
   let stopped = false
+  let stopPromise: Promise<void> | null = null
+  const pendingRequests = new Set<Promise<void>>()
   const pendingReads = new Set<Promise<void>>()
   let queued = false
   const requests: {
@@ -144,7 +147,10 @@ export function createGitHubObserverPool(options: GitHubObserverOptions = {}): G
     owner.contribution = contribution
     if (fingerprint === owner.fingerprint) return
     owner.fingerprint = fingerprint
-    for (const listener of owner.listeners) listener(contribution)
+    for (const listener of owner.listeners) {
+      if (owner.stopped || stopped) break
+      listener(contribution)
+    }
   }
 
   function resolver(selected: readonly Owner[]) {
@@ -272,6 +278,7 @@ export function createGitHubObserverPool(options: GitHubObserverOptions = {}): G
     const readSequences = new Map<number, number>()
     const mapClient: GitHubClient = {
       graphql(query, variables = {}) {
+        if (owner.stopped || stopped) return Promise.reject(new Error('GitHub source has stopped.'))
         // Number named scopes when their actual provider batch starts, not during interpretation.
         for (let index = 0; `i${index}` in variables; index += 1) {
           const mapNumber = variables[`i${index}`]
@@ -281,7 +288,10 @@ export function createGitHubObserverPool(options: GitHubObserverOptions = {}): G
         }
         return client.graphql(query, variables)
       },
-      restGet: (path) => client.restGet(path),
+      restGet: (path) =>
+        owner.stopped || stopped
+          ? Promise.reject(new Error('GitHub source has stopped.'))
+          : client.restGet(path),
     }
     function mapReadSequence(mapNumber: number): number {
       const sequence = readSequences.get(mapNumber)
@@ -492,6 +502,11 @@ export function createGitHubObserverPool(options: GitHubObserverOptions = {}): G
     const result = new Promise<void>((resolve, reject) =>
       requests.push({ selected, resolve, reject }),
     )
+    pendingRequests.add(result)
+    void result.then(
+      () => pendingRequests.delete(result),
+      () => pendingRequests.delete(result),
+    )
     if (!queued) {
       queued = true
       queueMicrotask(() => {
@@ -589,6 +604,42 @@ export function createGitHubObserverPool(options: GitHubObserverOptions = {}): G
     return owner.contribution
   }
 
+  function run<T>(owner: Owner, operation: () => Promise<T>): Promise<T> {
+    const result = Promise.resolve().then(operation)
+    const completion = result.then(
+      () => undefined,
+      () => undefined,
+    )
+    owner.tasks.add(completion)
+    void completion.then(() => owner.tasks.delete(completion))
+    return result
+  }
+
+  function stopOwner(owner: Owner): Promise<void> {
+    if (owner.stopPromise) return owner.stopPromise
+    owner.stopped = true
+    owner.active = false
+    owner.listeners.clear()
+    owner.worker.owners.delete(owner)
+    if (
+      ![...owner.worker.owners].some(
+        (candidate) => candidate.active && !candidate.stopped && candidate.baseline,
+      )
+    ) {
+      clearTimeout(owner.worker.timer ?? undefined)
+      owner.worker.timer = null
+    }
+    owner.stopPromise = Promise.resolve().then(async () => {
+      await Promise.all([...owner.tasks])
+      await owner.chain
+    })
+    void owner.stopPromise.then(
+      () => owners.delete(owner),
+      () => undefined,
+    )
+    return owner.stopPromise
+  }
+
   return {
     create(input) {
       if (stopped) throw new Error('GitHub observation has stopped.')
@@ -612,6 +663,8 @@ export function createGitHubObserverPool(options: GitHubObserverOptions = {}): G
         contribution: null,
         baseline: null,
         chain: Promise.resolve(),
+        tasks: new Set(),
+        stopPromise: null,
         reading: false,
         lastSuccessfulAt: null,
         transientFailures: 0,
@@ -624,47 +677,44 @@ export function createGitHubObserverPool(options: GitHubObserverOptions = {}): G
       worker.owners.add(owner)
       return {
         observe() {
-          if (owner.stopped) return Promise.reject(new Error('GitHub source has stopped.'))
-          owner.baseline ??= request([owner]).then(() => {
+          if (owner.stopped || stopped)
+            return Promise.reject(new Error('GitHub source has stopped.'))
+          owner.baseline ??= run(owner, async () => {
+            if (owner.stopped || stopped) throw new Error('GitHub source has stopped.')
+            await request([owner])
+            if (owner.stopped || stopped) throw new Error('GitHub source has stopped.')
             schedule(owner.worker)
             return completed(owner)
           })
           return owner.baseline
         },
         subscribe(listener) {
+          if (owner.stopped || stopped) return () => undefined
           owner.listeners.add(listener)
           return () => {
             owner.listeners.delete(listener)
           }
         },
-        async refresh() {
-          if (owner.stopped) throw new Error('GitHub source has stopped.')
-          const selected = owner.active
-            ? [...owner.worker.owners].filter((candidate) => candidate.active && !candidate.stopped)
-            : [owner]
-          await request(selected)
-          return completed(owner)
+        refresh() {
+          if (owner.stopped || stopped)
+            return Promise.reject(new Error('GitHub source has stopped.'))
+          return run(owner, async () => {
+            if (owner.stopped || stopped) throw new Error('GitHub source has stopped.')
+            const selected = owner.active
+              ? [...owner.worker.owners].filter(
+                  (candidate) => candidate.active && !candidate.stopped,
+                )
+              : [owner]
+            await request(selected)
+            if (owner.stopped || stopped) throw new Error('GitHub source has stopped.')
+            return completed(owner)
+          })
         },
-        async stop() {
-          owner.stopped = true
-          owner.active = false
-          owner.listeners.clear()
-          owners.delete(owner)
-          owner.worker.owners.delete(owner)
-          if (
-            ![...owner.worker.owners].some(
-              (candidate) => candidate.active && !candidate.stopped && candidate.baseline,
-            )
-          ) {
-            clearTimeout(owner.worker.timer ?? undefined)
-            owner.worker.timer = null
-          }
-          await Promise.resolve()
-          await owner.chain
-        },
+        stop: () => stopOwner(owner),
       }
     },
     reconcileTopology(inputs) {
+      if (stopped) return
       topology = inputs
       for (const owner of owners)
         owner.active = !owner.stopped && inputs.some((input) => sameSource(input, owner.input))
@@ -672,27 +722,27 @@ export function createGitHubObserverPool(options: GitHubObserverOptions = {}): G
       for (const owner of owners) if (owner.active) reproject(owner, resolveProject)
       for (const worker of workers.values()) schedule(worker)
     },
-    diagnostics() {
-      let rateLimit: RateLimit | null = null
-      for (const worker of workers.values())
-        if (
-          worker.rateLimit &&
-          (rateLimit === null || worker.rateLimit.remaining < rateLimit.remaining)
-        )
-          rateLimit = worker.rateLimit
-      return { rateLimit }
-    },
-    async stop() {
+    stop() {
+      if (stopPromise) return stopPromise
       stopped = true
-      for (const worker of workers.values()) clearTimeout(worker.timer ?? undefined)
-      for (const owner of owners) {
-        owner.stopped = true
-        owner.listeners.clear()
+      for (const worker of workers.values()) {
+        clearTimeout(worker.timer ?? undefined)
+        worker.timer = null
       }
-      await Promise.resolve()
-      await Promise.all([...pendingReads].map((run) => run.catch(() => {})))
-      owners.clear()
-      workers.clear()
+      const retiring = [...owners].map(stopOwner)
+      stopPromise = Promise.allSettled([...retiring, ...pendingReads, ...pendingRequests]).then(
+        (results) => {
+          owners.clear()
+          workers.clear()
+          const failures = results
+            .slice(0, retiring.length)
+            .flatMap((result) => (result.status === 'rejected' ? [result.reason] : []))
+          if (failures.length === 1) throw failures[0]
+          if (failures.length > 1)
+            throw new AggregateError(failures, 'GitHub source shutdown failed.')
+        },
+      )
+      return stopPromise
     },
   }
 }

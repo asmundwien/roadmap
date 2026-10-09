@@ -24,11 +24,13 @@ const DEFAULT_MAX_BODY_BYTES = 64 * 1024
 const QUERY_PATH = '/api/query'
 const COMMAND_PATH = '/api/command'
 const SOCKET_PATH = '/ws'
+const HEALTH_PATH = '/health'
+const READY_PATH = '/ready'
 
 export interface RoadmapTransport {
   handle(request: IncomingMessage, response: ServerResponse): boolean
   clientCount(): number
-  close(): void
+  close(): Promise<void>
 }
 
 export interface RoadmapTransportOptions {
@@ -46,8 +48,11 @@ export interface RoadmapTransportOptions {
 export function createRoadmapTransport(options: RoadmapTransportOptions): RoadmapTransport {
   const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES
   const sockets = new WebSocketServer({ noServer: true })
+  const requests = new Map<ApiRequestLifetime, Promise<void>>()
+  let closing: Promise<void> | undefined
 
   const broadcast = (state: ApplicationState): void => {
+    if (closing || options.application.diagnostics().lifecycle.phase !== 'ready') return
     const encoded = encodeState(state)
     if (encoded === null) return
     for (const client of sockets.clients) {
@@ -57,11 +62,17 @@ export function createRoadmapTransport(options: RoadmapTransportOptions): Roadma
   const unsubscribe = options.application.subscribe(broadcast)
 
   sockets.on('connection', (client) => {
+    client.on('error', () => reportTransportFailure('WebSocket stream'))
+    if (closing || options.application.diagnostics().lifecycle.phase !== 'ready') return
     const encoded = encodeState(options.application.current())
     if (encoded !== null) client.send(encoded)
   })
 
   const upgrade = (request: IncomingMessage, socket: Duplex, head: Buffer): void => {
+    if (closing) {
+      rejectUpgrade(socket, 503, 'Service Unavailable')
+      return
+    }
     if (request.url !== SOCKET_PATH) {
       rejectUpgrade(socket, 404, 'Not Found')
       return
@@ -78,11 +89,51 @@ export function createRoadmapTransport(options: RoadmapTransportOptions): Roadma
 
   function handle(request: IncomingMessage, response: ServerResponse): boolean {
     const path = request.url?.split('?', 1)[0]
-    if (path !== QUERY_PATH && path !== COMMAND_PATH) return false
-    void handleApiRequest(request, response, path, options, maxBodyBytes).catch(() => {
-      reportTransportFailure('request task')
+    if (path !== QUERY_PATH && path !== COMMAND_PATH && path !== HEALTH_PATH && path !== READY_PATH)
+      return false
+    if (closing) {
       terminateResponse(response)
+      return true
+    }
+    const lifetime = new ApiRequestLifetime(request, response)
+    const task = Promise.resolve().then(async () => {
+      try {
+        if (path === HEALTH_PATH || path === READY_PATH) {
+          if (request.method !== 'GET') {
+            response.setHeader('Allow', 'GET')
+            await lifetime.sendJson(405, { error: 'Method must be GET.' }, !request.complete)
+            return
+          }
+          const diagnostics = options.application.diagnostics()
+          const lifecycle =
+            diagnostics.lifecycle.phase === 'ready'
+              ? { phase: diagnostics.lifecycle.phase, mode: diagnostics.lifecycle.mode }
+              : diagnostics.lifecycle.phase === 'failed'
+                ? { phase: diagnostics.lifecycle.phase, cause: 'Application startup failed.' }
+                : { phase: diagnostics.lifecycle.phase }
+          await lifetime.sendJson(
+            path === READY_PATH && lifecycle.phase !== 'ready' ? 503 : 200,
+            {
+              lifecycle,
+              projects: diagnostics.projects,
+              maps: diagnostics.maps,
+              unavailable: diagnostics.unavailable,
+              absent: diagnostics.absent,
+              clients: sockets.clients.size,
+            },
+            !request.complete,
+          )
+        } else {
+          await handleApiRequest(request, response, path, options, maxBodyBytes, lifetime)
+        }
+      } catch {
+        reportTransportFailure('request task')
+        lifetime.terminate()
+      } finally {
+        requests.delete(lifetime)
+      }
     })
+    requests.set(lifetime, task)
     return true
   }
 
@@ -90,10 +141,56 @@ export function createRoadmapTransport(options: RoadmapTransportOptions): Roadma
     handle,
     clientCount: () => sockets.clients.size,
     close() {
-      unsubscribe()
-      options.server.off('upgrade', upgrade)
-      for (const client of sockets.clients) client.terminate()
-      sockets.close()
+      if (closing) return closing
+      const errors: unknown[] = []
+      closing = Promise.resolve().then(async () => {
+        try {
+          unsubscribe()
+        } catch (error: unknown) {
+          errors.push(error)
+        }
+        try {
+          options.server.off('upgrade', upgrade)
+        } catch (error: unknown) {
+          errors.push(error)
+        }
+        const socketClosure = new Promise<void>((resolve, reject) => {
+          sockets.close((error) => (error ? reject(error) : resolve()))
+        })
+        // Observe closure failure while admitted HTTP effects still drain.
+        const socketResult = socketClosure.then(
+          () => undefined,
+          (error: unknown) => {
+            errors.push(error)
+          },
+        )
+        for (const client of sockets.clients) {
+          try {
+            client.terminate()
+          } catch (error: unknown) {
+            errors.push(error)
+          }
+        }
+        await Promise.all([...requests.values(), socketResult])
+        // server.close() only reaps sockets that were idle when it was called.
+        // Replies whose headers were already sent can become idle after the drain.
+        try {
+          options.server.closeIdleConnections()
+        } catch (error: unknown) {
+          errors.push(error)
+        }
+        if (errors.length > 0) throw new AggregateError(errors, 'Transport shutdown failed.')
+      })
+      // Close response connections after flush and revoke every body not yet admitted.
+      for (const lifetime of requests.keys()) {
+        try {
+          lifetime.beginShutdown()
+        } catch (error: unknown) {
+          errors.push(error)
+          lifetime.terminate()
+        }
+      }
+      return closing
     },
   }
 }
@@ -104,8 +201,8 @@ async function handleApiRequest(
   path: typeof QUERY_PATH | typeof COMMAND_PATH,
   options: RoadmapTransportOptions,
   maxBodyBytes: number,
+  lifetime: ApiRequestLifetime,
 ): Promise<void> {
-  const lifetime = new ApiRequestLifetime(request, response)
   const requestKind = path === QUERY_PATH ? 'query' : 'command'
   let requestId: string | null = null
 
@@ -352,6 +449,13 @@ class ApiRequestLifetime {
     if (this.interrupted || !this.canRespond) return false
     this.admitted = true
     return true
+  }
+
+  beginShutdown(): void {
+    this.response.shouldKeepAlive = false
+    if (this.admitted) return
+    this.interruptBody()
+    this.stopInput()
   }
 
   private interruptBody(): void {

@@ -45,7 +45,11 @@ async function until(predicate: () => boolean): Promise<void> {
   }
 }
 
-function memoryConfiguration(epoch: string): ConfigurationDocument {
+function memoryConfiguration(
+  epoch: string,
+  beforeWrite: () => Promise<void>,
+  didWrite: (document: ProjectConfiguration) => void,
+): ConfigurationDocument {
   let current: ProjectConfiguration = {
     schemaVersion: 6,
     configurationVersion: 1,
@@ -70,7 +74,9 @@ function memoryConfiguration(epoch: string): ConfigurationDocument {
       return () => listeners.delete(listener)
     },
     async write(next) {
+      await beforeWrite()
       current = next
+      didWrite(next)
       for (const listener of listeners) listener({ ok: true, document: current })
       return { ok: true, durability: 'confirmed' }
     },
@@ -90,6 +96,11 @@ interface Backend {
   effectGate: ReturnType<typeof deferred> | null
   effectReached: ReturnType<typeof deferred>
   loseNextReply: boolean
+  configurationGate: ReturnType<typeof deferred> | null
+  configurationReached: ReturnType<typeof deferred>
+  persistedConfiguration: ProjectConfiguration | null
+  sourceOwners: number
+  retiredSourceOwners: number
 }
 
 const backends: Backend[] = []
@@ -99,6 +110,8 @@ const releases: (() => void)[] = []
 async function backend(epoch: string): Promise<Backend> {
   let transport: RoadmapTransport | null = null
   let commandResponse: ServerResponse | null = null
+  let sourceOwners = 0
+  let retiredSourceOwners = 0
   const server = createServer((request, response) => {
     if (request.url === '/api/command' && request.method === 'POST') {
       fixture.commandRequests += 1
@@ -108,13 +121,23 @@ async function backend(epoch: string): Promise<Backend> {
     response.writeHead(404).end()
   })
   const application = createRoadmapApplication({
-    configuration: memoryConfiguration(epoch),
+    configuration: memoryConfiguration(
+      epoch,
+      async () => {
+        fixture.configurationReached.resolve()
+        await fixture.configurationGate?.promise
+      },
+      (document) => {
+        fixture.persistedConfiguration = document
+      },
+    ),
     serverEpoch: epoch,
     admissions: fixtureAdmissions,
     observers: {
       local() {
+        sourceOwners += 1
         const read = createSourceFixtureOwner()
-        return controlledSourceFixture(
+        const source = controlledSourceFixture(
           { integration: 'local', id: 'fixture' },
           read(
             [
@@ -129,7 +152,14 @@ async function backend(epoch: string): Promise<Backend> {
             ],
             100,
           ),
-        ).observer
+        )
+        return {
+          ...source.observer,
+          async stop() {
+            retiredSourceOwners += 1
+            await source.observer.stop()
+          },
+        }
       },
       github() {
         throw new Error('Unused source')
@@ -163,6 +193,15 @@ async function backend(epoch: string): Promise<Backend> {
     effectGate: null,
     effectReached: deferred(),
     loseNextReply: false,
+    configurationGate: null,
+    configurationReached: deferred(),
+    persistedConfiguration: null,
+    get sourceOwners() {
+      return sourceOwners
+    },
+    get retiredSourceOwners() {
+      return retiredSourceOwners
+    },
   }
   backends.push(fixture)
   return fixture
@@ -239,6 +278,7 @@ function browser(initial: Backend, withhold = false) {
     store,
     wires,
     observed,
+    stop,
     route(next: Backend) {
       current = next
     },
@@ -298,15 +338,20 @@ function expectEpoch(store: RoadmapStore, epoch: string, synchronization = 'sync
 }
 
 afterEach(async () => {
-  for (const fixture of backends) fixture.effectGate?.resolve()
+  for (const fixture of backends) {
+    fixture.effectGate?.resolve()
+    fixture.configurationGate?.resolve()
+  }
   for (const release of releases.splice(0)) release()
   for (const socket of sockets) socket.terminate()
   sockets.clear()
   for (const fixture of backends.splice(0)) {
-    fixture.transport.close()
-    fixture.server.closeAllConnections()
-    await new Promise<void>((resolve) => fixture.server.close(() => resolve()))
-    await fixture.application.stop()
+    const closed = fixture.transport.close()
+    await Promise.all([
+      closed,
+      fixture.application.stop(),
+      new Promise<void>((resolve) => fixture.server.close(() => resolve())),
+    ])
   }
 })
 
@@ -429,5 +474,111 @@ describe('HTTP outcomes and current WebSocket authority', () => {
     expect(a.commandRequests).toBe(1)
     expect(b.effects).toBe(0)
     expect(b.commandRequests).toBe(0)
+  })
+
+  it.each(['rename-project', 'remove-project'] as const)(
+    'returns a legal saved %s outcome after HTTP and socket authority drain during shutdown',
+    async (type) => {
+      const a = await backend('A')
+      const client = browser(a)
+      await client.ready()
+      const retained = client.store.getSnapshot().state
+      a.configurationGate = deferred()
+      const project = { integration: 'local', id: 'fixture' } as const
+      const command = client.store.execute(
+        type === 'rename-project'
+          ? { type, project, name: 'Saved after retirement', expectedConfigurationVersion: 1 }
+          : { type, project, expectedConfigurationVersion: 1 },
+      )
+      void command.catch(() => undefined)
+      await a.configurationReached.promise
+      const applicationDone = a.application.stop()
+      const transportDone = a.transport.close()
+      const serverDone = new Promise<void>((resolve, reject) => {
+        a.server.close((error) => (error ? reject(error) : resolve()))
+      })
+      client.stop()
+      try {
+        await until(() => a.retiredSourceOwners === 1)
+        expect(a.persistedConfiguration).toBeNull()
+        a.configurationGate.resolve()
+        const outcome = await command
+        expect(outcome).toMatchObject({
+          ok: true,
+          result: { type: 'configuration-updated', configurationVersion: 2 },
+          state: { configurationVersion: 2 },
+        })
+        if (!('state' in outcome))
+          throw new Error('A saved outcome must include its diagnostic state.')
+        if (type === 'rename-project') {
+          expect(a.persistedConfiguration?.projects[0]?.displayName).toBe('Saved after retirement')
+          expect(outcome.state.projects[0]?.name).toBe('Saved after retirement')
+          expect(outcome.state.registrations[0]?.displayName).toBe('Saved after retirement')
+          expect(outcome.state.projects[0]?.resource).toEqual(retained?.projects[0]?.resource)
+        } else {
+          expect(a.persistedConfiguration?.projects).toEqual([])
+          expect(outcome.state.projects).toEqual([])
+          expect(outcome.state.registrations).toEqual([])
+        }
+        await Promise.all([applicationDone, transportDone, serverDone])
+        expect(client.store.getSnapshot()).toMatchObject({
+          synchronization: 'retained',
+          state: retained,
+          command: { error: null },
+        })
+        expect(a.application.current().registrations).toEqual(outcome.state.registrations)
+        expect(a.application.current().automation.availability.status).toBe('unavailable')
+        expect(a.sourceOwners).toBe(1)
+        expect(a.retiredSourceOwners).toBe(1)
+        expect(a.effects).toBe(0)
+        expect(a.commandRequests).toBe(1)
+        expect(a.transport.clientCount()).toBe(0)
+        expect(a.server.listening).toBe(false)
+      } finally {
+        a.configurationGate.resolve()
+        await command.catch(() => undefined)
+        await Promise.all([applicationDone, transportDone, serverDone])
+      }
+    },
+  )
+
+  it('delivers an admitted native outcome after socket authority retires during joined shutdown', async () => {
+    const a = await backend('A')
+    const client = browser(a)
+    await client.ready()
+    a.effectGate = deferred()
+    const command = client.store.execute(LAUNCH)
+    void command.catch(() => undefined)
+    await a.effectReached.promise
+    try {
+      const closing = a.transport.close()
+      expect(closing).toBeInstanceOf(Promise)
+      let transportClosed = false
+      const transportDone = closing.then(() => {
+        transportClosed = true
+      })
+      const applicationDone = a.application.stop()
+      const serverDone = new Promise<void>((resolve, reject) => {
+        a.server.close((error) => (error ? reject(error) : resolve()))
+      })
+      client.stop()
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      expect(transportClosed).toBe(false)
+      a.effectGate.resolve()
+      expect(await command).toMatchObject({
+        ok: true,
+        result: { type: 'action-launched', actionId: 'open-workspace' },
+        state: { serverEpoch: 'A' },
+      })
+      await Promise.all([transportDone, applicationDone, serverDone])
+      expectEpoch(client.store, 'A', 'retained')
+      expect(a.transport.clientCount()).toBe(0)
+      expect(a.server.listening).toBe(false)
+      expect(a.effects).toBe(1)
+      expect(a.commandRequests).toBe(1)
+    } finally {
+      a.effectGate.resolve()
+      await command.catch(() => undefined)
+    }
   })
 })

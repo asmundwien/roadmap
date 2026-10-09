@@ -1,8 +1,11 @@
-import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setImmediate } from 'node:timers/promises'
-import type { ApplicationState, AutomationTarget } from '@roadmap/contracts'
+import { promisify } from 'node:util'
+import type { ApplicationState, AutomationTarget, CommandOutcome } from '@roadmap/contracts'
+import { applicationStateCodec } from '@roadmap/contracts/codecs'
 import { describe, expect, it, vi } from 'vitest'
 import {
   type AutomationDatabase,
@@ -16,11 +19,17 @@ import type {
   ClassificationProcessResult,
   WayfinderProcessResult,
 } from '../automation/engine.ts'
-import type { ConfigurationDocument, ConfigurationRead } from '../configuration/document.ts'
+import {
+  type ConfigurationDocument,
+  type ConfigurationRead,
+  type ConfigurationWrite,
+  createConfigurationDocument,
+} from '../configuration/document.ts'
 import { createGitHubProjectAdmission } from '../github/admission.ts'
 import type { CredentialBundle, GitHubConnectionPort } from '../github/connections.ts'
 import { createGitHubObserverPool } from '../github/observer.ts'
 import { createLocalProjectAdmission } from '../local/admission.ts'
+import { inspectLocalWorkspace } from '../local/workspace.ts'
 import type { SourceObserver } from '../observation/source.ts'
 import type { HarnessCommand, ProjectConfiguration } from '../projects/registry.ts'
 import {
@@ -1009,4 +1018,490 @@ describe('RoadmapApplication queued activation safety', () => {
       await rm(root, { recursive: true, force: true })
     }
   })
+
+  it.each(['confirmed', 'unconfirmed', 'failed'] as const)(
+    'drains an admitted configuration write with an honest %s disk outcome',
+    async (completion) => {
+      const root = await realpath(await mkdtemp(join(tmpdir(), 'roadmap-configuration-drain-')))
+      const filename = join(root, 'roadmap.config.json')
+      const saved: ProjectConfiguration = {
+        schemaVersion: 6,
+        configurationVersion: 1,
+        connections: [LOCAL],
+        projects: [],
+        automation: { enabled: false, enabledProjects: [] },
+      }
+      await writeFile(filename, JSON.stringify(saved))
+      const document = createConfigurationDocument(filename)
+      const writeEntered = Promise.withResolvers<void>()
+      const writeGate = Promise.withResolvers<void>()
+      const writes: ProjectConfiguration[] = []
+      const configuration: ConfigurationDocument = {
+        ...document,
+        async write(next): Promise<ConfigurationWrite> {
+          writes.push(next)
+          writeEntered.resolve()
+          await writeGate.promise
+          if (completion === 'failed')
+            return { ok: false, kind: 'persistence', message: 'Harmless write failure.' }
+          const persisted = await document.write(next)
+          if (!persisted.ok || completion === 'confirmed') return persisted
+          return {
+            ok: true,
+            durability: 'unconfirmed',
+            message: 'Harmless directory sync uncertainty.',
+          }
+        },
+      }
+      const application = createRoadmapApplication({
+        configuration,
+        admissions: {},
+        observers: {
+          local() {
+            throw new Error('The configuration drain has no Local sources.')
+          },
+          github() {
+            throw new Error('The configuration drain has no GitHub sources.')
+          },
+        },
+      })
+      const states: ApplicationState[] = []
+      application.subscribe((state) => states.push(structuredClone(state)))
+      let writing: Promise<PromiseSettledResult<CommandOutcome>[]> | undefined
+      let stopping: Promise<PromiseSettledResult<void>[]> | undefined
+      try {
+        await application.start()
+        writing = Promise.allSettled([
+          application.execute({
+            type: 'rename-connection',
+            connectionId: 'local',
+            name: 'Saved during shutdown',
+            expectedConfigurationVersion: 1,
+          }),
+        ])
+        await writeEntered.promise
+        let stopped = false
+        stopping = Promise.allSettled([
+          application.stop().then(() => {
+            stopped = true
+          }),
+        ])
+        const publicationsAtStop = states.length
+        await setImmediate()
+        expect(stopped).toBe(false)
+        writeGate.resolve()
+        const settled = (await writing)[0]
+        expect(settled?.status).toBe('fulfilled')
+        if (settled?.status !== 'fulfilled')
+          throw new Error('An admitted write must return its persistence outcome.')
+        expect(settled.value).toMatchObject(
+          completion === 'confirmed'
+            ? { ok: true, result: { type: 'configuration-updated', configurationVersion: 2 } }
+            : { ok: false, error: { code: 'persistence-failed' } },
+        )
+        expect(settled.value.state).toMatchObject({
+          configurationVersion: completion === 'failed' ? 1 : 2,
+          connections: [
+            { id: 'local', name: completion === 'failed' ? 'Local' : 'Saved during shutdown' },
+          ],
+        })
+        expect(await stopping).toEqual([{ status: 'fulfilled', value: undefined }])
+        expect(JSON.parse(await readFile(filename, 'utf8'))).toMatchObject({
+          configurationVersion: completion === 'failed' ? 1 : 2,
+          connections: [
+            { id: 'local', name: completion === 'failed' ? 'Local' : 'Saved during shutdown' },
+          ],
+        })
+        expect(application.current()).toMatchObject({
+          configurationVersion: completion === 'failed' ? 1 : 2,
+          connections: [
+            { id: 'local', name: completion === 'failed' ? 'Local' : 'Saved during shutdown' },
+          ],
+        })
+        expect(writes).toHaveLength(1)
+        expect(states).toHaveLength(publicationsAtStop)
+      } finally {
+        writeGate.resolve()
+        await writing
+        await (stopping ?? Promise.allSettled([application.stop()]))
+        await document.stop()
+        await rm(root, { recursive: true, force: true })
+      }
+    },
+  )
+
+  it.each([
+    'rename-project',
+    'remove-project',
+    'register-project',
+    'repair-project-workspace',
+  ] as const)(
+    'retains truthful saved %s intent without reactivating a retired source',
+    async (type) => {
+      const root = await realpath(await mkdtemp(join(tmpdir(), 'roadmap-retired-save-')))
+      const filename = join(root, 'roadmap.config.json')
+      const project = { integration: 'local', id: 'fixture' } as const
+      const additionalPath = join(root, 'additional')
+      await mkdir(additionalPath)
+      if (type === 'repair-project-workspace') {
+        const git = promisify(execFile)
+        await git('/usr/bin/git', ['init', root])
+        await git('/usr/bin/git', [
+          '-C',
+          root,
+          '-c',
+          'user.name=Fixture',
+          '-c',
+          'user.email=fixture@example.test',
+          'commit',
+          '--allow-empty',
+          '-m',
+          'Fixture',
+        ])
+        await git('/usr/bin/git', ['clone', root, additionalPath])
+      }
+      const workspace = await inspectLocalWorkspace(root)
+      const saved: ProjectConfiguration = {
+        schemaVersion: 6,
+        configurationVersion: 1,
+        connections: [LOCAL],
+        projects: [
+          {
+            ref: { integration: 'local', projectId: 'fixture' },
+            connectionId: 'local',
+            workspace: {
+              path: root,
+              ...(workspace.gitIdentity ? { gitIdentity: workspace.gitIdentity } : {}),
+            },
+            displayName: 'Before save',
+          },
+        ],
+        automation: { enabled: false, enabledProjects: [] },
+      }
+      await writeFile(filename, JSON.stringify(saved))
+      const document = createConfigurationDocument(filename)
+      const entered = Promise.withResolvers<void>()
+      const gate = Promise.withResolvers<void>()
+      const read = createSourceFixtureOwner()
+      const source = controlledSourceFixture(
+        project,
+        read([localContent('fixture', root, type === 'repair-project-workspace')], 1_000),
+      )
+      let owners = 0
+      const application = createRoadmapApplication({
+        configuration: {
+          ...document,
+          async write(next) {
+            entered.resolve()
+            await gate.promise
+            return document.write(next)
+          },
+        },
+        admissions: { local: createLocalProjectAdmission() },
+        observers: {
+          local() {
+            owners += 1
+            return source.observer
+          },
+          github() {
+            throw new Error('No GitHub source belongs to this schedule.')
+          },
+        },
+        operations: harmlessHost(),
+      })
+      const publications: ApplicationState[] = []
+      application.subscribe((state) => publications.push(state))
+      let command: ReturnType<typeof application.execute> | undefined
+      let stopping: Promise<void> | undefined
+      try {
+        await application.start()
+        const observed = application.current().projects[0]?.resource
+        command = application.execute(
+          type === 'rename-project'
+            ? { type, project, name: 'Saved after retirement', expectedConfigurationVersion: 1 }
+            : type === 'remove-project'
+              ? { type, project, expectedConfigurationVersion: 1 }
+              : type === 'register-project'
+                ? {
+                    type,
+                    candidate: {
+                      integration: 'local',
+                      connectionId: 'local',
+                      workspace: { path: additionalPath },
+                    },
+                    expectedConfigurationVersion: 1,
+                  }
+                : {
+                    type,
+                    project,
+                    workspace: { path: additionalPath },
+                    expectedConfigurationVersion: 1,
+                  },
+        )
+        await entered.promise
+        stopping = application.stop()
+        const publicationsAtStop = publications.length
+        await vi.waitFor(() => expect(source.stopped).toBe(true))
+        gate.resolve()
+        const outcome = await command
+        expect(outcome).toMatchObject({
+          ok: true,
+          result: { type: 'configuration-updated', configurationVersion: 2 },
+          state: { configurationVersion: 2 },
+        })
+        expect(applicationStateCodec.decode(outcome.state).ok).toBe(true)
+        const persisted: unknown = JSON.parse(await readFile(filename, 'utf8'))
+        if (type === 'rename-project') {
+          expect(persisted).toMatchObject({ projects: [{ displayName: 'Saved after retirement' }] })
+          expect(outcome.state.registrations).toMatchObject([
+            { displayName: 'Saved after retirement' },
+          ])
+          expect(outcome.state.projects[0]).toMatchObject({
+            name: 'Saved after retirement',
+            resource: observed,
+          })
+        } else if (type === 'remove-project') {
+          expect(persisted).toMatchObject({ projects: [] })
+          expect(outcome.state.registrations).toEqual([])
+          expect(outcome.state.projects).toEqual([])
+        } else if (type === 'register-project') {
+          expect(persisted).toMatchObject({
+            projects: [
+              { ref: { projectId: 'fixture' }, workspace: { path: root } },
+              { ref: { projectId: 'additional' }, workspace: { path: additionalPath } },
+            ],
+          })
+          expect(outcome.state.projects[0]?.resource).toEqual(observed)
+          expect(outcome.state.projects[1]).toMatchObject({
+            key: { integration: 'local', id: 'additional' },
+            workspace: { path: additionalPath },
+            resource: { kind: 'never-observed', current: null },
+            mapsMembership: { kind: 'never-observed', current: null },
+            maps: [],
+            activeMap: { kind: 'uncertain', reason: 'never-observed' },
+          })
+        } else {
+          expect(persisted).toMatchObject({ projects: [{ workspace: { path: additionalPath } }] })
+          expect(outcome.state.registrations[0]?.workspace.path).toBe(additionalPath)
+          const retained = outcome.state.projects[0]
+          expect(retained).toMatchObject({
+            resource: {
+              kind: 'retained-unavailable',
+              unavailable: { kind: 'no-current-evidence' },
+            },
+            mapsMembership: { kind: 'unavailable' },
+            activeMap: { kind: 'uncertain', reason: 'project-unavailable' },
+          })
+          expect(
+            retained?.resource.kind === 'retained-unavailable'
+              ? retained.resource.lastSuccessful
+              : null,
+          ).toEqual(observed?.kind === 'current-readable' ? observed.observation : null)
+          expect(retained?.maps[0]).toMatchObject({
+            resource: { kind: 'retained-unavailable' },
+            ticketsMembership: { kind: 'unavailable' },
+            tickets: [{ resource: { kind: 'retained-unavailable' } }],
+          })
+        }
+        await stopping
+        expect(application.current().registrations).toEqual(outcome.state.registrations)
+        expect(application.current().projects).toEqual(outcome.state.projects)
+        expect(application.current().automation.availability.status).toBe('unavailable')
+        expect(
+          application
+            .current()
+            .projects.flatMap((entry) => entry.actions)
+            .some((action) => action.kind === 'server-launch'),
+        ).toBe(false)
+        expect(application.diagnostics().lifecycle.phase).toBe('stopped')
+        source.push(read([localContent('fixture', root)], 2_000))
+        expect(application.current().projects).toEqual(outcome.state.projects)
+        expect(publications).toHaveLength(publicationsAtStop)
+        expect(source.stopped).toBe(true)
+        expect(owners).toBe(1)
+      } finally {
+        gate.resolve()
+        await command
+        await (stopping ?? application.stop())
+        await document.stop()
+        await rm(root, { recursive: true, force: true })
+      }
+    },
+  )
+
+  it('rejects a queued mutation that had not entered its serialized callback before shutdown', async () => {
+    const writeEntered = Promise.withResolvers<void>()
+    const writeGate = Promise.withResolvers<void>()
+    const saved: ProjectConfiguration = {
+      schemaVersion: 6,
+      configurationVersion: 1,
+      connections: [LOCAL],
+      projects: [],
+      automation: { enabled: false, enabledProjects: [] },
+    }
+    const memory = memoryConfiguration(saved)
+    const writes: ProjectConfiguration[] = []
+    const application = createRoadmapApplication({
+      configuration: {
+        ...memory.document,
+        async write(next) {
+          writes.push(next)
+          writeEntered.resolve()
+          await writeGate.promise
+          return memory.document.write(next)
+        },
+      },
+      admissions: {},
+      observers: {
+        local() {
+          throw new Error('The mutation queue has no Local sources.')
+        },
+        github() {
+          throw new Error('The mutation queue has no GitHub sources.')
+        },
+      },
+    })
+    await application.start()
+    const first = application.execute({
+      type: 'rename-connection',
+      connectionId: 'local',
+      name: 'Already admitted',
+      expectedConfigurationVersion: 1,
+    })
+    const firstResult = Promise.allSettled([first])
+    await writeEntered.promise
+    const queued = application.execute({
+      type: 'rename-connection',
+      connectionId: 'local',
+      name: 'Must not be admitted',
+      expectedConfigurationVersion: 1,
+    })
+    const queuedResult = Promise.allSettled([queued])
+    const stopping = Promise.allSettled([application.stop()])
+    try {
+      writeGate.resolve()
+      const admitted = (await firstResult)[0]
+      expect(admitted).toMatchObject({
+        status: 'fulfilled',
+        value: { ok: true, result: { type: 'configuration-updated', configurationVersion: 2 } },
+      })
+      expect((await queuedResult)[0]).toMatchObject({
+        status: 'fulfilled',
+        value: { ok: false, error: { code: 'not-supported' } },
+      })
+      expect(await stopping).toEqual([{ status: 'fulfilled', value: undefined }])
+      expect(writes).toHaveLength(1)
+      expect(writes[0]?.connections[0]?.name).toBe('Already admitted')
+    } finally {
+      writeGate.resolve()
+      await Promise.all([firstResult, queuedResult, stopping])
+    }
+  })
+
+  it.each(['success', 'failure'] as const)(
+    'drains a begun host adapter and reports its honest %s without launching queued work',
+    async (completion) => {
+      const root = await realpath(await mkdtemp(join(tmpdir(), 'roadmap-host-drain-')))
+      const entered = Promise.withResolvers<void>()
+      const host = Promise.withResolvers<void>()
+      const effects: Array<{ executable: string; args: readonly string[] }> = []
+      const saved: ProjectConfiguration = {
+        schemaVersion: 6,
+        configurationVersion: 1,
+        connections: [LOCAL],
+        projects: [
+          {
+            ref: { integration: 'local', projectId: 'host' },
+            connectionId: 'local',
+            workspace: { path: root },
+          },
+        ],
+        automation: { enabled: false, enabledProjects: [] },
+      }
+      const configuration = memoryConfiguration(saved)
+      const application = createRoadmapApplication({
+        configuration: configuration.document,
+        admissions: { local: createLocalProjectAdmission() },
+        observers: {
+          local(input) {
+            const content = localContent(input.ref.projectId, input.workspace.path)
+            const read = createSourceFixtureOwner()
+            return controlledSourceFixture(content.key, read([content], 1_000)).observer
+          },
+          github() {
+            throw new Error('The host drain has no GitHub sources.')
+          },
+        },
+        operations: createApplicationOperations({
+          async launch(executable, args) {
+            effects.push({ executable, args })
+            entered.resolve()
+            await host.promise
+          },
+          async selectWorkspace() {
+            throw new Error('The host drain must not open a selector.')
+          },
+        }),
+      })
+      let launched: ReturnType<typeof Promise.allSettled> | undefined
+      let queued: ReturnType<typeof Promise.allSettled> | undefined
+      let stopping: ReturnType<typeof Promise.allSettled> | undefined
+      try {
+        await application.start()
+        launched = Promise.allSettled([
+          application.execute({
+            type: 'launch-action',
+            actionId: 'open-workspace',
+            project: { integration: 'local', id: 'host' },
+            expectedConfigurationVersion: 1,
+          }),
+        ])
+        await entered.promise
+        queued = Promise.allSettled([
+          application.execute({
+            type: 'launch-action',
+            actionId: 'open-terminal',
+            project: { integration: 'local', id: 'host' },
+            expectedConfigurationVersion: 1,
+          }),
+        ])
+        let stopped = false
+        stopping = Promise.allSettled([
+          application.stop().then(() => {
+            stopped = true
+          }),
+        ])
+        await setImmediate()
+        expect(stopped).toBe(false)
+        expect(effects).toEqual([
+          { executable: '/usr/bin/open', args: ['-a', 'Visual Studio Code', root] },
+        ])
+        if (completion === 'failure') host.reject(new Error('Private admitted host detail.'))
+        else host.resolve()
+        expect((await launched)[0]).toMatchObject(
+          completion === 'success'
+            ? {
+                status: 'fulfilled',
+                value: {
+                  ok: true,
+                  result: { type: 'action-launched', actionId: 'open-workspace' },
+                },
+              }
+            : { status: 'fulfilled', value: { ok: false, error: { code: 'launch-failed' } } },
+        )
+        expect((await queued)[0]).toMatchObject({
+          status: 'fulfilled',
+          value: { ok: false, error: { code: 'not-supported' } },
+        })
+        expect(await stopping).toEqual([{ status: 'fulfilled', value: undefined }])
+        expect(effects).toHaveLength(1)
+        expect(JSON.stringify(await launched)).not.toContain('Private admitted host detail.')
+      } finally {
+        host.resolve()
+        await Promise.all([launched, queued])
+        await (stopping ?? Promise.allSettled([application.stop()]))
+        await rm(root, { recursive: true, force: true })
+      }
+    },
+  )
 })

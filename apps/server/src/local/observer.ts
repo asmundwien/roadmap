@@ -76,6 +76,9 @@ export function createLocalObserver(
   const listeners = new Set<(value: SourceContribution) => void>()
   let watcher: WatchHandle | null = null
   let stopped = false
+  let stopPromise: Promise<void> | null = null
+  const tasks = new Set<Promise<void>>()
+  const disposalFailures: unknown[] = []
   let baseline: Promise<SourceContribution> | null = null
   let contributionFingerprint = ''
   let lastSuccessfulAt: number | undefined
@@ -86,12 +89,33 @@ export function createLocalObserver(
   let debounceStartedAt = 0
   let chain: Promise<void> = Promise.resolve()
 
+  function run<T>(operation: () => Promise<T>): Promise<T> {
+    const result = Promise.resolve().then(operation)
+    const completion = result.then(
+      () => undefined,
+      () => undefined,
+    )
+    tasks.add(completion)
+    void completion.then(() => tasks.delete(completion))
+    return result
+  }
+
+  function background(operation: () => Promise<void>, reason: string): void {
+    if (stopped) return
+    void run(operation).catch((error: unknown) => {
+      if (!stopped) logger.warn(`Local supervision (${reason}) failed`, error)
+    })
+  }
+
   function publish(contribution: SourceContribution): void {
     if (stopped) return
     const fingerprint = JSON.stringify(contribution)
     if (fingerprint === contributionFingerprint) return
     contributionFingerprint = fingerprint
-    for (const listener of listeners) listener(contribution)
+    for (const listener of listeners) {
+      if (stopped) break
+      listener(contribution)
+    }
   }
 
   function healthFor(batch: ObservationBatch): SourceObservationHealth {
@@ -214,9 +238,12 @@ export function createLocalObserver(
 
   function scheduleReconcile(): void {
     if (stopped) return
-    reconcileTimer = setTimeout(async () => {
-      await backgroundReconcile('interval')
-      scheduleReconcile()
+    reconcileTimer = setTimeout(() => {
+      reconcileTimer = null
+      background(async () => {
+        await backgroundReconcile('interval')
+        scheduleReconcile()
+      }, 'interval')
     }, reconcileMs)
   }
 
@@ -230,35 +257,47 @@ export function createLocalObserver(
     debounceTimer = setTimeout(() => {
       debounceTimer = null
       debounceStartedAt = 0
-      void backgroundReconcile(reason)
+      background(() => backgroundReconcile(reason), reason)
     }, delay)
   }
 
   function closeWatcher(): void {
-    watcher?.close()
+    const closing = watcher
     watcher = null
+    try {
+      closing?.close()
+    } catch (error) {
+      disposalFailures.push(error)
+    }
   }
 
   function scheduleRecovery(): void {
     if (stopped) return
     closeWatcher()
     if (recoveryTimer !== null) return
-    recoveryTimer = setTimeout(async () => {
+    recoveryTimer = setTimeout(() => {
       recoveryTimer = null
-      if (stopped) return
-      if (await pathExists(watchPath)) {
-        recoveryDelayMs = recoveryMs
-        await attachWatcher()
-        invalidate('recovery')
-        return
-      }
-      recoveryDelayMs = Math.min(recoveryDelayMs * 2, maxRecoveryMs)
-      scheduleRecovery()
+      background(async () => {
+        if (stopped) return
+        const exists = await pathExists(watchPath)
+        if (stopped) return
+        if (exists) {
+          recoveryDelayMs = recoveryMs
+          await attachWatcher()
+          invalidate('recovery')
+          return
+        }
+        recoveryDelayMs = Math.min(recoveryDelayMs * 2, maxRecoveryMs)
+        scheduleRecovery()
+      }, 'recovery')
     }, recoveryDelayMs)
   }
 
   async function handleDirty(): Promise<void> {
-    if (!(await pathExists(watchPath))) scheduleRecovery()
+    if (stopped) return
+    const exists = await pathExists(watchPath)
+    if (stopped) return
+    if (!exists) scheduleRecovery()
     invalidate('watch')
   }
 
@@ -270,7 +309,7 @@ export function createLocalObserver(
   }
 
   async function attachWatcher(): Promise<void> {
-    if (stopped) return
+    if (stopped || watcher) return
     clearTimeout(recoveryTimer ?? undefined)
     recoveryTimer = null
     recoveryDelayMs = recoveryMs
@@ -278,9 +317,13 @@ export function createLocalObserver(
       scheduleRecovery()
       return
     }
-    if (stopped) return
+    if (stopped || watcher) return
     try {
-      watcher = watchDirectory(watchPath, () => void handleDirty(), handleWatcherError)
+      watcher = watchDirectory(
+        watchPath,
+        () => background(handleDirty, 'watch'),
+        handleWatcherError,
+      )
     } catch {
       logger.warn(`Could not watch ${watchPath}; supervising re-attach`)
       scheduleRecovery()
@@ -288,35 +331,47 @@ export function createLocalObserver(
   }
 
   function observe(): Promise<SourceContribution> {
+    if (stopped) return Promise.reject(new Error('The Local observer has stopped.'))
     if (baseline !== null) return baseline
-    baseline = (async () => {
+    baseline = run(async () => {
       if (stopped) throw new Error('The Local observer has stopped.')
       await attachWatcher()
       const contribution = await reconcile()
-      scheduleReconcile()
-      logger.info('local baseline: 1 registered project')
+      if (!stopped) {
+        scheduleReconcile()
+        logger.info('local baseline: 1 registered project')
+      }
       return contribution
-    })()
+    })
     return baseline
   }
 
   return {
     observe,
     subscribe(listener) {
+      if (stopped) return () => undefined
       listeners.add(listener)
       return () => listeners.delete(listener)
     },
     refresh() {
-      return baseline === null ? observe() : baseline.then(() => reconcile())
+      if (stopped) return Promise.reject(new Error('The Local observer has stopped.'))
+      return run(() => (baseline === null ? observe() : baseline.then(() => reconcile())))
     },
-    async stop() {
+    stop() {
+      if (stopPromise) return stopPromise
       stopped = true
       clearTimeout(reconcileTimer ?? undefined)
       clearTimeout(debounceTimer ?? undefined)
       clearTimeout(recoveryTimer ?? undefined)
       closeWatcher()
       listeners.clear()
-      await chain
+      stopPromise = Promise.all([...tasks]).then(async () => {
+        await chain
+        if (disposalFailures.length === 1) throw disposalFailures[0]
+        if (disposalFailures.length > 1)
+          throw new AggregateError(disposalFailures, 'Local watcher disposal failed.')
+      })
+      return stopPromise
     },
   }
 }

@@ -50,6 +50,8 @@ const STDOUT_LIMIT = 16 * 1024
 const STDERR_LIMIT = 64 * 1024
 const RESTART_UNKNOWN_REASON = 'Roadmap restarted before this attempt recorded a terminal result.'
 const STOP_UNKNOWN_REASON = 'Roadmap stopped before this Session recorded a terminal result.'
+const STOP_CLASSIFICATION_REASON =
+  'Roadmap stopped before the owned Classification process supplied a terminal result.'
 
 interface FinishedProcessResult {
   status: 'finished'
@@ -115,14 +117,15 @@ type CandidateResolution =
   | { ok: false; target: AutomationTarget; reason: string }
 
 interface ActiveClassification {
-  candidate: Candidate
+  target: AutomationTarget
+  result: ClassificationProcessResult | null
   opportunityId: string
   process: ClassificationProcess
   admission: AutomationAdmission
 }
 interface ActiveWayfinder {
   target: AutomationTarget
-  process: WayfinderProcess
+  opportunityId: string
 }
 
 type LaunchResult =
@@ -146,9 +149,12 @@ export function createAutomationEngine(options: {
   let currentEvidence: readonly AutomationEvidence[] = []
   let activeClassification: ActiveClassification | null = null
   const activeWayfinders = new Map<string, ActiveWayfinder>()
-  let started = false
-  let accepting = true
-  let faulted = false
+  let phase: 'idle' | 'starting' | 'ready' | 'failed' | 'stopping' | 'stopped' = 'idle'
+  let persistenceFailure: Error | null = null
+  let startTask: Promise<void> | null = null
+  let stopTask: Promise<void> | null = null
+  const dispatchTasks = new Set<Promise<void>>()
+  const shutdownFailures: unknown[] = []
   let lane: Promise<void> = Promise.resolve()
 
   function resourcesNow(): ResourceCatalogSnapshot | null {
@@ -170,26 +176,35 @@ export function createAutomationEngine(options: {
     records = new Map(
       projection.records.map((record) => [automationTargetKey(record.opportunity.target), record]),
     )
-    options.onEvidenceChange?.()
+    if (phase === 'ready' || phase === 'starting') options.onEvidenceChange?.()
   }
 
   async function append(batch: AutomationAppend): Promise<boolean> {
     try {
       const result = await options.database.append(batch)
-      if (result.durability !== 'confirmed') faulted = true
+      if (result.durability !== 'confirmed') {
+        persistenceFailure = new Error(
+          result.message ?? 'Automation history durability could not be confirmed.',
+        )
+        if (phase === 'stopping') shutdownFailures.push(persistenceFailure)
+      }
       install(result.database)
       return result.durability === 'confirmed'
-    } catch {
-      faulted = true
-      options.onEvidenceChange?.()
+    } catch (error) {
+      persistenceFailure =
+        error instanceof Error
+          ? error
+          : new Error('Automation evidence could not be persisted.', { cause: error })
+      if (phase === 'stopping') shutdownFailures.push(persistenceFailure)
+      if (phase === 'ready' || phase === 'starting') options.onEvidenceChange?.()
       return false
     }
   }
 
   async function reconcileNow(): Promise<void> {
-    if (!started || !accepting || faulted) return
+    if (phase !== 'ready' || persistenceFailure) return
     await reconcileWayfinders()
-    if (!accepting || faulted || activeClassification) return
+    if (phase !== 'ready' || persistenceFailure || activeClassification) return
     await reconcileClassification()
   }
 
@@ -211,14 +226,14 @@ export function createAutomationEngine(options: {
       if (record.wayfinder?.status !== 'queued') continue
       if (projectHasUnacknowledgedInterruption(record.opportunity.target.project)) continue
       await beginDispatch(record.opportunity.target, 'automatic')
-      if (!accepting || faulted) return
+      if (phase !== 'ready' || persistenceFailure) return
     }
   }
 
   async function reconcileClassification(): Promise<void> {
     for (const candidate of selectCandidates(resourcesNow())) {
       const result = await beginClassification(candidate.target, 'automatic')
-      if (result.kind === 'admitted' || !accepting || faulted) return
+      if (result.kind === 'admitted' || phase !== 'ready' || persistenceFailure) return
     }
   }
 
@@ -264,32 +279,39 @@ export function createAutomationEngine(options: {
     }
 
     const launched: ActiveClassification = {
-      candidate,
+      target,
+      result: null,
       opportunityId: opportunity.id,
       process,
       admission,
     }
     activeClassification = launched
     void process.completed.then(
-      (result) => enqueue(() => finishClassification(launched, result)),
+      (result) => observeClassificationResult(launched, result),
       () =>
-        enqueue(() =>
-          finishClassification(launched, {
-            status: 'outcome-unknown',
-            reason: 'The Classification process result was lost.',
-          }),
-        ),
+        observeClassificationResult(launched, {
+          status: 'outcome-unknown',
+          reason: 'The Classification process result was lost.',
+        }),
     )
     return { kind: 'admitted' }
+  }
+
+  function observeClassificationResult(
+    launched: ActiveClassification,
+    result: ClassificationProcessResult,
+  ): Promise<void> | undefined {
+    if (activeClassification !== launched) return
+    launched.result = result
+    if (phase === 'ready') return enqueue(() => finishClassification(launched, result))
   }
 
   async function finishClassification(
     launched: ActiveClassification,
     result: ClassificationProcessResult,
   ): Promise<void> {
-    if (activeClassification !== launched) return
+    if (phase !== 'ready' || activeClassification !== launched) return
     activeClassification = null
-    if (!accepting) return
 
     const classification = classificationResult(result, launched.admission)
     if (
@@ -329,19 +351,35 @@ export function createAutomationEngine(options: {
         current.ok ? 'Prepared launch dependencies changed.' : current.reason,
       )
     }
+    const launched: ActiveWayfinder = { target, opportunityId: record.opportunity.id }
+    activeWayfinders.set(projectKey(target.project), launched)
+    const acquisition = Promise.withResolvers<void>()
+    dispatchTasks.add(acquisition.promise)
+    void acquisition.promise.then(
+      () => dispatchTasks.delete(acquisition.promise),
+      () => undefined,
+    )
     let dispatch: Promise<WayfinderProcess>
     try {
       dispatch = options.launcher.dispatch(
         launchRequest(initial.prepared.candidate, initial.prepared.command, 'wayfinder'),
       )
     } catch {
-      await finishWayfinderLaunchFailure(target)
-      return faulted ? { kind: 'persistence-failed' } : { kind: 'admitted' }
+      acquisition.resolve()
+      await finishWayfinderLaunchFailure(launched)
+      return persistenceFailure ? { kind: 'persistence-failed' } : { kind: 'admitted' }
     }
-    void dispatch.then(
-      (process) => enqueue(() => markWayfinderRunning(target, process)),
-      () => enqueue(() => finishWayfinderLaunchFailure(target)),
-    )
+    void dispatch
+      .then(
+        (process) => {
+          observeWayfinderCompletion(launched, process)
+          if (phase === 'ready') return enqueue(() => markWayfinderRunning(launched))
+        },
+        () => {
+          if (phase === 'ready') return enqueue(() => finishWayfinderLaunchFailure(launched))
+        },
+      )
+      .then(acquisition.resolve, acquisition.reject)
     return { kind: 'admitted' }
   }
 
@@ -369,8 +407,9 @@ export function createAutomationEngine(options: {
     admission: AutomationAdmission,
     reservationId?: string,
   ): LaunchPreparation {
-    if (!accepting) return { ok: false, reason: 'Roadmap is stopping.' }
-    if (faulted) return { ok: false, reason: 'Automation evidence could not be persisted.' }
+    if (phase !== 'ready') return { ok: false, reason: 'Automation is not ready.' }
+    if (persistenceFailure)
+      return { ok: false, reason: 'Automation evidence could not be persisted.' }
     const source = resourcesNow()
     if (!source?.committed.configurationValid)
       return { ok: false, reason: 'Current configuration cannot admit Automation.' }
@@ -463,30 +502,33 @@ export function createAutomationEngine(options: {
     return { ok: true, prepared: { candidate: resolved.candidate, command } }
   }
 
-  async function markWayfinderRunning(
-    target: AutomationTarget,
-    process: WayfinderProcess,
-  ): Promise<void> {
-    if (!accepting) return
-    const current = records.get(automationTargetKey(target))
-    if (current?.wayfinder?.status !== 'launching') return
-    const launched = { target, process }
-    activeWayfinders.set(projectKey(target.project), launched)
+  function observeWayfinderCompletion(launched: ActiveWayfinder, process: WayfinderProcess): void {
+    // Observing rejection does not supervise or join the external Session lifetime.
     void process.completed.then(
-      (result) => enqueue(() => finishWayfinder(launched, result)),
-      () =>
-        enqueue(() =>
-          finishWayfinderUnknown(launched, 'The Wayfinder Session process result was lost.'),
-        ),
+      (result) => {
+        if (phase === 'ready') return enqueue(() => finishWayfinder(launched, result))
+      },
+      () => {
+        if (phase === 'ready')
+          return enqueue(() =>
+            finishWayfinderUnknown(launched, 'The Wayfinder Session process result was lost.'),
+          )
+      },
     )
+  }
+
+  async function markWayfinderRunning(launched: ActiveWayfinder): Promise<void> {
+    if (phase !== 'ready' || !isActiveWayfinder(launched)) return
+    const current = records.get(automationTargetKey(launched.target))
+    if (current?.wayfinder?.status !== 'launching') return
     await append({
       events: [{ ...eventIdentity(current.opportunity.id), type: 'wayfinder-running' }],
     })
   }
 
-  async function finishWayfinderLaunchFailure(target: AutomationTarget): Promise<void> {
-    if (!accepting) return
-    const current = records.get(automationTargetKey(target))
+  async function finishWayfinderLaunchFailure(launched: ActiveWayfinder): Promise<void> {
+    if (phase !== 'ready' || !isActiveWayfinder(launched)) return
+    const current = records.get(automationTargetKey(launched.target))
     if (current?.wayfinder?.status !== 'launching') return
     const persisted = await append({
       events: [
@@ -497,14 +539,17 @@ export function createAutomationEngine(options: {
         },
       ],
     })
-    if (persisted) await reconcileNow()
+    if (persisted) {
+      activeWayfinders.delete(projectKey(launched.target.project))
+      await reconcileNow()
+    }
   }
 
   async function finishWayfinder(
     launched: ActiveWayfinder,
     result: WayfinderProcessResult,
   ): Promise<void> {
-    if (!accepting || !isActiveWayfinder(launched)) return
+    if (phase !== 'ready' || !isActiveWayfinder(launched)) return
     const current = records.get(automationTargetKey(launched.target))
     if (
       !current ||
@@ -531,7 +576,7 @@ export function createAutomationEngine(options: {
   }
 
   async function finishWayfinderUnknown(launched: ActiveWayfinder, reason: string): Promise<void> {
-    if (!accepting || !isActiveWayfinder(launched)) return
+    if (phase !== 'ready' || !isActiveWayfinder(launched)) return
     const current = records.get(automationTargetKey(launched.target))
     if (
       !current ||
@@ -615,8 +660,9 @@ export function createAutomationEngine(options: {
   function commonOverrideIneligibility(
     resolved: CandidateResolution,
   ): AutomationOverrideAvailability | null {
-    if (!accepting) return ineligible('Roadmap is stopping.')
-    if (faulted) return ineligible('Automation evidence could not be persisted; restart Roadmap.')
+    if (phase !== 'ready') return ineligible('Automation is not ready.')
+    if (persistenceFailure)
+      return ineligible('Automation evidence could not be persisted; restart Roadmap.')
     if (!resourcesNow()?.committed.configurationValid)
       return ineligible('Current configuration cannot admit Automation.')
     return resolved.ok ? null : ineligible(resolved.reason)
@@ -669,10 +715,10 @@ export function createAutomationEngine(options: {
     project: ProjectKey,
   ): Promise<{ ok: true } | { ok: false; error: SafeError }> {
     return enqueue(async () => {
-      if (!accepting) {
-        return { ok: false, error: overrideError('Roadmap is stopping.', 'not-supported') }
+      if (phase !== 'ready') {
+        return { ok: false, error: overrideError('Automation is not ready.', 'not-supported') }
       }
-      if (faulted) {
+      if (persistenceFailure) {
         return {
           ok: false,
           error: overrideError('Automation evidence could not be persisted.', 'persistence-failed'),
@@ -736,14 +782,97 @@ export function createAutomationEngine(options: {
     }
   }
 
-  return {
-    async start() {
-      if (started) return
+  async function startNow(): Promise<void> {
+    try {
+      if (phase !== 'starting') throw new Error('Automation startup was interrupted by shutdown.')
       install(await options.database.load())
-      const recovery = interruptionEvents(records.values(), RESTART_UNKNOWN_REASON)
-      if (recovery.length > 0 && !(await append({ events: recovery }))) return
-      started = true
+      const recovery = recoveryEvents(records.values())
+      if (recovery.length > 0 && !(await append({ events: recovery }))) {
+        throw persistenceFailure ?? new Error('Automation recovery could not be persisted.')
+      }
+      if (phase !== 'starting') throw new Error('Automation startup was interrupted by shutdown.')
+      phase = 'ready'
       await enqueue(reconcileNow)
+      if (phase !== 'ready') throw new Error('Automation startup was interrupted by shutdown.')
+    } catch (error) {
+      if (phase === 'starting' || phase === 'ready') phase = 'failed'
+      throw error
+    }
+  }
+
+  async function stopNow(): Promise<void> {
+    const live = activeClassification
+    try {
+      if (live) {
+        try {
+          await live.process.stop()
+        } catch (error) {
+          shutdownFailures.push(error)
+        }
+      }
+      // Startup recovery and admitted append work drain, but cannot admit another effect.
+      if (startTask) await startTask.catch(() => undefined)
+      await lane
+      const acquisitions = await Promise.allSettled(dispatchTasks)
+      for (const acquisition of acquisitions) {
+        if (acquisition.status === 'rejected') shutdownFailures.push(acquisition.reason)
+      }
+
+      const interruptions: AutomationEvent[] = []
+      if (live && activeClassification === live) {
+        const current = records.get(automationTargetKey(live.target))
+        if (
+          current?.opportunity.id === live.opportunityId &&
+          current.classification.status === 'running'
+        ) {
+          interruptions.push(
+            classificationEvent(
+              live.opportunityId,
+              classificationResult(
+                live.result ?? { status: 'outcome-unknown', reason: STOP_CLASSIFICATION_REASON },
+                live.admission,
+              ),
+            ),
+          )
+        }
+      }
+      activeClassification = null
+      for (const launched of activeWayfinders.values()) {
+        const current = records.get(automationTargetKey(launched.target))
+        if (
+          current?.opportunity.id === launched.opportunityId &&
+          (current.wayfinder?.status === 'launching' || current.wayfinder?.status === 'running')
+        ) {
+          interruptions.push({
+            ...eventIdentity(launched.opportunityId),
+            type: 'wayfinder-outcome-unknown',
+            reason: STOP_UNKNOWN_REASON,
+          })
+        }
+      }
+      if (interruptions.length > 0) await append({ events: interruptions })
+    } finally {
+      activeClassification = null
+      activeWayfinders.clear()
+      dispatchTasks.clear()
+      phase = 'stopped'
+    }
+    if (shutdownFailures.length === 1) throw shutdownFailures[0]
+    if (shutdownFailures.length > 1) {
+      throw new AggregateError(shutdownFailures, 'Automation shutdown could not complete cleanly.')
+    }
+  }
+
+  return {
+    start() {
+      if (phase === 'stopping' || phase === 'stopped') {
+        return Promise.reject(new Error('Automation has stopped and cannot be started again.'))
+      }
+      if (!startTask) {
+        phase = 'starting'
+        startTask = Promise.resolve().then(startNow)
+      }
+      return startTask
     },
     evidence: () => currentEvidence.map(publicEvidence),
     overrides: () => overrideControls().map(publicOverride),
@@ -753,7 +882,7 @@ export function createAutomationEngine(options: {
         const wayfinder = record.wayfinder
         const interrupted =
           (wayfinder?.status === 'outcome-unknown' && !wayfinder.acknowledged) ||
-          ((faulted || !accepting) &&
+          ((persistenceFailure || phase === 'stopping' || phase === 'stopped') &&
             (wayfinder?.status === 'launching' || wayfinder?.status === 'running'))
         if (interrupted) {
           projects.set(
@@ -767,18 +896,15 @@ export function createAutomationEngine(options: {
     acknowledgeProjectInterruption,
     startOverride,
     reconcile() {
-      if (!started || !accepting) return
+      if (phase !== 'ready') return
       void enqueue(reconcileNow)
     },
-    async stop() {
-      if (!accepting) return lane
-      accepting = false
-      const live = activeClassification
-      if (live) await live.process.stop()
-      await lane
-      const interruptions = interruptionEvents(records.values(), STOP_UNKNOWN_REASON)
-      if (interruptions.length > 0) await append({ events: interruptions })
-      activeWayfinders.clear()
+    stop() {
+      if (!stopTask) {
+        phase = 'stopping'
+        stopTask = Promise.resolve().then(stopNow)
+      }
+      return stopTask
     },
   }
 }
@@ -1225,24 +1351,21 @@ function classificationEvent(
   }
 }
 
-function interruptionEvents(
-  records: Iterable<AutomationRecord>,
-  reason: string,
-): AutomationEvent[] {
+function recoveryEvents(records: Iterable<AutomationRecord>): AutomationEvent[] {
   const events: AutomationEvent[] = []
   for (const record of records) {
-    if (record.classification.status === 'running' && reason === RESTART_UNKNOWN_REASON) {
+    if (record.classification.status === 'running') {
       events.push({
         ...eventIdentity(record.opportunity.id),
         type: 'classification-outcome-unknown',
-        reason,
+        reason: RESTART_UNKNOWN_REASON,
       })
     }
     if (record.wayfinder?.status === 'launching' || record.wayfinder?.status === 'running') {
       events.push({
         ...eventIdentity(record.opportunity.id),
         type: 'wayfinder-outcome-unknown',
-        reason,
+        reason: RESTART_UNKNOWN_REASON,
       })
     }
   }

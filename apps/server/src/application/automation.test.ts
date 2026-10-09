@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { setTimeout as delay } from 'node:timers/promises'
+import { setTimeout as delay, setImmediate as nextTurn } from 'node:timers/promises'
 import type { ProjectKey, TicketTypeEvidence } from '@roadmap/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -654,6 +654,8 @@ function deferredLauncher(
     resolve(result: WayfinderProcessResult): void
     reject(error: Error): void
   }> = []
+  const classificationEntered = Promise.withResolvers<(typeof classifications)[number]>()
+  const dispatchEntered = Promise.withResolvers<AutomationLaunch>()
   let running = 0
   let maximumRunning = 0
   const launcher: AutomationLauncher = {
@@ -675,6 +677,7 @@ function deferredLauncher(
         },
       }
       classifications.push(launch)
+      classificationEntered.resolve(launch)
       return {
         completed: promise,
         async stop() {
@@ -687,6 +690,7 @@ function deferredLauncher(
     async dispatch(request) {
       options.beforeDispatch?.(request)
       dispatches.push(request)
+      dispatchEntered.resolve(request)
       if (options.dispatchError) throw options.dispatchError
       await options.dispatchGate
       const { promise, resolve, reject } = Promise.withResolvers<WayfinderProcessResult>()
@@ -699,6 +703,8 @@ function deferredLauncher(
     classifications,
     dispatches,
     sessions,
+    classificationEntered: classificationEntered.promise,
+    dispatchEntered: dispatchEntered.promise,
     settleSessions() {
       for (const session of sessions)
         session.resolve(wayfinderResult({ code: null, signal: 'SIGTERM', stdout: '' }))
@@ -791,11 +797,12 @@ describe('Automation admission after durable append', () => {
       const launches = deferredLauncher()
       const current = await harness({ projects: [sourceProject], launcher: launches.launcher })
       try {
+        const classification = await launches.classificationEntered
         current.configured.emit(INVALID_CONFIGURATION)
         await vi.waitFor(() =>
           expect(current.application.current().automation.availability.status).toBe('unavailable'),
         )
-        launches.classifications[0]?.resolve(
+        classification.resolve(
           processResult(
             scenario === 'fresh target'
               ? {
@@ -818,6 +825,7 @@ describe('Automation admission after durable append', () => {
         expect(launches.dispatches).toEqual([])
         expect(current.application.current().configurationVersion).toBe(1)
         expect(current.application.current().projects[0]?.key).toEqual(sourceProject.key)
+        expect(current.application.current().automation.overrides).not.toEqual([])
         expect(
           current.application
             .current()
@@ -1190,6 +1198,10 @@ describe('Automation admission after durable append', () => {
                     : 'wayfinder-launch-failed'),
               ),
           ).toBe(false)
+          if (change !== 'unrelated source')
+            await vi.waitFor(() =>
+              expect(current.application.current().configurationVersion).toBe(2),
+            )
         } finally {
           gate.release()
           const stopping = current.application.stop()
@@ -1438,44 +1450,91 @@ describe('Automation admission after durable append', () => {
     },
   )
 
-  it('records known Classification nonlaunch when stop closes admission during its durable append', async () => {
-    const sourceProject = project('stop-race', [ticket('1')])
-    const gate = appendGate('classification-started')
-    const database = memoryAutomationDatabase(undefined, { beforeAppend: gate.beforeAppend })
-    const launches = deferredLauncher()
-    const disabled = configuration([sourceProject], { enabled: false })
-    const current = await harness({
-      projects: [sourceProject],
-      launcher: launches.launcher,
-      database,
-      configuration: disabled,
-    })
-    try {
-      current.configured.emit({
-        ...disabled,
-        configurationVersion: 2,
-        automation: { ...disabled.automation, enabled: true },
+  it.each([
+    { stage: 'classification', admission: 'automatic' },
+    { stage: 'classification', admission: 'override' },
+    { stage: 'wayfinder', admission: 'automatic' },
+    { stage: 'wayfinder', admission: 'override' },
+  ] as const)(
+    'records known $stage nonlaunch when stop closes $admission admission during its durable append',
+    async ({ stage, admission }) => {
+      const sourceProject = project('stop-race', [ticket('1')])
+      const target = { project: sourceProject.key, mapId: 'map', ticketId: '1' }
+      const reservation =
+        stage === 'classification' ? 'classification-started' : 'wayfinder-launching'
+      const gate = appendGate(reservation)
+      const database = memoryAutomationDatabase(
+        stage === 'wayfinder' ? queuedDatabase([target]) : undefined,
+        { beforeAppend: gate.beforeAppend },
+      )
+      const launches = deferredLauncher()
+      const disabled = configuration([sourceProject], { enabled: false })
+      const current = await harness({
+        projects: [sourceProject],
+        launcher: launches.launcher,
+        database,
+        configuration: disabled,
       })
-      await gate.waitForEntry()
-      const stopping = current.application.stop()
-      gate.release()
-      await stopping
-      expect(launches.classifications).toEqual([])
-      expect(database.events().map((event) => event.type)).toEqual([
-        'classification-started',
-        'classification-launch-failed',
-      ])
-      expect(database.evidence()[0]?.classification).toMatchObject({
-        status: 'launch-failed',
-        admission: 'automatic',
-      })
-    } finally {
-      gate.release()
-      const stopping = current.application.stop()
-      launches.settleSessions()
-      await stopping
-    }
-  })
+      let command: ReturnType<typeof current.application.execute> | null = null
+      try {
+        if (admission === 'override') {
+          command = current.application.execute({
+            type: 'start-automation-override',
+            expectedConfigurationVersion: 1,
+            target,
+            stage,
+          })
+        } else {
+          current.configured.emit({
+            ...disabled,
+            configurationVersion: 2,
+            automation: { ...disabled.automation, enabled: true },
+          })
+        }
+        await gate.waitForEntry()
+        const firstStop = current.application.stop()
+        const secondStop = current.application.stop()
+        let stopped = false
+        void Promise.all([firstStop, secondStop]).then(() => {
+          stopped = true
+        })
+        await nextTurn()
+        expect(stopped).toBe(false)
+        expect(launches.classifications).toEqual([])
+        expect(launches.dispatches).toEqual([])
+        gate.release()
+        await Promise.all([firstStop, secondStop])
+        if (command) expect(await command).toMatchObject({ ok: false })
+        expect(launches.classifications).toEqual([])
+        expect(launches.dispatches).toEqual([])
+        expect(database.events().map((event) => event.type)).toEqual(
+          stage === 'classification'
+            ? ['classification-started', 'classification-launch-failed']
+            : [
+                'classification-started',
+                'classification-completed',
+                'wayfinder-launching',
+                'wayfinder-launch-failed',
+              ],
+        )
+        const evidence = database.evidence()[0]
+        expect(
+          stage === 'classification' ? evidence?.classification : evidence?.wayfinder,
+        ).toMatchObject({
+          status: 'launch-failed',
+          admission,
+          reason: expect.stringContaining('No process was launched.'),
+        })
+        const events = [...database.events()]
+        await current.application.stop()
+        expect(database.events()).toEqual(events)
+      } finally {
+        gate.release()
+        await command
+        await current.application.stop()
+      }
+    },
+  )
 })
 
 describe('RoadmapApplication Automation', () => {
@@ -1540,7 +1599,7 @@ describe('RoadmapApplication Automation', () => {
     expect(current.configured.writes.at(-1)?.automation.enabledProjects).toEqual([])
   })
 
-  it('records a still-launching Session as interrupted without waiting for launch', async () => {
+  it('joins pending Session launch acquisition without waiting for the external Session to finish', async () => {
     const sourceProject = project('launching-stop', [ticket('1')])
     const target = { project: sourceProject.key, mapId: 'map', ticketId: '1' }
     const database = memoryAutomationDatabase(queuedDatabase([target]))
@@ -1551,16 +1610,33 @@ describe('RoadmapApplication Automation', () => {
       launcher: launches.launcher,
       database,
     })
-    expect(database.evidence()[0]?.wayfinder?.status).toBe('launching')
-
-    await current.application.stop()
-
-    expect(database.evidence()[0]?.wayfinder).toMatchObject({
-      status: 'outcome-unknown',
-      reason: expect.stringContaining('stopped'),
-    })
-    expect(current.configured.writes.at(-1)?.automation.enabledProjects).toEqual([])
-    gate.resolve()
+    try {
+      await launches.dispatchEntered
+      expect(database.evidence()[0]?.wayfinder?.status).toBe('launching')
+      const stopping = current.application.stop()
+      let stopped = false
+      void stopping.then(() => {
+        stopped = true
+      })
+      await nextTurn()
+      expect(stopped).toBe(false)
+      gate.resolve()
+      await stopping
+      expect(launches.sessions).toHaveLength(1)
+      expect(database.evidence()[0]?.wayfinder).toMatchObject({
+        status: 'outcome-unknown',
+        reason: expect.stringContaining('stopped'),
+      })
+      expect(current.configured.writes.at(-1)?.automation.enabledProjects).toEqual([])
+      const events = [...database.events()]
+      launches.settleSessions()
+      await nextTurn()
+      expect(database.events()).toEqual(events)
+    } finally {
+      gate.resolve()
+      launches.settleSessions()
+      await current.application.stop()
+    }
   })
 
   it('acknowledges the exact interruption before re-enabling and resuming queued work', async () => {

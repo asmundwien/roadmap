@@ -450,6 +450,119 @@ describe('Automation event database', () => {
     }
   })
 
+  it.each(['precommit rename', 'unconfirmed directory sync'] as const)(
+    'refuses public application readiness after recovery has %s failure',
+    async (failure) => {
+      const root = await mkdtemp(join(tmpdir(), 'roadmap-recovery-durability-'))
+      roots.push(root)
+      const configurationPath = join(root, 'roadmap.config.json')
+      const databasePath = join(root, 'automation.json')
+      const configuration: ProjectConfiguration = {
+        schemaVersion: 6,
+        configurationVersion: 1,
+        connections: [{ id: 'local', integration: 'local', name: 'Local', builtIn: true }],
+        projects: [],
+        automation: { enabled: false, enabledProjects: [] },
+      }
+      const interrupted = database([
+        started(),
+        completed(),
+        { ...identity('launching'), type: 'wayfinder-launching', admission: 'override' },
+        { ...identity('running'), type: 'wayfinder-running' },
+      ])
+      await writeFile(configurationPath, JSON.stringify(configuration), 'utf8')
+      await writeFile(databasePath, JSON.stringify(interrupted), 'utf8')
+      const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+      if (failure === 'precommit rename') {
+        vi.mocked(filesystem.rename).mockRejectedValue(
+          new Error('Controlled recovery rename failure.'),
+        )
+      } else {
+        vi.mocked(filesystem.open).mockImplementation(async (file, flags, mode) => {
+          const handle = await actual.open(file, flags, mode)
+          if (file === root)
+            vi.spyOn(handle, 'sync').mockRejectedValue(
+              new Error('Controlled recovery sync failure.'),
+            )
+          return handle
+        })
+      }
+      const effects: string[] = []
+      const application = createRoadmapApplication({
+        configuration: createConfigurationDocument(configurationPath, { debounceMs: 60_000 }),
+        admissions: {},
+        observers: {
+          local() {
+            throw new Error('Unregistered historical targets do not acquire source observers.')
+          },
+          github() {
+            throw new Error('This fixture has no GitHub source.')
+          },
+        },
+        automation: {
+          database: createAutomationDatabaseDocument(databasePath),
+          launcher: {
+            classify() {
+              effects.push('classification')
+              throw new Error('Recovery must not launch a process.')
+            },
+            async dispatch() {
+              effects.push('wayfinder')
+              throw new Error('Recovery must not launch a Session.')
+            },
+          },
+        },
+      })
+      const starting = application.start().then(
+        () => ({ status: 'fulfilled' as const }),
+        (error: unknown) => ({ status: 'rejected' as const, error }),
+      )
+      try {
+        expect(await starting).toMatchObject({ status: 'rejected' })
+        expect(await application.query({ type: 'select-workspace' })).toMatchObject({
+          ok: false,
+          error: { code: 'not-supported' },
+        })
+        expect(
+          await application.execute({
+            type: 'start-automation-override',
+            expectedConfigurationVersion: 1,
+            target,
+            stage: 'wayfinder',
+          }),
+        ).toMatchObject({ ok: false, error: { code: 'not-supported' } })
+        expect(effects).toEqual([])
+        const stored = await createAutomationDatabaseDocument(databasePath).load()
+        expect(stored.events.map((entry) => entry.type)).toEqual(
+          failure === 'precommit rename'
+            ? [
+                'classification-started',
+                'classification-completed',
+                'wayfinder-launching',
+                'wayfinder-running',
+              ]
+            : [
+                'classification-started',
+                'classification-completed',
+                'wayfinder-launching',
+                'wayfinder-running',
+                'wayfinder-outcome-unknown',
+              ],
+        )
+        expect(replayAutomationDatabase(stored).evidence[0]?.wayfinder).toMatchObject({
+          status: failure === 'precommit rename' ? 'running' : 'outcome-unknown',
+          admission: 'override',
+        })
+      } finally {
+        await starting
+        await application.stop().then(
+          () => undefined,
+          () => undefined,
+        )
+      }
+    },
+  )
+
   it('keeps appends immutable in memory', () => {
     const original = database([started()])
     const appended = appendAutomationDatabase(original, { events: [completed()] })

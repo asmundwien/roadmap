@@ -109,6 +109,7 @@ interface SourceOwner {
   contribution: SourceContribution | null
   fingerprint: string
   retired: boolean
+  disposal: Promise<void> | null
 }
 
 export function createObservationCoordinator(
@@ -117,6 +118,8 @@ export function createObservationCoordinator(
   const now = options.now ?? Date.now
   const listeners = new Set<(committed: CommittedObservation) => void>()
   const staged = new Set<SourceOwner>()
+  const disposals = new Set<Promise<void>>()
+  const disposalFailures: unknown[] = []
   let owners = new Map<string, SourceOwner>()
   let current: CommittedObservation | null = null
   let configurationValid = true
@@ -287,19 +290,51 @@ export function createObservationCoordinator(
     return true
   }
 
-  async function retire(owner: SourceOwner): Promise<void> {
-    if (owner.retired) return
+  function dispose(owner: SourceOwner): Promise<void> {
+    if (owner.disposal) return owner.disposal
+    const unsubscribe = owner.unsubscribe
+    const observer = owner.observer
+    owner.unsubscribe = () => undefined
+    owner.observer = null
+    owner.disposal = Promise.allSettled([
+      Promise.resolve().then(unsubscribe),
+      Promise.resolve().then(() => observer?.stop()),
+    ]).then((results) => {
+      const failures = results.flatMap((result) =>
+        result.status === 'rejected' ? [result.reason] : [],
+      )
+      if (failures.length === 1) throw failures[0]
+      if (failures.length > 1) throw new AggregateError(failures, 'Source disposal failed.')
+    })
+    const completion = owner.disposal
+    disposals.add(completion)
+    void completion.then(
+      () => disposals.delete(completion),
+      (error: unknown) => {
+        disposals.delete(completion)
+        disposalFailures.push(error)
+      },
+    )
+    return completion
+  }
+
+  function retire(owner: SourceOwner): Promise<void> {
     owner.retired = true
     staged.delete(owner)
-    owner.unsubscribe()
-    try {
-      await owner.observer?.stop()
-    } catch {
-      // Retirement already revoked this owner's authority to publish.
-    }
+    return dispose(owner)
+  }
+
+  async function retireAll(selected: readonly SourceOwner[]): Promise<void> {
+    const results = await Promise.allSettled(selected.map(retire))
+    const failures = results.flatMap((result) =>
+      result.status === 'rejected' ? [result.reason] : [],
+    )
+    if (failures.length === 1) throw failures[0]
+    if (failures.length > 1) throw new AggregateError(failures, 'Source retirement failed.')
   }
 
   async function start(owner: SourceOwner, admission: ProjectAdmissionRecord): Promise<void> {
+    if (owner.retired || stopped) return
     const startupReadSequence = owner.nextReadSequence()
     if (!owner.input) {
       owner.contribution = failedContribution(admission, now(), startupReadSequence)
@@ -328,6 +363,8 @@ export function createObservationCoordinator(
       if (owner.retired || stopped) return
       // A callback may already have established an honest baseline before observe rejected.
       if (owner.contribution) return
+      await dispose(owner)
+      if (owner.retired || stopped) return
       owner.contribution = failedContribution(admission, now(), startupReadSequence, true)
       owner.fingerprint = JSON.stringify(owner.contribution)
     }
@@ -350,84 +387,128 @@ export function createObservationCoordinator(
     const next = new Map<string, SourceOwner>()
     const replacements: { owner: SourceOwner; admission: ProjectAdmissionRecord }[] = []
     const baselineProjects: SourceProjectKey[] = []
-    for (const intent of registry.projects) {
-      const key = JSON.stringify([intent.ref.integration, intent.ref.projectId])
-      if (next.has(key)) throw new Error('Duplicate configured source identity.')
-      const admission = admissions.get(key)
-      if (!admission || !sameIntentSource(intent, admission.intent)) {
-        throw new Error('Configured source admission does not match its intent.')
-      }
-      const input = observationInput(admission)
-      const dependency = sourceDependency(admission, input)
-      const previous = owners.get(key)
-      if (previous && previous.dependency === dependency) {
-        next.set(key, previous)
-        continue
-      }
-      const project: SourceProjectKey = {
-        integration: intent.ref.integration,
-        id: intent.ref.projectId,
-      }
-      const owner: SourceOwner = {
-        key,
-        project,
-        binding: Object.freeze<SourceBinding>({ [sourceBindingBrand]: true }),
-        nextReadSequence: createReadSequenceAllocator(),
-        input,
-        dependency,
-        observer: null,
-        unsubscribe: () => undefined,
-        contribution: null,
-        fingerprint: '',
-        retired: false,
-      }
-      next.set(key, owner)
-      staged.add(owner)
-      replacements.push({ owner, admission })
-      baselineProjects.push(project)
-    }
-    for (const owner of owners.values()) {
-      if (!next.has(owner.key)) baselineProjects.push(owner.project)
-    }
-    await Promise.all(replacements.map(({ owner, admission }) => start(owner, admission)))
-    if (stopped) {
-      await Promise.all(replacements.map(({ owner }) => retire(owner)))
-      throw new Error('Observation stopped before activation.')
-    }
-    if (
-      recoveryFrom &&
-      (!configurationValid || pendingAdmission || current?.registry !== recoveryFrom)
-    ) {
-      await Promise.all(replacements.map(({ owner }) => retire(owner)))
-      throw new Error('Current configuration no longer admits this source recovery.')
-    }
-    const previous = owners
-    committing = true
-    owners = next
+    const starts: Promise<void>[] = []
+    let didCommit = false
     try {
-      const githubInputs: GitHubObservationInput[] = []
-      for (const admission of registry.admissions) {
+      for (const intent of registry.projects) {
+        const key = JSON.stringify([intent.ref.integration, intent.ref.projectId])
+        if (next.has(key)) throw new Error('Duplicate configured source identity.')
+        const admission = admissions.get(key)
+        if (!admission || !sameIntentSource(intent, admission.intent)) {
+          throw new Error('Configured source admission does not match its intent.')
+        }
         const input = observationInput(admission)
-        if (input?.integration === 'github') githubInputs.push(input)
+        const dependency = sourceDependency(admission, input)
+        const previous = owners.get(key)
+        if (previous && previous.dependency === dependency) {
+          next.set(key, previous)
+          continue
+        }
+        const project: SourceProjectKey = {
+          integration: intent.ref.integration,
+          id: intent.ref.projectId,
+        }
+        const owner: SourceOwner = {
+          key,
+          project,
+          binding: Object.freeze<SourceBinding>({ [sourceBindingBrand]: true }),
+          nextReadSequence: createReadSequenceAllocator(),
+          input,
+          dependency,
+          observer: null,
+          unsubscribe: () => undefined,
+          contribution: null,
+          fingerprint: '',
+          retired: false,
+          disposal: null,
+        }
+        next.set(key, owner)
+        staged.add(owner)
+        replacements.push({ owner, admission })
+        baselineProjects.push(project)
       }
-      options.observers.reconcileGitHubTopology?.(githubInputs)
-      if (authorization) authorizationUsability = new Map(authorization())
-      admissionRevision += 1
-      current = compose(registry, baselineProjects)
-      for (const { owner } of replacements) staged.delete(owner)
-    } finally {
-      committing = false
+      for (const owner of owners.values()) {
+        if (!next.has(owner.key)) baselineProjects.push(owner.project)
+      }
+      starts.push(...replacements.map(({ owner, admission }) => start(owner, admission)))
+      await Promise.all(starts)
+      if (stopped) throw new Error('Observation stopped before activation.')
+      if (
+        recoveryFrom &&
+        (!configurationValid || pendingAdmission || current?.registry !== recoveryFrom)
+      ) {
+        throw new Error('Current configuration no longer admits this source recovery.')
+      }
+      const previous = owners
+      const previousCurrent = current
+      const previousAuthorization = authorizationUsability
+      const previousRevision = admissionRevision
+      committing = true
+      owners = next
+      try {
+        const githubInputs: GitHubObservationInput[] = []
+        for (const admission of registry.admissions) {
+          const input = observationInput(admission)
+          if (input?.integration === 'github') githubInputs.push(input)
+        }
+        options.observers.reconcileGitHubTopology?.(githubInputs)
+        if (authorization) authorizationUsability = new Map(authorization())
+        if (stopped) throw new Error('Observation stopped before activation.')
+        admissionRevision += 1
+        current = compose(registry, baselineProjects)
+        didCommit = true
+        for (const { owner } of replacements) staged.delete(owner)
+      } catch (error) {
+        owners = previous
+        current = previousCurrent
+        authorizationUsability = previousAuthorization
+        admissionRevision = previousRevision
+        if (!stopped) {
+          try {
+            options.observers.reconcileGitHubTopology?.(
+              [...previous.values()].flatMap((owner) =>
+                owner.input?.integration === 'github' ? [owner.input] : [],
+              ),
+            )
+          } catch (rollbackError) {
+            throw new AggregateError([error, rollbackError], 'Source topology restoration failed.')
+          }
+        }
+        throw error
+      } finally {
+        committing = false
+      }
+      const committed = current
+      const retiring = retireAll(
+        [...previous.values()].filter((owner) => next.get(owner.key) !== owner),
+      )
+      try {
+        for (const listener of listeners) {
+          if (stopped) break
+          listener(committed)
+        }
+      } finally {
+        await retiring
+      }
+      scheduleRecovery()
+      return committed
+    } catch (error) {
+      if (!didCommit) {
+        const cleanup = await Promise.allSettled([
+          retireAll(replacements.map(({ owner }) => owner)),
+          ...starts,
+        ])
+        const failures = [
+          ...new Set([
+            error,
+            ...cleanup.flatMap((result) => (result.status === 'rejected' ? [result.reason] : [])),
+          ]),
+        ]
+        if (failures.length > 1)
+          throw new AggregateError(failures, 'Source activation and disposal failed.')
+      }
+      throw error
     }
-    const committed = current
-    for (const listener of listeners) {
-      if (stopped) break
-      listener(committed)
-    }
-    await Promise.all(
-      [...previous.values()].filter((owner) => next.get(owner.key) !== owner).map(retire),
-    )
-    scheduleRecovery()
-    return committed
   }
 
   return {
@@ -497,14 +578,25 @@ export function createObservationCoordinator(
       }
       listeners.clear()
       const all = new Set([...owners.values(), ...staged])
-      stopPromise = Promise.all([...all].map(retire)).then(async () => {
-        await Promise.all([
-          activationLane,
-          ...recoverySupervisors.flatMap((supervisor) =>
-            supervisor.running ? [supervisor.running] : [],
-          ),
-        ])
-        await options.observers.stop?.()
+      const retiring = [...all].map(retire)
+      const pool = Promise.resolve().then(() => options.observers.stop?.())
+      stopPromise = Promise.allSettled([
+        ...retiring,
+        ...disposals,
+        activationLane,
+        ...recoverySupervisors.flatMap((supervisor) =>
+          supervisor.running ? [supervisor.running] : [],
+        ),
+        pool,
+      ]).then((results) => {
+        const failures = [
+          ...new Set([
+            ...disposalFailures,
+            ...results.flatMap((result) => (result.status === 'rejected' ? [result.reason] : [])),
+          ]),
+        ]
+        if (failures.length === 1) throw failures[0]
+        if (failures.length > 1) throw new AggregateError(failures, 'Observation shutdown failed.')
       })
       return stopPromise
     },

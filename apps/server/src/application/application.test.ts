@@ -1274,8 +1274,14 @@ describe('RoadmapApplication', () => {
   it('keeps the active source live until a replacement baseline and ignores retired updates', async () => {
     const read = createSourceFixtureOwner()
     const configuration = memoryConfiguration({ ok: true, document: BASE_CONFIGURATION })
-    const first = immediateObserver()
-    const second = deferredObserver('replacement')
+    const first = immediateObserver(read([localProject('demo')], 500))
+    const replacementGate = Promise.withResolvers<void>()
+    const second = controlledObserver(
+      'local',
+      createSourceFixtureOwner()([localProject('replacement')], 1_500),
+      { gate: replacementGate.promise },
+    )
+    let retiredUpdate: Parameters<typeof first.observer.subscribe>[0] | undefined
     let created = false
     const application = createRoadmapApplication({
       configuration: configuration.document,
@@ -1284,7 +1290,13 @@ describe('RoadmapApplication', () => {
         local() {
           if (created) return second.observer
           created = true
-          return first.observer
+          return {
+            ...first.observer,
+            subscribe(listener) {
+              retiredUpdate = listener
+              return first.observer.subscribe(listener)
+            },
+          }
         },
         github() {
           throw new Error('Unused source')
@@ -1292,31 +1304,52 @@ describe('RoadmapApplication', () => {
       },
       serverEpoch: 'test',
     })
-    await application.start()
+    try {
+      await application.start()
 
-    configuration.emit({
-      ok: true,
-      document: {
-        ...BASE_CONFIGURATION,
-        configurationVersion: 2,
-        projects: [
-          {
-            ref: { integration: 'local', projectId: 'replacement' },
-            connectionId: 'local',
-            workspace: { path: '/tmp/replacement' },
-          },
-        ],
-      },
-    })
-    first.push(read([{ ...localProject('demo'), warnings: ['Still live'] }], 1_000))
-    await vi.waitFor(() => expect(observedProjectIds(application.current())).toEqual(['demo']))
+      configuration.emit({
+        ok: true,
+        document: {
+          ...BASE_CONFIGURATION,
+          configurationVersion: 2,
+          projects: [
+            {
+              ref: { integration: 'local', projectId: 'replacement' },
+              connectionId: 'local',
+              workspace: { path: '/tmp/replacement' },
+            },
+          ],
+        },
+      })
+      await second.started
+      expect(first.stopped).toBe(false)
+      first.push(read([{ ...localProject('demo'), warnings: ['Still live'] }], 1_000), {
+        status: 'available',
+        observedAt: 1_000,
+      })
+      await vi.waitFor(() => {
+        const active = application.current().projects[0]
+        expect(active && publicProjectObservation(active)?.value.warnings).toEqual(['Still live'])
+      })
+      expect(application.current().configurationVersion).toBe(1)
+      expect(observedProjectIds(application.current())).toEqual(['demo'])
 
-    second.release()
-    await vi.waitFor(() => expect(application.current().configurationVersion).toBe(2))
-    expect(first.stopped).toBe(true)
-    first.push(read([{ ...localProject('demo'), warnings: ['Late callback'] }], 2_000))
-    expect(observedProjectIds(application.current())).toEqual([])
-    await application.stop()
+      replacementGate.resolve()
+      await vi.waitFor(() => expect(application.current().configurationVersion).toBe(2))
+      expect(first.stopped).toBe(true)
+      expect(observedProjectIds(application.current())).toEqual(['replacement'])
+      const committed = application.current()
+      if (!retiredUpdate) throw new Error('Expected the retired source subscription.')
+      retiredUpdate({
+        project: { integration: 'local', id: 'demo' },
+        attempts: read([{ ...localProject('demo'), warnings: ['Late callback'] }], 2_000).attempts,
+        health: { status: 'available', observedAt: 2_000 },
+      })
+      expect(application.current()).toBe(committed)
+    } finally {
+      replacementGate.resolve()
+      await application.stop()
+    }
   })
 
   it('commits configuration before exposing an unavailable replacement source', async () => {

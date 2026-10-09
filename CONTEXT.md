@@ -158,6 +158,17 @@ shows previously accepted facts without current synchronization. This is separat
 degradation and Project reachability.
 _Avoid_: socket liveness, Connection health, empty roadmap
 
+**Application readiness**:
+Roadmap's ability to serve initialized application facts and admit eligible interactions. Read-only
+readiness preserves truthful facts while invalid configuration denies mutations and Automation;
+an unreachable Project does not itself make Roadmap unready.
+_Avoid_: socket open, all Projects reachable, valid-empty success
+
+**Server liveness**:
+Roadmap's ability to answer a diagnostic request, independently of application readiness and source
+reachability. A live server can still be starting, stopping, or unable to admit interactions.
+_Avoid_: application readiness, source health, synchronization
+
 **Completion unknown**:
 An operation whose trustworthy outcome is unavailable even though its effects may have occurred.
 Transport recovery or unrelated roadmap changes do not settle it. Only evidence specific to the

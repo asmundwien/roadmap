@@ -23,6 +23,167 @@ afterEach(async () => {
 })
 
 describe('createLocalObserver', () => {
+  it.each(['baseline', 'dirty', 'recovery'] as const)(
+    'joins the pending %s path check before concurrent stop resolves',
+    async (phase) => {
+      vi.useFakeTimers()
+      const root = await createFixture('lifetime')
+      const entered = Promise.withResolvers<void>()
+      const release = Promise.withResolvers<boolean>()
+      const opened: FakeWatcher[] = []
+      let gated = phase === 'baseline'
+      let live = phase !== 'recovery'
+      const publications: SourceContribution[] = []
+      const observer = createLocalObserver(source('lifetime', root), {
+        recoveryMs: 10,
+        reconcileMs: 60_000,
+        pathExists: async () => {
+          if (gated) {
+            entered.resolve()
+            return release.promise
+          }
+          return live
+        },
+        watchDirectory: (_path, dirty, error) => {
+          const watcher = new FakeWatcher(dirty, error)
+          opened.push(watcher)
+          return watcher
+        },
+        logger: silentLogger(),
+      })
+      observer.subscribe((value) => publications.push(value))
+      const baseline = observer.observe().then(
+        () => 'resolved',
+        () => 'rejected',
+      )
+      let stops: Promise<void>[] = []
+      try {
+        if (phase !== 'baseline') {
+          await baseline
+          gated = true
+          live = true
+          if (phase === 'dirty') opened[0]?.dirty()
+          else vi.advanceTimersByTime(10)
+        }
+        await entered.promise
+        const beforeStop = publications.length
+        const settled: number[] = []
+        stops = [observer.stop(), observer.stop()]
+        stops.forEach((stop, index) => void stop.then(() => settled.push(index)))
+        await Promise.resolve()
+        await Promise.resolve()
+        await Promise.resolve()
+        expect(settled).toEqual([])
+        release.resolve(true)
+        await Promise.all(stops)
+        await baseline
+        await vi.advanceTimersByTimeAsync(120_000)
+        expect(opened).toHaveLength(phase === 'dirty' ? 1 : 0)
+        expect(opened.every((watcher) => watcher.closed)).toBe(true)
+        expect(publications).toHaveLength(beforeStop)
+        await expect(observer.refresh()).rejects.toThrow()
+      } finally {
+        release.resolve(true)
+        await baseline
+        await Promise.all([...stops, observer.stop()])
+      }
+    },
+  )
+
+  it('joins a pending baseline read and suppresses its late success', async () => {
+    const root = await createFixture('pending-read')
+    const entered = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const publications: SourceContribution[] = []
+    const observer = createLocalObserver(source('pending-read', root), {
+      pathExists: async () => false,
+      async readProject(input, options) {
+        entered.resolve()
+        await release.promise
+        return readLocalProject(input, options)
+      },
+      logger: silentLogger(),
+    })
+    observer.subscribe((value) => publications.push(value))
+    const baseline = observer.observe()
+    let stopped = false
+    try {
+      await entered.promise
+      const stop = observer.stop().then(() => {
+        stopped = true
+      })
+      await setImmediate()
+      expect(stopped).toBe(false)
+      release.resolve()
+      await Promise.all([baseline, stop])
+      expect(publications).toEqual([])
+    } finally {
+      release.resolve()
+      await baseline
+      await observer.stop()
+    }
+  })
+
+  it('joins pending supervision and reports the same watcher disposal failure to every stop caller', async () => {
+    const root = await createFixture('disposal')
+    const failure = new Error('Controlled watcher close failure')
+    const entered = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<boolean>()
+    let gated = false
+    let closes = 0
+    let dirty: () => void = () => {
+      throw new Error('The watcher has not been acquired.')
+    }
+    const observer = createLocalObserver(source('disposal', root), {
+      pathExists: async () => {
+        if (!gated) return true
+        entered.resolve()
+        return release.promise
+      },
+      watchDirectory: (_path, onDirty) => {
+        dirty = onDirty
+        return {
+          close() {
+            closes += 1
+            throw failure
+          },
+        }
+      },
+      logger: silentLogger(),
+    })
+    await observer.observe()
+    const stops: Promise<void>[] = []
+    try {
+      gated = true
+      dirty()
+      await entered.promise
+      let settled = 0
+      stops.push(observer.stop(), observer.stop(), observer.stop())
+      const results = Promise.allSettled(
+        stops.map(async (stop) => {
+          try {
+            await stop
+          } finally {
+            settled += 1
+          }
+        }),
+      )
+      await setImmediate()
+      expect(closes).toBe(1)
+      expect(settled).toBe(0)
+      release.resolve(true)
+      expect(await results).toEqual([
+        { status: 'rejected', reason: failure },
+        { status: 'rejected', reason: failure },
+        { status: 'rejected', reason: failure },
+      ])
+      expect(closes).toBe(1)
+    } finally {
+      release.resolve(true)
+      await Promise.allSettled([...stops, observer.stop()])
+    }
+  })
+
   it('keeps independent admitted source baselines scoped to their own identities', async () => {
     const firstRoot = await createFixture('first-map')
     const secondRoot = await createFixture('second-map')

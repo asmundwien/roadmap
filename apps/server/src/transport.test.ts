@@ -306,6 +306,13 @@ function applicationHarness(initial = state(0)): ApplicationHarness {
     application: {
       start: async () => undefined,
       current: () => current,
+      diagnostics: () => ({
+        lifecycle: { phase: 'ready', mode: 'mutable' },
+        projects: current.projects.length,
+        maps: current.projects.length === 0 ? 0 : null,
+        unavailable: current.projects.length === 0 ? 0 : null,
+        absent: current.projects.length === 0 ? 0 : null,
+      }),
       subscribe(listener) {
         listeners.add(listener)
         return () => listeners.delete(listener)
@@ -370,11 +377,10 @@ afterEach(async () => {
   clients.clear()
   while (running.length > 0) {
     const harness = running.pop()
-    harness?.transport.close()
-    if (harness?.server.listening) {
-      harness.server.closeAllConnections()
-      await new Promise<void>((resolve) => harness.server.close(() => resolve()))
-    }
+    if (!harness) continue
+    const closed = harness.transport.close()
+    const serverClosed = new Promise<void>((resolve) => harness.server.close(() => resolve()))
+    await Promise.all([closed, serverClosed])
   }
   vi.restoreAllMocks()
 })
@@ -406,13 +412,13 @@ function post(
   })
 }
 
-async function bounded<T>(operation: Promise<T>): Promise<T> {
+async function bounded<T>(operation: Promise<T>, barrier = 'transport'): Promise<T> {
   let timeout: ReturnType<typeof setTimeout> | undefined
   try {
     return await Promise.race([
       operation,
       new Promise<never>((_resolve, reject) => {
-        timeout = setTimeout(() => reject(new Error('transport did not terminate promptly')), 2000)
+        timeout = setTimeout(() => reject(new Error(`${barrier} did not terminate promptly`)), 2000)
       }),
     ])
   } finally {
@@ -553,6 +559,76 @@ describe('Automation override transport', () => {
 })
 
 describe('createRoadmapTransport', () => {
+  it('uses only committed diagnostic counts and strips private failed-startup data', async () => {
+    const application = applicationHarness()
+    vi.spyOn(application.application, 'diagnostics').mockReturnValue(
+      Object.assign(
+        {
+          lifecycle: { phase: 'failed', cause: 'diagnostic-private-secret' } as const,
+          projects: 4,
+          maps: 7,
+          unavailable: 1,
+          absent: 1,
+        },
+        { accessToken: 'diagnostic-private-secret' },
+      ),
+    )
+    const harness = await transportHarness(application)
+    for (const [path, status] of [
+      ['/health', 200],
+      ['/ready', 503],
+    ] as const) {
+      const response = await bounded(fetch(`${harness.httpUrl}${path}`))
+      const body = await response.text()
+      expect(response.status).toBe(status)
+      expect(JSON.parse(body)).toMatchObject({
+        lifecycle: { phase: 'failed' },
+        projects: 4,
+        maps: 7,
+        unavailable: 1,
+        absent: 1,
+      })
+      expect(body).not.toContain('diagnostic-private-secret')
+      expect(body).not.toContain('accessToken')
+    }
+  })
+
+  it('publishes the first ready baseline even when its state sequence did not change', async () => {
+    const baseline = state(0)
+    const application = applicationHarness(baseline)
+    const diagnostics = vi.spyOn(application.application, 'diagnostics').mockReturnValue({
+      lifecycle: { phase: 'starting' },
+      projects: null,
+      maps: null,
+      unavailable: null,
+      absent: null,
+    })
+    const harness = await transportHarness(application)
+    const socket = new WebSocket(harness.wsUrl, { headers: { Origin: ALLOWED_ORIGIN } })
+    const messages: unknown[] = []
+    socket.on('message', (data) => messages.push(JSON.parse(String(data))))
+    await bounded(once(socket, 'open'))
+    application.publish(baseline)
+    const pong = once(socket, 'pong')
+    socket.ping('baseline-barrier')
+    await bounded(pong)
+    expect(messages).toEqual([])
+    diagnostics.mockReturnValue({
+      lifecycle: { phase: 'ready', mode: 'mutable' },
+      projects: 0,
+      maps: 0,
+      unavailable: 0,
+      absent: 0,
+    })
+    const firstReady = once(socket, 'message')
+    application.publish(baseline)
+    const [data] = await bounded(firstReady)
+    expect(stateEnvelopeCodec.decode(JSON.parse(String(data)))).toMatchObject({
+      ok: true,
+      value: { state: { stateSequence: 0 } },
+    })
+  })
+
   it('replays current state to late clients and broadcasts full replacements', async () => {
     const harness = await transportHarness(applicationHarness(resourceState(0)))
     const first = await openSocket(harness.wsUrl)
@@ -1447,4 +1523,176 @@ describe('bounded ingress lifecycle regressions after repair', () => {
       await expectRecovery(harness)
     },
   )
+})
+
+describe('joined transport shutdown', () => {
+  it('shares cleanup failure after joining WebSocket closure', async () => {
+    const application = applicationHarness()
+    const subscribe = application.application.subscribe
+    vi.spyOn(application.application, 'subscribe').mockImplementation((listener) => {
+      const unsubscribe = subscribe(listener)
+      return () => {
+        unsubscribe()
+        throw new Error('private-disposal-error')
+      }
+    })
+    const harness = await transportHarness(application)
+    running.splice(running.indexOf(harness), 1)
+    try {
+      const wire = await openSocket(harness.wsUrl)
+      const disconnected = once(wire.socket, 'close')
+      const closing = harness.transport.close()
+      expect(harness.transport.close()).toBe(closing)
+      await expect(bounded(closing)).rejects.toThrow('Transport shutdown failed.')
+      await bounded(disconnected)
+      expect(harness.transport.clientCount()).toBe(0)
+      expect(wire.socket.readyState).toBe(WebSocket.CLOSED)
+      expect(harness.transport.close()).toBe(closing)
+      await expect(closing).rejects.toThrow('Transport shutdown failed.')
+    } finally {
+      await new Promise<void>((resolve) => harness.server.close(() => resolve()))
+    }
+  })
+
+  it('reports idle-connection cleanup failure after joining WebSocket closure', async () => {
+    const harness = await transportHarness()
+    running.splice(running.indexOf(harness), 1)
+    vi.spyOn(harness.server, 'closeIdleConnections').mockImplementationOnce(() => {
+      throw new Error('private-idle-cleanup-error')
+    })
+    try {
+      const wire = await openSocket(harness.wsUrl)
+      const disconnected = once(wire.socket, 'close')
+      const closing = harness.transport.close()
+      expect(harness.transport.close()).toBe(closing)
+      await expect(bounded(closing)).rejects.toThrow('Transport shutdown failed.')
+      await bounded(disconnected)
+      expect(harness.transport.clientCount()).toBe(0)
+      expect(wire.socket.readyState).toBe(WebSocket.CLOSED)
+      await expect(harness.transport.close()).rejects.toThrow('Transport shutdown failed.')
+    } finally {
+      await new Promise<void>((resolve) => harness.server.close(() => resolve()))
+    }
+  })
+
+  it('closes admission for requests accepted by a listener that has not closed yet', async () => {
+    const harness = await transportHarness()
+    await bounded(harness.transport.close())
+    const result = await bounded(
+      post(`${harness.httpUrl}/api/query`, VALID_QUERY).catch(() => null),
+    )
+    expect(result).toBeNull()
+    expectNoAdmission(harness)
+  })
+
+  it.each(['query', 'command'] as const)(
+    'interrupts a pending %s body without waiting for EOF or admitting it',
+    async (family) => {
+      const harness = await transportHarness()
+      const accepted = once(harness.server, 'request')
+      const upload = pendingPost(`${harness.httpUrl}/api/${family}`, { 'Content-Length': '1000' })
+      void upload.response.catch(() => undefined)
+      upload.request.write('{"type":')
+      await bounded(accepted)
+      const closing = harness.transport.close()
+      expect(closing).toBeInstanceOf(Promise)
+      expect(harness.transport.close()).toBe(closing)
+      const response = await bounded(upload.response)
+      expect(response.status).toBe(400)
+      expect(response.headers.connection).toBe('close')
+      expect(JSON.parse(response.body)).toMatchObject({
+        type: 'request-rejected',
+        request: family,
+        requestId: REQUEST_ID,
+        reason: 'interrupted',
+      })
+      await bounded(Promise.all([closing, upload.closed]))
+      expect(upload.request.writableEnded).toBe(false)
+      expectNoAdmission(harness)
+    },
+  )
+
+  it.each(['query', 'command'] as const)(
+    'joins the admitted %s response flush and listener closure after keep-alive headers are sent',
+    async (family) => {
+      let entered: (() => void) | undefined
+      const writing = new Promise<void>((resolve) => {
+        entered = resolve
+      })
+      let finishWrite: (() => void) | undefined
+      const harness = await transportHarness(
+        applicationHarness(),
+        undefined,
+        (_request, response) => {
+          vi.spyOn(response, 'end').mockImplementationOnce((chunk: unknown) => {
+            if (typeof chunk !== 'string') throw new Error('Expected JSON response bytes')
+            response.flushHeaders()
+            let finished = false
+            finishWrite = () => {
+              if (finished) return
+              finished = true
+              response.end(chunk)
+            }
+            entered?.()
+            return response
+          })
+        },
+      )
+      harness.server.keepAliveTimeout = 60_000
+      const response = post(
+        `${harness.httpUrl}/api/${family}`,
+        family === 'query' ? VALID_QUERY : VALID_COMMAND,
+      )
+      void response.catch(() => undefined)
+      try {
+        await bounded(writing)
+        const closing = harness.transport.close()
+        expect(closing).toBeInstanceOf(Promise)
+        let closed = false
+        const joined = closing.then(() => {
+          closed = true
+        })
+        let listenerClosed = false
+        const listenerDone = new Promise<void>((resolve, reject) => {
+          harness.server.close((error) => {
+            if (error) reject(error)
+            else {
+              listenerClosed = true
+              resolve()
+            }
+          })
+        })
+        await new Promise<void>((resolve) => setImmediate(resolve))
+        expect(closed).toBe(false)
+        expect(listenerClosed).toBe(false)
+        finishWrite?.()
+        const reply = await bounded(response)
+        expect(reply.status).toBe(200)
+        expect(reply.headers.get('connection')).toBe('keep-alive')
+        expect(await bounded(reply.json(), 'admitted response body')).toMatchObject({
+          type: family === 'query' ? 'query-result' : 'command-result',
+        })
+        await Promise.all([
+          bounded(joined, 'transport response flush'),
+          bounded(listenerDone, 'HTTP listener closure'),
+        ])
+        expect(listenerClosed).toBe(true)
+        expect(harness.server.listening).toBe(false)
+      } finally {
+        finishWrite?.()
+      }
+    },
+  )
+
+  it('joins established WebSocket closure before its close promise resolves', async () => {
+    const harness = await transportHarness()
+    const wire = await openSocket(harness.wsUrl)
+    const disconnected = once(wire.socket, 'close')
+    const closing = harness.transport.close()
+    expect(closing).toBeInstanceOf(Promise)
+    await bounded(closing)
+    expect(harness.transport.clientCount()).toBe(0)
+    await bounded(disconnected)
+    expect(wire.socket.readyState).toBe(WebSocket.CLOSED)
+  })
 })

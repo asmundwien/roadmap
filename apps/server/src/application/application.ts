@@ -22,6 +22,7 @@ import { type ChangeEvent, type ChangeFeedInput, createChangeFeed } from '../cha
 import {
   type ConfigurationDocument,
   type ConfigurationRead,
+  type ConfigurationWrite,
   decodeConfigurationDocument,
 } from '../configuration/document.ts'
 import {
@@ -52,11 +53,21 @@ import {
 import { ResourceCatalog } from '../resources/catalog.ts'
 import { type CredentialVault, CredentialVaultError } from './credential-vault.ts'
 import type { ApplicationOperations } from './operations.ts'
-import { projectApplicationState, projectResources } from './projection.ts'
+import { projectApplicationState, projectResourceCounts, projectResources } from './projection.ts'
+
+type ApplicationLifecycle =
+  | { readonly phase: 'idle' | 'starting' | 'stopping' | 'stopped' }
+  | { readonly phase: 'ready'; readonly mode: 'mutable' | 'read-only' }
+  | { readonly phase: 'failed'; readonly cause: string }
+
+interface ApplicationDiagnostics extends Readonly<ReturnType<typeof projectResourceCounts>> {
+  readonly lifecycle: ApplicationLifecycle
+}
 
 export interface RoadmapApplication {
   start(): Promise<void>
   current(): ApplicationState
+  diagnostics(): ApplicationDiagnostics
   subscribe(listener: (state: ApplicationState) => void): () => void
   query(query: Query): Promise<QueryResult>
   execute(command: Command): Promise<CommandOutcome>
@@ -151,15 +162,18 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
   const pendingConfigurations = new Map<number, ProjectConfiguration>()
   let configurationReceipt = 0
   let stateSequence = 0
-  let started = false
-  let stopped = false
-  let stopping = false
+  let lifecycle: ApplicationLifecycle = { phase: 'idle' }
   let stopPromise: Promise<void> | null = null
   let startPromise: Promise<void> | null = null
+  let cleanupPromise: Promise<void> | null = null
+  const tasks = new Set<Promise<unknown>>()
   let unsubscribeConfiguration: (() => void) | null = null
   let mutationLane: Promise<void> = Promise.resolve()
   let credentialMutationLane: Promise<void> = Promise.resolve()
   let ownWriteDocument: ProjectConfiguration | null = null
+  let retainShutdownWrite:
+    | ((document: ProjectConfiguration, persisted: ConfigurationWrite) => void)
+    | null = null
   let lastBaselineRegistry: CommittedObservation['registry'] | null = null
   let observeNotifications: (input: ChangeFeedInput) => void = () => undefined
   const changeFeed = createChangeFeed({
@@ -177,14 +191,17 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
         launcher: options.automation.launcher,
         resources: () => catalog.current(),
         onEvidenceChange() {
+          if (!ownsEffects()) return
           publish()
           void enqueue(disableInterruptedProjects).catch(() => undefined)
         },
       })
     : null
+  let retainedState: ApplicationState | null = null
   let state = buildState()
   let stateFingerprint = semanticFingerprint(state)
   const unsubscribeObservation = coordinator.subscribe((committed) => {
+    if (!ownsEffects()) return
     catalog.commit(committed)
     publish()
     automationEngine?.reconcile()
@@ -193,32 +210,38 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
   function currentConfiguration(): CommittedObservation['registry'] {
     return coordinator.current()?.registry ?? emptyCommitted.registry
   }
-  function buildState(): ApplicationState {
+  function buildState(intent: ProjectConfiguration = currentConfiguration()): ApplicationState {
     const resources = catalog.current() ?? { committed: emptyCommitted, projects: [] }
     return projectApplicationState({
       committed: resources.committed,
-      source: projectResources(resources),
+      intent,
+      retainedConnections: retainedState?.connections ?? null,
+      source: projectResources(resources, intent, ownsEffects()),
       serverEpoch,
       stateSequence,
       supportedIntegrations,
-      authorizationOperations: [...authorizationOperations.values()].map((operation) => ({
-        ...operation.public,
-      })),
+      authorizationOperations: ownsEffects()
+        ? [...authorizationOperations.values()].map((operation) => ({ ...operation.public }))
+        : (retainedState?.authorizationOperations ?? []),
       configuration: configurationStatus,
-      automation: automationState(),
+      automation: automationState(intent),
     })
   }
-  function automationState(): ApplicationState['automation'] {
-    const configuration = currentConfiguration()
+  function automationState(
+    configuration: ProjectConfiguration = currentConfiguration(),
+  ): ApplicationState['automation'] {
     return {
       enabled: configuration.automation.enabled,
       enabledProjects: [...configuration.automation.enabledProjects],
-      availability: automationAvailability(),
+      availability: automationAvailability(configuration),
       evidence: automationEngine?.evidence() ?? [],
-      overrides: automationEngine?.overrides() ?? [],
+      overrides: ownsEffects() ? (automationEngine?.overrides() ?? []) : [],
     }
   }
-  function automationAvailability(): ApplicationState['automation']['availability'] {
+  function automationAvailability(
+    configuration: ProjectConfiguration,
+  ): ApplicationState['automation']['availability'] {
+    if (!ownsEffects()) return { status: 'unavailable', cause: 'Roadmap is not running.' }
     if (
       !configurationStatus.valid ||
       !configurationDurabilityConfirmed ||
@@ -232,7 +255,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
             ? 'An admission-affecting configuration update is pending.'
             : 'roadmap.config.json is invalid; repair it before enabling Automation.',
       }
-    const policy = currentConfiguration().automation
+    const policy = configuration.automation
     const missing = [
       policy.classificationCommand ? null : 'Classification Harness Command',
       policy.wayfinderCommand ? null : 'Wayfinder Session Command',
@@ -245,22 +268,25 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       : { status: 'ready' }
   }
   function publish(): void {
-    if (stopped) return
+    if (!ownsEffects()) return
     const candidate = buildState()
     const committed = coordinator.current()
     const baselineProjects =
       committed && lastBaselineRegistry !== committed.registry
         ? committed.classification.baselineProjects
         : []
-    if (committed) lastBaselineRegistry = committed.registry
+    if (committed && lifecycle.phase === 'ready') lastBaselineRegistry = committed.registry
     const fingerprint = semanticFingerprint(candidate)
     if (fingerprint !== stateFingerprint) {
       stateSequence += 1
       state = { ...candidate, stateSequence }
       stateFingerprint = fingerprint
-      for (const listener of listeners) listener(state)
+      for (const listener of listeners) {
+        if (lifecycle.phase !== 'ready') break
+        listener(state)
+      }
     }
-    if (committed)
+    if (committed && lifecycle.phase === 'ready')
       observeNotifications({
         attempts: committed.observation.attempts,
         projects: candidate.projects.map((project) => ({ key: project.key, name: project.name })),
@@ -278,12 +304,32 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       })
   }
   function updateAdmissionValidity(): void {
+    if (lifecycle.phase === 'ready')
+      lifecycle = {
+        phase: 'ready',
+        mode: receivedConfigurationValid ? 'mutable' : 'read-only',
+      }
     coordinator.receiveConfigurationValidity(
-      receivedConfigurationValid && configurationDurabilityConfirmed && !stopping,
+      receivedConfigurationValid && configurationDurabilityConfirmed && ownsEffects(),
       pendingConfigurations.size > 0,
       [...pendingConfigurations.values()],
     )
     automationEngine?.reconcile()
+  }
+  function ownsEffects(): boolean {
+    return lifecycle.phase === 'starting' || lifecycle.phase === 'ready'
+  }
+  function requireOwnership(): void {
+    if (!ownsEffects()) throw new Error('RoadmapApplication ownership has been revoked.')
+  }
+  function ownTask<T>(operation: () => Promise<T>): Promise<T> {
+    const task = Promise.resolve().then(operation)
+    tasks.add(task)
+    void task.then(
+      () => tasks.delete(task),
+      () => tasks.delete(task),
+    )
+    return task
   }
   function enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const run = mutationLane.then(operation, operation)
@@ -303,22 +349,26 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
   }
   async function disableInterruptedProjects(): Promise<void> {
     if (
+      !ownsEffects() ||
       !automationEngine ||
       !configurationStatus.valid ||
       pendingConfigurations.size > 0 ||
       !configurationDurabilityConfirmed
     )
       return
-    const interrupted = automationEngine.interruptedProjects()
-    const configuration = currentConfiguration()
+    const next = configurationWithoutInterruptedProjects(currentConfiguration())
+    if (next) await persistConfiguration(next)
+  }
+  function configurationWithoutInterruptedProjects(
+    configuration: ProjectConfiguration,
+  ): ProjectConfiguration | null {
+    const interrupted = automationEngine?.interruptedProjects() ?? []
     const enabledProjects = configuration.automation.enabledProjects.filter(
       (project) => !interrupted.some((candidate) => sameProject(candidate, project)),
     )
-    if (enabledProjects.length !== configuration.automation.enabledProjects.length)
-      await persistConfiguration({
-        ...configuration,
-        automation: { ...configuration.automation, enabledProjects },
-      })
+    return enabledProjects.length === configuration.automation.enabledProjects.length
+      ? null
+      : { ...configuration, automation: { ...configuration.automation, enabledProjects } }
   }
   function authorizationFacts(
     configuration: ProjectConfiguration,
@@ -339,11 +389,14 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
   }
   async function cleanupOrphanCredentials(configuration: ProjectConfiguration): Promise<void> {
     if (!options.credentialVault) return
+    if (!ownsEffects()) return
     try {
       await options.credentialVault.cleanupOrphans(
         new Set(configuration.connections.map((connection) => connection.id)),
       )
+      if (!ownsEffects()) return
     } catch (error) {
+      if (!ownsEffects()) return
       const notice = safeAuthorizationMessage(error)
       if (!configurationStatus.notices.includes(notice))
         configurationStatus = {
@@ -371,11 +424,13 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
   }
   async function synchronizeCredentials(configuration: ProjectConfiguration): Promise<void> {
     for (const connection of configuration.connections) await synchronizeConnection(connection)
+    requireOwnership()
   }
   async function synchronizeConnection(
     connection: ConfiguredConnection,
   ): Promise<GitHubAccessFailure | null> {
     const scope = authorizationScopeKey(connection)
+    requireOwnership()
     authorizationOwners.set(scope, connection.id)
     if (connection.integration === 'local') {
       setUsability(scope, { status: 'usable' })
@@ -405,6 +460,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     try {
       const credentials =
         credentialBundles.get(scope) ?? (await options.credentialVault.read(connection.id))
+      requireOwnership()
       if (!credentials || credentials.refreshTokenExpiresAt <= now())
         throw new GitHubAccessError('authorization-required')
       // A bundle already identified for another account cannot become this candidate's credential.
@@ -419,12 +475,14 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
           throw new GitHubAccessError('account-mismatch')
       }
       const token = await tokenFromCredentials(connection, credentials)
+      requireOwnership()
       if (
         validatedAccounts.get(scope) === connection.githubIdentity.id &&
         credentialBundles.get(scope)?.accessToken === token
       )
         return null
       const identity = await options.github.identify(token)
+      requireOwnership()
       if (identity.id !== connection.githubIdentity.id)
         throw new GitHubAccessError('account-mismatch')
       // Refresh may have installed a rotated bundle. Never restore its superseded predecessor.
@@ -433,6 +491,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       setUsability(scope, { status: 'usable' })
       return null
     } catch (error) {
+      requireOwnership()
       const failure = classifyGitHubAccessFailure(error)
       if (failure === 'rejected-credential' || failure === 'account-mismatch')
         rejectedAuthorizations.set(scope, { accountId: connection.githubIdentity.id, failure })
@@ -447,6 +506,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     connection: GitHubConnection,
   ): Promise<GitHubConnectionAccess> {
     const failure = await synchronizeConnection(connection)
+    requireOwnership()
     if (failure) throw new GitHubAccessError(failure)
     if (!options.providerRead) throw new GitHubAccessError('unavailable')
     const scope = authorizationScopeKey(connection)
@@ -457,11 +517,13 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       accountId: connection.githubIdentity.id,
       access: options.providerRead(() => ensureAccessToken(connection)),
     }
+    requireOwnership()
     providerAccess.set(scope, access)
     return access
   }
   async function ensureAccessToken(connection: GitHubConnection): Promise<string> {
     const scope = authorizationScopeKey(connection)
+    requireOwnership()
     const credentials = credentialBundles.get(scope)
     if (
       !credentials ||
@@ -481,6 +543,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     credentials: CredentialBundle,
   ): Promise<string> {
     const scope = authorizationScopeKey(connection)
+    requireOwnership()
     if (credentials.refreshTokenExpiresAt <= now()) {
       const error = new GitHubAccessError('authorization-required')
       applyCredentialFailure(connection, error)
@@ -489,7 +552,11 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     if (credentials.accessTokenExpiresAt > now() + REFRESH_LEEWAY_MS) return credentials.accessToken
     const activeRefresh = refreshes.get(scope)
     if (activeRefresh?.credentials === credentials) return activeRefresh.result
-    const refresh = { credentials, result: refreshAccessToken(connection, credentials) }
+    const startingCredentials = credentialBundles.get(scope)
+    const refresh = {
+      credentials,
+      result: ownTask(() => refreshAccessToken(connection, credentials, startingCredentials)),
+    }
     refreshes.set(scope, refresh)
     try {
       return await refresh.result
@@ -500,23 +567,30 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
   async function refreshAccessToken(
     connection: GitHubConnection,
     credentials: CredentialBundle,
+    startingCredentials: CredentialBundle | undefined,
   ): Promise<string> {
     const { github, credentialVault } = options
     if (!github || !credentialVault) throw new GitHubAccessError('unavailable')
+    requireOwnership()
     const scope = authorizationScopeKey(connection)
-    const startingCredentials = credentialBundles.get(scope)
+    if (credentialBundles.get(scope) !== startingCredentials) return ensureAccessToken(connection)
     try {
       const refreshed = await github.refresh(credentials.refreshToken)
+      requireOwnership()
       if (credentialBundles.get(scope) !== startingCredentials) return ensureAccessToken(connection)
-      if ((await github.identify(refreshed.accessToken)).id !== connection.githubIdentity.id)
+      const identity = await github.identify(refreshed.accessToken)
+      requireOwnership()
+      if (identity.id !== connection.githubIdentity.id)
         throw new GitHubAccessError('account-mismatch')
       const token = await mutateCredentials(async () => {
+        requireOwnership()
         if (credentialBundles.get(scope) !== startingCredentials) return null
         try {
           await credentialVault.write(connection.id, refreshed)
         } catch {
           throw new GitHubAccessError('authorization-required')
         }
+        requireOwnership()
         if (credentialBundles.get(scope) !== startingCredentials) return null
         credentialBundles.set(scope, refreshed)
         validatedAccounts.set(scope, connection.githubIdentity.id)
@@ -525,7 +599,9 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       })
       return token ?? ensureAccessToken(connection)
     } catch (error) {
+      requireOwnership()
       const superseded = await mutateCredentials(async () => {
+        requireOwnership()
         if (credentialBundles.get(scope) !== startingCredentials) return true
         applyCredentialFailure(connection, error)
         return false
@@ -535,6 +611,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     }
   }
   function applyCredentialFailure(connection: GitHubConnection, error: unknown): void {
+    if (!ownsEffects()) return
     const scope = authorizationScopeKey(connection)
     const failure = classifyGitHubAccessFailure(error)
     if (
@@ -596,6 +673,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     }
     authorizationOperations.set(operation.public.id, operation)
     await restartAuthorization(operation)
+    if (!ownsEffects()) return unsupported('Roadmap is not running.')
     return {
       ok: true,
       result: { type: 'authorization-started', operationId: operation.public.id },
@@ -611,6 +689,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       return invalid('operationId', 'Authorization is already in progress.')
     }
     await restartAuthorization(operation)
+    if (!ownsEffects()) return unsupported('Roadmap is not running.')
     return {
       ok: true,
       result: { type: 'authorization-started', operationId: operation.public.id },
@@ -623,6 +702,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     operation.timer = null
     try {
       const device = await options.github.beginDeviceAuthorization()
+      if (!ownsEffects()) return
       operation.deviceCode = device.deviceCode
       operation.intervalMs = device.intervalMs
       operation.public = {
@@ -641,24 +721,25 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
   }
 
   function scheduleAuthorizationPoll(operation: ActiveAuthorization): void {
-    if (stopped || operation.public.status !== 'waiting') return
+    if (lifecycle.phase !== 'ready' || operation.public.status !== 'waiting') return
     operation.timer = setTimeout(() => {
       operation.timer = null
-      void pollAuthorization(operation.public.id)
+      void ownTask(() => pollAuthorization(operation.public.id)).catch(() => undefined)
     }, operation.intervalMs)
   }
 
   async function pollAuthorization(operationId: string): Promise<void> {
     const operation = authorizationOperations.get(operationId)
-    if (operation?.public.status !== 'waiting' || !options.github) return
+    if (!ownsEffects() || operation?.public.status !== 'waiting' || !options.github) return
     if ((operation.public.expiresAt ?? 0) <= now()) {
       finishAuthorization(operation, 'expired', 'GitHub authorization expired.')
       return
     }
     try {
       const result = await options.github.pollDeviceAuthorization(operation.deviceCode)
+      if (!ownsEffects()) return
       await enqueue(async () => {
-        if (stopped || operation.public.status !== 'waiting') return
+        if (!ownsEffects() || operation.public.status !== 'waiting') return
         switch (result.status) {
           case 'pending':
             scheduleAuthorizationPoll(operation)
@@ -679,7 +760,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       })
     } catch (error) {
       await enqueue(async () => {
-        if (operation.public.status === 'waiting') {
+        if (ownsEffects() && operation.public.status === 'waiting') {
           finishAuthorization(operation, 'failed', safeAuthorizationMessage(error))
         }
       })
@@ -691,13 +772,15 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     credentials: CredentialBundle,
   ): Promise<void> {
     const identity = await identifyAuthorization(operation, credentials)
-    if (!identity || !options.credentialVault) return
+    if (!ownsEffects() || !identity || !options.credentialVault) return
     if (!authorizationIdentityIsValid(operation, identity)) return
 
     const update = configurationWithAuthorizedConnection(operation, identity)
     if (!(await stageCredentials(operation, update.connectionId, credentials, identity.id))) return
+    if (!ownsEffects()) return
 
     const outcome = await persistConfiguration(update.configuration, [update.connectionId])
+    if (!ownsEffects()) return
     if (!outcome.ok) {
       if (
         !update.reauthorizing &&
@@ -809,7 +892,9 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     if (!credentialVault) return false
     try {
       await mutateCredentials(async () => {
+        requireOwnership()
         await credentialVault.write(connectionId, credentials)
+        requireOwnership()
         const scope = githubAuthorizationScopeKey(connectionId, accountId)
         authorizationOwners.set(scope, connectionId)
         credentialBundles.set(scope, credentials)
@@ -821,7 +906,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       finishAuthorization(operation, 'failed', 'GitHub authorization could not be saved.')
       return false
     }
-    return true
+    return ownsEffects()
   }
 
   async function discardStagedCredentials(connectionId: string): Promise<void> {
@@ -862,6 +947,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     status: Exclude<AuthorizationOperation['status'], 'waiting' | 'granted'>,
     cause: string,
   ): void {
+    if (!ownsEffects()) return
     clearTimeout(operation.timer ?? undefined)
     operation.timer = null
     operation.deviceCode = ''
@@ -874,7 +960,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     publish()
   }
   function receiveConfiguration(result: ConfigurationRead): void {
-    if (stopping || stopped) return
+    if (!ownsEffects()) return
     if (
       result.ok &&
       ownWriteDocument &&
@@ -916,14 +1002,14 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
         updateAdmissionValidity()
         publish()
       }
-    })
+    }).catch(() => undefined)
   }
   async function applyConfigurationUpdate(
     result: ConfigurationRead,
     receipt: number,
     stale: boolean,
   ): Promise<void> {
-    if (stopped || stopping || !result.ok || stale) return
+    if (!ownsEffects() || !result.ok || stale) return
     if (
       compareConfigurations(currentConfiguration(), result.document) === 'same' &&
       result.document.configurationVersion <= currentConfiguration().configurationVersion
@@ -944,8 +1030,9 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       return
     }
     await synchronizeCredentials(result.document)
+    if (!ownsEffects()) return
     const prepared = await registry.prepare(result.document, currentConfiguration())
-    if (stopped || stopping) return
+    if (!ownsEffects()) return
     if (receipt === configurationReceipt) {
       configurationDurabilityConfirmed = result.durability !== 'unconfirmed'
       configurationStatus = {
@@ -955,6 +1042,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       }
     }
     await coordinator.activate(prepared, () => authorizationFacts(prepared))
+    if (!ownsEffects()) return
     forgetRemovedConnections()
     await disableInterruptedProjects()
     await cleanupOrphanCredentials(result.document)
@@ -971,12 +1059,29 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       notices: [],
     }
   }
-  async function start(): Promise<void> {
-    if (startPromise) return startPromise
-    startPromise = (async () => {
-      if (stopped || stopping) throw new Error('RoadmapApplication cannot restart after stop().')
+  function start(): Promise<void> {
+    switch (lifecycle.phase) {
+      case 'starting':
+      case 'ready':
+        if (startPromise) return startPromise
+        throw new Error('RoadmapApplication startup task is missing.')
+      case 'stopping':
+      case 'stopped':
+      case 'failed':
+        return Promise.reject(
+          new Error('RoadmapApplication cannot restart after terminal shutdown.'),
+        )
+      case 'idle':
+        lifecycle = { phase: 'starting' }
+        startPromise = Promise.resolve().then(initialize)
+        return startPromise
+    }
+  }
+  async function initialize(): Promise<void> {
+    try {
+      requireOwnership()
       const loaded = await options.configuration.load()
-      if (stopped || stopping) return
+      requireOwnership()
       const configuration = loaded.ok ? loaded.document : EMPTY_CONFIGURATION
       receivedConfigurationValid = loaded.ok
       configurationDurabilityConfirmed = !loaded.ok || loaded.durability !== 'unconfirmed'
@@ -984,32 +1089,72 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
         ? { valid: true, issues: [], notices: loaded.notices ?? [] }
         : { valid: false, issues: loaded.issues, notices: [] }
       updateAdmissionValidity()
-      unsubscribeConfiguration = options.configuration.subscribe(receiveConfiguration)
+      const unsubscribe = options.configuration.subscribe(receiveConfiguration)
+      if (!ownsEffects()) {
+        unsubscribe()
+        requireOwnership()
+      }
+      unsubscribeConfiguration = unsubscribe
       await cleanupOrphanCredentials(configuration)
+      requireOwnership()
       await synchronizeCredentials(configuration)
-      if (stopped || stopping) return
+      requireOwnership()
       const prepared = await registry.prepare(configuration)
-      if (stopped || stopping) return
+      requireOwnership()
       await coordinator.activate(prepared, () => authorizationFacts(prepared))
-      if (stopped || stopping) return
+      requireOwnership()
       await automationEngine?.start()
+      requireOwnership()
       await mutationLane
-      started = true
+      requireOwnership()
+      lifecycle = {
+        phase: 'ready',
+        mode: receivedConfigurationValid ? 'mutable' : 'read-only',
+      }
+      const before = stateSequence
       publish()
-    })()
-    return startPromise
+      requireOwnership()
+      if (stateSequence === before) {
+        stateSequence += 1
+        state = { ...state, stateSequence }
+        for (const listener of listeners) {
+          if (lifecycle.phase !== 'ready') break
+          listener(state)
+        }
+      }
+      requireOwnership()
+    } catch (error) {
+      if (lifecycle.phase === 'starting') {
+        lifecycle = { phase: 'failed', cause: 'RoadmapApplication startup failed.' }
+        try {
+          await cleanup(null)
+        } catch (cleanupError) {
+          throw new AggregateError(
+            [error, cleanupError],
+            'RoadmapApplication startup and cleanup failed.',
+          )
+        }
+      }
+      throw error
+    }
   }
-  async function query(query: Query): Promise<QueryResult> {
-    if (!started || stopping || stopped)
-      return failedQuery('not-supported', 'Roadmap is not running.')
-    if (!options.operations) return failedQuery('not-supported', 'This query is not available yet.')
-    return options.operations.query(query)
+  function query(query: Query): Promise<QueryResult> {
+    if (lifecycle.phase !== 'ready')
+      return Promise.resolve(failedQuery('not-supported', 'Roadmap is not running.'))
+    const operations = options.operations
+    if (!operations)
+      return Promise.resolve(failedQuery('not-supported', 'This query is not available yet.'))
+    return ownTask(async () => {
+      if (lifecycle.phase !== 'ready')
+        return failedQuery('not-supported', 'Roadmap is not running.')
+      return operations.query(query)
+    })
   }
   function execute(command: Command): Promise<CommandOutcome> {
     return enqueue(() => executeCommand(command))
   }
   async function executeCommand(command: Command): Promise<CommandOutcome> {
-    if (!started || stopping || stopped) return failure('not-supported', 'Roadmap is not running.')
+    if (lifecycle.phase !== 'ready') return failure('not-supported', 'Roadmap is not running.')
     if (!configurationStatus.valid || !receivedConfigurationValid || pendingConfigurations.size > 0)
       return failure(
         'configuration-invalid',
@@ -1024,6 +1169,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     if (!resolved.ok) return { ok: false, error: resolved.error, state }
     if ('result' in resolved) return { ok: true, result: resolved.result, state }
     const outcome = await persistConfiguration(resolved.configuration)
+    if (!ownsEffects()) return outcome
     if (
       command.type === 'remove-connection' &&
       !currentConfiguration().connections.some(
@@ -1049,6 +1195,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     candidate: ProjectConfiguration,
     revalidateConnections: readonly string[] = [],
   ): Promise<CommandOutcome> {
+    if (!ownsEffects()) return failure('not-supported', 'Roadmap is not running.')
     if (!receivedConfigurationValid || pendingConfigurations.size > 0)
       return failure('configuration-invalid', 'Current configuration no longer permits this write.')
     const decoded = decodeConfigurationDocument({
@@ -1071,11 +1218,14 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     updateAdmissionValidity()
     try {
       const persisted = await options.configuration.write(decoded.value)
-      if (!persisted.ok)
+      if (!persisted.ok) {
+        if (!ownsEffects()) retainShutdownWrite?.(decoded.value, persisted)
         return failure(
           persisted.kind === 'conflict' ? 'conflict' : 'persistence-failed',
           persisted.message,
         )
+      }
+      if (!ownsEffects()) return persistedConfigurationOutcome(persisted, decoded.value)
       configurationDurabilityConfirmed = persisted.durability === 'confirmed'
       if (receivedConfigurationValid)
         configurationStatus = {
@@ -1090,13 +1240,21 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
               : [],
         }
       updateAdmissionValidity()
-      await synchronizeCredentials(decoded.value)
-      const prepared = await registry.prepare(candidate, currentConfiguration(), {
-        revalidateConnections,
-      })
-      await coordinator.activate({ ...decoded.value, admissions: prepared.admissions }, () =>
-        authorizationFacts(decoded.value),
-      )
+      try {
+        await synchronizeCredentials(decoded.value)
+        if (!ownsEffects()) return persistedConfigurationOutcome(persisted, decoded.value)
+        const prepared = await registry.prepare(candidate, currentConfiguration(), {
+          revalidateConnections,
+        })
+        if (!ownsEffects()) return persistedConfigurationOutcome(persisted, decoded.value)
+        await coordinator.activate({ ...decoded.value, admissions: prepared.admissions }, () =>
+          authorizationFacts(decoded.value),
+        )
+        if (!ownsEffects()) return persistedConfigurationOutcome(persisted, decoded.value)
+      } catch (error) {
+        if (!ownsEffects()) return persistedConfigurationOutcome(persisted, decoded.value)
+        throw error
+      }
       forgetRemovedConnections()
       if (persisted.durability === 'unconfirmed')
         return failure(
@@ -1118,6 +1276,25 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       updateAdmissionValidity()
       publish()
     }
+  }
+  function persistedConfigurationOutcome(
+    persisted: Extract<Awaited<ReturnType<ConfigurationDocument['write']>>, { ok: true }>,
+    document: ProjectConfiguration,
+  ): CommandOutcome {
+    retainShutdownWrite?.(document, persisted)
+    return persisted.durability === 'confirmed'
+      ? {
+          ok: true,
+          result: {
+            type: 'configuration-updated',
+            configurationVersion: document.configurationVersion,
+          },
+          state,
+        }
+      : failure(
+          'persistence-failed',
+          persisted.message ?? 'Configuration was replaced, but its durability is unconfirmed.',
+        )
   }
   type CommandResolution =
     | { ok: true; result: CommandResult }
@@ -1194,7 +1371,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
             !expected ||
             !sameRef(expected.ref, ref) ||
             !receivedConfigurationValid ||
-            stopping ||
+            !ownsEffects() ||
             workspaceDependency(currentConfiguration(), ref) !== expected.value ||
             [...pendingConfigurations.values()].some(
               (pending) => workspaceDependency(pending, ref) !== expected.value,
@@ -1226,12 +1403,18 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
             const error = workspaceAdmissionError(project)
             if (error) return { status: 'unavailable', error }
             const current = currentConfiguration()
-            await coordinator.activate({
-              ...current,
-              admissions: current.admissions.map((record) =>
-                sameRef(record.intent.ref, ref) ? { ...record, workspace } : record,
-              ),
-            })
+            try {
+              await coordinator.activate({
+                ...current,
+                admissions: current.admissions.map((record) =>
+                  sameRef(record.intent.ref, ref) ? { ...record, workspace } : record,
+                ),
+              })
+            } catch (error) {
+              const revoked = workspaceAdmissionError(project)
+              if (revoked) return { status: 'unavailable', error: revoked }
+              throw error
+            }
             return workspace
           },
         })
@@ -1310,10 +1493,10 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
   function setAutomationEnabled(
     command: Extract<Command, { type: 'set-automation-enabled' }>,
   ): CommandResolution {
-    const availability = automationAvailability()
+    const configuration = currentConfiguration()
+    const availability = automationAvailability(configuration)
     if (command.enabled && availability.status === 'unavailable')
       return invalid('enabled', availability.cause)
-    const configuration = currentConfiguration()
     return {
       ok: true,
       configuration: {
@@ -1353,35 +1536,142 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
   function failure(code: SafeError['code'], message: string): CommandOutcome {
     return { ok: false, error: { code, message }, state }
   }
+  function diagnostics(): ApplicationDiagnostics {
+    return { lifecycle: { ...lifecycle }, ...projectResourceCounts(catalog.current()) }
+  }
+  function cleanup(startup: Promise<void> | null): Promise<void> {
+    if (cleanupPromise) return cleanupPromise
+    retainedState = state
+    const completion = Promise.withResolvers<void>()
+    cleanupPromise = completion.promise
+    const errors: unknown[] = []
+    // Only this cleanup retains begun disk writes; stopped source owners never reactivate.
+    let shutdownConfiguration: ProjectConfiguration = currentConfiguration()
+    let shutdownWriteSafe =
+      configurationStatus.valid &&
+      receivedConfigurationValid &&
+      configurationDurabilityConfirmed &&
+      [...pendingConfigurations.keys()].every((receipt) => receipt === -1)
+    const retainNotice = (message: string) => {
+      if (!configurationStatus.notices.includes(message))
+        configurationStatus = {
+          ...configurationStatus,
+          notices: [...configurationStatus.notices, message],
+        }
+    }
+    retainShutdownWrite = (document, persisted) => {
+      if (!persisted.ok) {
+        if (persisted.kind === 'conflict') shutdownWriteSafe = false
+        retainNotice(persisted.message)
+      } else {
+        shutdownConfiguration = document
+        configurationDurabilityConfirmed = persisted.durability === 'confirmed'
+        if (!configurationDurabilityConfirmed) {
+          shutdownWriteSafe = false
+          retainNotice(
+            persisted.message ?? 'Configuration was replaced, but its durability is unconfirmed.',
+          )
+        }
+      }
+      state = buildState(shutdownConfiguration)
+    }
+    for (const operation of authorizationOperations.values()) {
+      clearTimeout(operation.timer ?? undefined)
+      operation.timer = null
+    }
+    try {
+      unsubscribeConfiguration?.()
+    } catch (error) {
+      errors.push(error)
+    }
+    unsubscribeConfiguration = null
+    unsubscribeObservation()
+    changeFeed.stop()
+    const sources = coordinator.stop()
+    const automation = automationEngine?.stop() ?? Promise.resolve()
+    const owners = Promise.allSettled([sources, automation])
+    void Promise.resolve()
+      .then(async () => {
+        await startup?.catch(() => undefined)
+        await mutationLane
+        while (tasks.size > 0) await Promise.allSettled([...tasks])
+        await credentialMutationLane
+        for (const result of await owners)
+          if (result.status === 'rejected') errors.push(result.reason)
+        try {
+          const candidate = configurationWithoutInterruptedProjects(shutdownConfiguration)
+          if (candidate) {
+            if (!shutdownWriteSafe)
+              throw new Error(
+                'Interrupted Project Automation could not be disabled because configuration is invalid, pending, or its durability is unconfirmed.',
+              )
+            const decoded = decodeConfigurationDocument({
+              schemaVersion: 6,
+              configurationVersion: shutdownConfiguration.configurationVersion + 1,
+              connections: candidate.connections,
+              projects: candidate.projects,
+              automation: candidate.automation,
+            })
+            if (!decoded.ok)
+              throw new Error('Interrupted Project Automation configuration is invalid.')
+            const persisted = await options.configuration.write(decoded.value)
+            retainShutdownWrite?.(decoded.value, persisted)
+            if (!persisted.ok) throw new Error(persisted.message)
+            if (persisted.durability === 'unconfirmed')
+              throw new Error(
+                persisted.message ??
+                  'Configuration was replaced, but its durability is unconfirmed.',
+              )
+          }
+        } catch (error) {
+          retainNotice(
+            'Interrupted Project Automation could not be durably disabled during shutdown.',
+          )
+          errors.push(error)
+        }
+        retainShutdownWrite = null
+        try {
+          await options.configuration.stop()
+        } catch (error) {
+          errors.push(error)
+        }
+        state = buildState(shutdownConfiguration)
+        listeners.clear()
+        if (errors.length === 1) throw errors[0]
+        if (errors.length > 1)
+          throw new AggregateError(errors, 'RoadmapApplication cleanup failed.')
+      })
+      .then(completion.resolve, completion.reject)
+    return cleanupPromise
+  }
   return {
     start,
     current: () => state,
+    diagnostics,
     subscribe(listener) {
+      if (!ownsEffects() && lifecycle.phase !== 'idle') return () => undefined
       listeners.add(listener)
-      if (started) listener(state)
+      if (lifecycle.phase === 'ready') listener(state)
       return () => listeners.delete(listener)
     },
     query,
     execute,
     stop() {
       if (stopPromise) return stopPromise
-      stopping = true
+      const completion = Promise.withResolvers<void>()
+      stopPromise = completion.promise
+      lifecycle = { phase: 'stopping' }
       updateAdmissionValidity()
-      stopPromise = (async () => {
-        for (const operation of authorizationOperations.values()) {
-          clearTimeout(operation.timer ?? undefined)
-          operation.timer = null
-        }
-        unsubscribeConfiguration?.()
-        await automationEngine?.stop()
-        await startPromise
-        await mutationLane
-        stopped = true
-        unsubscribeObservation()
-        await coordinator.stop()
-        changeFeed.stop()
-        await options.configuration.stop()
-      })()
+      void cleanup(startPromise).then(
+        () => {
+          lifecycle = { phase: 'stopped' }
+          completion.resolve()
+        },
+        (error: unknown) => {
+          lifecycle = { phase: 'stopped' }
+          completion.reject(error)
+        },
+      )
       return stopPromise
     },
   }

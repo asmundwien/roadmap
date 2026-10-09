@@ -358,6 +358,7 @@ export function createConfigurationDocument(
   let watcher: FSWatcher | null = null
   let timer: ReturnType<typeof setTimeout> | undefined
   let stopped = false
+  let stopPromise: Promise<void> | null = null
   let lastRaw: string | null | undefined
   let fingerprint = ''
   let committedDurability:
@@ -381,10 +382,14 @@ export function createConfigurationDocument(
     }
   }
   function publish(result: ConfigurationRead): void {
+    if (stopped) return
     const next = JSON.stringify(result)
     if (next === fingerprint) return
     fingerprint = next
-    for (const listener of listeners) listener(result)
+    for (const listener of listeners) {
+      if (stopped) break
+      listener(result)
+    }
   }
   async function replace(raw: string, expected: string | null): Promise<ConfigurationWrite> {
     let disk: string | null
@@ -496,7 +501,10 @@ export function createConfigurationDocument(
       clearTimeout(timer)
       timer = setTimeout(() => {
         timer = undefined
-        if (!stopped) void serial(async () => publish(await readCurrent()))
+        if (!stopped)
+          void serial(async () => {
+            if (!stopped) publish(await readCurrent())
+          })
       }, options.debounceMs ?? 100)
     })
     watcher.on('error', (error) =>
@@ -506,6 +514,7 @@ export function createConfigurationDocument(
   return {
     load() {
       return serial<ConfigurationRead>(async () => {
+        if (stopped) throw new Error('Configuration is stopped.')
         const result = await readCurrent()
         fingerprint = JSON.stringify(result)
         ensureWatcher()
@@ -513,6 +522,7 @@ export function createConfigurationDocument(
       })
     },
     subscribe(listener) {
+      if (stopped) return () => undefined
       listeners.add(listener)
       return () => listeners.delete(listener)
     },
@@ -548,13 +558,19 @@ export function createConfigurationDocument(
         return result
       })
     },
-    async stop() {
-      if (stopped) return
+    stop() {
+      if (stopPromise) return stopPromise
       stopped = true
       clearTimeout(timer)
-      watcher?.close()
+      listeners.clear()
+      const closing = watcher
       watcher = null
-      await lane
+      const disposal = Promise.resolve().then(() => closing?.close())
+      stopPromise = Promise.allSettled([disposal, lane]).then((results) => {
+        const failure = results.find((result) => result.status === 'rejected')
+        if (failure?.status === 'rejected') throw failure.reason
+      })
+      return stopPromise
     },
   }
 }

@@ -2,7 +2,11 @@ import * as filesystem from 'node:fs/promises'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { ApplicationState, ProjectRegistration } from '@roadmap/contracts'
+import type {
+  ApplicationState,
+  GitHubConnectionIdentity,
+  ProjectRegistration,
+} from '@roadmap/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   type ConfigurationDocument,
@@ -1229,4 +1233,396 @@ describe('RoadmapApplication GitHub Connections', () => {
     )
     await restarted.stop()
   })
+
+  it.each(['success', 'failure'] as const)(
+    'joins a deferred authorization begin without installing its late %s result',
+    async (completion) => {
+      vi.useFakeTimers()
+      const begin =
+        deferred<Awaited<ReturnType<GitHubConnectionPort['beginDeviceAuthorization']>>>()
+      const entered = deferred<void>()
+      const configuration = memoryConfiguration(BASE_CONFIGURATION)
+      const credentials = memoryVault()
+      const github: GitHubConnectionPort = {
+        ...scriptedGitHub(),
+        async beginDeviceAuthorization() {
+          entered.resolve()
+          return begin.promise
+        },
+      }
+      const states: ApplicationState[] = []
+      const application = createRoadmapApplication({
+        configuration: configuration.document,
+        credentialVault: credentials.vault,
+        github,
+        ...sourceOptions(),
+        now: () => 0,
+      })
+      application.subscribe((state) => states.push(structuredClone(state)))
+      await application.start()
+      const beginning = application.execute({
+        type: 'begin-github-authorization',
+        name: 'Deferred GitHub',
+        expectedConfigurationVersion: 1,
+      })
+      await entered.promise
+      let stopped = false
+      const stopping = application.stop().then(() => {
+        stopped = true
+      })
+      const operationsAtStop = structuredClone(application.current().authorizationOperations)
+      const publicationsAtStop = states.length
+      try {
+        await vi.advanceTimersByTimeAsync(0)
+        expect(stopped).toBe(false)
+        if (completion === 'failure')
+          begin.reject(new GitHubConnectionError('network', 'Harmless late begin failure.'))
+        else
+          begin.resolve({
+            deviceCode: 'harmless-private-device',
+            userCode: 'LATE-CODE',
+            verificationUri: 'https://github.com/login/device',
+            expiresAt: 60_000,
+            intervalMs: 1,
+          })
+        await beginning
+        await stopping
+        await vi.advanceTimersByTimeAsync(60_000)
+        expect(application.current().authorizationOperations).toEqual(operationsAtStop)
+        expect(states).toHaveLength(publicationsAtStop)
+        expect(configuration.writes).toEqual([])
+        expect(credentials.records.size).toBe(0)
+        expect(github.pollDeviceAuthorization).not.toHaveBeenCalled()
+        expect(JSON.stringify(states)).not.toContain('harmless-private-device')
+      } finally {
+        begin.resolve({
+          deviceCode: 'cleanup-device',
+          userCode: 'CLEANUP',
+          verificationUri: 'https://github.com/login/device',
+          expiresAt: 60_000,
+          intervalMs: 1,
+        })
+        await beginning
+        await stopping
+        await vi.advanceTimersByTimeAsync(0)
+      }
+    },
+  )
+
+  it.each(['success', 'failure'] as const)(
+    'joins an active device poll and suppresses late %s authorization settlement',
+    async (completion) => {
+      vi.useFakeTimers()
+      const poll = deferred<DeviceAuthorizationPoll>()
+      const entered = deferred<void>()
+      const configuration = memoryConfiguration(BASE_CONFIGURATION)
+      const credentials = memoryVault()
+      const github: GitHubConnectionPort = {
+        ...scriptedGitHub(),
+        async pollDeviceAuthorization(deviceCode) {
+          expect(deviceCode).toBe('private-device-1')
+          entered.resolve()
+          return poll.promise
+        },
+      }
+      const states: ApplicationState[] = []
+      const application = createRoadmapApplication({
+        configuration: configuration.document,
+        credentialVault: credentials.vault,
+        github,
+        ...sourceOptions(),
+        now: () => 0,
+      })
+      application.subscribe((state) => states.push(structuredClone(state)))
+      await application.start()
+      await application.execute({
+        type: 'begin-github-authorization',
+        name: 'Polling GitHub',
+        expectedConfigurationVersion: 1,
+      })
+      await vi.advanceTimersByTimeAsync(1)
+      await entered.promise
+      let stopped = false
+      const stopping = application.stop().then(() => {
+        stopped = true
+      })
+      const operationsAtStop = structuredClone(application.current().authorizationOperations)
+      const publicationsAtStop = states.length
+      try {
+        await vi.advanceTimersByTimeAsync(0)
+        expect(stopped).toBe(false)
+        if (completion === 'failure')
+          poll.reject(new GitHubConnectionError('network', 'Harmless late poll failure.'))
+        else poll.resolve({ status: 'granted', credentials: CREDENTIALS })
+        await stopping
+        await vi.advanceTimersByTimeAsync(60_000)
+        expect(application.current().authorizationOperations).toEqual(operationsAtStop)
+        expect(states).toHaveLength(publicationsAtStop)
+        expect(configuration.writes).toEqual([])
+        expect(credentials.records.size).toBe(0)
+        expect(github.identify).not.toHaveBeenCalled()
+      } finally {
+        poll.resolve({ status: 'pending' })
+        await stopping
+        await vi.advanceTimersByTimeAsync(0)
+      }
+    },
+  )
+
+  it.each(['success', 'failure'] as const)(
+    'drains an already-started authorization vault write without late %s public settlement',
+    async (completion) => {
+      vi.useFakeTimers()
+      const write = deferred<void>()
+      const entered = deferred<void>()
+      const configuration = memoryConfiguration(BASE_CONFIGURATION)
+      const credentials = memoryVault()
+      const completedWrites: string[] = []
+      const vault: CredentialVault = {
+        ...credentials.vault,
+        async write(id, bundle) {
+          entered.resolve()
+          await write.promise
+          await credentials.vault.write(id, bundle)
+          completedWrites.push(id)
+        },
+      }
+      const application = createRoadmapApplication({
+        configuration: configuration.document,
+        credentialVault: vault,
+        github: scriptedGitHub(),
+        ...sourceOptions(),
+        now: () => 0,
+      })
+      const states: ApplicationState[] = []
+      application.subscribe((state) => states.push(structuredClone(state)))
+      await application.start()
+      await application.execute({
+        type: 'begin-github-authorization',
+        name: 'Writing GitHub',
+        expectedConfigurationVersion: 1,
+      })
+      await vi.advanceTimersByTimeAsync(1)
+      await entered.promise
+      let stopped = false
+      const stopping = application.stop().then(() => {
+        stopped = true
+      })
+      const operationsAtStop = structuredClone(application.current().authorizationOperations)
+      const publicationsAtStop = states.length
+      try {
+        await vi.advanceTimersByTimeAsync(0)
+        expect(stopped).toBe(false)
+        if (completion === 'failure') write.reject(new Error('Private late vault write detail.'))
+        else write.resolve()
+        await stopping
+        await vi.advanceTimersByTimeAsync(0)
+        expect(completedWrites).toHaveLength(completion === 'success' ? 1 : 0)
+        expect(configuration.writes).toEqual([])
+        expect(application.current().authorizationOperations).toEqual(operationsAtStop)
+        expect(states).toHaveLength(publicationsAtStop)
+        expect(JSON.stringify(states)).not.toContain('Private late vault write detail.')
+      } finally {
+        write.resolve()
+        await stopping
+        await vi.advanceTimersByTimeAsync(0)
+      }
+    },
+  )
+
+  it.each(['success', 'failure'] as const)(
+    'joins authorization identity verification without a late %s vault or configuration effect',
+    async (completion) => {
+      vi.useFakeTimers()
+      const identity = deferred<GitHubConnectionIdentity>()
+      const entered = deferred<void>()
+      const configuration = memoryConfiguration(BASE_CONFIGURATION)
+      const credentials = memoryVault()
+      const github: GitHubConnectionPort = {
+        ...scriptedGitHub(),
+        async identify(token) {
+          expect(token).toBe(CREDENTIALS.accessToken)
+          entered.resolve()
+          return identity.promise
+        },
+      }
+      const application = createRoadmapApplication({
+        configuration: configuration.document,
+        credentialVault: credentials.vault,
+        github,
+        ...sourceOptions(),
+        now: () => 0,
+      })
+      const states: ApplicationState[] = []
+      application.subscribe((state) => states.push(structuredClone(state)))
+      await application.start()
+      await application.execute({
+        type: 'begin-github-authorization',
+        name: 'Identity verification',
+        expectedConfigurationVersion: 1,
+      })
+      await vi.advanceTimersByTimeAsync(1)
+      await entered.promise
+      let stopped = false
+      const stopping = application.stop().then(() => {
+        stopped = true
+      })
+      const operationsAtStop = structuredClone(application.current().authorizationOperations)
+      const publicationsAtStop = states.length
+      try {
+        await vi.advanceTimersByTimeAsync(0)
+        expect(stopped).toBe(false)
+        if (completion === 'failure')
+          identity.reject(new GitHubConnectionError('network', 'Harmless late identity failure.'))
+        else identity.resolve({ id: '42', login: 'octocat' })
+        await stopping
+        await vi.advanceTimersByTimeAsync(0)
+        expect(credentials.records.size).toBe(0)
+        expect(configuration.writes).toEqual([])
+        expect(application.current().authorizationOperations).toEqual(operationsAtStop)
+        expect(states).toHaveLength(publicationsAtStop)
+      } finally {
+        identity.resolve({ id: '42', login: 'octocat' })
+        await stopping
+        await vi.advanceTimersByTimeAsync(0)
+      }
+    },
+  )
+
+  it.each([
+    { stage: 'network', completion: 'success' },
+    { stage: 'network', completion: 'failure' },
+    { stage: 'identity', completion: 'success' },
+    { stage: 'identity', completion: 'failure' },
+    { stage: 'vault', completion: 'success' },
+    { stage: 'vault', completion: 'failure' },
+  ] satisfies Array<{
+    stage: 'network' | 'identity' | 'vault'
+    completion: 'success' | 'failure'
+  }>)(
+    'joins autonomous credential refresh at $stage without late $completion settlement',
+    async ({ stage, completion }) => {
+      vi.useFakeTimers()
+      let clock = 0
+      const refresh = deferred<CredentialBundle>()
+      const identity = deferred<GitHubConnectionIdentity>()
+      const write = deferred<void>()
+      const entered = deferred<void>()
+      const expiring = { ...CREDENTIALS, accessTokenExpiresAt: 600_001 }
+      const refreshed = {
+        ...CREDENTIALS,
+        accessToken: 'harmless-late-access',
+        refreshToken: 'harmless-late-refresh',
+      }
+      const credentials = memoryVault({ 'github-connection': expiring })
+      const writes: CredentialBundle[] = []
+      const identified: string[] = []
+      const vault: CredentialVault = {
+        ...credentials.vault,
+        async write(id, bundle) {
+          writes.push(bundle)
+          if (stage === 'vault') {
+            entered.resolve()
+            await write.promise
+          }
+          await credentials.vault.write(id, bundle)
+        },
+      }
+      const github: GitHubConnectionPort = {
+        ...scriptedGitHub(),
+        async refresh(token) {
+          expect(token).toBe('refresh-one')
+          if (stage === 'network') {
+            entered.resolve()
+            return refresh.promise
+          }
+          return refreshed
+        },
+        async identify(token) {
+          identified.push(token)
+          if (stage === 'identity' && token === refreshed.accessToken) {
+            entered.resolve()
+            return identity.promise
+          }
+          return { id: '42', login: 'octocat' }
+        },
+      }
+      const configuration = memoryConfiguration({
+        ...githubConfiguration(),
+        projects: [GITHUB_INTENT],
+      })
+      const providerTokens: string[] = []
+      const source = sourceOptions({ now: () => clock, reconcileMs: 1_000, providerTokens })
+      const application = createRoadmapApplication({
+        configuration: configuration.document,
+        credentialVault: vault,
+        github,
+        ...source,
+        admissions: {
+          ...source.admissions,
+          github: createGitHubProjectAdmission({
+            async inspectWorkspace() {
+              throw new Error('Harmless unavailable Workspace.')
+            },
+          }),
+        },
+        now: () => clock,
+      })
+      const states: ApplicationState[] = []
+      application.subscribe((state) => states.push(structuredClone(state)))
+      let stopping: Promise<void> | undefined
+      try {
+        await application.start()
+        expect(application.current().connections[1]?.availability.status).toBe('available')
+        providerTokens.length = 0
+        clock = 600_002
+        await vi.advanceTimersByTimeAsync(1_000)
+        await entered.promise
+        let stopped = false
+        stopping = application.stop().then(() => {
+          stopped = true
+        })
+        const publicAtStop = structuredClone(application.current())
+        const publicationsAtStop = states.length
+        const identifiesAtStop = identified.length
+        const writesAtStop = writes.length
+        await vi.advanceTimersByTimeAsync(0)
+        expect(stopped).toBe(false)
+        if (stage === 'network') {
+          if (completion === 'failure')
+            refresh.reject(
+              new GitHubConnectionError('bad-refresh-token', 'Harmless late refresh rejection.'),
+            )
+          else refresh.resolve(refreshed)
+        } else if (stage === 'identity') {
+          if (completion === 'failure')
+            identity.reject(
+              new GitHubConnectionError('unauthorized', 'Harmless late refresh identity failure.'),
+            )
+          else identity.resolve({ id: '42', login: 'octocat' })
+        } else if (completion === 'failure')
+          write.reject(new Error('Private late refresh vault detail.'))
+        else write.resolve()
+        await stopping
+        await vi.advanceTimersByTimeAsync(60_000)
+        expect(application.current().connections).toEqual(publicAtStop.connections)
+        expect(application.current().authorizationOperations).toEqual(
+          publicAtStop.authorizationOperations,
+        )
+        expect(states).toHaveLength(publicationsAtStop)
+        expect(identified).toHaveLength(identifiesAtStop)
+        expect(writes).toHaveLength(writesAtStop)
+        expect(providerTokens).toEqual([])
+        expect(configuration.writes).toEqual([])
+        expect(JSON.stringify(states)).not.toContain('harmless-late-access')
+        expect(JSON.stringify(states)).not.toContain('Private late refresh vault detail.')
+      } finally {
+        refresh.resolve(refreshed)
+        identity.resolve({ id: '42', login: 'octocat' })
+        write.resolve()
+        await (stopping ?? application.stop())
+        await vi.advanceTimersByTimeAsync(0)
+      }
+    },
+  )
 })

@@ -2,6 +2,7 @@ import * as filesystem from 'node:fs/promises'
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { setImmediate } from 'node:timers/promises'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createConfigurationDocument,
@@ -77,6 +78,89 @@ afterEach(async () => {
 })
 
 describe('roadmap configuration', () => {
+  it.each(['load', 'watch', 'write'] as const)(
+    'joins concurrent stop during a real %s disk operation without publishing after disposal',
+    async (operation) => {
+      const path = await temporaryPath()
+      const document = createConfigurationDocument(path, { debounceMs: 1 })
+      const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+      const entered = Promise.withResolvers<void>()
+      const release = Promise.withResolvers<void>()
+      const publications: unknown[] = []
+      const disposedPublications: unknown[] = []
+      document.subscribe((value) => publications.push(value))
+      const dispose = document.subscribe((value) => disposedPublications.push(value))
+      let work: Promise<unknown> = Promise.resolve()
+      const stops: Promise<void>[] = []
+      try {
+        if (operation !== 'load') await document.load()
+        dispose()
+        vi.mocked(filesystem.open).mockImplementation(async (filename, flags, mode) => {
+          if (flags === 'wx') {
+            entered.resolve()
+            await release.promise
+          }
+          return actual.open(filename, flags, mode)
+        })
+        if (operation === 'load') work = document.load()
+        else if (operation === 'write') {
+          work = document.write({
+            schemaVersion: 6,
+            configurationVersion: 2,
+            connections: [LOCAL_CONNECTION],
+            projects: [],
+            automation: { enabled: false, enabledProjects: [] },
+          })
+        } else {
+          await writeFile(
+            path,
+            JSON.stringify({
+              schemaVersion: 1,
+              configurationVersion: 2,
+              connections: [LOCAL_CONNECTION],
+              projects: [],
+            }),
+          )
+        }
+        await entered.promise
+        const beforeStop = publications.length
+        const settled: number[] = []
+        stops.push(document.stop(), document.stop())
+        stops.forEach((stop, index) => void stop.then(() => settled.push(index)))
+        const latePublications: unknown[] = []
+        document.subscribe((value) => latePublications.push(value))
+        await setImmediate()
+        expect(settled).toEqual([])
+        release.resolve()
+        await Promise.all([...stops, work])
+        expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject({
+          schemaVersion: 6,
+          configurationVersion: operation === 'load' ? 1 : operation === 'watch' ? 3 : 2,
+        })
+        expect(publications).toHaveLength(beforeStop)
+        expect(disposedPublications).toEqual([])
+        expect(latePublications).toEqual([])
+        await writeFile(path, '{ invalid after terminal stop')
+        await setImmediate()
+        expect(publications).toHaveLength(beforeStop)
+        expect(
+          await document.write({
+            schemaVersion: 6,
+            configurationVersion: 3,
+            connections: [LOCAL_CONNECTION],
+            projects: [],
+            automation: { enabled: false, enabledProjects: [] },
+          }),
+        ).toMatchObject({ ok: false, kind: 'persistence' })
+        expect(await readFile(path, 'utf8')).toBe('{ invalid after terminal stop')
+      } finally {
+        release.resolve()
+        await work
+        await Promise.all([...stops, document.stop()])
+      }
+    },
+  )
+
   it('creates and reads the versioned empty document atomically on first use', async () => {
     const path = await temporaryPath()
     const document = createConfigurationDocument(path)
