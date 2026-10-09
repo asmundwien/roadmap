@@ -35,10 +35,13 @@ export type ConfigurationDecode =
   | { ok: true; value: ProjectConfiguration }
   | { ok: false; issues: ConfigurationIssue[] }
 const text = z.string().trim().min(1)
-const path = text.refine(
-  (value) => isAbsolute(value) && normalize(value) === value,
-  'Must be a canonical absolute path.',
-)
+const path = z
+  .string()
+  .min(1)
+  .refine(
+    (value) => isAbsolute(value) && normalize(value) === value,
+    'Must be a canonical absolute path.',
+  )
 const integer = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 const integration = z.enum(['local', 'github'])
 const key = z.strictObject({ integration, id: text })
@@ -83,7 +86,7 @@ const legacyRegistration = z
     connectionId: text,
     displayName: text.optional(),
     locator: z.discriminatedUnion('integration', [
-      z.strictObject({ integration: z.literal('local'), path: text }),
+      z.strictObject({ integration: z.literal('local'), path }),
       z.strictObject({ integration: z.literal('github'), repositoryId: text, nameWithOwner: text }),
     ]),
     workspace: localWorkspace,

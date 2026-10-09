@@ -159,14 +159,14 @@ async function expectedWorkspace(
   repositoryId: string,
   authorized: EvidenceResult<GitHubConnectionAccess>,
   inspectWorkspace: (path: string) => Promise<GitHubWorktreeInspection>,
-): Promise<EvidenceResult<GitHubWorkspaceInspection>> {
+): Promise<GitHubOutcome['workspace']> {
   let workspace: GitHubWorktreeInspection
   try {
     workspace = await inspectWorkspace(path)
   } catch {
     return failed('workspace.path', 'Workspace must be a readable Git worktree root.')
   }
-  if (!authorized.ok) return authorized
+  if (!authorized.ok) return { ...authorized, canonicalOccupancyPath: workspace.path }
   for (const remote of workspace.remotes) {
     try {
       const repository = await readRepositoryByName(authorized.value.access, remote.nameWithOwner)
@@ -180,7 +180,10 @@ async function expectedWorkspace(
       // A different remote may prove the admitted stable repository. Provider errors stay private.
     }
   }
-  return failed('workspace.path', 'Workspace Git remotes do not identify this GitHub repository.')
+  return {
+    ...failed('workspace.path', 'Workspace Git remotes do not identify this GitHub repository.'),
+    canonicalOccupancyPath: workspace.path,
+  }
 }
 
 function workspaceEvidence(

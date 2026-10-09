@@ -1,11 +1,15 @@
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import type { ApplicationState, ProjectRegistration } from '@roadmap/contracts'
 import { describe, expect, it, vi } from 'vitest'
-import type { ConfigurationDocument, ConfigurationRead } from '../configuration/document.ts'
+import {
+  type ConfigurationDocument,
+  type ConfigurationRead,
+  createConfigurationDocument,
+} from '../configuration/document.ts'
 import { createGitHubProjectAdmission } from '../github/admission.ts'
 import type { GitHubConnectionPort } from '../github/connections.ts'
 import { createGitHubObserverPool } from '../github/observer.ts'
@@ -98,6 +102,39 @@ function localApplication(
   return { application, launch, observedPaths, ...storage }
 }
 
+function persistedLocalApplication(filename: string) {
+  const effects: { executable: string; args: readonly string[] }[] = []
+  const application = createRoadmapApplication({
+    configuration: createConfigurationDocument(filename, { debounceMs: 60_000 }),
+    admissions: { local: createLocalProjectAdmission() },
+    operations: createApplicationOperations({
+      async launch(executable, args) {
+        effects.push({ executable, args: [...args] })
+      },
+    }),
+    observers: {
+      local(input) {
+        return createLocalObserver(input, {
+          reconcileMs: 1_000_000,
+          logger: { info() {}, warn() {} },
+        })
+      },
+      github() {
+        throw new Error('Unexpected GitHub observer')
+      },
+    },
+  })
+  return { application, effects }
+}
+
+function registerLocal(application: ReturnType<typeof createRoadmapApplication>, path: string) {
+  return application.execute({
+    type: 'register-project',
+    candidate: { integration: 'local', connectionId: 'local', workspace: { path } },
+    expectedConfigurationVersion: application.current().configurationVersion,
+  })
+}
+
 async function fixture(run: (root: string) => Promise<void>) {
   const root = await mkdtemp(join(tmpdir(), 'roadmap-registration-'))
   try {
@@ -105,6 +142,16 @@ async function fixture(run: (root: string) => Promise<void>) {
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+}
+
+async function localMap(workspace: string, title: string) {
+  const mapDirectory = join(workspace, '.wayfinder', 'registration-map')
+  await mkdir(join(mapDirectory, 'tickets'), { recursive: true })
+  await writeFile(
+    join(mapDirectory, 'map.md'),
+    `---\ntitle: ${title}\nlabels: [wayfinder:map]\nstatus: open\n---\n\n## Destination\n\nRead this registered local source.\n\n## Notes\n\n## Decisions so far\n\n## Not yet specified\n\n## Out of scope\n`,
+    'utf8',
+  )
 }
 
 async function worktree(path: string, remote = 'Acme/Roadmap') {
@@ -266,6 +313,249 @@ function repair(
 }
 
 describe('public application registration authority', () => {
+  it.each([
+    { basename: ' leading-name', id: 'leading-name' },
+    { basename: 'trailing-name ', id: 'trailing-name' },
+    { basename: '   ', id: 'local-project' },
+  ])(
+    'persists and activates normalized Local identity for basename "$basename"',
+    async ({ basename, id }) => {
+      await fixture(async (root) => {
+        const workspace = join(root, basename)
+        await localMap(workspace, 'Normalized Local map')
+        const canonical = await realpath(workspace)
+        const filename = join(root, 'roadmap.config.json')
+        await writeFile(filename, `${JSON.stringify(BASE, null, 2)}\n`, 'utf8')
+        const { application } = persistedLocalApplication(filename)
+        try {
+          await application.start()
+          expect(await registerLocal(application, workspace)).toMatchObject({
+            ok: true,
+            result: { type: 'configuration-updated', configurationVersion: 2 },
+          })
+          expect(JSON.parse(await readFile(filename, 'utf8'))).toEqual({
+            ...BASE,
+            configurationVersion: 2,
+            projects: [
+              {
+                ref: { integration: 'local', projectId: id },
+                connectionId: 'local',
+                workspace: { path: canonical },
+              },
+            ],
+          })
+          expect(application.current().configurationVersion).toBe(2)
+          expect(application.current().registrations).toEqual([
+            {
+              key: { integration: 'local', id },
+              connectionId: 'local',
+              locator: { integration: 'local', path: canonical },
+              workspace: { path: canonical },
+            },
+          ])
+          expect(application.current().projects[0]).toMatchObject({
+            key: { integration: 'local', id },
+            availability: { status: 'available' },
+          })
+          expect(application.current().roadmap.projects[0]).toMatchObject({
+            key: { integration: 'local', id },
+            openMaps: [
+              expect.objectContaining({
+                id: '.wayfinder/registration-map/map.md',
+                title: 'Normalized Local map',
+              }),
+            ],
+          })
+        } finally {
+          await application.stop()
+        }
+      })
+    },
+  )
+
+  it('allocates unique Local IDs when different canonical basenames normalize to the same ID', async () => {
+    await fixture(async (root) => {
+      const first = join(root, 'shared-name')
+      const second = join(root, ' shared-name ')
+      await localMap(first, 'First Local map')
+      await localMap(second, 'Second Local map')
+      const firstCanonical = await realpath(first)
+      const secondCanonical = await realpath(second)
+      const filename = join(root, 'roadmap.config.json')
+      await writeFile(filename, `${JSON.stringify(BASE, null, 2)}\n`, 'utf8')
+      const { application } = persistedLocalApplication(filename)
+      try {
+        await application.start()
+        expect((await registerLocal(application, first)).ok).toBe(true)
+        expect(await registerLocal(application, second)).toMatchObject({
+          ok: true,
+          result: { type: 'configuration-updated', configurationVersion: 3 },
+        })
+        expect(JSON.parse(await readFile(filename, 'utf8'))).toEqual({
+          ...BASE,
+          configurationVersion: 3,
+          projects: [
+            {
+              ref: { integration: 'local', projectId: 'shared-name' },
+              connectionId: 'local',
+              workspace: { path: firstCanonical },
+            },
+            {
+              ref: { integration: 'local', projectId: 'shared-name-2' },
+              connectionId: 'local',
+              workspace: { path: secondCanonical },
+            },
+          ],
+        })
+        expect(application.current().configurationVersion).toBe(3)
+        expect(application.current().registrations).toEqual([
+          {
+            key: { integration: 'local', id: 'shared-name' },
+            connectionId: 'local',
+            locator: { integration: 'local', path: firstCanonical },
+            workspace: { path: firstCanonical },
+          },
+          {
+            key: { integration: 'local', id: 'shared-name-2' },
+            connectionId: 'local',
+            locator: { integration: 'local', path: secondCanonical },
+            workspace: { path: secondCanonical },
+          },
+        ])
+        expect(application.current().projects).toEqual([
+          expect.objectContaining({
+            key: { integration: 'local', id: 'shared-name' },
+            availability: expect.objectContaining({ status: 'available' }),
+          }),
+          expect.objectContaining({
+            key: { integration: 'local', id: 'shared-name-2' },
+            availability: expect.objectContaining({ status: 'available' }),
+          }),
+        ])
+        expect(application.current().roadmap.projects).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              key: { integration: 'local', id: 'shared-name' },
+              openMaps: [
+                expect.objectContaining({
+                  id: '.wayfinder/registration-map/map.md',
+                  title: 'First Local map',
+                }),
+              ],
+            }),
+            expect.objectContaining({
+              key: { integration: 'local', id: 'shared-name-2' },
+              openMaps: [
+                expect.objectContaining({
+                  id: '.wayfinder/registration-map/map.md',
+                  title: 'Second Local map',
+                }),
+              ],
+            }),
+          ]),
+        )
+      } finally {
+        await application.stop()
+      }
+    })
+  })
+
+  it('restarts from saved normalized Local identity and reproves its canonical Workspace before host launch', async () => {
+    await fixture(async (root) => {
+      const workspace = join(root, ' restart-name ')
+      const mapDirectory = join(workspace, '.wayfinder', 'saved-map')
+      await mkdir(join(mapDirectory, 'tickets'), { recursive: true })
+      const mapFilename = join(mapDirectory, 'map.md')
+      await writeFile(
+        mapFilename,
+        '---\ntitle: Before restart\nlabels: [wayfinder:map]\nstatus: open\n---\n\n## Destination\n\nRead this source after restart.\n\n## Notes\n\n## Decisions so far\n\n## Not yet specified\n\n## Out of scope\n',
+        'utf8',
+      )
+      const canonical = await realpath(workspace)
+      const filename = join(root, 'roadmap.config.json')
+      await writeFile(filename, `${JSON.stringify(BASE, null, 2)}\n`, 'utf8')
+      const project = {
+        integration: 'local',
+        id: 'restart-name',
+      } satisfies ProjectRegistration['key']
+      const saved = persistedLocalApplication(filename)
+      let persistedBytes = ''
+      try {
+        await saved.application.start()
+        expect((await registerLocal(saved.application, workspace)).ok).toBe(true)
+        expect(saved.application.current().configurationVersion).toBe(2)
+        expect(saved.application.current().registrations[0]?.key).toEqual(project)
+        expect(saved.application.current().roadmap.projects[0]?.openMaps[0]?.title).toBe(
+          'Before restart',
+        )
+        persistedBytes = await readFile(filename, 'utf8')
+        expect(JSON.parse(persistedBytes)).toEqual({
+          ...BASE,
+          configurationVersion: 2,
+          projects: [
+            {
+              ref: { integration: 'local', projectId: 'restart-name' },
+              connectionId: 'local',
+              workspace: { path: canonical },
+            },
+          ],
+        })
+        expect(saved.effects).toEqual([])
+      } finally {
+        await saved.application.stop()
+      }
+      await writeFile(
+        mapFilename,
+        '---\ntitle: After restart\nlabels: [wayfinder:map]\nstatus: open\n---\n\n## Destination\n\nRead this source after restart.\n\n## Notes\n\n## Decisions so far\n\n## Not yet specified\n\n## Out of scope\n',
+        'utf8',
+      )
+      const restarted = persistedLocalApplication(filename)
+      try {
+        await restarted.application.start()
+        expect(restarted.application.current().configurationVersion).toBe(2)
+        expect(restarted.application.current().registrations).toEqual([
+          {
+            key: project,
+            connectionId: 'local',
+            locator: { integration: 'local', path: canonical },
+            workspace: { path: canonical },
+          },
+        ])
+        expect(restarted.application.current().projects[0]).toMatchObject({
+          key: project,
+          availability: { status: 'available' },
+        })
+        expect(restarted.application.current().roadmap.projects[0]).toMatchObject({
+          key: project,
+          openMaps: [
+            expect.objectContaining({
+              id: '.wayfinder/saved-map/map.md',
+              title: 'After restart',
+            }),
+          ],
+        })
+        expect(
+          await restarted.application.execute({
+            type: 'launch-action',
+            actionId: 'open-workspace',
+            project,
+            expectedConfigurationVersion: 2,
+          }),
+        ).toMatchObject({
+          ok: true,
+          result: { type: 'action-launched', actionId: 'open-workspace' },
+        })
+        expect(restarted.effects).toEqual([
+          { executable: '/usr/bin/open', args: ['-a', 'Visual Studio Code', canonical] },
+        ])
+        expect(restarted.application.current().configurationVersion).toBe(2)
+        expect(await readFile(filename, 'utf8')).toBe(persistedBytes)
+      } finally {
+        await restarted.application.stop()
+      }
+    })
+  })
+
   it('admits a readable non-Git directory and preserves scoped identity through presentation rename', async () => {
     await fixture(async (root) => {
       const test = localApplication()

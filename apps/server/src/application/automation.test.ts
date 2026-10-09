@@ -2337,6 +2337,97 @@ describe('RoadmapApplication Automation', () => {
     await current.application.stop()
   })
 
+  it('renders GitHub source URLs for both Harness Commands in the admitted Workspace', async () => {
+    const temporaryRoot = await mkdtemp(join(tmpdir(), 'roadmap-github-harness-'))
+    roots.push(temporaryRoot)
+    const workspace = await realpath(temporaryRoot)
+    const sourceProject = githubProject('harness-pointers', [ticket('9')])
+    const classificationCommand: HarnessCommand = {
+      ...COMMAND,
+      promptTemplate: 'Classify map={{roadmap.map}} ticket={{roadmap.ticket}}',
+    }
+    const wayfinderCommand: HarnessCommand = {
+      ...COMMAND,
+      promptTemplate: 'Run map={{roadmap.map}} ticket={{roadmap.ticket}}',
+    }
+    const configured = configuration([sourceProject], {
+      classificationCommand,
+      wayfinderCommand,
+    })
+    configured.projects = configured.projects.map((entry) => ({
+      ...entry,
+      workspace: { path: workspace },
+    }))
+    const launches = deferredLauncher()
+    const current = await harness({
+      projects: [sourceProject],
+      launcher: launches.launcher,
+      configuration: configured,
+    })
+
+    try {
+      expect(current.application.current().projects[0]).toMatchObject({
+        key: { integration: 'github', id: 'harness-pointers' },
+        connectionId: 'github',
+        locator: {
+          integration: 'github',
+          repositoryId: 'harness-pointers',
+          nameWithOwner: 'owner/harness-pointers',
+        },
+        workspace: { path: workspace },
+        availability: { status: 'available' },
+      })
+      expect(launches.classifications).toHaveLength(1)
+      expect(launches.classifications[0]?.request).toMatchObject({
+        command: classificationCommand,
+        workspace,
+        prompt:
+          'Classify map=https://github.com/owner/harness-pointers/issues/100 ticket=https://github.com/owner/harness-pointers/issues/9',
+      })
+
+      launches.classifications[0]?.resolve(processResult())
+      await vi.waitFor(() => expect(launches.dispatches).toHaveLength(1))
+      expect(launches.dispatches[0]).toMatchObject({
+        command: wayfinderCommand,
+        workspace,
+        prompt:
+          'Run map=https://github.com/owner/harness-pointers/issues/100 ticket=https://github.com/owner/harness-pointers/issues/9',
+      })
+      await vi.waitFor(() => expect(launches.sessions).toHaveLength(1))
+      launches.sessions[0]?.resolve(wayfinderResult())
+
+      await vi.waitFor(() =>
+        expect(current.application.current().automation.evidence).toEqual([
+          expect.objectContaining({
+            target: {
+              project: { integration: 'github', id: 'harness-pointers' },
+              mapId: 'map',
+              ticketId: '9',
+            },
+            classification: {
+              status: 'completed',
+              admission: 'automatic',
+              processResult: { status: 'exited', code: 0 },
+              verdict: { value: 'afk', reason: 'Agent-ready.' },
+            },
+            wayfinder: {
+              status: 'finished',
+              admission: 'automatic',
+              processResult: { status: 'exited', code: 0 },
+              report: {
+                status: 'received',
+                report: { outcome: 'completed', reason: 'Ticket resolved.' },
+              },
+            },
+          }),
+        ]),
+      )
+      expect(current.application.current().automation.evidence).toEqual(current.database.evidence())
+    } finally {
+      await current.application.stop()
+    }
+  })
+
   it('direct-spawns the classifier and detaches a Wayfinder session in the Workspace', async () => {
     const temporaryRoot = await mkdtemp(join(tmpdir(), 'roadmap-automation-'))
     roots.push(temporaryRoot)

@@ -351,6 +351,7 @@ async function queuedReversionSchedule(stage: 'classification' | 'wayfinder', ho
   const bGate = Promise.withResolvers<void>()
   const revertedGate = Promise.withResolvers<void>()
   const durableGate = Promise.withResolvers<void>()
+  const appendEntered = Promise.withResolvers<void>()
   let bRequested = false
   let reversionRequested = false
   let aObservations = 0
@@ -409,6 +410,7 @@ async function queuedReversionSchedule(stage: 'classification' | 'wayfinder', ho
     async append(batch) {
       if (batch.events.some((event) => event.type === startType)) {
         reservationRequested = true
+        appendEntered.resolve()
         if (holdAppend) await durableGate.promise
       }
       stored = appendAutomationDatabase(stored, batch)
@@ -457,12 +459,26 @@ async function queuedReversionSchedule(stage: 'classification' | 'wayfinder', ho
 
     configuration.emit(b)
     await vi.waitFor(() => expect(bRequested).toBe(true))
-    configuration.emit(reverted)
-    expect(application.current().configurationVersion).toBe(1)
-    bGate.resolve()
-    await vi.waitFor(() =>
-      expect(reversionRequested || application.current().configurationVersion === 3).toBe(true),
-    )
+    if (holdAppend) {
+      bGate.resolve()
+      await vi.waitFor(() => expect(application.current().configurationVersion).toBe(2))
+      await appendEntered.promise
+      expect(reservationRequested).toBe(true)
+      expect(writes.some((event) => event.type === startType)).toBe(false)
+      expect(stored.events.some((event) => event.type === startType)).toBe(false)
+      expect(effects).toEqual([])
+      configuration.emit(reverted)
+      await vi.waitFor(() => expect(reversionRequested).toBe(true))
+      expect(application.current().configurationVersion).toBe(2)
+      expect(application.current().automation.availability.status).toBe('unavailable')
+    } else {
+      configuration.emit(reverted)
+      expect(application.current().configurationVersion).toBe(1)
+      bGate.resolve()
+      await vi.waitFor(() =>
+        expect(reversionRequested || application.current().configurationVersion === 3).toBe(true),
+      )
+    }
     // A different source holds v3 pending; this target's source, Workspace, pointers and commands never change.
     const pending = structuredClone(application.current())
     expect([2, 3]).toContain(pending.configurationVersion)
@@ -470,9 +486,28 @@ async function queuedReversionSchedule(stage: 'classification' | 'wayfinder', ho
       targetPath,
     )
     if (holdAppend) {
-      await setImmediate()
       expect(writes.some((event) => event.type === startType)).toBe(false)
       durableGate.resolve()
+      await vi.waitFor(() =>
+        expect(stored.events.filter((event) => event.type === startType)).toHaveLength(1),
+      )
+      const failureType =
+        stage === 'classification' ? 'classification-launch-failed' : 'wayfinder-launch-failed'
+      await vi.waitFor(() =>
+        expect(stored.events.some((event) => event.type === failureType)).toBe(true),
+      )
+      expect(stored.events.filter((event) => event.type === startType)).toHaveLength(1)
+      expect(writes.filter((event) => event.type === startType)).toHaveLength(1)
+      expect(application.current().configurationVersion).toBe(2)
+      await vi.waitFor(() =>
+        expect(application.current().automation.evidence[0]).toMatchObject({
+          target,
+          [stage]: { status: 'launch-failed', admission: 'automatic' },
+        }),
+      )
+      expect(application.current().configurationVersion).toBe(2)
+      expect(application.current().automation.availability.status).toBe('unavailable')
+      expect(effects).toEqual([])
     }
     await setImmediate()
     const afterAppend = structuredClone(application.current())
@@ -487,15 +522,16 @@ async function queuedReversionSchedule(stage: 'classification' | 'wayfinder', ho
     if (afterAppend.configurationVersion === 2)
       expect(afterAppend.automation.availability.status).toBe('unavailable')
     expect(application.current().automation.enabled).toBe(false)
-    expect(
-      states
-        .filter((state) => state.configurationVersion === 2)
-        .every((state) => state.automation.availability.status === 'unavailable'),
-    ).toBe(true)
+    if (!holdAppend)
+      expect(
+        states
+          .filter((state) => state.configurationVersion === 2)
+          .every((state) => state.automation.availability.status === 'unavailable'),
+      ).toBe(true)
     if (!holdAppend) {
       expect(reservationRequested).toBe(false)
       expect(writes.some((event) => event.type === startType)).toBe(false)
-    } else if (reservationRequested) {
+    } else {
       // A durable reservation that raced the receipt must settle as known nonlaunch, not execute under B.
       const failureType =
         stage === 'classification' ? 'classification-launch-failed' : 'wayfinder-launch-failed'
@@ -504,6 +540,10 @@ async function queuedReversionSchedule(stage: 'classification' | 'wayfinder', ho
         expect.arrayContaining([expect.objectContaining({ type: failureType })]),
       )
       expect(afterAppend.automation.evidence[0]?.target).toEqual(target)
+      expect(application.current().automation.evidence[0]).toMatchObject({
+        target,
+        [stage]: { status: 'launch-failed', admission: 'automatic' },
+      })
     }
   } finally {
     bGate.resolve()
@@ -521,7 +561,7 @@ describe('RoadmapApplication queued activation safety', () => {
   )
 
   it.each(['classification', 'wayfinder'] satisfies Array<'classification' | 'wayfinder'>)(
-    'rechecks the same-target queued A/v3 reversion after a deferred durable %s reservation under B/v2',
+    'records known nonlaunch when A/v3 arrives while the durable %s reservation under committed B/v2 is held',
     async (stage) => queuedReversionSchedule(stage, true),
   )
 

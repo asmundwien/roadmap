@@ -177,7 +177,9 @@ export type AdmissionOutcome =
   | {
       integration: 'github'
       source: EvidenceResult<GitHubSourceAccessEvidence>
-      workspace: EvidenceResult<GitHubWorkspaceInspection>
+      workspace:
+        | EvidenceResult<GitHubWorkspaceInspection>
+        | { ok: false; error: AdmissionFailure; canonicalOccupancyPath: string }
       locator?: { repositoryId: string; nameWithOwner: string }
     }
 export interface ProjectAdmissionRequest {
@@ -570,7 +572,7 @@ export function createProjectRegistry({
         const ref: LocalProjectRef = {
           integration: 'local',
           projectId: allocateId(
-            proof.value.path.split('/').at(-1) || 'local-project',
+            proof.value.path.split('/').at(-1)?.trim() || 'local-project',
             'local',
             configuration.projects,
           ),
@@ -919,7 +921,7 @@ function refineRecord(
         displayName: intent.displayName,
       })
     : proof
-  return {
+  const record: ProjectAdmissionRecord = {
     intent,
     source: source.ok
       ? { status: 'ready', value: source.value }
@@ -928,6 +930,14 @@ function refineRecord(
       ? { status: 'admitted', proof: registration.value.workspace }
       : { status: 'unavailable', error: registration.error },
   }
+  if (
+    record.workspace.status === 'unavailable' &&
+    !outcome.workspace.ok &&
+    'canonicalOccupancyPath' in outcome.workspace &&
+    canonical(outcome.workspace.canonicalOccupancyPath)
+  )
+    canonicalOccupancyPaths.set(record.workspace, outcome.workspace.canonicalOccupancyPath)
+  return record
 }
 function unavailable(intent: ProjectConfigurationIntent, message: string): ProjectAdmissionRecord {
   const error: AdmissionFailure = { code: 'admission-failed', message, field: 'workspace.path' }
