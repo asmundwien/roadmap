@@ -1,17 +1,17 @@
+import type { ConnectionId, ProjectRef } from '@roadmap/contracts/identity'
 import type {
-  ApplicationState,
   Connection,
   MapResource,
-  ProjectKey,
-  RegisteredProject,
-} from '@roadmap/contracts'
+  Project,
+  ReadyApplicationState,
+} from '@roadmap/contracts/state'
 import { stripInlineMarkdown } from '@/views/shared/gist'
 import { orderedMaps, resourceMessage, resourceObservation } from '@/views/shared/resource-results'
 
 type ProjectJourney = 'active' | 'resting' | 'waiting' | 'uncertain'
 
 export interface ProjectPresentation {
-  project: RegisteredProject
+  project: Project
   connection: Connection | null
   journey: ProjectJourney
   activeMap: MapResource | null
@@ -37,14 +37,14 @@ export type AttentionItem =
       key: string
       title: string
       detail: string
-      connectionId: string
+      connectionId: ConnectionId
     }
   | {
       kind: 'project'
       key: string
       title: string
       detail: string
-      project: ProjectKey
+      project: ProjectRef
     }
 
 export interface ProjectPortfolio {
@@ -56,7 +56,7 @@ export interface ProjectPortfolio {
   attention: AttentionItem[]
 }
 
-type PresentationState = Pick<ApplicationState, 'connections' | 'projects' | 'configuration'>
+type PresentationState = Pick<ReadyApplicationState, 'connections' | 'projects' | 'configuration'>
 
 /** Derives presentation without establishing resource membership or active ordering. */
 export function presentProjects(state: PresentationState): ProjectPortfolio {
@@ -84,15 +84,16 @@ export function presentProjects(state: PresentationState): ProjectPortfolio {
 }
 
 function presentProject(
-  project: RegisteredProject,
+  project: Project,
   connections: ReadonlyMap<string, Connection>,
 ): ProjectPresentation {
   const ordered = orderedMaps(project)
-  const activeMapId = project.activeMap.kind === 'known-current' ? project.activeMap.mapId : null
+  const activeMapId =
+    project.activeMap.kind === 'known-current' ? project.activeMap.ref.mapId : null
   const activeMap =
     activeMapId === null
       ? null
-      : (project.maps.find((map) => map.key.mapId === activeMapId) ?? null)
+      : (project.maps.find((map) => map.ref.mapId === activeMapId) ?? null)
   const active = activeMap ? resourceObservation(activeMap.resource)?.value : undefined
   const latestClosed = ordered.closed[0]
   const closed = latestClosed ? resourceObservation(latestClosed.resource)?.value : undefined
@@ -100,7 +101,7 @@ function presentProject(
   const complete = membership.kind === 'current-complete'
   const currentMaps = complete
     ? membership.observation.value.members.map((key) =>
-        project.maps.find((map) => map.key.mapId === key.mapId),
+        project.maps.find((map) => map.ref.mapId === key.mapId),
       )
     : null
   const decisions =
@@ -140,12 +141,11 @@ function presentProject(
       active && (active.body.notYetSpecified.length > 0 || active.body.notYetSpecifiedNote !== ''),
     ),
     priorities:
-      activeMap?.tickets.flatMap((ticket) => {
-        if (ticket.resource.kind !== 'current-readable') return []
+      activeMap?.frontier.flatMap((ref) => {
+        const ticket = activeMap.tickets.find((ticket) => ticket.ref.ticketId === ref.ticketId)
+        if (ticket?.resource.kind !== 'current-readable') return []
         const value = ticket.resource.observation.value
-        return value.state === 'frontier'
-          ? [value.title ?? value.displayId ?? `Ticket ${ticket.key.ticketId}`]
-          : []
+        return [value.title ?? value.displayId ?? `Ticket ${ref.ticketId}`]
       }) ?? [],
     activityAt: active?.updatedAt ?? closed?.closedAt ?? closed?.updatedAt,
     sourceMessage: resourceMessage(project.resource),
@@ -205,10 +205,10 @@ function projectAttention(projects: readonly ProjectPresentation[]): AttentionIt
     if (project.resource.kind !== 'current-readable' || project.activeMap.kind === 'uncertain') {
       items.push({
         kind: 'project',
-        key: JSON.stringify([project.key.integration, project.key.id, 'source']),
+        key: JSON.stringify([project.ref.integration, project.ref.projectId, 'source']),
         title: `${project.name} source needs attention`,
         detail: `${sourceMessage}${project.activeMap.kind === 'uncertain' ? ` ${project.activeMap.cause}` : ''}`,
-        project: project.key,
+        project: project.ref,
       })
     }
     const warnings = [
@@ -218,10 +218,10 @@ function projectAttention(projects: readonly ProjectPresentation[]): AttentionIt
     if (warnings.length > 0) {
       items.push({
         kind: 'project',
-        key: JSON.stringify([project.key.integration, project.key.id, 'warnings']),
+        key: JSON.stringify([project.ref.integration, project.ref.projectId, 'warnings']),
         title: `${project.name} has warnings`,
         detail: warnings.join(' '),
-        project: project.key,
+        project: project.ref,
       })
     }
     return items

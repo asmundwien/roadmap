@@ -1,15 +1,14 @@
-import type { ProjectKey } from '@roadmap/contracts'
 import { Page, PageHeader, PageTitle } from '@roadmap/ui/page'
 import { Route, Routes, useLocation } from 'react-router'
 import { Link } from './navigation'
-import { pathParams, routePaths } from './router'
+import { connectionRoute, projectRoute, routePaths } from './router'
 import { CatalogPage } from './views/catalog/page'
 import { MapPage } from './views/map/page'
 import { OverviewPage } from './views/overview/page'
 import { ProjectImportPage } from './views/settings/connections/[connectionId]/import/page'
 import { ConnectionPage } from './views/settings/connections/[connectionId]/page'
 import { ConnectionSettings } from './views/settings/connections/page'
-import { ProjectRegistrationPage } from './views/settings/projects/[projectId]/page'
+import { ProjectSettingsPage } from './views/settings/projects/[projectId]/page'
 import { SiteHeader } from './views/shell/site-header'
 
 export function App() {
@@ -48,13 +47,16 @@ type ProjectRouteProps = {
 
 function ProjectRoute({ pattern, settings = false }: ProjectRouteProps) {
   const { pathname } = useLocation()
-  const { integration, projectId, mapId, ticketId } = pathParams(pattern, pathname)
-  if (!projectId || (integration !== 'github' && integration !== 'local')) return <NotFoundPage />
-  const projectKey: ProjectKey = { integration, id: projectId }
+  const selected = projectRoute(pattern, pathname)
+  if (selected === null) return <NotFoundPage />
   return settings ? (
-    <ProjectRegistrationPage projectKey={projectKey} />
+    <ProjectSettingsPage projectRef={selected.project} />
   ) : (
-    <MapPage projectKey={projectKey} mapId={mapId ?? null} ticketId={ticketId ?? null} />
+    <MapPage
+      projectRef={selected.project}
+      mapId={selected.map?.mapId ?? null}
+      ticketId={selected.ticket?.ticketId ?? null}
+    />
   )
 }
 
@@ -65,8 +67,8 @@ type ConnectionRouteProps = {
 
 function ConnectionRoute({ pattern, importProjects = false }: ConnectionRouteProps) {
   const { pathname } = useLocation()
-  const { connectionId } = pathParams(pattern, pathname)
-  if (!connectionId) return <NotFoundPage />
+  const connectionId = connectionRoute(pattern, pathname)
+  if (connectionId === null) return <NotFoundPage />
   return importProjects ? (
     <ProjectImportPage connectionId={connectionId} />
   ) : (

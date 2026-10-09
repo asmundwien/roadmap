@@ -1,15 +1,27 @@
 import { mkdir, mkdtemp, realpath, rename, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import type { ApplicationState, ProjectKey } from '@roadmap/contracts'
-import { stateEnvelopeCodec } from '@roadmap/contracts/codecs'
+import { commandSchema } from '@roadmap/contracts/operations'
+import type { ReadyApplicationState } from '@roadmap/contracts/state'
+import { decodeStateEnvelope } from '@roadmap/contracts/wire'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { type AutomationDatabase, appendAutomationDatabase } from '../automation/database.ts'
 import type { ConfigurationDocument, ConfigurationRead } from '../configuration/document.ts'
 import { createLocalProjectAdmission } from '../local/admission.ts'
 import { createLocalObserver } from '../local/observer.ts'
-import type { ObservationAttempt, ObservationBatch, SourceScope } from '../observation/source.ts'
+import type {
+  ObservationAttempt,
+  ObservationBatch,
+  SourceProjectKey as ProjectKey,
+  SourceScope,
+} from '../observation/source.ts'
 import type { ProjectConfiguration } from '../projects/registry.ts'
+import {
+  fixtureProjectRef,
+  fixtureResourceRef,
+  fixtureTicketRef,
+  readApplicationState,
+} from '../public-test-fixtures.ts'
 import {
   controlledSourceFixture,
   createSourceFixtureOwner,
@@ -93,7 +105,6 @@ function map(
       missingSections: [],
     },
     tickets: [ticket('same:ticket/id', 'Original ticket prose.', id, root)],
-    frontier: [ticket('same:ticket/id', 'Original ticket prose.', id, root)],
     progress: { total: 1, completed: 0 },
     ticketsComplete: true,
     warnings: [],
@@ -237,16 +248,20 @@ function controlledReads() {
   }
 }
 
-function expectProject(state: ApplicationState, expected: Record<string, unknown>, key = PROJECT) {
+function expectProject(
+  state: ReadyApplicationState,
+  expected: Record<string, unknown>,
+  key = PROJECT,
+) {
   expect(
     state.projects.find(
-      (project) => project.key.integration === key.integration && project.key.id === key.id,
+      (project) => project.ref.integration === key.integration && project.ref.projectId === key.id,
     ),
   ).toMatchObject(expected)
 }
 
 function expectReadableBaseline(
-  state: ApplicationState,
+  state: ReadyApplicationState,
   mapIds: string[],
   key = PROJECT,
   root = ROOT,
@@ -254,18 +269,21 @@ function expectReadableBaseline(
   expectProject(
     state,
     {
-      locator: { integration: 'local', path: root },
+      source: { integration: 'local', path: root },
       resource: { kind: 'current-readable', observation: { observedAt: 1000 } },
       mapsMembership: { kind: 'current-complete' },
       maps: expect.arrayContaining(
         mapIds.map((mapId) =>
           expect.objectContaining({
-            key: { project: key, mapId },
+            ref: fixtureResourceRef({ project: key, mapId }),
             resource: expect.objectContaining({ kind: 'current-readable' }),
             ticketsMembership: expect.objectContaining({ kind: 'current-complete' }),
             tickets: expect.arrayContaining([
               expect.objectContaining({
-                key: { map: { project: key, mapId }, ticketId: 'same:ticket/id' },
+                ref: fixtureResourceRef({
+                  map: { project: key, mapId },
+                  ticketId: 'same:ticket/id',
+                }),
                 resource: expect.objectContaining({ kind: 'current-readable' }),
               }),
             ]),
@@ -278,7 +296,7 @@ function expectReadableBaseline(
 }
 
 function expectedMap(mapId: string, resource: unknown, extra = {}) {
-  return partial({ key: { project: PROJECT, mapId }, resource, ...extra })
+  return partial({ ref: fixtureResourceRef({ project: PROJECT, mapId }), resource, ...extra })
 }
 
 function partial(value: unknown): unknown {
@@ -295,6 +313,68 @@ afterEach(() => {
 })
 
 describe('RoadmapApplication retained resource truth', () => {
+  it('keeps one sufficient scoped Project authority through source loss and same-ID recovery', async () => {
+    const { read, failed } = controlledReads()
+    const test = controlled(read([content([map(FIRST, 900)])], 1000))
+    try {
+      await test.application.start()
+      expect(readApplicationState(test.application.current())).toMatchObject({
+        phase: 'ready',
+        projects: [
+          {
+            integration: 'local',
+            ref: { integration: 'local', projectId: PROJECT.id },
+            source: { integration: 'local', path: ROOT },
+            management: {},
+            maps: [
+              {
+                ref: { project: { integration: 'local', projectId: PROJECT.id }, mapId: FIRST },
+                frontier: [
+                  {
+                    map: { project: { integration: 'local', projectId: PROJECT.id }, mapId: FIRST },
+                    ticketId: 'same:ticket/id',
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      })
+      test.push(
+        { attempts: [failed({ kind: 'project', project: PROJECT }, 2000, ROOT, 'inspect-root')] },
+        2000,
+      )
+      expect(readApplicationState(test.application.current())).toMatchObject({
+        projects: [
+          {
+            source: { path: ROOT },
+            resource: { kind: 'retained-unavailable', lastSuccessful: { observedAt: 1000 } },
+          },
+        ],
+      })
+      const recovered = content([map(FIRST, 900, 'Recovered graph and prose.')])
+      test.push(read([recovered], 3000), 3000)
+      expect(readApplicationState(test.application.current())).toMatchObject({
+        projects: [
+          {
+            ref: { integration: 'local', projectId: PROJECT.id },
+            source: { path: ROOT },
+            resource: { kind: 'current-readable', observation: { observedAt: 3000 } },
+            maps: [
+              {
+                resource: {
+                  observation: { value: { body: { raw: 'Recovered graph and prose.' } } },
+                },
+              },
+            ],
+          },
+        ],
+      })
+    } finally {
+      await test.application.stop()
+    }
+  })
+
   // Catches invented payloads for registered Projects or listed maps that have never been read.
   it('distinguishes a never-read Project and map from a complete known-empty Project', async () => {
     const { read, failed, membership } = controlledReads()
@@ -303,17 +383,20 @@ describe('RoadmapApplication retained resource truth', () => {
     })
     try {
       await never.application.start()
-      expectProject(never.application.current(), {
+      expectProject(readApplicationState(never.application.current()), {
         resource: {
           kind: 'never-observed',
-          current: { scope: { kind: 'project', project: PROJECT }, attemptedAt: 1000 },
+          current: {
+            scope: { kind: 'project', project: fixtureResourceRef(PROJECT) },
+            attemptedAt: 1000,
+          },
         },
         maps: [],
         activeMap: { kind: 'uncertain' },
       })
       const empty = read([content([])], 2000)
       never.push(empty, 2000)
-      expectProject(never.application.current(), {
+      expectProject(readApplicationState(never.application.current()), {
         resource: {
           kind: 'current-readable',
           observation: { observedAt: 2000, value: { name: 'Source Project' } },
@@ -337,7 +420,7 @@ describe('RoadmapApplication retained resource truth', () => {
         },
         3000,
       )
-      expectProject(never.application.current(), {
+      expectProject(readApplicationState(never.application.current()), {
         maps: [
           expectedMap(FIRST, {
             kind: 'never-observed',
@@ -347,9 +430,9 @@ describe('RoadmapApplication retained resource truth', () => {
         activeMap: { kind: 'uncertain' },
       })
       never.push(read([content([])], 4000), 4000)
-      expectProject(never.application.current(), {
+      expectProject(readApplicationState(never.application.current()), {
         activeMap: { kind: 'known-empty' },
-        displayOrder: { openMapIds: [] },
+        displayOrder: { open: [].map((mapId) => fixtureResourceRef({ project: PROJECT, mapId })) },
         maps: [
           expectedMap(FIRST, {
             kind: 'proven-absent',
@@ -370,10 +453,15 @@ describe('RoadmapApplication retained resource truth', () => {
     const test = controlled(baseline)
     try {
       await test.application.start()
-      expectReadableBaseline(test.application.current(), [FIRST, SECOND])
-      expectProject(test.application.current(), {
-        activeMap: { kind: 'known-current', mapId: FIRST },
-        displayOrder: { openMapIds: [FIRST, SECOND] },
+      expectReadableBaseline(readApplicationState(test.application.current()), [FIRST, SECOND])
+      expectProject(readApplicationState(test.application.current()), {
+        activeMap: {
+          kind: 'known-current',
+          ref: fixtureResourceRef({ project: PROJECT, mapId: FIRST }),
+        },
+        displayOrder: {
+          open: [FIRST, SECOND].map((mapId) => fixtureResourceRef({ project: PROJECT, mapId })),
+        },
       })
       const later = read(
         [
@@ -405,9 +493,11 @@ describe('RoadmapApplication retained resource truth', () => {
         },
         2000,
       )
-      expectProject(test.application.current(), {
+      expectProject(readApplicationState(test.application.current()), {
         activeMap: { kind: 'uncertain' },
-        displayOrder: { openMapIds: [FIRST, SECOND] },
+        displayOrder: {
+          open: [FIRST, SECOND].map((mapId) => fixtureResourceRef({ project: PROJECT, mapId })),
+        },
         maps: expect.arrayContaining([
           expectedMap(FIRST, {
             kind: 'retained-unavailable',
@@ -442,7 +532,7 @@ describe('RoadmapApplication retained resource truth', () => {
     const test = controlled(baseline)
     try {
       await test.application.start()
-      expectReadableBaseline(test.application.current(), [FIRST, SECOND])
+      expectReadableBaseline(readApplicationState(test.application.current()), [FIRST, SECOND])
       let absentBatch = baseline
       for (const time of [2000, 3000]) {
         const currentSecond = read([content([map(SECOND, 800)])], time)
@@ -456,9 +546,14 @@ describe('RoadmapApplication retained resource truth', () => {
         )
         absentBatch = { attempts: [...currentSecond.attempts, ...oldFirst] }
         test.push(absentBatch, time)
-        expectProject(test.application.current(), {
-          activeMap: { kind: 'known-current', mapId: SECOND },
-          displayOrder: { openMapIds: [SECOND] },
+        expectProject(readApplicationState(test.application.current()), {
+          activeMap: {
+            kind: 'known-current',
+            ref: fixtureResourceRef({ project: PROJECT, mapId: SECOND }),
+          },
+          displayOrder: {
+            open: [SECOND].map((mapId) => fixtureResourceRef({ project: PROJECT, mapId })),
+          },
           maps: expect.arrayContaining([
             expectedMap(FIRST, {
               kind: 'proven-absent',
@@ -466,7 +561,7 @@ describe('RoadmapApplication retained resource truth', () => {
                 observedAt: time,
                 proof: {
                   kind: 'complete-membership',
-                  parent: { kind: 'maps-membership', project: PROJECT },
+                  parent: { kind: 'maps-membership', project: fixtureResourceRef(PROJECT) },
                 },
               },
               trace: {
@@ -490,9 +585,11 @@ describe('RoadmapApplication retained resource truth', () => {
         },
         4000,
       )
-      expectProject(test.application.current(), {
+      expectProject(readApplicationState(test.application.current()), {
         activeMap: { kind: 'uncertain' },
-        displayOrder: { openMapIds: [SECOND] },
+        displayOrder: {
+          open: [SECOND].map((mapId) => fixtureResourceRef({ project: PROJECT, mapId })),
+        },
         maps: expect.arrayContaining([
           expectedMap(FIRST, {
             kind: 'proven-absent',
@@ -502,7 +599,7 @@ describe('RoadmapApplication retained resource truth', () => {
         ]),
       })
       test.push(membership(absentBatch, [SECOND], false, 5000), 5000)
-      expectProject(test.application.current(), {
+      expectProject(readApplicationState(test.application.current()), {
         activeMap: { kind: 'uncertain' },
         maps: expect.arrayContaining([
           expectedMap(FIRST, {
@@ -523,18 +620,22 @@ describe('RoadmapApplication retained resource truth', () => {
     const test = controlled(read([content([map(FIRST, 900), map(SECOND, 800)])], 1000))
     try {
       await test.application.start()
-      expectReadableBaseline(test.application.current(), [FIRST, SECOND])
+      expectReadableBaseline(readApplicationState(test.application.current()), [FIRST, SECOND])
       test.push(read([content([map(SECOND, 800)])], 2000), 2000)
       const recovered = map(FIRST, 4000, 'Recovered map prose.')
       const recoveredTicketPath = join(ROOT, dirname(FIRST), 'tickets', '02-recovered-ticket.md')
       const recoveredTicket = ticket('same:ticket/id', 'Recovered ticket prose.')
       recoveredTicket.sourcePath = recoveredTicketPath
       recovered.tickets = [recoveredTicket]
-      recovered.frontier = [recoveredTicket]
       test.push(read([content([recovered, map(SECOND, 800)])], 4000), 4000)
-      expectProject(test.application.current(), {
-        activeMap: { kind: 'known-current', mapId: FIRST },
-        displayOrder: { openMapIds: [FIRST, SECOND] },
+      expectProject(readApplicationState(test.application.current()), {
+        activeMap: {
+          kind: 'known-current',
+          ref: fixtureResourceRef({ project: PROJECT, mapId: FIRST }),
+        },
+        displayOrder: {
+          open: [FIRST, SECOND].map((mapId) => fixtureResourceRef({ project: PROJECT, mapId })),
+        },
         maps: expect.arrayContaining([
           expectedMap(
             FIRST,
@@ -556,7 +657,10 @@ describe('RoadmapApplication retained resource truth', () => {
             {
               tickets: [
                 {
-                  key: { map: { project: PROJECT, mapId: FIRST }, ticketId: 'same:ticket/id' },
+                  ref: fixtureResourceRef({
+                    map: { project: PROJECT, mapId: FIRST },
+                    ticketId: 'same:ticket/id',
+                  }),
                   resource: {
                     kind: 'current-readable',
                     observation: {
@@ -583,10 +687,9 @@ describe('RoadmapApplication retained resource truth', () => {
     const test = controlled(baseline)
     try {
       await test.application.start()
-      expectReadableBaseline(test.application.current(), [FIRST])
+      expectReadableBaseline(readApplicationState(test.application.current()), [FIRST])
       const emptyMap = map(FIRST, 900)
       emptyMap.tickets = []
-      emptyMap.frontier = []
       emptyMap.progress = { total: 0, completed: 0 }
       const complete = read([content([emptyMap])], 2000)
       const oldTicket = baseline.attempts.filter((attempt) => attempt.scope.kind === 'ticket')
@@ -605,12 +708,15 @@ describe('RoadmapApplication retained resource truth', () => {
           },
           time,
         )
-        expectProject(test.application.current(), {
+        expectProject(readApplicationState(test.application.current()), {
           maps: expect.arrayContaining([
             expectedMap(FIRST, expect.anything(), {
               tickets: [
                 {
-                  key: { map: { project: PROJECT, mapId: FIRST }, ticketId: 'same:ticket/id' },
+                  ref: fixtureResourceRef({
+                    map: { project: PROJECT, mapId: FIRST },
+                    ticketId: 'same:ticket/id',
+                  }),
                   resource: {
                     kind: 'proven-absent',
                     absence: { observedAt: 2000, proof: { kind: 'complete-membership' } },
@@ -657,7 +763,6 @@ describe('RoadmapApplication retained resource truth', () => {
         await test.application.start()
         const emptyMap = map(FIRST, 900)
         emptyMap.tickets = []
-        emptyMap.frontier = []
         emptyMap.progress = { total: 0, completed: 0 }
         const absence = read([content([emptyMap, map(SECOND, 800)])], 2000)
         test.push(absence, 2000)
@@ -668,10 +773,10 @@ describe('RoadmapApplication retained resource truth', () => {
             ? { kind: 'last-successful-trace', lastSuccessful: { observedAt: 1000 } }
             : { kind: 'no-known-trace' },
         }
-        expectProject(test.application.current(), {
+        expectProject(readApplicationState(test.application.current()), {
           maps: expect.arrayContaining([
             expectedMap(FIRST, expect.anything(), {
-              tickets: [{ key: ticketKey, resource: absent }],
+              tickets: [{ ref: fixtureResourceRef(ticketKey), resource: absent }],
             }),
           ]),
         })
@@ -680,10 +785,10 @@ describe('RoadmapApplication retained resource truth', () => {
           { attempts: baseline.attempts.filter((attempt) => attempt.scope.kind !== 'ticket') },
           2500,
         )
-        expectProject(test.application.current(), {
+        expectProject(readApplicationState(test.application.current()), {
           maps: expect.arrayContaining([
             expectedMap(FIRST, expect.anything(), {
-              tickets: [{ key: ticketKey, resource: absent }],
+              tickets: [{ ref: fixtureResourceRef(ticketKey), resource: absent }],
             }),
           ]),
         })
@@ -701,15 +806,18 @@ describe('RoadmapApplication retained resource truth', () => {
           9000,
         )
         const unavailable = {
-          scope: { kind: 'ticket', ticket: ticketKey },
+          kind: 'source-failure',
+          scope: { kind: 'ticket', ticket: fixtureResourceRef(ticketKey) },
           attemptedAt: 3000,
           provenance: { integration: 'local', path, operation: 'read' },
           failure: { kind: 'filesystem', operation: 'read', code: 'EACCES' },
           cause: 'Source read permission was denied.',
         }
-        expectProject(test.application.current(), {
+        expectProject(readApplicationState(test.application.current()), {
           activeMap: { kind: 'uncertain' },
-          displayOrder: { openMapIds: [FIRST, SECOND] },
+          displayOrder: {
+            open: [FIRST, SECOND].map((mapId) => fixtureResourceRef({ project: PROJECT, mapId })),
+          },
           maps: expect.arrayContaining([
             expectedMap(
               FIRST,
@@ -717,11 +825,14 @@ describe('RoadmapApplication retained resource truth', () => {
               {
                 ticketsMembership: {
                   kind: complete ? 'current-complete' : 'current-incomplete',
-                  observation: { observedAt: 3000, value: { members: [ticketKey] } },
+                  observation: {
+                    observedAt: 3000,
+                    value: { members: [fixtureResourceRef(ticketKey)] },
+                  },
                 },
                 tickets: [
                   {
-                    key: ticketKey,
+                    ref: fixtureResourceRef(ticketKey),
                     resource: hadSuccess
                       ? {
                           kind: 'retained-unavailable',
@@ -743,17 +854,26 @@ describe('RoadmapApplication retained resource truth', () => {
           ]),
         })
         expect(
-          await test.application.execute({
-            type: 'start-automation-override',
-            expectedConfigurationVersion: 1,
-            target: { project: PROJECT, mapId: FIRST, ticketId: ticketKey.ticketId },
-            stage: 'classification',
-          }),
+          await test.application.execute(
+            commandSchema.parse({
+              type: 'start-automation-override',
+              expectedConfigurationVersion: 1,
+              target: fixtureTicketRef({
+                project: PROJECT,
+                mapId: FIRST,
+                ticketId: ticketKey.ticketId,
+              }),
+              stage: 'classification',
+            }),
+          ),
         ).toMatchObject({ ok: false })
-        expect(test.application.current().automation.evidence).toEqual([])
+        expect(readApplicationState(test.application.current()).automation.evidence).toEqual([])
         test.push(read([content([map(FIRST, 900), map(SECOND, 800)])], 4000), 10000)
-        expectProject(test.application.current(), {
-          activeMap: { kind: 'known-current', mapId: FIRST },
+        expectProject(readApplicationState(test.application.current()), {
+          activeMap: {
+            kind: 'known-current',
+            ref: fixtureResourceRef({ project: PROJECT, mapId: FIRST }),
+          },
           maps: expect.arrayContaining([
             expectedMap(
               FIRST,
@@ -761,7 +881,7 @@ describe('RoadmapApplication retained resource truth', () => {
               {
                 tickets: [
                   {
-                    key: ticketKey,
+                    ref: fixtureResourceRef(ticketKey),
                     resource: {
                       kind: 'current-readable',
                       observation: { observedAt: 4000, value: { body: 'Original ticket prose.' } },
@@ -816,14 +936,20 @@ describe('RoadmapApplication retained resource truth', () => {
         } satisfies ObservationAttempt
         const positive = membership(empty, [FIRST, SECOND], false, 3000)
         test.push({ attempts: [...positive.attempts, failed(mapScope, 3000, path, 'read')] }, 3000)
-        expectProject(test.application.current(), {
+        expectProject(readApplicationState(test.application.current()), {
           activeMap: { kind: 'uncertain' },
-          displayOrder: { openMapIds: [SECOND] },
+          displayOrder: {
+            open: [SECOND].map((mapId) => fixtureResourceRef({ project: PROJECT, mapId })),
+          },
           mapsMembership: {
             kind: 'current-incomplete',
             observation: {
               observedAt: 3000,
-              value: { members: [mapScope.map, { project: PROJECT, mapId: SECOND }] },
+              value: {
+                members: [mapScope.map, { project: PROJECT, mapId: SECOND }].map(
+                  fixtureResourceRef,
+                ),
+              },
             },
           },
           maps: expect.arrayContaining([
@@ -860,7 +986,7 @@ describe('RoadmapApplication retained resource truth', () => {
           },
           9000,
         )
-        expectProject(test.application.current(), {
+        expectProject(readApplicationState(test.application.current()), {
           maps: expect.arrayContaining([
             expectedMap(FIRST, {
               kind: hadSuccess ? 'retained-unavailable' : 'never-observed',
@@ -882,7 +1008,7 @@ describe('RoadmapApplication retained resource truth', () => {
           },
           10000,
         )
-        expectProject(test.application.current(), {
+        expectProject(readApplicationState(test.application.current()), {
           maps: expect.arrayContaining([
             expectedMap(FIRST, {
               kind: hadSuccess ? 'retained-unavailable' : 'never-observed',
@@ -914,7 +1040,6 @@ describe('RoadmapApplication retained resource truth', () => {
       },
     ]
     incompleteMap.tickets = [unknownTicket]
-    incompleteMap.frontier = []
     const test = controlled(read([content([map(FIRST, 900)])], 1000))
     const batch = read([content([incompleteMap])], 2000)
     const incomplete = {
@@ -927,9 +1052,9 @@ describe('RoadmapApplication retained resource truth', () => {
     } satisfies ObservationBatch
     try {
       await test.application.start()
-      expectReadableBaseline(test.application.current(), [FIRST])
+      expectReadableBaseline(readApplicationState(test.application.current()), [FIRST])
       test.push(incomplete, 2000)
-      expectProject(test.application.current(), {
+      expectProject(readApplicationState(test.application.current()), {
         activeMap: { kind: 'uncertain' },
         maps: [
           expectedMap(
@@ -990,13 +1115,18 @@ describe('RoadmapApplication retained resource truth', () => {
     )
     try {
       await test.application.start()
-      expectReadableBaseline(test.application.current(), ['same:map/id'])
-      expectReadableBaseline(test.application.current(), ['same:map/id'], other, otherRoot)
+      expectReadableBaseline(readApplicationState(test.application.current()), ['same:map/id'])
+      expectReadableBaseline(
+        readApplicationState(test.application.current()),
+        ['same:map/id'],
+        other,
+        otherRoot,
+      )
       test.push(
         { attempts: [failed({ kind: 'project', project: PROJECT }, 2000, ROOT, 'inspect-root')] },
         2000,
       )
-      expectProject(test.application.current(), {
+      expectProject(readApplicationState(test.application.current()), {
         resource: { kind: 'retained-unavailable' },
         maps: [
           {
@@ -1008,22 +1138,22 @@ describe('RoadmapApplication retained resource truth', () => {
         ],
       })
       expectProject(
-        test.application.current(),
+        readApplicationState(test.application.current()),
         {
           resource: { kind: 'current-readable', observation: { observedAt: 1000 } },
           maps: [
             {
-              key: { project: other, mapId: 'same:map/id' },
+              ref: fixtureResourceRef({ project: other, mapId: 'same:map/id' }),
               resource: {
                 kind: 'current-readable',
                 observation: { value: { body: { raw: 'Other Project prose.' } } },
               },
               tickets: [
                 {
-                  key: {
+                  ref: fixtureResourceRef({
                     map: { project: other, mapId: 'same:map/id' },
                     ticketId: 'same:ticket/id',
-                  },
+                  }),
                 },
               ],
             },
@@ -1141,17 +1271,21 @@ async function localFixture(withAdmission = false) {
         automation: { ...configured.automation, enabled: true },
       }
       for (const listener of listeners) listener({ ok: true, document: configured })
-      await vi.waitFor(() => expect(application.current().configurationVersion).toBe(2))
+      await vi.waitFor(() =>
+        expect(readApplicationState(application.current()).configurationVersion).toBe(2),
+      )
     },
     async refresh(time: number) {
       clock = time
       expect(
         (
-          await application.execute({
-            type: 'refresh-project',
-            project: PROJECT,
-            expectedConfigurationVersion: configured.configurationVersion,
-          })
+          await application.execute(
+            commandSchema.parse({
+              type: 'refresh-project',
+              project: fixtureProjectRef(PROJECT),
+              expectedConfigurationVersion: configured.configurationVersion,
+            }),
+          )
         ).ok,
       ).toBe(true)
     },
@@ -1164,6 +1298,157 @@ async function localFixture(withAdmission = false) {
 }
 
 describe('RoadmapApplication actual Local observer retention', () => {
+  it('keeps duplicate Local blocker IDs within each originating map through retained and absent targets', async () => {
+    const test = await localFixture()
+    try {
+      for (const [mapId, status] of [
+        [FIRST, 'closed'],
+        [SECOND, 'open'],
+      ] as const) {
+        const directory = join(test.root, dirname(mapId), 'tickets')
+        await writeFile(
+          join(directory, '01-ticket.md'),
+          `---\nid: 1\ntitle: Scoped blocker\nlabels: [wayfinder:task]\nstatus: ${status}\n---\n\nActual scoped blocker prose.\n`,
+        )
+        await writeFile(
+          join(directory, '02-dependent.md'),
+          '---\nid: 2\ntitle: Dependent\nlabels: [wayfinder:task]\nstatus: open\nblocked-by: [1]\n---\n\nActual dependent prose.\n',
+        )
+      }
+      await test.application.start()
+      function expectScopedBlockers(firstState: string, firstComplete: boolean) {
+        const state = readApplicationState(test.application.current())
+        for (const [mapId, blockerState, complete] of [
+          [FIRST, firstState, firstComplete],
+          [SECOND, 'open', true],
+        ] as const) {
+          const dependent = state.projects[0]?.maps
+            .find((map) => map.ref.mapId === mapId)
+            ?.tickets.find((ticket) => ticket.ref.ticketId === '2')
+          expect(dependent?.resource).toMatchObject({
+            kind: 'current-readable',
+            observation: {
+              value: {
+                blockedBy: [
+                  {
+                    reference: {
+                      kind: 'registered',
+                      ticket: fixtureResourceRef({
+                        map: { project: PROJECT, mapId },
+                        ticketId: '1',
+                      }),
+                    },
+                    state: blockerState,
+                  },
+                ],
+                blockersComplete: complete,
+              },
+            },
+          })
+        }
+        expect(
+          decodeStateEnvelope(JSON.parse(JSON.stringify({ type: 'state', state }))),
+        ).toMatchObject({
+          ok: true,
+        })
+      }
+      expectScopedBlockers('closed', true)
+      const target = join(test.root, dirname(FIRST), 'tickets/01-ticket.md')
+      filesystemFailures.set(`read:${target}`, Object.assign(new Error(SECRET), { code: 'EACCES' }))
+      await test.refresh(2000)
+      expectScopedBlockers('unknown', false)
+      expectProject(readApplicationState(test.application.current()), {
+        maps: expect.arrayContaining([
+          expectedMap(
+            FIRST,
+            { kind: 'current-readable' },
+            {
+              tickets: expect.arrayContaining([
+                partial({
+                  ref: fixtureResourceRef({
+                    map: { project: PROJECT, mapId: FIRST },
+                    ticketId: '1',
+                  }),
+                  resource: { kind: 'retained-unavailable' },
+                }),
+              ]),
+            },
+          ),
+        ]),
+      })
+      filesystemFailures.clear()
+      await rm(target)
+      await test.refresh(3000)
+      expectScopedBlockers('unknown', false)
+      expectProject(readApplicationState(test.application.current()), {
+        maps: expect.arrayContaining([
+          expectedMap(
+            FIRST,
+            { kind: 'current-readable' },
+            {
+              tickets: expect.arrayContaining([
+                partial({
+                  ref: fixtureResourceRef({
+                    map: { project: PROJECT, mapId: FIRST },
+                    ticketId: '1',
+                  }),
+                  resource: { kind: 'proven-absent' },
+                }),
+              ]),
+            },
+          ),
+        ]),
+      })
+    } finally {
+      await test.stop()
+    }
+  })
+
+  it('keeps a missing Local blocker scoped to its map instead of another maps matching ticket', async () => {
+    const test = await localFixture()
+    try {
+      await writeFile(
+        join(test.root, dirname(FIRST), 'tickets/01-ticket.md'),
+        '---\nid: 2\ntitle: Dependent\nlabels: [wayfinder:task]\nstatus: open\nblocked-by: [1]\n---\n\nActual dependent prose.\n',
+      )
+      await test.application.start()
+      const state = readApplicationState(test.application.current())
+      const first = state.projects[0]?.maps.find((map) => map.ref.mapId === FIRST)
+      expect(first?.tickets).toHaveLength(1)
+      expect(first?.tickets[0]?.resource).toMatchObject({
+        kind: 'current-readable',
+        observation: {
+          completeness: { kind: 'incomplete' },
+          value: {
+            blockedBy: [
+              {
+                reference: {
+                  kind: 'registered',
+                  ticket: fixtureResourceRef({
+                    map: { project: PROJECT, mapId: FIRST },
+                    ticketId: '1',
+                  }),
+                },
+                state: 'unknown',
+              },
+            ],
+            blockersComplete: false,
+          },
+        },
+      })
+      expect(
+        state.projects[0]?.maps.find((map) => map.ref.mapId === SECOND)?.tickets[0]?.ref,
+      ).toEqual(fixtureResourceRef({ map: { project: PROJECT, mapId: SECOND }, ticketId: '1' }))
+      expect(
+        decodeStateEnvelope(JSON.parse(JSON.stringify({ type: 'state', state }))),
+      ).toMatchObject({
+        ok: true,
+      })
+    } finally {
+      await test.stop()
+    }
+  })
+
   // Catches catalog locale collation disagreeing with the strict public decoder's ID order.
   it('publishes decodable code-unit ordering for actual Local maps with equal update times', async () => {
     const test = await localFixture()
@@ -1174,7 +1459,7 @@ describe('RoadmapApplication actual Local observer retention', () => {
       await rename(join(test.root, '.wayfinder/second'), join(test.root, '.wayfinder/a'))
       for (const mapId of [upper, lower]) await utimes(join(test.root, mapId), 0.9, 0.9)
       await test.application.start()
-      const state = test.application.current()
+      const state = readApplicationState(test.application.current())
       expectProject(state, {
         resource: {
           kind: 'current-readable',
@@ -1184,7 +1469,7 @@ describe('RoadmapApplication actual Local observer retention', () => {
         maps: expect.arrayContaining(
           [upper, lower].map((mapId) =>
             partial({
-              key: { project: PROJECT, mapId },
+              ref: fixtureResourceRef({ project: PROJECT, mapId }),
               resource: {
                 kind: 'current-readable',
                 observation: {
@@ -1212,13 +1497,19 @@ describe('RoadmapApplication actual Local observer retention', () => {
         ),
       })
       const envelope: unknown = JSON.parse(JSON.stringify({ type: 'state', state }))
-      const decoded = stateEnvelopeCodec.decode(envelope)
+      const decoded = decodeStateEnvelope(envelope)
       expect(decoded.ok).toBe(true)
       if (!decoded.ok) throw new Error('Actual Local ordering produced an invalid outgoing state')
       expect(decoded.value.state).toEqual(state)
       expectProject(state, {
-        displayOrder: { openMapIds: [upper, lower], closedMapIds: [] },
-        activeMap: { kind: 'known-current', mapId: upper },
+        displayOrder: {
+          open: [upper, lower].map((mapId) => fixtureResourceRef({ project: PROJECT, mapId })),
+          closed: [],
+        },
+        activeMap: {
+          kind: 'known-current',
+          ref: fixtureResourceRef({ project: PROJECT, mapId: upper }),
+        },
       })
     } finally {
       await test.stop()
@@ -1230,14 +1521,19 @@ describe('RoadmapApplication actual Local observer retention', () => {
     const test = await localFixture(true)
     const mapPath = join(test.root, FIRST)
     const directory = dirname(mapPath)
-    const target = { project: PROJECT, mapId: FIRST, ticketId: '1' }
+    const target = fixtureTicketRef({ project: PROJECT, mapId: FIRST, ticketId: '1' })
     try {
       await test.application.start()
       await rm(directory, { recursive: true })
       await test.refresh(2000)
-      expectProject(test.application.current(), {
-        activeMap: { kind: 'known-current', mapId: SECOND },
-        displayOrder: { openMapIds: [SECOND] },
+      expectProject(readApplicationState(test.application.current()), {
+        activeMap: {
+          kind: 'known-current',
+          ref: fixtureResourceRef({ project: PROJECT, mapId: SECOND }),
+        },
+        displayOrder: {
+          open: [SECOND].map((mapId) => fixtureResourceRef({ project: PROJECT, mapId })),
+        },
         maps: expect.arrayContaining([
           expectedMap(FIRST, {
             kind: 'proven-absent',
@@ -1262,7 +1558,7 @@ describe('RoadmapApplication actual Local observer retention', () => {
         Object.assign(new Error(SECRET), { code: 'EACCES' }),
       )
       await test.refresh(3000)
-      expectProject(test.application.current(), {
+      expectProject(readApplicationState(test.application.current()), {
         mapsMembership: {
           kind: 'current-complete',
           observation: {
@@ -1274,19 +1570,21 @@ describe('RoadmapApplication actual Local observer retention', () => {
             },
             value: {
               members: [
-                { project: PROJECT, mapId: FIRST },
-                { project: PROJECT, mapId: SECOND },
+                fixtureResourceRef({ project: PROJECT, mapId: FIRST }),
+                fixtureResourceRef({ project: PROJECT, mapId: SECOND }),
               ],
             },
           },
         },
         activeMap: { kind: 'uncertain' },
-        displayOrder: { openMapIds: [SECOND] },
+        displayOrder: {
+          open: [SECOND].map((mapId) => fixtureResourceRef({ project: PROJECT, mapId })),
+        },
         maps: expect.arrayContaining([
           expectedMap(FIRST, {
             kind: 'retained-unavailable',
             unavailable: {
-              scope: { kind: 'map', map: { project: PROJECT, mapId: FIRST } },
+              scope: { kind: 'map', map: fixtureResourceRef({ project: PROJECT, mapId: FIRST }) },
               attemptedAt: 3000,
               provenance: { integration: 'local', path: mapPath, operation: 'read' },
               failure: { kind: 'filesystem', operation: 'read', code: 'EACCES' },
@@ -1304,22 +1602,29 @@ describe('RoadmapApplication actual Local observer retention', () => {
         ]),
       })
       expect(
-        await test.application.execute({
-          type: 'start-automation-override',
-          expectedConfigurationVersion: 1,
-          target,
-          stage: 'classification',
-        }),
+        await test.application.execute(
+          commandSchema.parse({
+            type: 'start-automation-override',
+            expectedConfigurationVersion: 1,
+            target,
+            stage: 'classification',
+          }),
+        ),
       ).toMatchObject({ ok: false })
       await test.enable()
       expect(test.launches).toEqual([])
-      expect(test.application.current().automation.evidence).toEqual([])
-      expect(JSON.stringify(test.application.current())).not.toContain(SECRET)
+      expect(readApplicationState(test.application.current()).automation.evidence).toEqual([])
+      expect(JSON.stringify(readApplicationState(test.application.current()))).not.toContain(SECRET)
       filesystemFailures.clear()
       await test.refresh(4000)
-      expectProject(test.application.current(), {
-        activeMap: { kind: 'known-current', mapId: FIRST },
-        displayOrder: { openMapIds: [FIRST, SECOND] },
+      expectProject(readApplicationState(test.application.current()), {
+        activeMap: {
+          kind: 'known-current',
+          ref: fixtureResourceRef({ project: PROJECT, mapId: FIRST }),
+        },
+        displayOrder: {
+          open: [FIRST, SECOND].map((mapId) => fixtureResourceRef({ project: PROJECT, mapId })),
+        },
         maps: expect.arrayContaining([
           expectedMap(FIRST, {
             kind: 'current-readable',
@@ -1340,10 +1645,12 @@ describe('RoadmapApplication actual Local observer retention', () => {
     'keeps newly read ticket evidence current during %s failure but retains it after root failure',
     async (location) => {
       const test = await localFixture(true)
-      const target = { project: PROJECT, mapId: FIRST, ticketId: '1' }
+      const target = fixtureTicketRef({ project: PROJECT, mapId: FIRST, ticketId: '1' })
       try {
         await test.application.start()
-        expect(test.application.current().automation.overrides).toContainEqual(
+        expect(
+          readApplicationState(test.application.current()).automation.overrides,
+        ).toContainEqual(
           expect.objectContaining({ target, classification: { status: 'eligible' } }),
         )
         const ticketPath = join(test.root, '.wayfinder/first/tickets/01-ticket.md')
@@ -1372,9 +1679,11 @@ describe('RoadmapApplication actual Local observer retention', () => {
             source: { kind: 'file', path: ticketPath },
           },
         }
-        expectProject(test.application.current(), {
+        expectProject(readApplicationState(test.application.current()), {
           activeMap: { kind: 'uncertain' },
-          displayOrder: { openMapIds: [FIRST, SECOND] },
+          displayOrder: {
+            open: [FIRST, SECOND].map((mapId) => fixtureResourceRef({ project: PROJECT, mapId })),
+          },
           maps: expect.arrayContaining([
             expectedMap(
               FIRST,
@@ -1411,7 +1720,10 @@ describe('RoadmapApplication actual Local observer retention', () => {
                       },
                 tickets: [
                   {
-                    key: { map: { project: PROJECT, mapId: FIRST }, ticketId: '1' },
+                    ref: fixtureResourceRef({
+                      map: { project: PROJECT, mapId: FIRST },
+                      ticketId: '1',
+                    }),
                     resource: { kind: 'current-readable', observation: childSuccess },
                   },
                 ],
@@ -1420,17 +1732,19 @@ describe('RoadmapApplication actual Local observer retention', () => {
           ]),
         })
         expect(
-          await test.application.execute({
-            type: 'start-automation-override',
-            expectedConfigurationVersion: 1,
-            target,
-            stage: 'classification',
-          }),
+          await test.application.execute(
+            commandSchema.parse({
+              type: 'start-automation-override',
+              expectedConfigurationVersion: 1,
+              target,
+              stage: 'classification',
+            }),
+          ),
         ).toMatchObject({ ok: false })
-        expect(test.application.current().automation.evidence).toEqual([])
+        expect(readApplicationState(test.application.current()).automation.evidence).toEqual([])
         await test.enable()
         expect(test.launches).toEqual([])
-        expect(test.application.current().automation.evidence).toEqual([])
+        expect(readApplicationState(test.application.current()).automation.evidence).toEqual([])
 
         filesystemFailures.clear()
         filesystemFailures.set(
@@ -1438,14 +1752,16 @@ describe('RoadmapApplication actual Local observer retention', () => {
           Object.assign(new Error(SECRET), { code: 'EACCES' }),
         )
         await test.refresh(3000)
-        expectProject(test.application.current(), {
+        expectProject(readApplicationState(test.application.current()), {
           resource: {
             kind: 'retained-unavailable',
             lastSuccessful: { observedAt: 2000 },
             unavailable: { attemptedAt: 3000 },
           },
           activeMap: { kind: 'uncertain' },
-          displayOrder: { openMapIds: [FIRST, SECOND] },
+          displayOrder: {
+            open: [FIRST, SECOND].map((mapId) => fixtureResourceRef({ project: PROJECT, mapId })),
+          },
           maps: expect.arrayContaining([
             expectedMap(
               FIRST,
@@ -1457,7 +1773,7 @@ describe('RoadmapApplication actual Local observer retention', () => {
                       kind: 'retained-unavailable',
                       lastSuccessful: childSuccess,
                       unavailable: {
-                        scope: { kind: 'project', project: PROJECT },
+                        scope: { kind: 'project', project: fixtureResourceRef(PROJECT) },
                         attemptedAt: 3000,
                         provenance: { path: test.root, operation: 'inspect-root' },
                       },
@@ -1469,16 +1785,20 @@ describe('RoadmapApplication actual Local observer retention', () => {
           ]),
         })
         expect(
-          await test.application.execute({
-            type: 'start-automation-override',
-            expectedConfigurationVersion: 2,
-            target,
-            stage: 'classification',
-          }),
+          await test.application.execute(
+            commandSchema.parse({
+              type: 'start-automation-override',
+              expectedConfigurationVersion: 2,
+              target,
+              stage: 'classification',
+            }),
+          ),
         ).toMatchObject({ ok: false })
-        expect(test.application.current().automation.evidence).toEqual([])
+        expect(readApplicationState(test.application.current()).automation.evidence).toEqual([])
         expect(test.launches).toEqual([])
-        expect(JSON.stringify(test.application.current())).not.toContain(SECRET)
+        expect(JSON.stringify(readApplicationState(test.application.current()))).not.toContain(
+          SECRET,
+        )
       } finally {
         await test.stop()
       }
@@ -1498,9 +1818,14 @@ describe('RoadmapApplication actual Local observer retention', () => {
       const test = await localFixture()
       try {
         await test.application.start()
-        expectProject(test.application.current(), {
-          activeMap: { kind: 'known-current', mapId: FIRST },
-          displayOrder: { openMapIds: [FIRST, SECOND] },
+        expectProject(readApplicationState(test.application.current()), {
+          activeMap: {
+            kind: 'known-current',
+            ref: fixtureResourceRef({ project: PROJECT, mapId: FIRST }),
+          },
+          displayOrder: {
+            open: [FIRST, SECOND].map((mapId) => fixtureResourceRef({ project: PROJECT, mapId })),
+          },
         })
         const paths = {
           root: test.root,
@@ -1517,9 +1842,11 @@ describe('RoadmapApplication actual Local observer retention', () => {
         await test.refresh(2000)
         const mapFailed =
           location === 'root' || location === 'maps-directory' || location === 'map-file'
-        expectProject(test.application.current(), {
+        expectProject(readApplicationState(test.application.current()), {
           activeMap: { kind: 'uncertain' },
-          displayOrder: { openMapIds: [FIRST, SECOND] },
+          displayOrder: {
+            open: [FIRST, SECOND].map((mapId) => fixtureResourceRef({ project: PROJECT, mapId })),
+          },
           maps: expect.arrayContaining([
             expectedMap(
               FIRST,
@@ -1553,7 +1880,10 @@ describe('RoadmapApplication actual Local observer retention', () => {
               {
                 tickets: [
                   {
-                    key: { map: { project: PROJECT, mapId: FIRST }, ticketId: '1' },
+                    ref: fixtureResourceRef({
+                      map: { project: PROJECT, mapId: FIRST },
+                      ticketId: '1',
+                    }),
                     resource:
                       location === 'tickets-directory' || location === 'map-file'
                         ? {
@@ -1584,11 +1914,16 @@ describe('RoadmapApplication actual Local observer retention', () => {
             ),
           ]),
         })
-        expect(JSON.stringify(test.application.current())).not.toContain(SECRET)
+        expect(JSON.stringify(readApplicationState(test.application.current()))).not.toContain(
+          SECRET,
+        )
         filesystemFailures.clear()
         await test.refresh(3000)
-        expectProject(test.application.current(), {
-          activeMap: { kind: 'known-current', mapId: FIRST },
+        expectProject(readApplicationState(test.application.current()), {
+          activeMap: {
+            kind: 'known-current',
+            ref: fixtureResourceRef({ project: PROJECT, mapId: FIRST }),
+          },
           maps: expect.arrayContaining([
             expectedMap(FIRST, {
               kind: 'current-readable',
@@ -1609,7 +1944,7 @@ describe('RoadmapApplication actual Local observer retention', () => {
       await test.application.start()
       await rm(join(test.root, FIRST))
       await test.refresh(2000)
-      expectProject(test.application.current(), {
+      expectProject(readApplicationState(test.application.current()), {
         activeMap: { kind: 'uncertain' },
         maps: expect.arrayContaining([
           expectedMap(FIRST, {
@@ -1621,9 +1956,14 @@ describe('RoadmapApplication actual Local observer retention', () => {
       })
       await rm(join(test.root, '.wayfinder/first'), { recursive: true })
       await test.refresh(3000)
-      expectProject(test.application.current(), {
-        activeMap: { kind: 'known-current', mapId: SECOND },
-        displayOrder: { openMapIds: [SECOND] },
+      expectProject(readApplicationState(test.application.current()), {
+        activeMap: {
+          kind: 'known-current',
+          ref: fixtureResourceRef({ project: PROJECT, mapId: SECOND }),
+        },
+        displayOrder: {
+          open: [SECOND].map((mapId) => fixtureResourceRef({ project: PROJECT, mapId })),
+        },
         maps: expect.arrayContaining([
           expectedMap(FIRST, {
             kind: 'proven-absent',
@@ -1645,7 +1985,7 @@ describe('RoadmapApplication actual Local observer retention', () => {
       const path = join(test.root, '.wayfinder/first/tickets/01-ticket.md')
       filesystemFailures.set(`read:${path}`, Object.assign(new Error(SECRET), { code: 'ENOENT' }))
       await test.refresh(2000)
-      expectProject(test.application.current(), {
+      expectProject(readApplicationState(test.application.current()), {
         activeMap: { kind: 'uncertain' },
         maps: expect.arrayContaining([
           expectedMap(
@@ -1675,8 +2015,11 @@ describe('RoadmapApplication actual Local observer retention', () => {
       filesystemFailures.clear()
       await rm(path)
       await test.refresh(3000)
-      expectProject(test.application.current(), {
-        activeMap: { kind: 'known-current', mapId: FIRST },
+      expectProject(readApplicationState(test.application.current()), {
+        activeMap: {
+          kind: 'known-current',
+          ref: fixtureResourceRef({ project: PROJECT, mapId: FIRST }),
+        },
         maps: expect.arrayContaining([
           expectedMap(
             FIRST,
@@ -1713,7 +2056,7 @@ describe('RoadmapApplication actual Local observer retention', () => {
         Object.assign(new Error(SECRET), { code: 'EACCES' }),
       )
       await test.refresh(4000)
-      expectProject(test.application.current(), {
+      expectProject(readApplicationState(test.application.current()), {
         activeMap: { kind: 'uncertain' },
         maps: expect.arrayContaining([
           expectedMap(
@@ -1742,7 +2085,7 @@ describe('RoadmapApplication actual Local observer retention', () => {
   it('keeps actual Local ticket absence until a returning file confirms the same readable identity', async () => {
     const test = await localFixture(true)
     const path = join(test.root, '.wayfinder/first/tickets/01-ticket.md')
-    const target = { project: PROJECT, mapId: FIRST, ticketId: '1' }
+    const target = fixtureTicketRef({ project: PROJECT, mapId: FIRST, ticketId: '1' })
     try {
       await test.application.start()
       await rm(path)
@@ -1761,7 +2104,7 @@ describe('RoadmapApplication actual Local observer retention', () => {
           },
         },
       }
-      expectProject(test.application.current(), {
+      expectProject(readApplicationState(test.application.current()), {
         maps: expect.arrayContaining([
           expectedMap(
             FIRST,
@@ -1773,7 +2116,10 @@ describe('RoadmapApplication actual Local observer retention', () => {
               },
               tickets: [
                 {
-                  key: { map: { project: PROJECT, mapId: FIRST }, ticketId: '1' },
+                  ref: fixtureResourceRef({
+                    map: { project: PROJECT, mapId: FIRST },
+                    ticketId: '1',
+                  }),
                   resource: absent,
                 },
               ],
@@ -1788,9 +2134,11 @@ describe('RoadmapApplication actual Local observer retention', () => {
       await utimes(path, 1.5, 1.5)
       filesystemFailures.set(`read:${path}`, Object.assign(new Error(SECRET), { code: 'EACCES' }))
       await test.refresh(3000)
-      expectProject(test.application.current(), {
+      expectProject(readApplicationState(test.application.current()), {
         activeMap: { kind: 'uncertain' },
-        displayOrder: { openMapIds: [FIRST, SECOND] },
+        displayOrder: {
+          open: [FIRST, SECOND].map((mapId) => fixtureResourceRef({ project: PROJECT, mapId })),
+        },
         maps: expect.arrayContaining([
           expectedMap(
             FIRST,
@@ -1799,7 +2147,10 @@ describe('RoadmapApplication actual Local observer retention', () => {
               ticketsMembership: {
                 kind: 'unavailable',
                 unavailable: {
-                  scope: { kind: 'tickets-membership', map: { project: PROJECT, mapId: FIRST } },
+                  scope: {
+                    kind: 'tickets-membership',
+                    map: fixtureResourceRef({ project: PROJECT, mapId: FIRST }),
+                  },
                   attemptedAt: 3000,
                   provenance: { integration: 'local', path, operation: 'read' },
                   failure: { kind: 'filesystem', operation: 'read', code: 'EACCES' },
@@ -1808,7 +2159,10 @@ describe('RoadmapApplication actual Local observer retention', () => {
               },
               tickets: [
                 {
-                  key: { map: { project: PROJECT, mapId: FIRST }, ticketId: '1' },
+                  ref: fixtureResourceRef({
+                    map: { project: PROJECT, mapId: FIRST },
+                    ticketId: '1',
+                  }),
                   resource: absent,
                 },
               ],
@@ -1817,21 +2171,26 @@ describe('RoadmapApplication actual Local observer retention', () => {
         ]),
       })
       expect(
-        await test.application.execute({
-          type: 'start-automation-override',
-          expectedConfigurationVersion: 1,
-          target,
-          stage: 'classification',
-        }),
+        await test.application.execute(
+          commandSchema.parse({
+            type: 'start-automation-override',
+            expectedConfigurationVersion: 1,
+            target,
+            stage: 'classification',
+          }),
+        ),
       ).toMatchObject({ ok: false })
       await test.enable()
       expect(test.launches).toEqual([])
-      expect(test.application.current().automation.evidence).toEqual([])
-      expect(JSON.stringify(test.application.current())).not.toContain(SECRET)
+      expect(readApplicationState(test.application.current()).automation.evidence).toEqual([])
+      expect(JSON.stringify(readApplicationState(test.application.current()))).not.toContain(SECRET)
       filesystemFailures.clear()
       await test.refresh(4000)
-      expectProject(test.application.current(), {
-        activeMap: { kind: 'known-current', mapId: FIRST },
+      expectProject(readApplicationState(test.application.current()), {
+        activeMap: {
+          kind: 'known-current',
+          ref: fixtureResourceRef({ project: PROJECT, mapId: FIRST }),
+        },
         maps: expect.arrayContaining([
           expectedMap(
             FIRST,
@@ -1841,12 +2200,22 @@ describe('RoadmapApplication actual Local observer retention', () => {
                 kind: 'current-complete',
                 observation: {
                   observedAt: 4000,
-                  value: { members: [{ map: { project: PROJECT, mapId: FIRST }, ticketId: '1' }] },
+                  value: {
+                    members: [
+                      fixtureResourceRef({
+                        map: { project: PROJECT, mapId: FIRST },
+                        ticketId: '1',
+                      }),
+                    ],
+                  },
                 },
               },
               tickets: [
                 {
-                  key: { map: { project: PROJECT, mapId: FIRST }, ticketId: '1' },
+                  ref: fixtureResourceRef({
+                    map: { project: PROJECT, mapId: FIRST },
+                    ticketId: '1',
+                  }),
                   resource: {
                     kind: 'current-readable',
                     observation: {

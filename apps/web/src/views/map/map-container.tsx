@@ -1,4 +1,5 @@
-import type { MapResource } from '@roadmap/contracts'
+import type { TicketId } from '@roadmap/contracts/identity'
+import type { MapResource } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 import { Surface, SurfaceDescription } from '@roadmap/ui/surface'
 import { Controls, type FitViewOptions, type NodeTypes, ReactFlow } from '@xyflow/react'
@@ -16,7 +17,7 @@ const fitViewOptions: FitViewOptions = { padding: 0.16, minZoom: 0.1, maxZoom: 1
 
 export type MapContainerProps = {
   map: MapResource
-  onOpenTicket: (id: string) => void
+  onOpenTicket: (id: TicketId) => void
 }
 
 export function MapContainer({ map, onOpenTicket }: MapContainerProps) {
@@ -30,7 +31,11 @@ export function MapContainer({ map, onOpenTicket }: MapContainerProps) {
   }, [])
   // Opening a modal or replacing its callback does not project or lay out the map again.
   const graph = useMemo(() => projectGraph(map), [map, projectGraph])
-  const graphKey = JSON.stringify([map.key.project.integration, map.key.project.id, map.key.mapId])
+  const graphKey = JSON.stringify([
+    map.ref.project.integration,
+    map.ref.project.projectId,
+    map.ref.mapId,
+  ])
   const content = resourceObservation(map.resource)?.value
 
   return (
@@ -98,7 +103,7 @@ export function MapContainer({ map, onOpenTicket }: MapContainerProps) {
               fitView
               fitViewOptions={fitViewOptions}
               colorMode="system"
-              aria-label={`Ticket dependencies for ${content?.title ?? content?.displayId ?? map.key.mapId}`}
+              aria-label={`Ticket dependencies for ${content?.title ?? content?.displayId ?? map.ref.mapId}`}
             >
               <Controls showInteractive={false} fitViewOptions={fitViewOptions} />
             </ReactFlow>

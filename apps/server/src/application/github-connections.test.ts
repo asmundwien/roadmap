@@ -2,12 +2,17 @@ import * as filesystem from 'node:fs/promises'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type {
-  ApplicationState,
-  GitHubConnectionIdentity,
-  ProjectRegistration,
-} from '@roadmap/contracts'
+import { commandSchema } from '@roadmap/contracts/operations'
+import type { GitHubConnectionIdentity, ReadyApplicationState } from '@roadmap/contracts/state'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  type CredentialBundle,
+  type CredentialVault,
+  CredentialVaultError,
+  type DeviceAuthorizationPoll,
+  GitHubConnectionError,
+  type GitHubConnectionPort,
+} from '../authorization/contracts.ts'
 import {
   type ConfigurationDocument,
   type ConfigurationRead,
@@ -16,24 +21,19 @@ import {
   decodeConfigurationDocument,
 } from '../configuration/document.ts'
 import { createGitHubProjectAdmission } from '../github/admission.ts'
-import {
-  type CredentialBundle,
-  type DeviceAuthorizationPoll,
-  GitHubConnectionError,
-  type GitHubConnectionPort,
-} from '../github/connections.ts'
 import { createGitHubObserverPool } from '../github/observer.ts'
 import { createLocalProjectAdmission } from '../local/admission.ts'
 import { createLocalObserver } from '../local/observer.ts'
 import type { SourceContribution } from '../observation/source.ts'
 import type { GitHubProjectIntent, ProjectConfiguration } from '../projects/registry.ts'
-import { createRoadmapApplication } from './application.ts'
 import {
-  type CredentialVault,
-  CredentialVaultError,
-  createMacOsCredentialVault,
-  type KeychainPort,
-} from './credential-vault.ts'
+  fixtureProjectManagement,
+  fixtureProjectRef,
+  fixtureResourceRef,
+  readApplicationState,
+} from '../public-test-fixtures.ts'
+import { createRoadmapApplication } from './application.ts'
+import { createMacOsCredentialVault, type KeychainPort } from './credential-vault.ts'
 import { createApplicationOperations } from './operations.ts'
 
 vi.mock('node:fs/promises', async (importOriginal) => {
@@ -72,13 +72,6 @@ const GITHUB_INTENT: GitHubProjectIntent = {
   locator: { repositoryId: '84', nameWithOwner: 'octocat/roadmap' },
   workspace: { path: '/roadmap' },
 }
-const GITHUB_REGISTRATION: ProjectRegistration = {
-  key: { integration: 'github', id: 'octocat/roadmap' },
-  connectionId: 'github-connection',
-  locator: { integration: 'github', repositoryId: '84', nameWithOwner: 'octocat/roadmap' },
-  workspace: { path: '/roadmap', gitIdentity: '84' },
-}
-
 const CREDENTIALS: CredentialBundle = {
   accessToken: 'access-one',
   refreshToken: 'refresh-one',
@@ -106,7 +99,14 @@ function memoryConfiguration(initial: ProjectConfiguration) {
     },
     async stop() {},
   }
-  return { document, writes }
+  return {
+    document,
+    writes,
+    emit(next: ProjectConfiguration) {
+      current = next
+      for (const listener of listeners) listener({ ok: true, document: next })
+    },
+  }
 }
 
 function memoryVault(initial: Record<string, CredentialBundle> = {}, failWrite = false) {
@@ -257,6 +257,199 @@ afterEach(async () => {
 })
 
 describe('RoadmapApplication GitHub Connections', () => {
+  it('does not publish a fabricated failure while initial device authorization is still being acquired', async () => {
+    const configuration = memoryConfiguration(BASE_CONFIGURATION)
+    const github = scriptedGitHub()
+    const entered = Promise.withResolvers<void>()
+    const released = Promise.withResolvers<void>()
+    vi.mocked(github.beginDeviceAuthorization).mockImplementationOnce(async () => {
+      entered.resolve()
+      await released.promise
+      return {
+        deviceCode: 'private-held-device',
+        userCode: 'ACTUAL-CODE',
+        verificationUri: 'https://github.com/login/device',
+        expiresAt: 60_000,
+        intervalMs: 10_000,
+      }
+    })
+    const application = createRoadmapApplication({
+      configuration: configuration.document,
+      credentialVault: memoryVault().vault,
+      github,
+      ...sourceOptions(),
+      now: () => 0,
+    })
+    await application.start()
+    const begun = application.execute(
+      commandSchema.parse({
+        type: 'begin-github-authorization',
+        name: 'Pending actual device',
+        expectedConfigurationVersion: 1,
+      }),
+    )
+    try {
+      await entered.promise
+      configuration.emit(BASE_CONFIGURATION)
+      expect(readApplicationState(application.current()).authorizationOperations).toEqual([])
+      released.resolve()
+      expect((await begun).ok).toBe(true)
+      expect(readApplicationState(application.current()).authorizationOperations).toMatchObject([
+        { status: 'waiting', userCode: 'ACTUAL-CODE' },
+      ])
+    } finally {
+      released.resolve()
+      await begun.catch(() => {})
+      await application.stop()
+    }
+  })
+  it.each(['command', 'manual'])(
+    'terminates waiting reauthorization before its Connection is removed by %s input',
+    async (input) => {
+      vi.useFakeTimers()
+      const initial = githubConfiguration()
+      const configuration = memoryConfiguration(initial)
+      const credentials = memoryVault({ 'github-connection': CREDENTIALS })
+      const github = scriptedGitHub({ polls: [{ status: 'granted', credentials: CREDENTIALS }] })
+      const application = createRoadmapApplication({
+        configuration: configuration.document,
+        credentialVault: credentials.vault,
+        github,
+        ...sourceOptions(),
+        now: () => 0,
+      })
+      try {
+        await application.start()
+        const begun = await application.execute(
+          commandSchema.parse({
+            type: 'begin-github-authorization',
+            connectionId: 'github-connection',
+            name: 'Repair account',
+            expectedConfigurationVersion: 1,
+          }),
+        )
+        if (!begun.ok || begun.result.type !== 'authorization-started')
+          throw new Error('Expected actual waiting reauthorization.')
+        const operationId = begun.result.operationId
+        expect(
+          readApplicationState(application.current()).authorizationOperations[0],
+        ).toMatchObject({ id: operationId, status: 'waiting', connectionId: 'github-connection' })
+        if (input === 'command') {
+          const removed = await application.execute(
+            commandSchema.parse({
+              type: 'remove-connection',
+              connectionId: 'github-connection',
+              expectedConfigurationVersion: 1,
+            }),
+          )
+          expect(removed.ok).toBe(true)
+        } else {
+          configuration.emit({
+            ...initial,
+            configurationVersion: 2,
+            connections: [LOCAL_CONNECTION],
+          })
+        }
+        await vi.waitFor(() =>
+          expect(readApplicationState(application.current()).configurationVersion).toBe(2),
+        )
+        expect(readApplicationState(application.current()).connections).toHaveLength(1)
+        expect(
+          readApplicationState(application.current()).authorizationOperations[0],
+        ).toMatchObject({
+          id: operationId,
+          status: 'terminal',
+          outcome: 'cancelled',
+          connectionId: 'github-connection',
+        })
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(github.pollDeviceAuthorization).not.toHaveBeenCalled()
+        expect(configuration.writes).toHaveLength(input === 'command' ? 1 : 0)
+        const beginCount = vi.mocked(github.beginDeviceAuthorization).mock.calls.length
+        const current = readApplicationState(application.current())
+        const retried = await application.execute(
+          commandSchema.parse({
+            type: 'retry-github-authorization',
+            operationId,
+            expectedConfigurationVersion: current.configurationVersion,
+          }),
+        )
+        expect(retried).toMatchObject({
+          ok: false,
+          error: { code: 'validation', field: 'connectionId' },
+        })
+        expect(github.beginDeviceAuthorization).toHaveBeenCalledTimes(beginCount)
+      } finally {
+        await application.stop()
+      }
+    },
+  )
+  it('retains the actual granted account receipt after its Connection is removed', async () => {
+    vi.useFakeTimers()
+    const configuration = memoryConfiguration(BASE_CONFIGURATION)
+    const credentials = memoryVault()
+    const github = scriptedGitHub()
+    const application = createRoadmapApplication({
+      configuration: configuration.document,
+      credentialVault: credentials.vault,
+      github,
+      ...sourceOptions(),
+      now: () => 0,
+    })
+    try {
+      await application.start()
+      const begun = await application.execute(
+        commandSchema.parse({
+          type: 'begin-github-authorization',
+          name: 'Historical grant',
+          expectedConfigurationVersion: 1,
+        }),
+      )
+      expect(begun.ok).toBe(true)
+      await vi.advanceTimersByTimeAsync(1)
+      await vi.waitFor(() =>
+        expect(readApplicationState(application.current()).authorizationOperations[0]?.status).toBe(
+          'granted',
+        ),
+      )
+      const granted = readApplicationState(application.current())
+      const receipt = granted.authorizationOperations[0]
+      expect(receipt).toMatchObject({
+        status: 'granted',
+        connection: { kind: 'current', accountId: '42' },
+      })
+      if (receipt?.status !== 'granted') throw new Error('Expected actual provider grant.')
+      const removed = await application.execute(
+        commandSchema.parse({
+          type: 'remove-connection',
+          connectionId: receipt.connection.id,
+          expectedConfigurationVersion: granted.configurationVersion,
+        }),
+      )
+      expect(removed.ok).toBe(true)
+      expect(readApplicationState(application.current()).authorizationOperations[0]).toEqual({
+        id: receipt.id,
+        status: 'granted',
+        connection: { kind: 'historical', id: receipt.connection.id, accountId: '42' },
+      })
+      await application.stop()
+      expect(application.current()).toMatchObject({
+        phase: 'stopped',
+        retained: {
+          authorizationOperations: [
+            {
+              id: receipt.id,
+              status: 'granted',
+              connection: { kind: 'historical', id: receipt.connection.id, accountId: '42' },
+            },
+          ],
+        },
+      })
+    } finally {
+      await application.stop()
+    }
+  })
+
   it('publishes a safe device operation, then saves identity and credentials before configuration', async () => {
     vi.useFakeTimers()
     const configuration = memoryConfiguration(BASE_CONFIGURATION)
@@ -272,28 +465,36 @@ describe('RoadmapApplication GitHub Connections', () => {
     })
     await application.start()
 
-    const begun = await application.execute({
-      type: 'begin-github-authorization',
-      name: 'Personal GitHub',
-      expectedConfigurationVersion: 1,
-    })
+    const begun = await application.execute(
+      commandSchema.parse({
+        type: 'begin-github-authorization',
+        name: 'Personal GitHub',
+        expectedConfigurationVersion: 1,
+      }),
+    )
 
     expect(begun).toMatchObject({ ok: true, result: { type: 'authorization-started' } })
-    expect(application.current().supportedIntegrations).toContainEqual(github.integration)
-    expect(application.current().authorizationOperations[0]).toMatchObject({
+    expect(readApplicationState(application.current()).supportedIntegrations).toContainEqual(
+      github.integration,
+    )
+    expect(readApplicationState(application.current()).authorizationOperations[0]).toMatchObject({
       status: 'waiting',
       verificationUri: 'https://github.com/login/device',
       userCode: 'CODE-1',
       expiresAt: 60_000,
     })
-    expect(JSON.stringify(application.current())).not.toContain('private-device')
-    expect(JSON.stringify(application.current())).not.toContain('access-one')
+    expect(JSON.stringify(readApplicationState(application.current()))).not.toContain(
+      'private-device',
+    )
+    expect(JSON.stringify(readApplicationState(application.current()))).not.toContain('access-one')
 
     await vi.advanceTimersByTimeAsync(1)
     await vi.waitFor(() =>
-      expect(application.current().authorizationOperations[0]).toMatchObject({ status: 'granted' }),
+      expect(readApplicationState(application.current()).authorizationOperations[0]).toMatchObject({
+        status: 'granted',
+      }),
     )
-    expect(application.current().connections).toEqual(
+    expect(readApplicationState(application.current()).connections).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           integration: 'github',
@@ -308,8 +509,9 @@ describe('RoadmapApplication GitHub Connections', () => {
     expect(credentials.records.get(saved?.id ?? '')).toEqual(CREDENTIALS)
     expect(JSON.stringify(configuration.writes)).not.toContain('access-one')
     expect(
-      application.current().connections.find((connection) => connection.integration === 'github')
-        ?.availability.observedAt,
+      readApplicationState(application.current()).connections.find(
+        (connection) => connection.integration === 'github',
+      )?.availability.observedAt,
     ).toBeUndefined()
     await application.stop()
   })
@@ -339,31 +541,41 @@ describe('RoadmapApplication GitHub Connections', () => {
       })
       try {
         await application.start()
-        await application.execute({
-          type: 'begin-github-authorization',
-          name: 'Personal GitHub',
-          expectedConfigurationVersion: 1,
-        })
+        await application.execute(
+          commandSchema.parse({
+            type: 'begin-github-authorization',
+            name: 'Personal GitHub',
+            expectedConfigurationVersion: 1,
+          }),
+        )
         await vi.advanceTimersByTimeAsync(1)
         await entered.promise
 
         expect(configuration.writes).toEqual([])
-        expect(application.current().configurationVersion).toBe(1)
-        expect(application.current().connections).toHaveLength(1)
-        expect(application.current().authorizationOperations[0]?.status).toBe('waiting')
+        expect(readApplicationState(application.current()).configurationVersion).toBe(1)
+        expect(readApplicationState(application.current()).connections).toHaveLength(1)
+        expect(readApplicationState(application.current()).authorizationOperations[0]?.status).toBe(
+          'waiting',
+        )
         expect(credentials.records.size).toBe(0)
 
         if (rejectVault) gate.reject(new Error('private vault failure'))
         else gate.resolve()
         await vi.waitFor(() =>
-          expect(application.current().authorizationOperations[0]?.status).toBe(
-            rejectVault ? 'failed' : 'granted',
+          expect(
+            readApplicationState(application.current()).authorizationOperations[0],
+          ).toMatchObject(
+            rejectVault ? { status: 'terminal', outcome: 'failed' } : { status: 'granted' },
           ),
         )
         expect(configuration.writes).toHaveLength(rejectVault ? 0 : 1)
-        expect(application.current().connections).toHaveLength(rejectVault ? 1 : 2)
+        expect(readApplicationState(application.current()).connections).toHaveLength(
+          rejectVault ? 1 : 2,
+        )
         expect(credentials.records.size).toBe(rejectVault ? 0 : 1)
-        expect(JSON.stringify(application.current())).not.toContain('private vault failure')
+        expect(JSON.stringify(readApplicationState(application.current()))).not.toContain(
+          'private vault failure',
+        )
       } finally {
         gate.resolve()
         await application.stop()
@@ -404,7 +616,7 @@ describe('RoadmapApplication GitHub Connections', () => {
         now: () => 0,
       })
       const states: ReturnType<typeof application.current>[] = []
-      application.subscribe((state) => states.push(state))
+      application.subscribe((state) => states.push(readApplicationState(state)))
       try {
         await application.start()
         const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
@@ -426,40 +638,52 @@ describe('RoadmapApplication GitHub Connections', () => {
             return handle
           })
         }
-        await application.execute({
-          type: 'begin-github-authorization',
-          ...(reauthorizing ? { connectionId: 'github-connection' } : {}),
-          name: 'Personal GitHub',
-          expectedConfigurationVersion: 1,
-        })
+        await application.execute(
+          commandSchema.parse({
+            type: 'begin-github-authorization',
+            ...(reauthorizing ? { connectionId: 'github-connection' } : {}),
+            name: 'Personal GitHub',
+            expectedConfigurationVersion: 1,
+          }),
+        )
         await vi.advanceTimersByTimeAsync(1)
         await vi.waitFor(() =>
-          expect(application.current().authorizationOperations[0]?.status).not.toBe('waiting'),
+          expect(
+            readApplicationState(application.current()).authorizationOperations[0]?.status,
+          ).not.toBe('waiting'),
         )
 
         const stored = decodeConfigurationDocument(JSON.parse(await readFile(path, 'utf8')))
         if (!stored.ok) throw new Error('Expected valid committed configuration')
         const committed = failure !== 'rename'
         expect(stored.value.configurationVersion).toBe(committed ? 2 : 1)
-        expect(application.current().configurationVersion).toBe(committed ? 2 : 1)
-        expect(stored.value.projects).toEqual(initial.projects)
-        expect(application.current().registrations).toEqual(
-          reauthorizing ? [GITHUB_REGISTRATION] : [],
+        expect(readApplicationState(application.current()).configurationVersion).toBe(
+          committed ? 2 : 1,
         )
-        expect(application.current().authorizationOperations[0]?.status).toBe(
-          failure === 'directory-close' ? 'granted' : 'failed',
+        expect(stored.value.projects).toMatchObject(initial.projects)
+        expect(readApplicationState(application.current()).projects).toMatchObject(
+          reauthorizing ? [fixtureProjectManagement(GITHUB_INTENT)] : [],
+        )
+        expect(
+          readApplicationState(application.current()).authorizationOperations[0],
+        ).toMatchObject(
+          failure === 'directory-close'
+            ? { status: 'granted' }
+            : { status: 'terminal', outcome: 'failed' },
         )
         if (failure === 'directory-sync') {
-          expect(application.current().automation.availability).toMatchObject({
-            status: 'unavailable',
-          })
+          expect(readApplicationState(application.current()).automation.availability).toMatchObject(
+            {
+              status: 'unavailable',
+            },
+          )
         }
         if (reauthorizing || committed) {
           const connection = stored.value.connections.find((item) => item.integration === 'github')
           if (!connection) throw new Error('Expected retained configured GitHub identity')
           expect(connection.githubIdentity).toEqual({ id: '42', login: 'octocat' })
           expect(credentials.records.get(connection.id)).toEqual(renewed)
-          expect(application.current().connections).toContainEqual(
+          expect(readApplicationState(application.current()).connections).toContainEqual(
             expect.objectContaining({
               id: connection.id,
               githubIdentity: connection.githubIdentity,
@@ -468,11 +692,11 @@ describe('RoadmapApplication GitHub Connections', () => {
         } else {
           expect(stored.value).toEqual(initial)
           expect(credentials.records.size).toBe(0)
-          expect(application.current().connections).toHaveLength(1)
+          expect(readApplicationState(application.current()).connections).toHaveLength(1)
         }
         const publicAndDisk = JSON.stringify({
           states,
-          current: application.current(),
+          current: readApplicationState(application.current()),
           stored: stored.value,
         })
         expect(publicAndDisk).not.toContain('access-renewed')
@@ -523,15 +747,21 @@ describe('RoadmapApplication GitHub Connections', () => {
         expect(credentials.records.get('github-connection')?.accessToken).toBe(
           rejectVault ? 'access-one' : 'access-two',
         )
-        expect(application.current().connections[1]?.availability.status).toBe(
-          rejectVault ? 'authorization-required' : 'available',
-        )
-        expect(application.current().connections[1]?.githubIdentity).toEqual({
+        expect(
+          readApplicationState(application.current()).connections[1]?.availability.status,
+        ).toBe(rejectVault ? 'authorization-required' : 'available')
+        const connection = readApplicationState(application.current()).connections[1]
+        if (connection?.integration !== 'github') {
+          throw new Error('Expected retained GitHub Connection identity')
+        }
+        expect(connection.githubIdentity).toEqual({
           id: '42',
           login: 'octocat',
         })
-        expect(JSON.stringify(application.current())).not.toContain('access-two')
-        expect(JSON.stringify(application.current())).not.toContain(
+        expect(JSON.stringify(readApplicationState(application.current()))).not.toContain(
+          'access-two',
+        )
+        expect(JSON.stringify(readApplicationState(application.current()))).not.toContain(
           'private refreshed credential detail',
         )
       } finally {
@@ -559,33 +789,40 @@ describe('RoadmapApplication GitHub Connections', () => {
       now: () => 0,
     })
     await application.start()
-    const begun = await application.execute({
-      type: 'begin-github-authorization',
-      name: 'Personal GitHub',
-      expectedConfigurationVersion: 1,
-    })
+    const begun = await application.execute(
+      commandSchema.parse({
+        type: 'begin-github-authorization',
+        name: 'Personal GitHub',
+        expectedConfigurationVersion: 1,
+      }),
+    )
     if (!begun.ok || begun.result.type !== 'authorization-started') throw new Error('not started')
     const operationId = begun.result.operationId
 
-    await application.execute({
-      type: 'cancel-github-authorization',
-      operationId,
-      expectedConfigurationVersion: 1,
-    })
-    expect(application.current().authorizationOperations[0]).toMatchObject({
+    await application.execute(
+      commandSchema.parse({
+        type: 'cancel-github-authorization',
+        operationId,
+        expectedConfigurationVersion: 1,
+      }),
+    )
+    expect(readApplicationState(application.current()).authorizationOperations[0]).toMatchObject({
       id: operationId,
-      status: 'cancelled',
+      status: 'terminal',
+      outcome: 'cancelled',
     })
     await vi.advanceTimersByTimeAsync(10)
     expect(github.pollDeviceAuthorization).not.toHaveBeenCalled()
 
-    await application.execute({
-      type: 'retry-github-authorization',
-      operationId,
-      expectedConfigurationVersion: 1,
-    })
+    await application.execute(
+      commandSchema.parse({
+        type: 'retry-github-authorization',
+        operationId,
+        expectedConfigurationVersion: 1,
+      }),
+    )
     await vi.waitFor(() =>
-      expect(application.current().authorizationOperations[0]).toMatchObject({
+      expect(readApplicationState(application.current()).authorizationOperations[0]).toMatchObject({
         id: operationId,
         status: 'waiting',
         userCode: 'CODE-2',
@@ -598,7 +835,7 @@ describe('RoadmapApplication GitHub Connections', () => {
     if (firstPollAt === undefined) throw new Error('The retried authorization has not polled.')
     await vi.advanceTimersByTimeAsync(Math.max(0, firstPollAt + 5_000 - Date.now()))
     expect(github.pollDeviceAuthorization).toHaveBeenCalledTimes(1)
-    expect(application.current().authorizationOperations[0]).toMatchObject({
+    expect(readApplicationState(application.current()).authorizationOperations[0]).toMatchObject({
       id: operationId,
       status: 'waiting',
     })
@@ -606,9 +843,12 @@ describe('RoadmapApplication GitHub Connections', () => {
     await vi.waitFor(
       () => {
         expect(github.pollDeviceAuthorization).toHaveBeenCalledTimes(2)
-        expect(application.current().authorizationOperations[0]).toMatchObject({
+        expect(
+          readApplicationState(application.current()).authorizationOperations[0],
+        ).toMatchObject({
           id: operationId,
-          status: 'denied',
+          status: 'terminal',
+          outcome: 'denied',
         })
       },
       { interval: 1 },
@@ -638,41 +878,48 @@ describe('RoadmapApplication GitHub Connections', () => {
     await application.start()
     providerTokens.length = 0
 
-    const begun = await application.execute({
-      type: 'begin-github-authorization',
-      connectionId: 'github-connection',
-      name: 'Personal GitHub',
-      expectedConfigurationVersion: 1,
-    })
+    const begun = await application.execute(
+      commandSchema.parse({
+        type: 'begin-github-authorization',
+        connectionId: 'github-connection',
+        name: 'Personal GitHub',
+        expectedConfigurationVersion: 1,
+      }),
+    )
     if (!begun.ok || begun.result.type !== 'authorization-started') throw new Error('not started')
     const operationId = begun.result.operationId
     await vi.advanceTimersByTimeAsync(1)
     await vi.waitFor(() =>
-      expect(application.current().authorizationOperations).toContainEqual({
+      expect(readApplicationState(application.current()).authorizationOperations).toContainEqual({
         id: operationId,
-        connectionId: 'github-connection',
+        connection: { kind: 'current', id: 'github-connection', accountId: '42' },
         status: 'granted',
       }),
     )
     expect(configuration.writes).toHaveLength(1)
-    expect(configuration.writes[0]?.projects).toEqual([project])
+    expect(configuration.writes[0]?.projects).toMatchObject([project])
     expect(configuration.writes[0]?.connections).toHaveLength(existing.connections.length)
-    expect(application.current().registrations).toEqual([GITHUB_REGISTRATION])
+    expect(readApplicationState(application.current()).projects).toMatchObject([
+      fixtureProjectManagement(GITHUB_INTENT),
+    ])
     expect(credentials.records.get('github-connection')).toEqual(renewed)
     providerTokens.length = 0
     expect(
-      await application.execute({
-        type: 'refresh-project',
-        project: GITHUB_REGISTRATION.key,
-        expectedConfigurationVersion: application.current().configurationVersion,
-      }),
+      await application.execute(
+        commandSchema.parse({
+          type: 'refresh-project',
+          project: fixtureProjectRef(fixtureProjectManagement(GITHUB_INTENT).ref),
+          expectedConfigurationVersion: readApplicationState(application.current())
+            .configurationVersion,
+        }),
+      ),
     ).toMatchObject({
       ok: true,
-      result: { type: 'project-refreshed', project: GITHUB_REGISTRATION.key },
+      result: { type: 'project-refreshed', project: fixtureProjectManagement(GITHUB_INTENT).ref },
     })
     expect(providerTokens.length).toBeGreaterThan(0)
     expect(providerTokens.every((token) => token === 'access-renewed')).toBe(true)
-    expect(application.current().projects[0]).toMatchObject({
+    expect(readApplicationState(application.current()).projects[0]).toMatchObject({
       resource: { kind: 'current-readable', observation: { observedAt: 0 } },
       mapsMembership: { kind: 'current-complete' },
     })
@@ -694,15 +941,18 @@ describe('RoadmapApplication GitHub Connections', () => {
     })
     await application.start()
 
-    await application.execute({
-      type: 'begin-github-authorization',
-      name: 'Duplicate',
-      expectedConfigurationVersion: 1,
-    })
+    await application.execute(
+      commandSchema.parse({
+        type: 'begin-github-authorization',
+        name: 'Duplicate',
+        expectedConfigurationVersion: 1,
+      }),
+    )
     await vi.advanceTimersByTimeAsync(1)
     await vi.waitFor(() =>
-      expect(application.current().authorizationOperations[0]).toMatchObject({
-        status: 'failed',
+      expect(readApplicationState(application.current()).authorizationOperations[0]).toMatchObject({
+        status: 'terminal',
+        outcome: 'failed',
         cause: 'GitHub user octocat already has a Connection.',
       }),
     )
@@ -718,15 +968,20 @@ describe('RoadmapApplication GitHub Connections', () => {
       now: () => 0,
     })
     await second.start()
-    await second.execute({
-      type: 'begin-github-authorization',
-      connectionId: 'github-connection',
-      name: 'Personal GitHub',
-      expectedConfigurationVersion: 1,
-    })
+    await second.execute(
+      commandSchema.parse({
+        type: 'begin-github-authorization',
+        connectionId: 'github-connection',
+        name: 'Personal GitHub',
+        expectedConfigurationVersion: 1,
+      }),
+    )
     await vi.advanceTimersByTimeAsync(1)
     await vi.waitFor(() =>
-      expect(second.current().authorizationOperations[0]).toMatchObject({ status: 'failed' }),
+      expect(readApplicationState(second.current()).authorizationOperations[0]).toMatchObject({
+        status: 'terminal',
+        outcome: 'failed',
+      }),
     )
     expect(credentials.records.get('github-connection')).toEqual(CREDENTIALS)
     await second.stop()
@@ -740,19 +995,22 @@ describe('RoadmapApplication GitHub Connections', () => {
       now: () => 0,
     })
     await third.start()
-    await third.execute({
-      type: 'begin-github-authorization',
-      name: 'Cannot save',
-      expectedConfigurationVersion: 1,
-    })
+    await third.execute(
+      commandSchema.parse({
+        type: 'begin-github-authorization',
+        name: 'Cannot save',
+        expectedConfigurationVersion: 1,
+      }),
+    )
     await vi.advanceTimersByTimeAsync(1)
     await vi.waitFor(() =>
-      expect(third.current().authorizationOperations[0]).toMatchObject({
-        status: 'failed',
+      expect(readApplicationState(third.current()).authorizationOperations[0]).toMatchObject({
+        status: 'terminal',
+        outcome: 'failed',
         cause: 'GitHub authorization could not be saved.',
       }),
     )
-    expect(third.current().connections).toHaveLength(1)
+    expect(readApplicationState(third.current()).connections).toHaveLength(1)
     await third.stop()
   })
 
@@ -859,11 +1117,11 @@ describe('RoadmapApplication GitHub Connections', () => {
       },
       now: () => clock,
     })
-    const states: ApplicationState[] = []
-    const unsubscribe = application.subscribe((state) => states.push(state))
+    const states: ReadyApplicationState[] = []
+    const unsubscribe = application.subscribe((state) => states.push(readApplicationState(state)))
     try {
       await application.start()
-      expect(application.current().projects[0]).toMatchObject({
+      expect(readApplicationState(application.current()).projects[0]).toMatchObject({
         resource: { kind: 'current-readable', observation: { observedAt: 0 } },
         mapsMembership: { kind: 'current-complete' },
       })
@@ -878,12 +1136,14 @@ describe('RoadmapApplication GitHub Connections', () => {
       expect(providerTokens).toEqual([])
       expect(contributions).toHaveLength(baselineContributions)
 
-      const begun = await application.execute({
-        type: 'begin-github-authorization',
-        connectionId: 'github-connection',
-        name: 'Personal GitHub',
-        expectedConfigurationVersion: 1,
-      })
+      const begun = await application.execute(
+        commandSchema.parse({
+          type: 'begin-github-authorization',
+          connectionId: 'github-connection',
+          name: 'Personal GitHub',
+          expectedConfigurationVersion: 1,
+        }),
+      )
       if (!begun.ok || begun.result.type !== 'authorization-started')
         throw new Error('The replacement authorization did not start.')
       const operationId = begun.result.operationId
@@ -891,13 +1151,17 @@ describe('RoadmapApplication GitHub Connections', () => {
       if (holdReplacementWrite) {
         await replacementWriteEntered.promise
         expect(configuration.writes).toEqual([])
-        expect(application.current().configurationVersion).toBe(1)
-        expect(application.current().authorizationOperations[0]?.status).toBe('waiting')
-        expect(application.current().projects[0]?.resource).toMatchObject({
+        expect(readApplicationState(application.current()).configurationVersion).toBe(1)
+        expect(readApplicationState(application.current()).authorizationOperations[0]?.status).toBe(
+          'waiting',
+        )
+        expect(readApplicationState(application.current()).projects[0]?.resource).toMatchObject({
           kind: 'current-readable',
           observation: { observedAt: 0 },
         })
-        expect(application.current().connections[1]?.availability.observedAt).toBe(0)
+        expect(
+          readApplicationState(application.current()).connections[1]?.availability.observedAt,
+        ).toBe(0)
         expect(keychainRecords.get('harmless-refresh-order:github-connection')).toBe(
           JSON.stringify(expiring),
         )
@@ -911,21 +1175,23 @@ describe('RoadmapApplication GitHub Connections', () => {
         replacementWriteResult.resolve()
       }
       await vi.waitFor(() =>
-        expect(application.current().authorizationOperations).toContainEqual({
+        expect(readApplicationState(application.current()).authorizationOperations).toContainEqual({
           id: operationId,
-          connectionId: 'github-connection',
+          connection: { kind: 'current', id: 'github-connection', accountId: '42' },
           status: 'granted',
         }),
       )
       if (!holdReplacementWrite)
         expect(await credentialVault.read('github-connection')).toEqual(replacement)
-      expect(application.current().configurationVersion).toBe(2)
+      expect(readApplicationState(application.current()).configurationVersion).toBe(2)
       if (!holdReplacementWrite) {
-        expect(application.current().projects[0]?.resource).toMatchObject({
+        expect(readApplicationState(application.current()).projects[0]?.resource).toMatchObject({
           kind: 'current-readable',
           observation: { observedAt: 0 },
         })
-        expect(application.current().connections[1]?.availability.observedAt).toBe(0)
+        expect(
+          readApplicationState(application.current()).connections[1]?.availability.observedAt,
+        ).toBe(0)
         expect(contributions).toHaveLength(baselineContributions)
         clock = 600_003
         if (outcome === 'rejected')
@@ -935,7 +1201,7 @@ describe('RoadmapApplication GitHub Connections', () => {
         else refreshResult.resolve(obsolete)
       }
       await vi.waitFor(() => expect(contributions.length).toBeGreaterThan(baselineContributions))
-      const afterObsoleteRefresh = application.current()
+      const afterObsoleteRefresh = readApplicationState(application.current())
       const credentialAfterObsoleteRefresh = await credentialVault.read('github-connection')
       const completedContributions = contributions.length
       const tokensAfterObsoleteRefresh = [...providerTokens]
@@ -945,7 +1211,7 @@ describe('RoadmapApplication GitHub Connections', () => {
       clock = 600_004
       await vi.advanceTimersByTimeAsync(1_000)
       await vi.waitFor(() => expect(contributions.length).toBeGreaterThan(completedContributions))
-      const recovered = application.current()
+      const recovered = readApplicationState(application.current())
       expect(credentialAfterObsoleteRefresh).toEqual(replacement)
       expect(await credentialVault.read('github-connection')).toEqual(replacement)
       expect(afterObsoleteRefresh.connections[1]?.availability.status).toBe('available')
@@ -960,24 +1226,31 @@ describe('RoadmapApplication GitHub Connections', () => {
         availability: { status: 'available', observedAt: 600_004 },
       })
       expect(recovered.projects[0]).toMatchObject({
-        key: GITHUB_REGISTRATION.key,
+        ref: fixtureResourceRef(fixtureProjectManagement(GITHUB_INTENT).ref),
         connectionId: 'github-connection',
         resource: { kind: 'current-readable', observation: { observedAt: 600_004 } },
         mapsMembership: { kind: 'current-complete' },
       })
-      expect(recovered.registrations).toEqual([GITHUB_REGISTRATION])
+      expect(recovered.projects).toMatchObject([fixtureProjectManagement(GITHUB_INTENT)])
       expect(recovered.authorizationOperations).toEqual([
-        { id: operationId, connectionId: 'github-connection', status: 'granted' },
+        {
+          id: operationId,
+          connection: { kind: 'current', id: 'github-connection', accountId: '42' },
+          status: 'granted',
+        },
       ])
       expect(configuration.writes).toHaveLength(1)
-      expect(configuration.writes[0]?.projects).toEqual([GITHUB_INTENT])
+      expect(configuration.writes[0]?.projects).toMatchObject([GITHUB_INTENT])
       expect(configuration.writes[0]?.connections).toEqual(githubConfiguration().connections)
       expect(configuration.writes[0]?.automation).toEqual(BASE_CONFIGURATION.automation)
       expect(refreshRequests).toEqual(['refresh-one'])
       expect(contributions.at(-1)?.attempts).toEqual([
         expect.objectContaining({
           kind: 'observed',
-          scope: { kind: 'project', project: GITHUB_REGISTRATION.key },
+          scope: {
+            kind: 'project',
+            project: { integration: 'github', id: GITHUB_INTENT.ref.projectId },
+          },
           observedAt: 600_004,
           provenance: {
             integration: 'github',
@@ -988,7 +1261,10 @@ describe('RoadmapApplication GitHub Connections', () => {
         }),
         expect.objectContaining({
           kind: 'observed',
-          scope: { kind: 'maps-membership', project: GITHUB_REGISTRATION.key },
+          scope: {
+            kind: 'maps-membership',
+            project: { integration: 'github', id: GITHUB_INTENT.ref.projectId },
+          },
           observedAt: 600_004,
           provenance: {
             integration: 'github',
@@ -1039,22 +1315,26 @@ describe('RoadmapApplication GitHub Connections', () => {
     clock = 300_001
 
     const refreshed = await Promise.all([
-      application.execute({
-        type: 'refresh-project',
-        project: GITHUB_REGISTRATION.key,
-        expectedConfigurationVersion: 1,
-      }),
-      application.execute({
-        type: 'refresh-project',
-        project: GITHUB_REGISTRATION.key,
-        expectedConfigurationVersion: 1,
-      }),
+      application.execute(
+        commandSchema.parse({
+          type: 'refresh-project',
+          project: fixtureProjectRef(fixtureProjectManagement(GITHUB_INTENT).ref),
+          expectedConfigurationVersion: 1,
+        }),
+      ),
+      application.execute(
+        commandSchema.parse({
+          type: 'refresh-project',
+          project: fixtureProjectRef(fixtureProjectManagement(GITHUB_INTENT).ref),
+          expectedConfigurationVersion: 1,
+        }),
+      ),
     ])
 
     for (const outcome of refreshed)
       expect(outcome).toMatchObject({
         ok: true,
-        result: { type: 'project-refreshed', project: GITHUB_REGISTRATION.key },
+        result: { type: 'project-refreshed', project: fixtureProjectManagement(GITHUB_INTENT).ref },
       })
     expect(providerTokens.length).toBeGreaterThan(0)
     expect(providerTokens.every((token) => token === 'access-two')).toBe(true)
@@ -1062,18 +1342,24 @@ describe('RoadmapApplication GitHub Connections', () => {
     expect(credentials.records.get('github-connection')?.accessToken).toBe('access-two')
     expect(
       (
-        await application.execute({
-          type: 'remove-project',
-          project: GITHUB_REGISTRATION.key,
-          expectedConfigurationVersion: application.current().configurationVersion,
-        })
+        await application.execute(
+          commandSchema.parse({
+            type: 'remove-project',
+            project: fixtureProjectRef(fixtureProjectManagement(GITHUB_INTENT).ref),
+            expectedConfigurationVersion: readApplicationState(application.current())
+              .configurationVersion,
+          }),
+        )
       ).ok,
     ).toBe(true)
-    const removed = await application.execute({
-      type: 'remove-connection',
-      connectionId: 'github-connection',
-      expectedConfigurationVersion: application.current().configurationVersion,
-    })
+    const removed = await application.execute(
+      commandSchema.parse({
+        type: 'remove-connection',
+        connectionId: 'github-connection',
+        expectedConfigurationVersion: readApplicationState(application.current())
+          .configurationVersion,
+      }),
+    )
     expect(removed.ok).toBe(true)
     expect(credentials.records.has('github-connection')).toBe(false)
     await application.stop()
@@ -1094,7 +1380,9 @@ describe('RoadmapApplication GitHub Connections', () => {
       now: () => 0,
     })
     await bad.start()
-    expect(bad.current().connections[1]?.availability.status).toBe('authorization-required')
+    expect(readApplicationState(bad.current()).connections[1]?.availability.status).toBe(
+      'authorization-required',
+    )
     await bad.stop()
   })
 
@@ -1114,28 +1402,32 @@ describe('RoadmapApplication GitHub Connections', () => {
       now: () => clock,
     })
     await application.start()
-    expect(application.current().connections[1]?.availability).toEqual({
+    expect(readApplicationState(application.current()).connections[1]?.availability).toEqual({
       status: 'available',
       observedAt: 0,
     })
 
     clock = 300_001
     expect(
-      await application.execute({
-        type: 'refresh-project',
-        project: GITHUB_REGISTRATION.key,
-        expectedConfigurationVersion: 1,
-      }),
+      await application.execute(
+        commandSchema.parse({
+          type: 'refresh-project',
+          project: fixtureProjectRef(fixtureProjectManagement(GITHUB_INTENT).ref),
+          expectedConfigurationVersion: 1,
+        }),
+      ),
     ).toMatchObject({
       ok: true,
-      result: { type: 'project-refreshed', project: GITHUB_REGISTRATION.key },
+      result: { type: 'project-refreshed', project: fixtureProjectManagement(GITHUB_INTENT).ref },
     })
 
-    expect(application.current().connections[1]?.availability).toEqual({
+    expect(readApplicationState(application.current()).connections[1]?.availability).toEqual({
       status: 'available',
       observedAt: 0,
     })
-    expect(JSON.stringify(application.current())).not.toContain('private network detail')
+    expect(JSON.stringify(readApplicationState(application.current()))).not.toContain(
+      'private network detail',
+    )
     await application.stop()
   })
 
@@ -1160,7 +1452,7 @@ describe('RoadmapApplication GitHub Connections', () => {
     })
 
     await application.start()
-    expect(application.current().connections[1]?.availability).toMatchObject({
+    expect(readApplicationState(application.current()).connections[1]?.availability).toMatchObject({
       status: 'authorization-required',
     })
     await application.stop()
@@ -1179,22 +1471,31 @@ describe('RoadmapApplication GitHub Connections', () => {
       now: () => 0,
     })
     await application.start()
-    const begun = await application.execute({
-      type: 'begin-github-authorization',
-      name: 'Personal GitHub',
-      expectedConfigurationVersion: 1,
-    })
+    const begun = await application.execute(
+      commandSchema.parse({
+        type: 'begin-github-authorization',
+        name: 'Personal GitHub',
+        expectedConfigurationVersion: 1,
+      }),
+    )
     if (!begun.ok || begun.result.type !== 'authorization-started') throw new Error('not started')
-    expect(application.current().authorizationOperations[0]).toMatchObject({ status: 'failed' })
-
-    await application.execute({
-      type: 'retry-github-authorization',
-      operationId: begun.result.operationId,
-      expectedConfigurationVersion: 1,
+    expect(readApplicationState(application.current()).authorizationOperations[0]).toMatchObject({
+      status: 'terminal',
+      outcome: 'failed',
     })
+
+    await application.execute(
+      commandSchema.parse({
+        type: 'retry-github-authorization',
+        operationId: begun.result.operationId,
+        expectedConfigurationVersion: 1,
+      }),
+    )
     await vi.advanceTimersByTimeAsync(1)
     await vi.waitFor(() =>
-      expect(application.current().authorizationOperations[0]).toMatchObject({ status: 'granted' }),
+      expect(readApplicationState(application.current()).authorizationOperations[0]).toMatchObject({
+        status: 'granted',
+      }),
     )
     await application.stop()
 
@@ -1206,11 +1507,13 @@ describe('RoadmapApplication GitHub Connections', () => {
       now: () => 0,
     })
     await interrupted.start()
-    await interrupted.execute({
-      type: 'begin-github-authorization',
-      name: 'Interrupted',
-      expectedConfigurationVersion: 1,
-    })
+    await interrupted.execute(
+      commandSchema.parse({
+        type: 'begin-github-authorization',
+        name: 'Interrupted',
+        expectedConfigurationVersion: 1,
+      }),
+    )
     await interrupted.stop()
 
     const restarted = createRoadmapApplication({
@@ -1221,15 +1524,20 @@ describe('RoadmapApplication GitHub Connections', () => {
       now: () => 0,
     })
     await restarted.start()
-    expect(restarted.current().authorizationOperations).toEqual([])
-    await restarted.execute({
-      type: 'begin-github-authorization',
-      name: 'Expired',
-      expectedConfigurationVersion: 1,
-    })
+    expect(readApplicationState(restarted.current()).authorizationOperations).toEqual([])
+    await restarted.execute(
+      commandSchema.parse({
+        type: 'begin-github-authorization',
+        name: 'Expired',
+        expectedConfigurationVersion: 1,
+      }),
+    )
     await vi.advanceTimersByTimeAsync(1)
     await vi.waitFor(() =>
-      expect(restarted.current().authorizationOperations[0]).toMatchObject({ status: 'expired' }),
+      expect(readApplicationState(restarted.current()).authorizationOperations[0]).toMatchObject({
+        status: 'terminal',
+        outcome: 'expired',
+      }),
     )
     await restarted.stop()
   })
@@ -1250,7 +1558,7 @@ describe('RoadmapApplication GitHub Connections', () => {
           return begin.promise
         },
       }
-      const states: ApplicationState[] = []
+      const states: ReadyApplicationState[] = []
       const application = createRoadmapApplication({
         configuration: configuration.document,
         credentialVault: credentials.vault,
@@ -1258,19 +1566,23 @@ describe('RoadmapApplication GitHub Connections', () => {
         ...sourceOptions(),
         now: () => 0,
       })
-      application.subscribe((state) => states.push(structuredClone(state)))
+      application.subscribe((state) => states.push(structuredClone(readApplicationState(state))))
       await application.start()
-      const beginning = application.execute({
-        type: 'begin-github-authorization',
-        name: 'Deferred GitHub',
-        expectedConfigurationVersion: 1,
-      })
+      const beginning = application.execute(
+        commandSchema.parse({
+          type: 'begin-github-authorization',
+          name: 'Deferred GitHub',
+          expectedConfigurationVersion: 1,
+        }),
+      )
       await entered.promise
       let stopped = false
       const stopping = application.stop().then(() => {
         stopped = true
       })
-      const operationsAtStop = structuredClone(application.current().authorizationOperations)
+      const operationsAtStop = structuredClone(
+        readApplicationState(application.current()).authorizationOperations,
+      )
       const publicationsAtStop = states.length
       try {
         await vi.advanceTimersByTimeAsync(0)
@@ -1288,7 +1600,9 @@ describe('RoadmapApplication GitHub Connections', () => {
         await beginning
         await stopping
         await vi.advanceTimersByTimeAsync(60_000)
-        expect(application.current().authorizationOperations).toEqual(operationsAtStop)
+        expect(readApplicationState(application.current()).authorizationOperations).toEqual(
+          operationsAtStop,
+        )
         expect(states).toHaveLength(publicationsAtStop)
         expect(configuration.writes).toEqual([])
         expect(credentials.records.size).toBe(0)
@@ -1325,7 +1639,7 @@ describe('RoadmapApplication GitHub Connections', () => {
           return poll.promise
         },
       }
-      const states: ApplicationState[] = []
+      const states: ReadyApplicationState[] = []
       const application = createRoadmapApplication({
         configuration: configuration.document,
         credentialVault: credentials.vault,
@@ -1333,20 +1647,24 @@ describe('RoadmapApplication GitHub Connections', () => {
         ...sourceOptions(),
         now: () => 0,
       })
-      application.subscribe((state) => states.push(structuredClone(state)))
+      application.subscribe((state) => states.push(structuredClone(readApplicationState(state))))
       await application.start()
-      await application.execute({
-        type: 'begin-github-authorization',
-        name: 'Polling GitHub',
-        expectedConfigurationVersion: 1,
-      })
+      await application.execute(
+        commandSchema.parse({
+          type: 'begin-github-authorization',
+          name: 'Polling GitHub',
+          expectedConfigurationVersion: 1,
+        }),
+      )
       await vi.advanceTimersByTimeAsync(1)
       await entered.promise
       let stopped = false
       const stopping = application.stop().then(() => {
         stopped = true
       })
-      const operationsAtStop = structuredClone(application.current().authorizationOperations)
+      const operationsAtStop = structuredClone(
+        readApplicationState(application.current()).authorizationOperations,
+      )
       const publicationsAtStop = states.length
       try {
         await vi.advanceTimersByTimeAsync(0)
@@ -1356,7 +1674,9 @@ describe('RoadmapApplication GitHub Connections', () => {
         else poll.resolve({ status: 'granted', credentials: CREDENTIALS })
         await stopping
         await vi.advanceTimersByTimeAsync(60_000)
-        expect(application.current().authorizationOperations).toEqual(operationsAtStop)
+        expect(readApplicationState(application.current()).authorizationOperations).toEqual(
+          operationsAtStop,
+        )
         expect(states).toHaveLength(publicationsAtStop)
         expect(configuration.writes).toEqual([])
         expect(credentials.records.size).toBe(0)
@@ -1394,21 +1714,25 @@ describe('RoadmapApplication GitHub Connections', () => {
         ...sourceOptions(),
         now: () => 0,
       })
-      const states: ApplicationState[] = []
-      application.subscribe((state) => states.push(structuredClone(state)))
+      const states: ReadyApplicationState[] = []
+      application.subscribe((state) => states.push(structuredClone(readApplicationState(state))))
       await application.start()
-      await application.execute({
-        type: 'begin-github-authorization',
-        name: 'Writing GitHub',
-        expectedConfigurationVersion: 1,
-      })
+      await application.execute(
+        commandSchema.parse({
+          type: 'begin-github-authorization',
+          name: 'Writing GitHub',
+          expectedConfigurationVersion: 1,
+        }),
+      )
       await vi.advanceTimersByTimeAsync(1)
       await entered.promise
       let stopped = false
       const stopping = application.stop().then(() => {
         stopped = true
       })
-      const operationsAtStop = structuredClone(application.current().authorizationOperations)
+      const operationsAtStop = structuredClone(
+        readApplicationState(application.current()).authorizationOperations,
+      )
       const publicationsAtStop = states.length
       try {
         await vi.advanceTimersByTimeAsync(0)
@@ -1419,7 +1743,9 @@ describe('RoadmapApplication GitHub Connections', () => {
         await vi.advanceTimersByTimeAsync(0)
         expect(completedWrites).toHaveLength(completion === 'success' ? 1 : 0)
         expect(configuration.writes).toEqual([])
-        expect(application.current().authorizationOperations).toEqual(operationsAtStop)
+        expect(readApplicationState(application.current()).authorizationOperations).toEqual(
+          operationsAtStop,
+        )
         expect(states).toHaveLength(publicationsAtStop)
         expect(JSON.stringify(states)).not.toContain('Private late vault write detail.')
       } finally {
@@ -1453,21 +1779,25 @@ describe('RoadmapApplication GitHub Connections', () => {
         ...sourceOptions(),
         now: () => 0,
       })
-      const states: ApplicationState[] = []
-      application.subscribe((state) => states.push(structuredClone(state)))
+      const states: ReadyApplicationState[] = []
+      application.subscribe((state) => states.push(structuredClone(readApplicationState(state))))
       await application.start()
-      await application.execute({
-        type: 'begin-github-authorization',
-        name: 'Identity verification',
-        expectedConfigurationVersion: 1,
-      })
+      await application.execute(
+        commandSchema.parse({
+          type: 'begin-github-authorization',
+          name: 'Identity verification',
+          expectedConfigurationVersion: 1,
+        }),
+      )
       await vi.advanceTimersByTimeAsync(1)
       await entered.promise
       let stopped = false
       const stopping = application.stop().then(() => {
         stopped = true
       })
-      const operationsAtStop = structuredClone(application.current().authorizationOperations)
+      const operationsAtStop = structuredClone(
+        readApplicationState(application.current()).authorizationOperations,
+      )
       const publicationsAtStop = states.length
       try {
         await vi.advanceTimersByTimeAsync(0)
@@ -1479,7 +1809,9 @@ describe('RoadmapApplication GitHub Connections', () => {
         await vi.advanceTimersByTimeAsync(0)
         expect(credentials.records.size).toBe(0)
         expect(configuration.writes).toEqual([])
-        expect(application.current().authorizationOperations).toEqual(operationsAtStop)
+        expect(readApplicationState(application.current()).authorizationOperations).toEqual(
+          operationsAtStop,
+        )
         expect(states).toHaveLength(publicationsAtStop)
       } finally {
         identity.resolve({ id: '42', login: 'octocat' })
@@ -1568,12 +1900,14 @@ describe('RoadmapApplication GitHub Connections', () => {
         },
         now: () => clock,
       })
-      const states: ApplicationState[] = []
-      application.subscribe((state) => states.push(structuredClone(state)))
+      const states: ReadyApplicationState[] = []
+      application.subscribe((state) => states.push(structuredClone(readApplicationState(state))))
       let stopping: Promise<void> | undefined
       try {
         await application.start()
-        expect(application.current().connections[1]?.availability.status).toBe('available')
+        expect(
+          readApplicationState(application.current()).connections[1]?.availability.status,
+        ).toBe('available')
         providerTokens.length = 0
         clock = 600_002
         await vi.advanceTimersByTimeAsync(1_000)
@@ -1582,7 +1916,7 @@ describe('RoadmapApplication GitHub Connections', () => {
         stopping = application.stop().then(() => {
           stopped = true
         })
-        const publicAtStop = structuredClone(application.current())
+        const publicAtStop = structuredClone(readApplicationState(application.current()))
         const publicationsAtStop = states.length
         const identifiesAtStop = identified.length
         const writesAtStop = writes.length
@@ -1605,8 +1939,10 @@ describe('RoadmapApplication GitHub Connections', () => {
         else write.resolve()
         await stopping
         await vi.advanceTimersByTimeAsync(60_000)
-        expect(application.current().connections).toEqual(publicAtStop.connections)
-        expect(application.current().authorizationOperations).toEqual(
+        expect(readApplicationState(application.current()).connections).toEqual(
+          publicAtStop.connections,
+        )
+        expect(readApplicationState(application.current()).authorizationOperations).toEqual(
           publicAtStop.authorizationOperations,
         )
         expect(states).toHaveLength(publicationsAtStop)

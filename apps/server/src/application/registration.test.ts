@@ -3,24 +3,34 @@ import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import type { ApplicationState, ProjectRegistration } from '@roadmap/contracts'
+import { commandSchema } from '@roadmap/contracts/operations'
+import type { ReadyApplicationState } from '@roadmap/contracts/state'
 import { describe, expect, it, vi } from 'vitest'
+import type { GitHubConnectionPort } from '../authorization/contracts.ts'
 import {
   type ConfigurationDocument,
   type ConfigurationRead,
   createConfigurationDocument,
 } from '../configuration/document.ts'
 import { createGitHubProjectAdmission } from '../github/admission.ts'
-import type { GitHubConnectionPort } from '../github/connections.ts'
 import { createGitHubObserverPool } from '../github/observer.ts'
 import { createLocalProjectAdmission } from '../local/admission.ts'
 import { createLocalObserver } from '../local/observer.ts'
 import type {
+  GitHubProjectIntent,
   GitHubProviderRead,
   LocalProjectIntent,
   ProjectAdmission,
   ProjectConfiguration,
+  ProjectConfigurationIntent,
 } from '../projects/registry.ts'
+import {
+  fixtureProjectManagement,
+  fixtureProjectRef,
+  fixtureResourceRef,
+  fixtureWorkspacePath,
+  readApplicationState,
+} from '../public-test-fixtures.ts'
 import { createRoadmapApplication } from './application.ts'
 import { createApplicationOperations } from './operations.ts'
 
@@ -61,16 +71,6 @@ function localIntent(path: string, gitIdentity?: string): LocalProjectIntent {
     ref: { integration: 'local', projectId: 'stable-local' },
     connectionId: 'local',
     displayName: 'Managed Local',
-    workspace: { path, ...(gitIdentity ? { gitIdentity } : {}) },
-  }
-}
-
-function localRow(path: string, gitIdentity?: string): ProjectRegistration {
-  return {
-    key: { integration: 'local', id: 'stable-local' },
-    connectionId: 'local',
-    displayName: 'Managed Local',
-    locator: { integration: 'local', path },
     workspace: { path, ...(gitIdentity ? { gitIdentity } : {}) },
   }
 }
@@ -128,11 +128,14 @@ function persistedLocalApplication(filename: string) {
 }
 
 function registerLocal(application: ReturnType<typeof createRoadmapApplication>, path: string) {
-  return application.execute({
-    type: 'register-project',
-    candidate: { integration: 'local', connectionId: 'local', workspace: { path } },
-    expectedConfigurationVersion: application.current().configurationVersion,
-  })
+  return application.execute(
+    commandSchema.parse({
+      type: 'register-project',
+      candidate: { integration: 'local', connectionId: 'local', workspace: { path } },
+      expectedConfigurationVersion: readApplicationState(application.current())
+        .configurationVersion,
+    }),
+  )
 }
 
 async function fixture(run: (root: string) => Promise<void>) {
@@ -184,12 +187,12 @@ const github: GitHubConnectionPort = {
 }
 
 function githubApplication(path: string, identityId = '7') {
-  const row: ProjectRegistration = {
-    key: { integration: 'github', id: 'stable-route' },
+  const row: GitHubProjectIntent = {
+    ref: { integration: 'github', projectId: 'stable-route' },
     connectionId: 'work',
     displayName: 'Managed remote',
-    locator: { integration: 'github', repositoryId: '42', nameWithOwner: 'Acme/Roadmap' },
-    workspace: { path, gitIdentity: '42' },
+    locator: { repositoryId: '42', nameWithOwner: 'Acme/Roadmap' },
+    workspace: { path },
   }
   const storage = document({
     ...BASE,
@@ -203,15 +206,7 @@ function githubApplication(path: string, identityId = '7') {
         githubIdentity: { id: '7', login: 'octocat' },
       },
     ],
-    projects: [
-      {
-        ref: { integration: 'github', projectId: 'stable-route' },
-        connectionId: 'work',
-        displayName: 'Managed remote',
-        locator: { repositoryId: '42', nameWithOwner: 'Acme/Roadmap' },
-        workspace: { path },
-      },
-    ],
+    projects: [row],
   })
   const requests: string[] = []
   const launch = vi.fn(async () => {})
@@ -301,15 +296,18 @@ function githubApplication(path: string, identityId = '7') {
 
 function repair(
   application: ReturnType<typeof createRoadmapApplication>,
-  project: ProjectRegistration['key'],
+  project: ProjectConfigurationIntent['ref'],
   path: string,
 ) {
-  return application.execute({
-    type: 'repair-project-workspace',
-    project,
-    workspace: { path },
-    expectedConfigurationVersion: application.current().configurationVersion,
-  })
+  return application.execute(
+    commandSchema.parse({
+      type: 'repair-project-workspace',
+      project,
+      workspace: { path },
+      expectedConfigurationVersion: readApplicationState(application.current())
+        .configurationVersion,
+    }),
+  )
 }
 
 describe('public application registration authority', () => {
@@ -344,27 +342,27 @@ describe('public application registration authority', () => {
               },
             ],
           })
-          expect(application.current().configurationVersion).toBe(2)
-          expect(application.current().registrations).toEqual([
+          expect(readApplicationState(application.current()).configurationVersion).toBe(2)
+          expect(readApplicationState(application.current()).projects).toMatchObject([
             {
-              key: { integration: 'local', id },
+              ref: fixtureResourceRef({ integration: 'local', id }),
               connectionId: 'local',
-              locator: { integration: 'local', path: canonical },
-              workspace: { path: canonical },
+              source: { integration: 'local', path: canonical },
+              management: {},
             },
           ])
-          expect(application.current().projects[0]).toMatchObject({
-            key: { integration: 'local', id },
+          expect(readApplicationState(application.current()).projects[0]).toMatchObject({
+            ref: fixtureResourceRef({ integration: 'local', id }),
             resource: { kind: 'current-readable' },
           })
-          expect(application.current().projects[0]).toMatchObject({
-            key: { integration: 'local', id },
+          expect(readApplicationState(application.current()).projects[0]).toMatchObject({
+            ref: fixtureResourceRef({ integration: 'local', id }),
             maps: [
               expect.objectContaining({
-                key: {
+                ref: fixtureResourceRef({
                   project: { integration: 'local', id },
                   mapId: '.wayfinder/registration-map/map.md',
-                },
+                }),
                 resource: {
                   kind: 'current-readable',
                   observation: expect.objectContaining({
@@ -415,41 +413,41 @@ describe('public application registration authority', () => {
             },
           ],
         })
-        expect(application.current().configurationVersion).toBe(3)
-        expect(application.current().registrations).toEqual([
+        expect(readApplicationState(application.current()).configurationVersion).toBe(3)
+        expect(readApplicationState(application.current()).projects).toMatchObject([
           {
-            key: { integration: 'local', id: 'shared-name' },
+            ref: fixtureResourceRef({ integration: 'local', id: 'shared-name' }),
             connectionId: 'local',
-            locator: { integration: 'local', path: firstCanonical },
-            workspace: { path: firstCanonical },
+            source: { integration: 'local', path: firstCanonical },
+            management: {},
           },
           {
-            key: { integration: 'local', id: 'shared-name-2' },
+            ref: fixtureResourceRef({ integration: 'local', id: 'shared-name-2' }),
             connectionId: 'local',
-            locator: { integration: 'local', path: secondCanonical },
-            workspace: { path: secondCanonical },
+            source: { integration: 'local', path: secondCanonical },
+            management: {},
           },
         ])
-        expect(application.current().projects).toEqual([
+        expect(readApplicationState(application.current()).projects).toEqual([
           expect.objectContaining({
-            key: { integration: 'local', id: 'shared-name' },
+            ref: fixtureResourceRef({ integration: 'local', id: 'shared-name' }),
             resource: expect.objectContaining({ kind: 'current-readable' }),
           }),
           expect.objectContaining({
-            key: { integration: 'local', id: 'shared-name-2' },
+            ref: fixtureResourceRef({ integration: 'local', id: 'shared-name-2' }),
             resource: expect.objectContaining({ kind: 'current-readable' }),
           }),
         ])
-        expect(application.current().projects).toEqual(
+        expect(readApplicationState(application.current()).projects).toEqual(
           expect.arrayContaining([
             expect.objectContaining({
-              key: { integration: 'local', id: 'shared-name' },
+              ref: fixtureResourceRef({ integration: 'local', id: 'shared-name' }),
               maps: [
                 expect.objectContaining({
-                  key: {
+                  ref: fixtureResourceRef({
                     project: { integration: 'local', id: 'shared-name' },
                     mapId: '.wayfinder/registration-map/map.md',
-                  },
+                  }),
                   resource: {
                     kind: 'current-readable',
                     observation: expect.objectContaining({
@@ -460,13 +458,13 @@ describe('public application registration authority', () => {
               ],
             }),
             expect.objectContaining({
-              key: { integration: 'local', id: 'shared-name-2' },
+              ref: fixtureResourceRef({ integration: 'local', id: 'shared-name-2' }),
               maps: [
                 expect.objectContaining({
-                  key: {
+                  ref: fixtureResourceRef({
                     project: { integration: 'local', id: 'shared-name-2' },
                     mapId: '.wayfinder/registration-map/map.md',
-                  },
+                  }),
                   resource: {
                     kind: 'current-readable',
                     observation: expect.objectContaining({
@@ -500,16 +498,20 @@ describe('public application registration authority', () => {
       await writeFile(filename, `${JSON.stringify(BASE, null, 2)}\n`, 'utf8')
       const project = {
         integration: 'local',
-        id: 'restart-name',
-      } satisfies ProjectRegistration['key']
+        projectId: 'restart-name',
+      } satisfies ProjectConfigurationIntent['ref']
       const saved = persistedLocalApplication(filename)
       let persistedBytes = ''
       try {
         await saved.application.start()
         expect((await registerLocal(saved.application, workspace)).ok).toBe(true)
-        expect(saved.application.current().configurationVersion).toBe(2)
-        expect(saved.application.current().registrations[0]?.key).toEqual(project)
-        expect(saved.application.current().projects[0]?.maps[0]?.resource).toMatchObject({
+        expect(readApplicationState(saved.application.current()).configurationVersion).toBe(2)
+        expect(readApplicationState(saved.application.current()).projects[0]?.ref).toEqual(
+          fixtureProjectRef(project),
+        )
+        expect(
+          readApplicationState(saved.application.current()).projects[0]?.maps[0]?.resource,
+        ).toMatchObject({
           kind: 'current-readable',
           observation: { value: { title: 'Before restart' } },
         })
@@ -537,24 +539,24 @@ describe('public application registration authority', () => {
       const restarted = persistedLocalApplication(filename)
       try {
         await restarted.application.start()
-        expect(restarted.application.current().configurationVersion).toBe(2)
-        expect(restarted.application.current().registrations).toEqual([
+        expect(readApplicationState(restarted.application.current()).configurationVersion).toBe(2)
+        expect(readApplicationState(restarted.application.current()).projects).toMatchObject([
           {
-            key: project,
+            ref: fixtureResourceRef(project),
             connectionId: 'local',
-            locator: { integration: 'local', path: canonical },
-            workspace: { path: canonical },
+            source: { integration: 'local', path: canonical },
+            management: {},
           },
         ])
-        expect(restarted.application.current().projects[0]).toMatchObject({
-          key: project,
+        expect(readApplicationState(restarted.application.current()).projects[0]).toMatchObject({
+          ref: fixtureResourceRef(project),
           resource: { kind: 'current-readable' },
         })
-        expect(restarted.application.current().projects[0]).toMatchObject({
-          key: project,
+        expect(readApplicationState(restarted.application.current()).projects[0]).toMatchObject({
+          ref: fixtureResourceRef(project),
           maps: [
             expect.objectContaining({
-              key: { project, mapId: '.wayfinder/saved-map/map.md' },
+              ref: fixtureResourceRef({ project, mapId: '.wayfinder/saved-map/map.md' }),
               resource: {
                 kind: 'current-readable',
                 observation: expect.objectContaining({
@@ -565,12 +567,14 @@ describe('public application registration authority', () => {
           ],
         })
         expect(
-          await restarted.application.execute({
-            type: 'launch-action',
-            actionId: 'open-workspace',
-            project,
-            expectedConfigurationVersion: 2,
-          }),
+          await restarted.application.execute(
+            commandSchema.parse({
+              type: 'launch-action',
+              actionId: 'open-workspace',
+              project: fixtureProjectRef(project),
+              expectedConfigurationVersion: 2,
+            }),
+          ),
         ).toMatchObject({
           ok: true,
           result: { type: 'action-launched', actionId: 'open-workspace' },
@@ -578,7 +582,7 @@ describe('public application registration authority', () => {
         expect(restarted.effects).toEqual([
           { executable: '/usr/bin/open', args: ['-a', 'Visual Studio Code', canonical] },
         ])
-        expect(restarted.application.current().configurationVersion).toBe(2)
+        expect(readApplicationState(restarted.application.current()).configurationVersion).toBe(2)
         expect(await readFile(filename, 'utf8')).toBe(persistedBytes)
       } finally {
         await restarted.application.stop()
@@ -593,35 +597,39 @@ describe('public application registration authority', () => {
       try {
         expect(
           (
-            await test.application.execute({
-              type: 'register-project',
-              candidate: {
-                integration: 'local',
-                connectionId: 'local',
-                workspace: { path: root },
-                displayName: 'Plain',
-              },
-              expectedConfigurationVersion: 1,
-            })
+            await test.application.execute(
+              commandSchema.parse({
+                type: 'register-project',
+                candidate: {
+                  integration: 'local',
+                  connectionId: 'local',
+                  workspace: { path: root },
+                  displayName: 'Plain',
+                },
+                expectedConfigurationVersion: 1,
+              }),
+            )
           ).ok,
         ).toBe(true)
-        const admitted = test.application.current().registrations[0]
-        expect(admitted?.workspace.path).toBe(await realpath(root))
-        expect(admitted?.workspace.gitIdentity).toBeUndefined()
+        const admitted = readApplicationState(test.application.current()).projects[0]
+        expect(fixtureWorkspacePath(admitted)).toBe(await realpath(root))
         if (!admitted) throw new Error('missing admitted Project')
         expect(
           (
-            await test.application.execute({
-              type: 'rename-project',
-              project: admitted.key,
-              name: 'Renamed',
-              expectedConfigurationVersion: test.application.current().configurationVersion,
-            })
+            await test.application.execute(
+              commandSchema.parse({
+                type: 'rename-project',
+                project: fixtureProjectRef(admitted.ref),
+                name: 'Renamed',
+                expectedConfigurationVersion: readApplicationState(test.application.current())
+                  .configurationVersion,
+              }),
+            )
           ).ok,
         ).toBe(true)
-        expect(test.application.current().registrations[0]).toMatchObject({
-          key: admitted.key,
-          displayName: 'Renamed',
+        expect(readApplicationState(test.application.current()).projects[0]).toMatchObject({
+          ref: admitted.ref,
+          management: { displayName: 'Renamed' },
         })
       } finally {
         await test.application.stop()
@@ -645,15 +653,15 @@ describe('public application registration authority', () => {
             (
               await repair(
                 test.application,
-                localRow(canonical).key,
+                localIntent(canonical).ref,
                 kind === 'symlink' ? alias : `${path}/.`,
               )
             ).ok,
           ).toBe(true)
-          expect(test.application.current().registrations[0]).toMatchObject({
-            key: { integration: 'local', id: 'stable-local' },
-            workspace: { path: canonical },
-            displayName: 'Managed Local',
+          expect(readApplicationState(test.application.current()).projects[0]).toMatchObject({
+            ref: fixtureResourceRef({ integration: 'local', id: 'stable-local' }),
+            source: { integration: 'local', path: canonical },
+            management: { displayName: 'Managed Local' },
           })
         } finally {
           await test.application.stop()
@@ -668,13 +676,15 @@ describe('public application registration authority', () => {
       const other = join(root, 'second', 'plain')
       await mkdir(original, { recursive: true })
       await mkdir(other, { recursive: true })
-      const row = localRow(await realpath(original))
+      const row = localIntent(await realpath(original))
       const test = localApplication({ ...BASE, projects: [localIntent(await realpath(original))] })
       await test.application.start()
       try {
-        expect((await repair(test.application, row.key, other)).ok).toBe(false)
+        expect((await repair(test.application, row.ref, other)).ok).toBe(false)
         expect(test.writes).toEqual([])
-        expect(test.application.current().registrations).toEqual([row])
+        expect(readApplicationState(test.application.current()).projects).toMatchObject([
+          fixtureProjectManagement(row),
+        ])
       } finally {
         await test.application.stop()
       }
@@ -709,22 +719,24 @@ describe('public application registration authority', () => {
             : history === 'different'
               ? 'git-roots:unrelated'
               : `git-roots:${stdout.trim()}`
-        const row = localRow(await realpath(original), recorded)
+        const row = localIntent(await realpath(original), recorded)
         const test = localApplication({
           ...BASE,
           projects: [localIntent(await realpath(original), recorded)],
         })
         await test.application.start()
         try {
-          expect((await repair(test.application, row.key, moved)).ok).toBe(history === 'matching')
+          expect((await repair(test.application, row.ref, moved)).ok).toBe(history === 'matching')
           if (history === 'matching') {
-            expect(test.application.current().registrations[0]).toMatchObject({
-              key: row.key,
-              workspace: { path: await realpath(moved), gitIdentity: recorded },
+            expect(readApplicationState(test.application.current()).projects[0]).toMatchObject({
+              ref: fixtureResourceRef(row.ref),
+              source: { integration: 'local', path: await realpath(moved) },
             })
           } else {
             expect(test.writes).toEqual([])
-            expect(test.application.current().registrations).toEqual([row])
+            expect(readApplicationState(test.application.current()).projects).toMatchObject([
+              fixtureProjectManagement(row),
+            ])
           }
         } finally {
           await test.application.stop()
@@ -739,7 +751,7 @@ describe('public application registration authority', () => {
       await fixture(async (root) => {
         const path = join(root, kind)
         if (kind === 'unreadable') await mkdir(path)
-        const row = localRow(path, 'git-roots:recorded')
+        const row = localIntent(path, 'git-roots:recorded')
         const admission =
           kind === 'unreadable'
             ? createLocalProjectAdmission({
@@ -754,20 +766,25 @@ describe('public application registration authority', () => {
         )
         await test.application.start()
         try {
-          expect(test.application.current().registrations).toEqual([row])
-          expect(test.application.current().projects[0]).toMatchObject({
-            key: row.key,
+          expect(readApplicationState(test.application.current()).projects).toMatchObject([
+            fixtureProjectManagement(row),
+          ])
+          expect(readApplicationState(test.application.current()).projects[0]).toMatchObject({
+            ref: fixtureResourceRef(row.ref),
             name: 'Managed Local',
             resource: { kind: 'never-observed' },
           })
           expect(test.observedPaths).toEqual([])
           expect(
-            await test.application.execute({
-              type: 'launch-action',
-              actionId: 'open-workspace',
-              project: row.key,
-              expectedConfigurationVersion: test.application.current().configurationVersion,
-            }),
+            await test.application.execute(
+              commandSchema.parse({
+                type: 'launch-action',
+                actionId: 'open-workspace',
+                project: fixtureProjectRef(row.ref),
+                expectedConfigurationVersion: readApplicationState(test.application.current())
+                  .configurationVersion,
+              }),
+            ),
           ).toMatchObject({
             ok: false,
             error: { code: 'admission-failed', field: 'workspace.path' },
@@ -783,19 +800,21 @@ describe('public application registration authority', () => {
   it('observes authorized saved GitHub source with missing worktree but fails host launch closed', async () => {
     await fixture(async (root) => {
       const test = githubApplication(join(root, 'missing'))
-      const publications: ApplicationState[] = []
-      test.application.subscribe((state) => publications.push(state))
+      const publications: ReadyApplicationState[] = []
+      test.application.subscribe((state) => publications.push(readApplicationState(state)))
       await test.application.start()
       try {
-        expect(test.application.current().registrations).toEqual([test.row])
-        expect(test.application.current().projects[0]).toMatchObject({
-          key: test.row.key,
+        expect(readApplicationState(test.application.current()).projects).toMatchObject([
+          fixtureProjectManagement(test.row),
+        ])
+        expect(readApplicationState(test.application.current()).projects[0]).toMatchObject({
+          ref: fixtureResourceRef(test.row.ref),
           name: 'Managed remote',
           resource: { kind: 'current-readable', observation: { observedAt: 1000 } },
         })
-        expect(test.application.current().projects[0]?.activeMap).toEqual({
+        expect(readApplicationState(test.application.current()).projects[0]?.activeMap).toEqual({
           kind: 'known-current',
-          mapId: '108',
+          ref: { project: { integration: 'github', projectId: 'stable-route' }, mapId: '108' },
         })
         expect(
           publications.some((state) => state.projects[0]?.resource.kind === 'current-readable'),
@@ -803,12 +822,15 @@ describe('public application registration authority', () => {
         expect(test.requests.filter((path) => path === '/repositories/42')).toHaveLength(1)
         expect(test.requests.filter((path) => path === 'map-read')).toHaveLength(1)
         expect(
-          await test.application.execute({
-            type: 'launch-action',
-            actionId: 'open-terminal',
-            project: test.row.key,
-            expectedConfigurationVersion: test.application.current().configurationVersion,
-          }),
+          await test.application.execute(
+            commandSchema.parse({
+              type: 'launch-action',
+              actionId: 'open-terminal',
+              project: fixtureProjectRef(test.row.ref),
+              expectedConfigurationVersion: readApplicationState(test.application.current())
+                .configurationVersion,
+            }),
+          ),
         ).toMatchObject({
           ok: false,
           error: { code: 'admission-failed', field: 'workspace.path' },
@@ -827,7 +849,7 @@ describe('public application registration authority', () => {
       await worktree(moved, 'Acme/Renamed')
       await test.application.start()
       try {
-        const before = test.application.current().projects[0]
+        const before = readApplicationState(test.application.current()).projects[0]
         const evidence = before && {
           resource: before.resource,
           mapsMembership: before.mapsMembership,
@@ -837,14 +859,14 @@ describe('public application registration authority', () => {
         }
         const requests = [...test.requests]
         const starts = test.starts()
-        expect((await repair(test.application, test.row.key, moved)).ok).toBe(true)
-        expect(test.application.current().registrations[0]).toMatchObject({
-          key: test.row.key,
+        expect((await repair(test.application, test.row.ref, moved)).ok).toBe(true)
+        expect(readApplicationState(test.application.current()).projects[0]).toMatchObject({
+          ref: fixtureResourceRef(test.row.ref),
           connectionId: 'work',
-          locator: { repositoryId: '42', nameWithOwner: 'Acme/Renamed' },
-          workspace: { path: await realpath(moved) },
+          source: { repositoryId: '42', nameWithOwner: 'Acme/Renamed' },
+          management: { workspacePath: await realpath(moved) },
         })
-        const after = test.application.current().projects[0]
+        const after = readApplicationState(test.application.current()).projects[0]
         expect(
           after && {
             resource: after.resource,
@@ -872,9 +894,11 @@ describe('public application registration authority', () => {
       await worktree(other, 'Other/Repository')
       await test.application.start()
       try {
-        expect((await repair(test.application, test.row.key, other)).ok).toBe(false)
+        expect((await repair(test.application, test.row.ref, other)).ok).toBe(false)
         expect(test.writes).toEqual([])
-        expect(test.application.current().registrations).toEqual([test.row])
+        expect(readApplicationState(test.application.current()).projects).toMatchObject([
+          fixtureProjectManagement(test.row),
+        ])
       } finally {
         await test.application.stop()
       }
@@ -888,10 +912,14 @@ describe('public application registration authority', () => {
       await worktree(moved, 'Acme/Renamed')
       await test.application.start()
       try {
-        expect(test.application.current().registrations).toEqual([test.row])
-        expect(test.application.current().projects[0]?.resource.kind).toBe('never-observed')
+        expect(readApplicationState(test.application.current()).projects).toMatchObject([
+          fixtureProjectManagement(test.row),
+        ])
+        expect(readApplicationState(test.application.current()).projects[0]?.resource.kind).toBe(
+          'never-observed',
+        )
         expect(test.requests).toEqual([])
-        expect((await repair(test.application, test.row.key, moved)).ok).toBe(false)
+        expect((await repair(test.application, test.row.ref, moved)).ok).toBe(false)
         expect(test.writes).toEqual([])
       } finally {
         await test.application.stop()

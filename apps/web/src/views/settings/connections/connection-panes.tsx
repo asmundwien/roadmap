@@ -1,4 +1,6 @@
-import type { AuthorizationOperation, Command, SafeError } from '@roadmap/contracts'
+import type { AuthorizationOperationId, ConfigurationVersion } from '@roadmap/contracts/identity'
+import type { Command, SafeError } from '@roadmap/contracts/operations'
+import type { AuthorizationOperation } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
 import { ControlGroup } from '@roadmap/ui/control-group'
@@ -18,9 +20,9 @@ const cx = classNames.bind(styles)
 
 type AddConnectionPaneProps = {
   operation: ConnectionOperation
-  configurationVersion: number
+  configurationVersion: ConfigurationVersion
   onClose: () => void
-  onStarted: (operationId: string) => void
+  onStarted: (operationId: AuthorizationOperationId) => void
 }
 
 export function AddConnectionPane({
@@ -97,7 +99,7 @@ export function AddConnectionPane({
 type AuthorizationPaneProps = {
   authorization: AuthorizationOperation
   operation: ConnectionOperation
-  configurationVersion: number
+  configurationVersion: ConfigurationVersion
   onClose: () => void
   onFinished: (message: string) => void
 }
@@ -141,24 +143,16 @@ export function AuthorizationPane({
           <DeviceCode>
             <small>{authorization.verificationUri}</small>
             <strong>{authorization.userCode}</strong>
-            <span>
-              {authorization.expiresAt
-                ? `Expires ${new Date(authorization.expiresAt).toLocaleTimeString()}`
-                : 'Waiting for GitHub'}
-            </span>
+            <span>{`Expires ${new Date(authorization.expiresAt).toLocaleTimeString()}`}</span>
           </DeviceCode>
           <AuthorizationControls>
-            {authorization.verificationUri && (
-              <Link href={authorization.verificationUri} external>
-                Open GitHub
-              </Link>
-            )}
+            <Link href={authorization.verificationUri} external>
+              Open GitHub
+            </Link>
             <ControlGroup>
               <Button
                 type="button"
-                disabled={!authorization.userCode}
                 onClick={() => {
-                  if (!authorization.userCode) return
                   void navigator.clipboard
                     .writeText(authorization.userCode)
                     .then(() => setCopied(true))
@@ -187,13 +181,17 @@ export function AuthorizationPane({
       {authorization.status === 'granted' && (
         <Alert variant="info">
           <strong>GitHub authorized.</strong>
-          <span>The Connection is saved and reconciliation has started.</span>
+          <span>
+            {authorization.connection.kind === 'historical'
+              ? 'The granted Connection account is no longer configured.'
+              : 'The Connection is configured. This grant does not establish Project source availability.'}
+          </span>
         </Alert>
       )}
       {authorization.status !== 'waiting' && authorization.status !== 'granted' && (
         <Alert>
           <strong>{authorizationStatus(authorization)}</strong>
-          <span>{authorization.cause}</span>
+          <span>{'cause' in authorization ? authorization.cause : undefined}</span>
         </Alert>
       )}
       <ErrorText error={error} />
@@ -205,7 +203,7 @@ export function AuthorizationPane({
             onClick={() =>
               onFinished(
                 authorization.status === 'granted'
-                  ? 'GitHub Connection authorized and queued for reconciliation.'
+                  ? 'GitHub authorization grant recorded.'
                   : 'Authorization progress closed.',
               )
             }

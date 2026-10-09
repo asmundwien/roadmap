@@ -1,6 +1,9 @@
-import type { Integration, ProjectKey } from '@roadmap/contracts'
+import type { Integration } from '@roadmap/contracts/identity'
 
-export type SourceProjectKey = ProjectKey
+export interface SourceProjectKey {
+  readonly integration: Integration
+  readonly id: string
+}
 export interface SourceMapKey {
   readonly project: SourceProjectKey
   readonly mapId: string

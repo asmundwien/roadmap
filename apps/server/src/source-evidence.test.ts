@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { ApplicationState } from '@roadmap/contracts'
+import type { ReadyApplicationState } from '@roadmap/contracts/state'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRoadmapApplication, type RoadmapApplication } from './application/application.ts'
 import { createApplicationOperations } from './application/operations.ts'
@@ -16,6 +16,7 @@ import {
   type SourceObservationHealth,
 } from './observation/source.ts'
 import type { ProjectConfiguration } from './projects/registry.ts'
+import { fixtureResourceRef, readApplicationState } from './public-test-fixtures.ts'
 import {
   controlledSourceFixture,
   createFixtureReadSequence,
@@ -127,7 +128,7 @@ async function writeMap(
 }
 
 async function reconcile(application: RoadmapApplication, time = 2_000): Promise<void> {
-  const previousSequence = application.current().stateSequence
+  const previousSequence = readApplicationState(application.current()).stateSequence
   let unsubscribe = () => {}
   const published = new Promise<void>((resolve) => {
     unsubscribe = application.subscribe((state) => {
@@ -193,7 +194,7 @@ async function controlledEvidenceApplication() {
   const readGitHub = createSourceFixtureOwner()
   const localControl = controlledSourceFixture(local.key, readLocal([local], 800, document))
   const remoteControl = controlledSourceFixture(github.key, readGitHub([github], 900, document))
-  const states: ApplicationState[] = []
+  const states: ReadyApplicationState[] = []
   const application = createRoadmapApplication({
     configuration: {
       async load() {
@@ -213,7 +214,7 @@ async function controlledEvidenceApplication() {
     serverEpoch: 'controlled-source-evidence',
   })
   applications.push(application)
-  application.subscribe((state) => states.push(state))
+  application.subscribe((state) => states.push(readApplicationState(state)))
   await application.start()
   return {
     application,
@@ -233,8 +234,8 @@ async function controlledEvidenceApplication() {
     },
   }
 }
-function sourceTime(state: ApplicationState, integration: 'local' | 'github') {
-  const project = state.projects.find((project) => project.key.integration === integration)
+function sourceTime(state: ReadyApplicationState, integration: 'local' | 'github') {
+  const project = state.projects.find((project) => project.ref.integration === integration)
   return project ? publicProjectObservation(project)?.observedAt : undefined
 }
 
@@ -247,22 +248,23 @@ describe('source evidence through RoadmapApplication', () => {
       'local',
       controlled.readLocal([{ ...local, warnings: ['Local-only content change.'] }], 1_800),
     )
-    expect(sourceTime(application.current(), 'local')).toBe(1_800)
-    expect(sourceTime(application.current(), 'github')).toBe(900)
-    expect(application.current().roadmap.capturedAt).toBe(2_000)
+    expect(sourceTime(readApplicationState(application.current()), 'local')).toBe(1_800)
+    expect(sourceTime(readApplicationState(application.current()), 'github')).toBe(900)
+    expect(application.current().capturedAt).toBe(2_000)
 
     vi.setSystemTime(3_000)
     controlled.push('github', controlled.readGitHub([github], 2_500, configuration))
-    expect(sourceTime(application.current(), 'github')).toBe(2_500)
-    expect(sourceTime(application.current(), 'local')).toBe(1_800)
+    expect(sourceTime(readApplicationState(application.current()), 'github')).toBe(2_500)
+    expect(sourceTime(readApplicationState(application.current()), 'local')).toBe(1_800)
     expect(
-      application.current().connections.find((connection) => connection.id === 'github')
-        ?.availability.observedAt,
+      readApplicationState(application.current()).connections.find(
+        (connection) => connection.id === 'github',
+      )?.availability.observedAt,
     ).toBe(900)
-    expect(application.current().roadmap.capturedAt).toBe(3_000)
+    expect(application.current().capturedAt).toBe(3_000)
     expect(
       states.map((state) => ({
-        publication: state.roadmap.capturedAt,
+        publication: state.capturedAt,
         local: sourceTime(state, 'local'),
         github: sourceTime(state, 'github'),
       })),
@@ -272,8 +274,8 @@ describe('source evidence through RoadmapApplication', () => {
       { publication: 3_000, local: 1_800, github: 2_500 },
     ])
     for (const state of states) {
-      expect(state.projects.find((project) => project.key.integration === 'github')).toMatchObject({
-        key: { integration: 'github', id: 'remote-evidence' },
+      expect(state.projects.find((project) => project.ref.integration === 'github')).toMatchObject({
+        ref: fixtureResourceRef({ integration: 'github', id: 'remote-evidence' }),
         name: 'acme/remote',
       })
     }
@@ -315,9 +317,9 @@ describe('source evidence through RoadmapApplication', () => {
       ),
     )
 
-    const beforeRecovery = application
-      .current()
-      .projects.find((project) => project.key.integration === 'github')
+    const beforeRecovery = readApplicationState(application.current()).projects.find(
+      (project) => project.ref.integration === 'github',
+    )
     expect(beforeRecovery).toMatchObject({
       name: 'acme/remote',
       resource: {
@@ -328,11 +330,12 @@ describe('source evidence through RoadmapApplication', () => {
       activeMap: { kind: 'uncertain' },
     })
     expect(
-      application.current().projects.find((project) => project.key.integration === 'local')
-        ?.resource.kind,
+      readApplicationState(application.current()).projects.find(
+        (project) => project.ref.integration === 'local',
+      )?.resource.kind,
     ).toBe('current-readable')
     for (const state of states.slice(1)) {
-      expect(state.projects.find((project) => project.key.integration === 'github')).toMatchObject({
+      expect(state.projects.find((project) => project.ref.integration === 'github')).toMatchObject({
         name: 'acme/remote',
         resource: { kind: 'retained-unavailable', lastSuccessful: { observedAt: 900 } },
         activeMap: { kind: 'uncertain' },
@@ -352,8 +355,8 @@ describe('source evidence through RoadmapApplication', () => {
     })
     expect(states.length).toBeGreaterThan(recoveryBoundary)
     for (const state of states.slice(recoveryBoundary)) {
-      expect(state.projects.find((project) => project.key.integration === 'github')).toMatchObject({
-        key: { integration: 'github', id: 'remote-evidence' },
+      expect(state.projects.find((project) => project.ref.integration === 'github')).toMatchObject({
+        ref: fixtureResourceRef({ integration: 'github', id: 'remote-evidence' }),
         name: 'acme/remote',
         resource: {
           kind: 'current-readable',
@@ -362,7 +365,7 @@ describe('source evidence through RoadmapApplication', () => {
         mapsMembership: { kind: 'current-complete', observation: { observedAt: 2_900 } },
         activeMap: { kind: 'known-empty' },
       })
-      expect(state.roadmap.capturedAt).toBe(4_000)
+      expect(state.capturedAt).toBe(4_000)
       expect(sourceTime(state, 'local')).toBe(2_800)
       expect(
         state.connections.find((connection) => connection.id === 'github')?.availability.observedAt,
@@ -375,23 +378,31 @@ describe('source evidence through RoadmapApplication', () => {
     await writeMap(root, 'primary', 'Original primary prose.', 200)
     await writeMap(root, 'secondary', 'Original secondary prose.', 100)
     const application = await startApplication(root)
-    expect(application.current().projects[0]?.displayOrder.openMapIds).toEqual([
-      PRIMARY_MAP_ID,
-      SECONDARY_MAP_ID,
-    ])
+    expect(
+      readApplicationState(application.current()).projects[0]?.displayOrder.open.map(
+        (ref) => ref.mapId,
+      ),
+    ).toEqual([PRIMARY_MAP_ID, SECONDARY_MAP_ID])
 
     await rm(join(root, '.wayfinder', 'primary', 'map.md'))
     await mkdir(join(root, '.wayfinder', 'primary', 'map.md'))
     await writeMap(root, 'secondary', 'Updated secondary prose.', 300)
     await reconcile(application)
 
-    const project = application.current().projects[0]
+    const project = readApplicationState(application.current()).projects[0]
     expect(project).toMatchObject({
       resource: { kind: 'current-readable', observation: { observedAt: 2_100 } },
       activeMap: { kind: 'uncertain' },
-      displayOrder: { openMapIds: [PRIMARY_MAP_ID, SECONDARY_MAP_ID] },
+      displayOrder: {
+        open: [PRIMARY_MAP_ID, SECONDARY_MAP_ID].map((mapId) =>
+          fixtureResourceRef({
+            project: { integration: 'local', id: 'opaque/local-project' },
+            mapId,
+          }),
+        ),
+      },
     })
-    expect(project?.maps.find((map) => map.key.mapId === PRIMARY_MAP_ID)).toMatchObject({
+    expect(project?.maps.find((map) => map.ref.mapId === PRIMARY_MAP_ID)).toMatchObject({
       resource: {
         kind: 'retained-unavailable',
         lastSuccessful: {
@@ -410,13 +421,13 @@ describe('source evidence through RoadmapApplication', () => {
       },
       tickets: [
         expect.objectContaining({
-          key: {
+          ref: fixtureResourceRef({
             map: {
               project: { integration: 'local', id: 'opaque/local-project' },
               mapId: PRIMARY_MAP_ID,
             },
             ticketId: '1',
-          },
+          }),
           resource: {
             kind: 'current-readable',
             observation: expect.objectContaining({
@@ -429,7 +440,7 @@ describe('source evidence through RoadmapApplication', () => {
         }),
       ],
     })
-    expect(project?.maps.find((map) => map.key.mapId === SECONDARY_MAP_ID)?.resource).toMatchObject(
+    expect(project?.maps.find((map) => map.ref.mapId === SECONDARY_MAP_ID)?.resource).toMatchObject(
       {
         kind: 'current-readable',
         observation: {
@@ -449,7 +460,7 @@ describe('source evidence through RoadmapApplication', () => {
     const unreadable = await startApplication(unreadableRoot, 'never-read')
     const empty = await startApplication(emptyRoot, 'readable-empty')
 
-    expect(unreadable.current().projects[0]).toMatchObject({
+    expect(readApplicationState(unreadable.current()).projects[0]).toMatchObject({
       resource: { kind: 'current-readable', observation: { observedAt: 1_000 } },
       mapsMembership: {
         kind: 'unavailable',
@@ -459,7 +470,7 @@ describe('source evidence through RoadmapApplication', () => {
       maps: [],
       activeMap: { kind: 'uncertain' },
     })
-    expect(empty.current().projects[0]).toMatchObject({
+    expect(readApplicationState(empty.current()).projects[0]).toMatchObject({
       resource: { kind: 'current-readable', observation: { observedAt: 1_000 } },
       mapsMembership: { kind: 'current-complete', observation: { value: { members: [] } } },
       maps: [],
@@ -476,14 +487,21 @@ describe('source evidence through RoadmapApplication', () => {
     await writeFile(join(root, '.wayfinder'), 'Enumeration cannot succeed.')
     await reconcile(application)
 
-    const project = application.current().projects[0]
+    const project = readApplicationState(application.current()).projects[0]
     expect(project).toMatchObject({
       resource: { kind: 'current-readable', observation: { observedAt: 2_100 } },
       mapsMembership: { kind: 'unavailable', lastComplete: { observedAt: 1_000 } },
       activeMap: { kind: 'uncertain' },
-      displayOrder: { openMapIds: [PRIMARY_MAP_ID] },
+      displayOrder: {
+        open: [PRIMARY_MAP_ID].map((mapId) =>
+          fixtureResourceRef({
+            project: { integration: 'local', id: 'opaque/local-project' },
+            mapId,
+          }),
+        ),
+      },
     })
-    expect(project?.maps.find((map) => map.key.mapId === PRIMARY_MAP_ID)?.resource).toMatchObject({
+    expect(project?.maps.find((map) => map.ref.mapId === PRIMARY_MAP_ID)?.resource).toMatchObject({
       kind: 'retained-unavailable',
       lastSuccessful: {
         observedAt: 1_000,
@@ -501,15 +519,25 @@ describe('source evidence through RoadmapApplication', () => {
     await rm(join(root, '.wayfinder', 'primary'), { recursive: true })
     await reconcile(application)
 
-    const project = application.current().projects[0]
-    const retained = project?.maps.find((map) => map.key.mapId === PRIMARY_MAP_ID)
+    const project = readApplicationState(application.current()).projects[0]
+    const retained = project?.maps.find((map) => map.ref.mapId === PRIMARY_MAP_ID)
     expect(project).toMatchObject({
       activeMap: { kind: 'known-empty' },
-      displayOrder: { openMapIds: [] },
+      displayOrder: {
+        open: [].map((mapId) =>
+          fixtureResourceRef({
+            project: { integration: 'local', id: 'opaque/local-project' },
+            mapId,
+          }),
+        ),
+      },
       mapsMembership: { kind: 'current-complete', observation: { value: { members: [] } } },
     })
     expect(retained).toMatchObject({
-      key: { mapId: PRIMARY_MAP_ID },
+      ref: fixtureResourceRef({
+        project: { integration: 'local', id: 'opaque/local-project' },
+        mapId: PRIMARY_MAP_ID,
+      }),
       resource: {
         kind: 'proven-absent',
         absence: { observedAt: 2_100, proof: { kind: 'complete-membership' } },
@@ -526,13 +554,13 @@ describe('source evidence through RoadmapApplication', () => {
       },
       tickets: [
         expect.objectContaining({
-          key: {
+          ref: fixtureResourceRef({
             ticketId: '1',
             map: {
               project: { integration: 'local', id: 'opaque/local-project' },
               mapId: PRIMARY_MAP_ID,
             },
-          },
+          }),
           resource: expect.objectContaining({
             kind: 'retained-unavailable',
             lastSuccessful: expect.objectContaining({
@@ -555,7 +583,7 @@ describe('source evidence through RoadmapApplication', () => {
     await rm(join(root, '.wayfinder', 'primary', 'map.md'))
     await mkdir(join(root, '.wayfinder', 'primary', 'map.md'))
     await reconcile(application)
-    expect(application.current().projects[0]).toMatchObject({
+    expect(readApplicationState(application.current()).projects[0]).toMatchObject({
       activeMap: { kind: 'uncertain' },
       maps: [
         expect.objectContaining({
@@ -571,13 +599,19 @@ describe('source evidence through RoadmapApplication', () => {
     await writeMap(root, 'primary', 'Recovered map prose.', 400)
     await reconcile(application, 3_000)
 
-    const recovered = application.current().projects[0]
+    const recovered = readApplicationState(application.current()).projects[0]
     expect(recovered).toMatchObject({
-      key: { integration: 'local', id: 'opaque/local-project' },
+      ref: { integration: 'local', projectId: 'opaque/local-project' },
       resource: { kind: 'current-readable', observation: { observedAt: 3_100 } },
-      activeMap: { kind: 'known-current', mapId: PRIMARY_MAP_ID },
+      activeMap: {
+        kind: 'known-current',
+        ref: fixtureResourceRef({
+          project: { integration: 'local', id: 'opaque/local-project' },
+          mapId: PRIMARY_MAP_ID,
+        }),
+      },
     })
-    expect(recovered?.maps.find((map) => map.key.mapId === PRIMARY_MAP_ID)?.resource).toMatchObject(
+    expect(recovered?.maps.find((map) => map.ref.mapId === PRIMARY_MAP_ID)?.resource).toMatchObject(
       {
         kind: 'current-readable',
         observation: {

@@ -1,6 +1,8 @@
 import { createServer, type Server, type ServerResponse } from 'node:http'
-import type { ApplicationState, Command } from '@roadmap/contracts'
-import { stateEnvelopeCodec } from '@roadmap/contracts/codecs'
+import type { Command } from '@roadmap/contracts/operations'
+import { commandSchema } from '@roadmap/contracts/operations'
+import type { ApplicationState } from '@roadmap/contracts/state'
+import { decodeStateEnvelope } from '@roadmap/contracts/wire'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
 import {
@@ -12,6 +14,7 @@ import { createRoadmapApplication, type RoadmapApplication } from './application
 import { createApplicationOperations } from './application/operations.ts'
 import type { ConfigurationDocument, ConfigurationRead } from './configuration/document.ts'
 import type { ProjectConfiguration } from './projects/registry.ts'
+import { fixtureProjectRef, readApplicationState } from './public-test-fixtures.ts'
 import {
   controlledSourceFixture,
   createSourceFixtureOwner,
@@ -22,12 +25,12 @@ import {
 import { createRoadmapTransport, type RoadmapTransport } from './transport.ts'
 
 const ORIGIN = 'http://localhost:5173'
-const LAUNCH: Command = {
+const LAUNCH: Command = commandSchema.parse({
   type: 'launch-action',
   expectedConfigurationVersion: 1,
-  project: { integration: 'local', id: 'fixture' },
+  project: fixtureProjectRef({ integration: 'local', id: 'fixture' }),
   actionId: 'open-workspace',
-}
+})
 
 function deferred() {
   let resolve: () => void = () => undefined
@@ -250,7 +253,7 @@ function browser(initial: Backend, withhold = false) {
       native.on('message', (raw) => {
         const data = String(raw)
         const body: unknown = JSON.parse(data)
-        const decoded = stateEnvelopeCodec.decode(body)
+        const decoded = decodeStateEnvelope(body)
         if (!decoded.ok) throw new Error('fixture emitted an invalid state')
         wire.messages.push(decoded.value.state)
         if (hold) pending.push(data)
@@ -302,12 +305,15 @@ function browser(initial: Backend, withhold = false) {
 }
 
 async function publishName(fixture: Backend, name: string): Promise<void> {
-  const outcome = await fixture.application.execute({
-    type: 'rename-project',
-    expectedConfigurationVersion: fixture.application.current().configurationVersion,
-    project: { integration: 'local', id: 'fixture' },
-    name,
-  })
+  const outcome = await fixture.application.execute(
+    commandSchema.parse({
+      type: 'rename-project',
+      expectedConfigurationVersion: readApplicationState(fixture.application.current())
+        .configurationVersion,
+      project: fixtureProjectRef({ integration: 'local', id: 'fixture' }),
+      name,
+    }),
+  )
   if (!outcome.ok) throw new Error('fixture publication was rejected')
 }
 
@@ -316,12 +322,13 @@ function expectEpoch(store: RoadmapStore, epoch: string, synchronization = 'sync
   expect(snapshot).toMatchObject({ synchronization, state: { serverEpoch: epoch } })
   const state = snapshot.state
   if (!state) throw new Error('Expected an authoritative or retained application state.')
+  if (state.phase !== 'ready') throw new Error('Expected an actual ready socket baseline.')
   const project = state.projects[0]
   if (!project) throw new Error('Expected the registered source Project.')
-  expect(project.key).toEqual({ integration: 'local', id: 'fixture' })
+  expect(project.ref).toEqual({ integration: 'local', projectId: 'fixture' })
   expect(project.resource.kind).toBe('current-readable')
   expect(publicProjectObservation(project)).toMatchObject({
-    scope: { kind: 'project', project: { integration: 'local', id: 'fixture' } },
+    scope: { kind: 'project', project: fixtureProjectRef({ integration: 'local', id: 'fixture' }) },
     observedAt: 100,
     value: {
       name: epoch,
@@ -334,7 +341,7 @@ function expectEpoch(store: RoadmapStore, epoch: string, synchronization = 'sync
     observation: { value: { members: [] } },
   })
   expect(project.activeMap).toEqual({ kind: 'known-empty' })
-  expect(state.roadmap).toEqual({ capturedAt: state.roadmap.capturedAt })
+  expect(state.capturedAt).toBeGreaterThanOrEqual(0)
 }
 
 afterEach(async () => {
@@ -366,7 +373,7 @@ describe('HTTP outcomes and current WebSocket authority', () => {
       synchronization: 'not-ready',
       state: null,
     })
-    const outcome = await client.store.execute(LAUNCH)
+    const outcome = await client.store.execute(commandSchema.parse(LAUNCH))
     expect(outcome).toMatchObject({ ok: true, result: { type: 'action-launched' } })
     expect(client.store.getSnapshot()).toMatchObject({ synchronization: 'not-ready', state: null })
     expect(a.effects).toBe(1)
@@ -382,7 +389,7 @@ describe('HTTP outcomes and current WebSocket authority', () => {
       const client = browser(a, true)
       await client.ready()
       a.effectGate = deferred()
-      const delayed = client.store.execute(LAUNCH)
+      const delayed = client.store.execute(commandSchema.parse(LAUNCH))
       await a.effectReached.promise
       const b = await backend('B')
       await client.reconnect(b, true)
@@ -407,7 +414,9 @@ describe('HTTP outcomes and current WebSocket authority', () => {
       await publishName(b, 'B continued')
       await until(() => (client.store.getSnapshot().state?.stateSequence ?? -1) > before)
       expectEpoch(client.store, 'B')
-      expect(client.store.getSnapshot().state?.registrations[0]?.displayName).toBe('B continued')
+      expect(
+        readApplicationState(client.store.getSnapshot().state)?.projects[0]?.management.displayName,
+      ).toBe('B continued')
       expect(client.observed.some((snapshot) => snapshot.state?.serverEpoch === 'A')).toBe(false)
       expect(a.effects).toBe(1)
       expect(a.commandRequests).toBe(1)
@@ -423,7 +432,7 @@ describe('HTTP outcomes and current WebSocket authority', () => {
     const c = await backend('C')
     client.route(c)
     client.withhold()
-    const outcome = await client.store.execute(LAUNCH)
+    const outcome = await client.store.execute(commandSchema.parse(LAUNCH))
     expect(outcome).toMatchObject({ ok: true, state: { serverEpoch: 'C' } })
     // A new socket is required; its baseline is withheld independently of the completed HTTP call.
     await until(() => client.wires.length === 2)
@@ -437,7 +446,9 @@ describe('HTTP outcomes and current WebSocket authority', () => {
     expect(c.commandRequests).toBe(1)
     await publishName(c, 'C continued')
     await until(
-      () => client.store.getSnapshot().state?.registrations[0]?.displayName === 'C continued',
+      () =>
+        readApplicationState(client.store.getSnapshot().state)?.projects[0]?.management
+          .displayName === 'C continued',
     )
     expectEpoch(client.store, 'C')
   })
@@ -448,7 +459,7 @@ describe('HTTP outcomes and current WebSocket authority', () => {
     const client = browser(a)
     await client.ready()
     a.loseNextReply = true
-    const lost = client.store.execute(LAUNCH).then(
+    const lost = client.store.execute(commandSchema.parse(LAUNCH)).then(
       () => 'received',
       () => 'lost',
     )
@@ -458,7 +469,8 @@ describe('HTTP outcomes and current WebSocket authority', () => {
     await publishName(a, 'A after lost reply')
     await until(
       () =>
-        client.store.getSnapshot().state?.registrations[0]?.displayName === 'A after lost reply',
+        readApplicationState(client.store.getSnapshot().state)?.projects[0]?.management
+          .displayName === 'A after lost reply',
     )
     expect(client.store.getSnapshot().command.error?.code).toBe('transport-failed')
     const b = await backend('B')
@@ -467,7 +479,8 @@ describe('HTTP outcomes and current WebSocket authority', () => {
     await publishName(b, 'B after lost reply')
     await until(
       () =>
-        client.store.getSnapshot().state?.registrations[0]?.displayName === 'B after lost reply',
+        readApplicationState(client.store.getSnapshot().state)?.projects[0]?.management
+          .displayName === 'B after lost reply',
     )
     expect(client.store.getSnapshot().command.error?.code).toBe('transport-failed')
     expect(a.effects).toBe(1)
@@ -484,11 +497,13 @@ describe('HTTP outcomes and current WebSocket authority', () => {
       await client.ready()
       const retained = client.store.getSnapshot().state
       a.configurationGate = deferred()
-      const project = { integration: 'local', id: 'fixture' } as const
+      const project = fixtureProjectRef({ integration: 'local', id: 'fixture' })
       const command = client.store.execute(
-        type === 'rename-project'
-          ? { type, project, name: 'Saved after retirement', expectedConfigurationVersion: 1 }
-          : { type, project, expectedConfigurationVersion: 1 },
+        commandSchema.parse(
+          type === 'rename-project'
+            ? { type, project, name: 'Saved after retirement', expectedConfigurationVersion: 1 }
+            : { type, project, expectedConfigurationVersion: 1 },
+        ),
       )
       void command.catch(() => undefined)
       await a.configurationReached.promise
@@ -506,28 +521,34 @@ describe('HTTP outcomes and current WebSocket authority', () => {
         expect(outcome).toMatchObject({
           ok: true,
           result: { type: 'configuration-updated', configurationVersion: 2 },
-          state: { configurationVersion: 2 },
+          state: { phase: 'stopping', retained: { configurationVersion: 2 } },
         })
         if (!('state' in outcome))
           throw new Error('A saved outcome must include its diagnostic state.')
+        const saved = readApplicationState(outcome.state)
+        const previous = readApplicationState(retained)
         if (type === 'rename-project') {
           expect(a.persistedConfiguration?.projects[0]?.displayName).toBe('Saved after retirement')
-          expect(outcome.state.projects[0]?.name).toBe('Saved after retirement')
-          expect(outcome.state.registrations[0]?.displayName).toBe('Saved after retirement')
-          expect(outcome.state.projects[0]?.resource).toEqual(retained?.projects[0]?.resource)
+          expect(saved.projects[0]?.name).toBe('Saved after retirement')
+          expect(saved.projects[0]?.management.displayName).toBe('Saved after retirement')
+          expect(saved.projects[0]?.resource).toEqual(previous?.projects[0]?.resource)
         } else {
           expect(a.persistedConfiguration?.projects).toEqual([])
-          expect(outcome.state.projects).toEqual([])
-          expect(outcome.state.registrations).toEqual([])
+          expect(saved.projects).toEqual([])
         }
         await Promise.all([applicationDone, transportDone, serverDone])
+        expect(a.application.current().phase).toBe('stopped')
         expect(client.store.getSnapshot()).toMatchObject({
           synchronization: 'retained',
           state: retained,
           command: { error: null },
         })
-        expect(a.application.current().registrations).toEqual(outcome.state.registrations)
-        expect(a.application.current().automation.availability.status).toBe('unavailable')
+        expect(readApplicationState(a.application.current()).projects).toEqual(
+          readApplicationState(outcome.state).projects,
+        )
+        expect(readApplicationState(a.application.current()).automation.availability.status).toBe(
+          'unavailable',
+        )
         expect(a.sourceOwners).toBe(1)
         expect(a.retiredSourceOwners).toBe(1)
         expect(a.effects).toBe(0)
@@ -547,7 +568,7 @@ describe('HTTP outcomes and current WebSocket authority', () => {
     const client = browser(a)
     await client.ready()
     a.effectGate = deferred()
-    const command = client.store.execute(LAUNCH)
+    const command = client.store.execute(commandSchema.parse(LAUNCH))
     void command.catch(() => undefined)
     await a.effectReached.promise
     try {

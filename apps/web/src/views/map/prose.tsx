@@ -1,4 +1,5 @@
-import type { MapResource } from '@roadmap/contracts'
+import type { TicketId } from '@roadmap/contracts/identity'
+import type { MapResource } from '@roadmap/contracts/state'
 import classNames from 'classnames/bind'
 import { type ReactNode, useMemo } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
@@ -13,7 +14,7 @@ export type ProseProps = {
   map: MapResource
   sourcePath?: string
   markdown: string
-  onOpenTicket: (id: string) => void
+  onOpenTicket: (id: TicketId) => void
   onOpenMap: () => void
 }
 
@@ -30,7 +31,7 @@ export function Prose({ map, sourcePath, markdown, onOpenTicket, onOpenMap }: Pr
         const resolved = resolveProseLink(map, sourcePath, href)
         const target: ProseLinkTarget | null =
           resolved === null &&
-          map.key.project.integration === 'local' &&
+          map.ref.project.integration === 'local' &&
           href &&
           !/^(?:[a-zA-Z][a-zA-Z\d+.-]*:|\/\/)/.test(href)
             ? {

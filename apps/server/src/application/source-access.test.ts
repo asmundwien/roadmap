@@ -1,15 +1,25 @@
-import type { ApplicationState, ProjectKey } from '@roadmap/contracts'
+import { commandSchema } from '@roadmap/contracts/operations'
+import type { ReadyApplicationState } from '@roadmap/contracts/state'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  type CredentialBundle,
+  type CredentialVault,
+  CredentialVaultError,
+} from '../authorization/contracts.ts'
 import type { ConfigurationDocument } from '../configuration/document.ts'
 import { createGitHubProjectAdmission } from '../github/admission.ts'
 import { createGitHubClient } from '../github/client.ts'
-import { type CredentialBundle, createGitHubConnectionPort } from '../github/connections.ts'
+import { createGitHubConnectionPort } from '../github/connections.ts'
 import { createGitHubObserverPool } from '../github/observer.ts'
-import type { SourceContribution } from '../observation/source.ts'
+import type { SourceProjectKey as ProjectKey, SourceContribution } from '../observation/source.ts'
 import type { ProjectConfiguration } from '../projects/registry.ts'
+import {
+  fixtureProjectRef,
+  fixtureResourceRef,
+  readApplicationState,
+} from '../public-test-fixtures.ts'
 import { publicProjectObservation } from '../source-test-fixtures.ts'
 import { createRoadmapApplication } from './application.ts'
-import { type CredentialVault, CredentialVaultError } from './credential-vault.ts'
 import { createApplicationOperations } from './operations.ts'
 
 const PROJECT: ProjectKey = { integration: 'github', id: 'saved-project' }
@@ -193,26 +203,33 @@ function fixture(initial: AccessFailure | null, liveRefresh = false) {
   }
 }
 
-function expectSavedManagement(state: ApplicationState) {
+function expectSavedManagement(
+  state: ReadyApplicationState,
+  nameWithOwner = 'octocat/configured-hint',
+) {
   expect(state.configurationVersion).toBe(7)
   expect(state.configuration.valid).toBe(true)
-  expect(state.registrations).toEqual([
+  expect(state.projects).toMatchObject([
     {
-      key: PROJECT,
+      ref: fixtureResourceRef(PROJECT),
       connectionId: 'saved-github',
-      locator: {
+      source: {
         integration: 'github',
         repositoryId: '84',
-        nameWithOwner: 'octocat/configured-hint',
+        nameWithOwner,
+        url: `https://github.com/${nameWithOwner}`,
       },
-      workspace: { path: '/harmless-missing-worktree', gitIdentity: '84' },
+      management: { workspacePath: '/harmless-missing-worktree' },
     },
   ])
   expect(state.connections.find((connection) => connection.id === 'saved-github')).toMatchObject({
     name: 'Saved GitHub',
     githubIdentity: { id: '42', login: 'octocat' },
   })
-  expect(state.projects[0]).toMatchObject({ key: PROJECT, connectionId: 'saved-github' })
+  expect(state.projects[0]).toMatchObject({
+    ref: fixtureResourceRef(PROJECT),
+    connectionId: 'saved-github',
+  })
   expect(state.projects[0]?.actions.map((action) => action.id)).toEqual([
     'open-roadmap',
     'open-source',
@@ -220,10 +237,16 @@ function expectSavedManagement(state: ApplicationState) {
 }
 
 function expectRecovered(test: ReturnType<typeof fixture>, observedAt: number) {
-  const state = test.application.current()
-  expectSavedManagement(state)
+  const state = readApplicationState(test.application.current())
+  expectSavedManagement(state, 'octocat/provider-name')
   expect(state.projects[0]).toMatchObject({
     name: 'octocat/provider-name',
+    source: {
+      integration: 'github',
+      repositoryId: '84',
+      nameWithOwner: 'octocat/provider-name',
+      url: 'https://github.com/octocat/provider-name',
+    },
     resource: {
       kind: 'current-readable',
       observation: { observedAt, value: { name: 'octocat/provider-name' } },
@@ -264,8 +287,10 @@ describe('RoadmapApplication saved GitHub access recovery', () => {
       vi.useFakeTimers()
       vi.setSystemTime(1_000)
       const test = fixture(failure)
-      const states: ApplicationState[] = []
-      const unsubscribe = test.application.subscribe((state) => states.push(state))
+      const states: ReadyApplicationState[] = []
+      const unsubscribe = test.application.subscribe((state) =>
+        states.push(readApplicationState(state)),
+      )
       try {
         await test.application.start()
         expect(states.length).toBeGreaterThan(0)
@@ -299,7 +324,7 @@ describe('RoadmapApplication saved GitHub access recovery', () => {
       const test = fixture(failure)
       try {
         await test.application.start()
-        expectSavedManagement(test.application.current())
+        expectSavedManagement(readApplicationState(test.application.current()))
         expect(test.requests).toEqual([])
         test.recover()
         await vi.advanceTimersByTimeAsync(30_000)
@@ -318,18 +343,20 @@ describe('RoadmapApplication saved GitHub access recovery', () => {
       const test = fixture(failure)
       try {
         await test.application.start()
-        expectSavedManagement(test.application.current())
+        expectSavedManagement(readApplicationState(test.application.current()))
         expect(test.requests).toEqual([])
         test.recover()
         vi.setSystemTime(2_000)
-        const outcome = await test.application.execute({
-          type: 'refresh-project',
-          project: PROJECT,
-          expectedConfigurationVersion: 7,
-        })
+        const outcome = await test.application.execute(
+          commandSchema.parse({
+            type: 'refresh-project',
+            project: fixtureProjectRef(PROJECT),
+            expectedConfigurationVersion: 7,
+          }),
+        )
         expect(outcome).toMatchObject({
           ok: true,
-          result: { type: 'project-refreshed', project: PROJECT },
+          result: { type: 'project-refreshed', project: fixtureProjectRef(PROJECT) },
         })
         expectRecovered(test, 2_000)
       } finally {
@@ -346,25 +373,28 @@ describe('RoadmapApplication saved GitHub access recovery', () => {
       const test = fixture(failure)
       try {
         await test.application.start()
-        expectSavedManagement(test.application.current())
+        expectSavedManagement(readApplicationState(test.application.current()))
         expect(
-          test.application
-            .current()
-            .connections.find((connection) => connection.id === 'saved-github')?.availability,
+          readApplicationState(test.application.current()).connections.find(
+            (connection) => connection.id === 'saved-github',
+          )?.availability,
         ).toMatchObject({ status: 'authorization-required' })
-        expect(test.application.current().projects[0]?.resource.kind).toBe('never-observed')
+        expect(readApplicationState(test.application.current()).projects[0]?.resource.kind).toBe(
+          'never-observed',
+        )
         test.recover()
         await vi.advanceTimersByTimeAsync(30_000)
-        await test.application.execute({
-          type: 'refresh-project',
-          project: PROJECT,
-          expectedConfigurationVersion: 7,
-        })
+        await test.application.execute(
+          commandSchema.parse({
+            type: 'refresh-project',
+            project: fixtureProjectRef(PROJECT),
+            expectedConfigurationVersion: 7,
+          }),
+        )
         expect(
-          test.application
-            .current()
-            .connections.find((connection) => connection.id === 'saved-github')?.availability
-            .status,
+          readApplicationState(test.application.current()).connections.find(
+            (connection) => connection.id === 'saved-github',
+          )?.availability.status,
         ).toBe('authorization-required')
         expect(test.requests).toEqual([])
         expect(test.writes).toEqual([])
@@ -410,25 +440,31 @@ describe('RoadmapApplication provider credential resolution', () => {
       vi.useFakeTimers()
       vi.setSystemTime(1_000)
       const test = fixture(null, true)
-      const states: ApplicationState[] = []
-      const unsubscribe = test.application.subscribe((state) => states.push(state))
+      const states: ReadyApplicationState[] = []
+      const unsubscribe = test.application.subscribe((state) =>
+        states.push(readApplicationState(state)),
+      )
       try {
         await test.application.start()
-        expect(test.application.current().projects[0]?.resource).toMatchObject({
+        expect(
+          readApplicationState(test.application.current()).projects[0]?.resource,
+        ).toMatchObject({
           kind: 'current-readable',
           observation: { observedAt: 1_000 },
         })
         const providerRequests = [...test.requests]
         if (failure !== 'authorization-required') test.failRefresh(failure)
         vi.setSystemTime(failure === 'authorization-required' ? 2_000_000 : 1_000_000)
-        await test.application.execute({
-          type: 'refresh-project',
-          project: PROJECT,
-          expectedConfigurationVersion: 7,
-        })
+        await test.application.execute(
+          commandSchema.parse({
+            type: 'refresh-project',
+            project: fixtureProjectRef(PROJECT),
+            expectedConfigurationVersion: 7,
+          }),
+        )
 
-        const state = test.application.current()
-        expectSavedManagement(state)
+        const state = readApplicationState(test.application.current())
+        expectSavedManagement(state, 'octocat/provider-name')
         expect(state.projects[0]).toMatchObject({
           name: 'octocat/provider-name',
           resource: {
@@ -436,7 +472,7 @@ describe('RoadmapApplication provider credential resolution', () => {
             lastSuccessful: { observedAt: 1_000, value: { name: 'octocat/provider-name' } },
             unavailable: {
               kind: 'source-failure',
-              scope: { kind: 'project', project: PROJECT },
+              scope: { kind: 'project', project: fixtureResourceRef(PROJECT) },
               provenance: { stage: 'credentials' },
             },
           },
@@ -497,13 +533,15 @@ describe('RoadmapApplication provider credential resolution', () => {
     try {
       await test.application.start()
       vi.setSystemTime(1_000_000)
-      await test.application.execute({
-        type: 'refresh-project',
-        project: PROJECT,
-        expectedConfigurationVersion: 7,
-      })
+      await test.application.execute(
+        commandSchema.parse({
+          type: 'refresh-project',
+          project: fixtureProjectRef(PROJECT),
+          expectedConfigurationVersion: 7,
+        }),
+      )
 
-      expect(test.application.current().projects[0]?.resource).toMatchObject({
+      expect(readApplicationState(test.application.current()).projects[0]?.resource).toMatchObject({
         kind: 'current-readable',
         observation: { observedAt: 1_000_000 },
       })

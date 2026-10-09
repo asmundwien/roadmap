@@ -1,5 +1,10 @@
 import type { SourceProjectKey } from '../observation/source.ts'
 
+export interface AutomationFailure {
+  kind: 'not-ready' | 'ineligible' | 'persistence-failed'
+  reason: string
+}
+
 export type AutomationAdmission = 'automatic' | 'override'
 export interface AutomationTarget {
   project: SourceProjectKey

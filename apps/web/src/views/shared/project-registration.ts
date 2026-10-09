@@ -1,16 +1,14 @@
-import type {
-  Connection,
-  ProjectKey,
-  ProjectRegistrationCandidate,
-  RegisteredProject,
-  SafeError,
-} from '@roadmap/contracts'
+import type { ProjectRef } from '@roadmap/contracts/identity'
+import type { Command, SafeError } from '@roadmap/contracts/operations'
+import type { Connection, Project } from '@roadmap/contracts/state'
+
+type RegistrationInput = Extract<Command, { type: 'register-project' }>['candidate']
 
 export function projectRegistrationDraft(
   data: FormData,
   connection: Connection | undefined,
   workspacePath: string,
-): { candidate: ProjectRegistrationCandidate | null; errors: Record<string, string> } {
+): { candidate: RegistrationInput | null; errors: Record<string, string> } {
   if (!connection) return { candidate: null, errors: { connection: 'Choose a Connection.' } }
   const path = workspacePath.trim()
   if (!path) {
@@ -29,16 +27,17 @@ export function projectRegistrationDraft(
   }
 }
 
-export function admittedProjectKey(
-  projects: RegisteredProject[],
-  candidate: ProjectRegistrationCandidate,
-): ProjectKey | undefined {
+export function admittedProjectRef(
+  projects: Project[],
+  candidate: RegistrationInput,
+): ProjectRef | undefined {
   return projects.find(
     (project) =>
-      project.key.integration === candidate.integration &&
+      project.ref.integration === candidate.integration &&
       project.connectionId === candidate.connectionId &&
-      project.workspace.path === candidate.workspace.path,
-  )?.key
+      (project.integration === 'local' ? project.source.path : project.management.workspacePath) ===
+        candidate.workspace.path,
+  )?.ref
 }
 
 export function projectRegistrationError(error: SafeError): {

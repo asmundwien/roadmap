@@ -1,4 +1,5 @@
-import { ticketTypeOf } from '@roadmap/contracts'
+import type { TicketId } from '@roadmap/contracts/identity'
+import { ticketTypeOf } from '@roadmap/contracts/state'
 import { Badge } from '@roadmap/ui/badge'
 import { Button } from '@roadmap/ui/button'
 import { Link } from '@roadmap/ui/link'
@@ -15,7 +16,7 @@ import styles from './map.module.css'
 
 const cx = classNames.bind(styles)
 
-export const TicketOpenContext = createContext<((id: string) => void) | null>(null)
+export const TicketOpenContext = createContext<((id: TicketId) => void) | null>(null)
 
 export type TicketNodeProps = NodeProps<MapNode>
 
@@ -58,12 +59,16 @@ type BlockerCardProps = {
 
 function BlockerCard({ data }: BlockerCardProps) {
   const { blocker, scope } = data
-  const identity = blocker.displayId ?? blocker.ticketId
+  const identity =
+    blocker.displayId ??
+    (blocker.reference.kind === 'registered'
+      ? blocker.reference.ticket.ticketId
+      : blocker.reference.ticketId)
   const title = stripInlineMarkdown(blocker.title ?? '').trim() || 'Blocker title unavailable'
   const { reference } = blocker
   const project =
     reference.kind === 'registered'
-      ? `${reference.project.integration}: ${reference.project.id}`
+      ? `${reference.ticket.map.project.integration}: ${reference.ticket.map.project.projectId}`
       : reference.kind === 'external'
         ? `${reference.integration}: ${reference.nameWithOwner}`
         : reference.locator
@@ -133,7 +138,7 @@ type TicketCardProps = {
 function TicketCard({ data }: TicketCardProps) {
   const onOpenTicket = useContext(TicketOpenContext)
   const ticket = data.observation.value
-  const identity = ticket.displayId ?? data.ticket.key.ticketId
+  const identity = ticket.displayId ?? data.ticket.ref.ticketId
   const title = stripInlineMarkdown(ticket.title ?? '').trim() || 'Untitled ticket'
   const type = ticketTypeOf(ticket.typeEvidence)
   const stateMeta = TICKET_STATE_META[ticket.state]
@@ -182,7 +187,7 @@ function TicketCard({ data }: TicketCardProps) {
       <div className={cx('actions', 'nodrag', 'nopan')}>
         <Button
           size="small"
-          onClick={() => onOpenTicket?.(data.ticket.key.ticketId)}
+          onClick={() => onOpenTicket?.(data.ticket.ref.ticketId)}
           disabled={!onOpenTicket}
           aria-label={`Open ${identity}: ${title}`}
         >

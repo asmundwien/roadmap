@@ -1,4 +1,4 @@
-import type { Connection, RegisteredProject } from '@roadmap/contracts'
+import type { Connection, Project } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 import { Badge } from '@roadmap/ui/badge'
 import { Icon, icon } from '@roadmap/ui/icon'
@@ -12,9 +12,9 @@ import { unacknowledgedInterruption } from '@/views/settings/project-automation'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
 import { resourceMessage } from '@/views/shared/resource-results'
 import {
-  locatorLabel,
   mapState,
   projectIdentity,
+  projectSourceLabel,
   sameProject,
 } from '@/views/shared/settings-shared'
 import { connectionAvailability } from './connection-details'
@@ -25,7 +25,7 @@ const cx = classNames.bind(styles)
 
 type ConnectionStrideProps = {
   connection: Connection
-  dependents: RegisteredProject[]
+  dependents: Project[]
 }
 
 export function ConnectionStride({ connection, dependents }: ConnectionStrideProps) {
@@ -54,8 +54,8 @@ export function ConnectionStride({ connection, dependents }: ConnectionStridePro
           </Alert>
         )}
         {dependents.map((project) => {
-          const interrupted = unacknowledgedInterruption(project.key, automation.evidence)
-          const preferred = automation.enabledProjects.some((key) => sameProject(key, project.key))
+          const interrupted = unacknowledgedInterruption(project.ref, automation.evidence)
+          const preferred = automation.enabledProjects.some((key) => sameProject(key, project.ref))
           const unavailable = automation.availability.status === 'unavailable'
           return (
             <Surface key={projectIdentity(project)}>
@@ -63,7 +63,7 @@ export function ConnectionStride({ connection, dependents }: ConnectionStridePro
                 <SurfaceTitle>{project.name}</SurfaceTitle>
                 {interrupted ? (
                   <strong className={cx('connection-project-review')}>
-                    <Link href={projectSettingsPath(project.key)}>Automation needs review</Link>
+                    <Link href={projectSettingsPath(project.ref)}>Automation needs review</Link>
                   </strong>
                 ) : preferred ? (
                   <Badge>
@@ -75,14 +75,14 @@ export function ConnectionStride({ connection, dependents }: ConnectionStridePro
                   </Badge>
                 ) : null}
               </div>
-              <SurfaceDescription>{locatorLabel(project)}</SurfaceDescription>
+              <SurfaceDescription>{projectSourceLabel(project)}</SurfaceDescription>
               <SurfaceDescription>{resourceMessage(project.resource)}</SurfaceDescription>
               <SurfaceDescription>{mapState(project)}</SurfaceDescription>
               {project.managementWarnings.map((warning) => (
                 <Alert key={warning}>{warning}</Alert>
               ))}
               <div className={cx('connection-project-links')}>
-                <Link href={projectSettingsPath(project.key)}>Project settings</Link>
+                <Link href={projectSettingsPath(project.ref)}>Project settings</Link>
               </div>
               <ProjectLaunchButtons project={project} />
             </Surface>

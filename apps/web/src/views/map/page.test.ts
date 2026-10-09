@@ -1,4 +1,12 @@
-import type { MapResource, RegisteredProject, TicketResource } from '@roadmap/contracts'
+import {
+  connectionIdSchema,
+  githubProjectRefSchema,
+  mapIdSchema,
+  projectIdSchema,
+  ticketIdSchema,
+  ticketRefSchema,
+} from '@roadmap/contracts/identity'
+import type { MapResource, Project, TicketResource } from '@roadmap/contracts/state'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router'
@@ -9,15 +17,24 @@ import { RoadmapProvider } from '@/store/roadmap-provider'
 import type { RoadmapStore } from '@/store/roadmap-store'
 import { resourceObservation } from '@/views/shared/resource-results'
 import { mapGraph } from './graph'
-import { makeMap, makeRoadmapStore, ticket } from './test-fixtures'
+import { makeMap, makeRoadmapSnapshot, makeRoadmapStore, ticket } from './test-fixtures'
 
-function project(maps: MapResource[]): RegisteredProject {
-  const key = { integration: 'github', id: 'project-home' } as const
+function project(maps: MapResource[]): Project {
+  const key = githubProjectRefSchema.parse({
+    integration: 'github',
+    projectId: projectIdSchema.parse('project-home'),
+  })
   return {
-    key,
-    connectionId: 'connection-home',
-    locator: { integration: 'github', repositoryId: key.id, nameWithOwner: 'me/repo' },
-    workspace: { path: '/workspace' },
+    integration: 'github',
+    ref: key,
+    connectionId: connectionIdSchema.parse('connection-home'),
+    source: {
+      integration: 'github',
+      repositoryId: key.projectId,
+      nameWithOwner: 'me/repo',
+      url: 'https://example.test/me/repo',
+    },
+    management: { workspacePath: '/workspace' },
     name: 'Configured project',
     actions: [],
     managementWarnings: [],
@@ -29,8 +46,8 @@ function project(maps: MapResource[]): RegisteredProject {
         observedAt: 0,
         provenance: {
           integration: 'github',
-          connectionId: 'connection-home',
-          repositoryId: key.id,
+          connectionId: connectionIdSchema.parse('connection-home'),
+          repositoryId: key.projectId,
           stage: 'repository',
         },
         completeness: { kind: 'complete' },
@@ -38,7 +55,7 @@ function project(maps: MapResource[]): RegisteredProject {
           name: 'Source project',
           source: {
             integration: 'github',
-            repositoryId: key.id,
+            repositoryId: key.projectId,
             nameWithOwner: 'me/repo',
             url: 'https://example.test/me/repo',
           },
@@ -54,25 +71,27 @@ function project(maps: MapResource[]): RegisteredProject {
         observedAt: 0,
         provenance: {
           integration: 'github',
-          connectionId: 'connection-home',
-          repositoryId: key.id,
+          connectionId: connectionIdSchema.parse('connection-home'),
+          repositoryId: key.projectId,
           stage: 'map-list',
         },
         completeness: { kind: 'complete' },
-        value: { members: maps.map((map) => map.key) },
+        value: {
+          members: maps
+            .filter((map) => map.resource.kind !== 'proven-absent')
+            .map((map) => map.ref),
+        },
       },
     },
     maps,
-    displayOrder: { openMapIds: maps.map((map) => map.key.mapId), closedMapIds: [] },
+    displayOrder: { open: maps.map((map) => map.ref), closed: [] },
     activeMap:
-      maps[0] === undefined
-        ? { kind: 'known-empty' }
-        : { kind: 'known-current', mapId: maps[0].key.mapId },
+      maps[0] === undefined ? { kind: 'known-empty' } : { kind: 'known-current', ref: maps[0].ref },
   }
 }
 
 function renderProject(
-  value: RegisteredProject,
+  value: Project,
   path: string,
   store: RoadmapStore = makeRoadmapStore([value]),
 ): string {
@@ -121,7 +140,7 @@ function absentTicket(ticket: TicketResource): TicketResource {
         provenance: observation.provenance,
         proof: {
           kind: 'complete-membership',
-          parent: { kind: 'tickets-membership', map: ticket.key.map },
+          parent: { kind: 'tickets-membership', map: ticket.ref.map },
         },
       },
       trace: { kind: 'last-successful-trace', lastSuccessful: observation },
@@ -133,7 +152,7 @@ const uncertain = {
   kind: 'uncertain',
   reason: 'map-unavailable',
   cause: 'A map required for ordering is currently unavailable.',
-} satisfies RegisteredProject['activeMap']
+} satisfies Project['activeMap']
 
 describe('App pinned map resource interpretation', () => {
   it('retains pinned graph, raw prose, ticket source and independent child freshness during map failure', () => {
@@ -144,7 +163,10 @@ describe('App pinned map resource interpretation', () => {
       ),
     )
     const registered = { ...project([map]), activeMap: uncertain }
-    const markup = renderProject(registered, ticketPath({ map: map.key, ticketId: '8' }))
+    const markup = renderProject(
+      registered,
+      ticketPath({ map: map.ref, ticketId: ticketIdSchema.parse('8') }),
+    )
 
     expect(markup).toContain('Retained raw map prose')
     expect(markup).toContain('Independent ticket prose.')
@@ -177,20 +199,32 @@ describe('App pinned map resource interpretation', () => {
           provenance: observation.provenance,
           proof: {
             kind: 'complete-membership',
-            parent: { kind: 'maps-membership', project: readable.key.project },
+            parent: { kind: 'maps-membership', project: readable.ref.project },
           },
         },
         trace: { kind: 'last-successful-trace', lastSuccessful: observation },
       },
       tickets: [absentTicket(knownTicket)],
+      ticketsMembership:
+        readable.ticketsMembership.kind === 'current-complete'
+          ? {
+              kind: 'current-complete',
+              observation: {
+                ...readable.ticketsMembership.observation,
+                attemptedAt: 2000,
+                observedAt: 2000,
+                value: { members: [] },
+              },
+            }
+          : readable.ticketsMembership,
     }
-    const registered: RegisteredProject = {
+    const registered: Project = {
       ...project([absent]),
       mapsMembership: { kind: 'never-observed', current: null },
       activeMap: uncertain,
-      displayOrder: { openMapIds: [], closedMapIds: [] },
+      displayOrder: { open: [], closed: [] },
     }
-    const markup = renderProject(registered, ticketPath(absent.tickets[0]?.key ?? knownTicket.key))
+    const markup = renderProject(registered, ticketPath(absent.tickets[0]?.ref ?? knownTicket.ref))
 
     expect(markup).toContain('Historical map prose.')
     expect(markup).toContain('Historical ticket prose.')
@@ -206,19 +240,19 @@ describe('App pinned map resource interpretation', () => {
     const newcomer = makeMap(
       [],
       { raw: 'Newcomer prose.' },
-      { ...first.key, mapId: 'new' },
+      { ...first.ref, mapId: mapIdSchema.parse('new') },
       { title: 'New readable map', updatedAt: 3000 },
     )
     const registered = {
       ...project([first, newcomer]),
       activeMap: uncertain,
-      displayOrder: { openMapIds: [first.key.mapId], closedMapIds: [] },
+      displayOrder: { open: [first.ref], closed: [] },
     }
-    const markup = renderProject(registered, projectPath(registered.key))
+    const markup = renderProject(registered, projectPath(registered.ref))
 
     expect(markup).toContain('Current map ordering is uncertain')
     expect(markup).toContain('Historical or unplaced maps')
-    expect(markup).toContain(mapPath(newcomer.key))
+    expect(markup).toContain(mapPath(newcomer.ref))
     expect(markup).not.toContain('First retained prose.')
     expect(markup).not.toContain('Newcomer prose.')
   })
@@ -226,7 +260,10 @@ describe('App pinned map resource interpretation', () => {
   it('never substitutes the current active map for a missing pinned identity', () => {
     const current = makeMap([], { raw: 'Do not substitute this map.' })
     const registered = project([current])
-    const markup = renderProject(registered, mapPath({ ...current.key, mapId: 'missing' }))
+    const markup = renderProject(
+      registered,
+      mapPath({ ...current.ref, mapId: mapIdSchema.parse('missing') }),
+    )
 
     expect(markup).toContain('No other map has been selected')
     expect(markup).not.toContain('Do not substitute this map.')
@@ -234,13 +271,14 @@ describe('App pinned map resource interpretation', () => {
 
   it('does not invent graph, source or prose for a never-read pinned map', () => {
     const key = {
-      project: { integration: 'github', id: 'project-home' },
-      mapId: 'never-read',
+      project: { integration: 'github', projectId: projectIdSchema.parse('project-home') },
+      mapId: mapIdSchema.parse('never-read'),
     } as const
     const map: MapResource = {
-      key,
+      ref: key,
       resource: { kind: 'never-observed', scope: { kind: 'map', map: key }, current: null },
       tickets: [],
+      frontier: [],
       ticketsMembership: { kind: 'never-observed', current: null },
     }
     const registered = { ...project([map]), activeMap: uncertain }
@@ -262,14 +300,14 @@ describe('App pinned map resource interpretation', () => {
         }),
       ],
       { raw: 'Recovered map prose.' },
-      original.key,
+      original.ref,
       { source: { kind: 'issue', url: 'https://recovered.test/maps/1' } },
     )
     if (recovered.resource.kind !== 'current-readable')
       throw new Error('Expected recovery observation')
     recovered.resource.observation.attemptedAt = 4000
     recovered.resource.observation.observedAt = 4000
-    const path = ticketPath({ map: original.key, ticketId: '8' })
+    const path = ticketPath({ map: original.ref, ticketId: ticketIdSchema.parse('8') })
     const markup = renderProject(project([recovered]), path)
 
     expect(markup).toContain('Recovered map prose.')
@@ -297,9 +335,9 @@ describe('pinned resource content limits', () => {
         kind: 'uncertain',
         reason: 'map-incomplete',
         cause: 'A map required for ordering is incomplete.',
-      } satisfies RegisteredProject['activeMap'],
+      } satisfies Project['activeMap'],
     }
-    const markup = renderProject(registered, mapPath(map.key))
+    const markup = renderProject(registered, mapPath(map.ref))
 
     expect(markup).toContain('Readable incomplete raw content.')
     expect(markup).toContain('Content is incomplete')
@@ -323,7 +361,7 @@ describe('pinned resource content limits', () => {
           provenance: observation.provenance,
           proof: {
             kind: 'complete-membership',
-            parent: { kind: 'maps-membership', project: original.key.project },
+            parent: { kind: 'maps-membership', project: original.ref.project },
           },
         },
         trace: { kind: 'no-known-trace' },
@@ -332,9 +370,9 @@ describe('pinned resource content limits', () => {
     const registered = {
       ...project([map]),
       activeMap: uncertain,
-      displayOrder: { openMapIds: [], closedMapIds: [] },
+      displayOrder: { open: [], closed: [] },
     }
-    const markup = renderProject(registered, mapPath(map.key))
+    const markup = renderProject(registered, mapPath(map.ref))
 
     expect(markup).toContain('No previously read content is known')
     expect(markup).not.toContain('Map content')
@@ -349,9 +387,12 @@ describe('URL-selected ticket Automation evidence', () => {
     const registered = project([map])
     const store = makeRoadmapStore([registered])
     const snapshot = store.getSnapshot()
-    if (snapshot.synchronization === 'not-ready')
+    if (snapshot.synchronization === 'not-ready' || snapshot.state.phase !== 'ready')
       throw new Error('Expected authoritative fixture state')
-    const target = { project: map.key.project, mapId: map.key.mapId, ticketId: 'historical-ticket' }
+    const target = ticketRefSchema.parse({
+      map: map.ref,
+      ticketId: ticketIdSchema.parse('historical-ticket'),
+    })
     snapshot.state.automation.evidence = [
       {
         target,
@@ -374,7 +415,7 @@ describe('URL-selected ticket Automation evidence', () => {
 
     const markup = renderProject(
       registered,
-      ticketPath({ map: map.key, ticketId: target.ticketId }),
+      ticketPath({ map: map.ref, ticketId: target.ticketId }),
       store,
     )
 
@@ -388,6 +429,47 @@ describe('URL-selected ticket Automation evidence', () => {
     expect(markup).toMatch(/<button[^>]*disabled[^>]*>Run Classification<\/button>/)
     expect(markup).toMatch(/<button[^>]*disabled[^>]*>Start Wayfinder Session<\/button>/)
   })
+
+  it('keeps durable Automation evidence addressable when the selected Project and map are absent', () => {
+    const store = makeRoadmapStore()
+    const snapshot = store.getSnapshot()
+    if (snapshot.synchronization === 'not-ready' || snapshot.state.phase !== 'ready')
+      throw new Error('Expected ready fixture')
+    const target = ticketRefSchema.parse({
+      map: { project: { integration: 'local', projectId: 'absent-project' }, mapId: 'absent-map' },
+      ticketId: 'absent-ticket',
+    })
+    snapshot.state.automation.evidence = [
+      {
+        target,
+        classification: {
+          status: 'completed',
+          admission: 'override',
+          processResult: { status: 'exited', code: 0 },
+          verdict: { value: 'afk', reason: 'Actual durable AFK verdict.' },
+        },
+        wayfinder: {
+          status: 'outcome-unknown',
+          admission: 'override',
+          reason: 'Actual durable unknown outcome.',
+          acknowledged: true,
+        },
+      },
+    ]
+    const markup = renderToStaticMarkup(
+      createElement(
+        MemoryRouter,
+        { initialEntries: [ticketPath(target)] },
+        createElement(RoadmapProvider, { store }, createElement(App)),
+      ),
+    )
+
+    expect(markup).toContain('Recorded Automation evidence')
+    expect(markup).toContain('Actual durable AFK verdict.')
+    expect(markup).toContain('Actual durable unknown outcome.')
+    expect(markup).toContain('No other ticket has been selected')
+    expect(markup).not.toContain('Map content')
+  })
 })
 
 describe('trusted default history', () => {
@@ -395,17 +477,87 @@ describe('trusted default history', () => {
     const map = makeMap([], { raw: 'Trusted closed history prose.' }, undefined, {
       status: 'closed',
     })
-    const registered: RegisteredProject = {
+    const registered: Project = {
       ...project([map]),
       activeMap: { kind: 'known-empty' },
-      displayOrder: { openMapIds: [], closedMapIds: [map.key.mapId] },
+      displayOrder: { open: [], closed: [map.ref] },
     }
 
-    expect(renderProject(registered, projectPath(registered.key))).toContain(
+    expect(renderProject(registered, projectPath(registered.ref))).toContain(
       'Trusted closed history prose.',
     )
     expect(
-      renderProject({ ...registered, activeMap: uncertain }, projectPath(registered.key)),
+      renderProject({ ...registered, activeMap: uncertain }, projectPath(registered.ref)),
     ).not.toContain('Trusted closed history prose.')
+  })
+})
+
+describe('application lifecycle consumer admission', () => {
+  it('does not render Project consumers from a starting application baseline', () => {
+    const base = makeRoadmapStore()
+    const accepted = base.getSnapshot()
+    if (accepted.synchronization === 'not-ready') throw new Error('Expected fixture baseline')
+    const snapshot = makeRoadmapSnapshot({
+      phase: 'starting',
+      serverEpoch: accepted.state.serverEpoch,
+      stateSequence: accepted.state.stateSequence,
+      capturedAt: accepted.state.capturedAt,
+    })
+    const store: RoadmapStore = { ...base, getSnapshot: () => snapshot }
+    const markup = renderToStaticMarkup(
+      createElement(
+        MemoryRouter,
+        { initialEntries: ['/'] },
+        createElement(RoadmapProvider, { store }, createElement(App)),
+      ),
+    )
+
+    expect(markup).toContain('data-roadmap-readiness="waiting"')
+    expect(markup).not.toContain('No Projects')
+    expect(markup).not.toContain('Projects needing attention')
+  })
+
+  it('renders a valid known-empty ready baseline instead of waiting for source content', () => {
+    const markup = renderToStaticMarkup(
+      createElement(
+        MemoryRouter,
+        { initialEntries: ['/'] },
+        createElement(RoadmapProvider, { store: makeRoadmapStore() }, createElement(App)),
+      ),
+    )
+
+    expect(markup).not.toContain('data-roadmap-readiness="waiting"')
+    expect(markup).toContain('No Projects registered yet.')
+  })
+
+  it('renders actual terminal retained graph and prose without presenting live application readiness', () => {
+    const map = makeMap(
+      [ticket('8', 'frontier', [], undefined, 0, 'task', { body: 'Actual retained ticket.' })],
+      { raw: 'Actual retained map.' },
+    )
+    const configured = project([map])
+    const base = makeRoadmapStore([configured])
+    const accepted = base.getSnapshot()
+    if (accepted.synchronization === 'not-ready' || accepted.state.phase !== 'ready')
+      throw new Error('Expected ready fixture')
+    const terminal = {
+      phase: 'stopped' as const,
+      serverEpoch: accepted.state.serverEpoch,
+      stateSequence: accepted.state.stateSequence,
+      capturedAt: accepted.state.capturedAt,
+      retained: accepted.state,
+    }
+    const store: RoadmapStore = { ...base, getSnapshot: () => makeRoadmapSnapshot(terminal) }
+    const markup = renderProject(
+      configured,
+      ticketPath(map.tickets[0]?.ref ?? ticketRefSchema.parse({ map: map.ref, ticketId: '8' })),
+      store,
+    )
+
+    expect(markup).toContain('data-roadmap-readiness="retained"')
+    expect(markup).toContain('Actual retained map.')
+    expect(markup).toContain('Actual retained ticket.')
+    expect(markup).toContain('https://example.test/me/repo/8')
+    expect(mapGraph(map).nodes).toHaveLength(1)
   })
 })

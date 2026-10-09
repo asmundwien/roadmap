@@ -1,6 +1,14 @@
 import { z } from 'zod'
 import { requestDataSchema } from './internal/request-data.ts'
-import { commandSchema, querySchema } from './operations.ts'
+import {
+  type Command,
+  commandOutcomeSchema,
+  commandResultFor,
+  commandSchema,
+  queryResultSchema,
+  querySchema,
+} from './operations.ts'
+import { applicationStateSchema } from './state.ts'
 
 export const REQUEST_ID_HEADER = 'X-Roadmap-Request-Id'
 export const requestIdSchema = z.uuid()
@@ -10,6 +18,15 @@ export const queryEnvelopeSchema = requestDataSchema.pipe(
 )
 export const commandEnvelopeSchema = requestDataSchema.pipe(
   z.strictObject({ type: z.literal('command'), command: commandSchema }),
+)
+export const stateEnvelopeSchema = requestDataSchema.pipe(
+  z.strictObject({ type: z.literal('state'), state: applicationStateSchema }),
+)
+export const queryResultEnvelopeSchema = requestDataSchema.pipe(
+  z.strictObject({ type: z.literal('query-result'), result: queryResultSchema }),
+)
+export const commandResultEnvelopeSchema = requestDataSchema.pipe(
+  z.strictObject({ type: z.literal('command-result'), outcome: commandOutcomeSchema }),
 )
 
 export const requestRejectionSchema = requestDataSchema.pipe(
@@ -34,6 +51,9 @@ export const requestRejectionSchema = requestDataSchema.pipe(
 export type QueryEnvelope = z.output<typeof queryEnvelopeSchema>
 export type CommandEnvelope = z.output<typeof commandEnvelopeSchema>
 export type RequestRejection = z.output<typeof requestRejectionSchema>
+export type StateEnvelope = z.output<typeof stateEnvelopeSchema>
+export type QueryResultEnvelope = z.output<typeof queryResultEnvelopeSchema>
+export type CommandResultEnvelope = z.output<typeof commandResultEnvelopeSchema>
 
 export interface DecodeIssue {
   path: string
@@ -58,7 +78,7 @@ const safeFields = new Set([
   'gitIdentity',
   'displayName',
   'project',
-  'id',
+  'projectId',
   'enabled',
   'target',
   'mapId',
@@ -69,6 +89,96 @@ const safeFields = new Set([
   'requestId',
   'reason',
   'message',
+  'state',
+  'result',
+  'outcome',
+  'error',
+  'ok',
+  'serverEpoch',
+  'stateSequence',
+  'capturedAt',
+  'phase',
+  'mode',
+  'retained',
+  'cause',
+  'configurationVersion',
+  'supportedIntegrations',
+  'connections',
+  'projects',
+  'authorizationOperations',
+  'configuration',
+  'automation',
+  'ref',
+  'resource',
+  'source',
+  'management',
+  'workspacePath',
+  'maps',
+  'mapsMembership',
+  'tickets',
+  'ticketsMembership',
+  'displayOrder',
+  'open',
+  'closed',
+  'activeMap',
+  'frontier',
+  'kind',
+  'scope',
+  'observation',
+  'attemptedAt',
+  'observedAt',
+  'provenance',
+  'completeness',
+  'value',
+  'lastSuccessful',
+  'unavailable',
+  'absence',
+  'proof',
+  'trace',
+  'labels',
+  'typeEvidence',
+  'classification',
+  'wayfinder',
+  'admission',
+  'verdict',
+  'processResult',
+  'report',
+  'acknowledged',
+  'status',
+  'id',
+  'reference',
+  'ticket',
+  'map',
+  'members',
+  'lastComplete',
+  'blockedBy',
+  'blockersComplete',
+  'isClaimed',
+  'isBlocked',
+  'githubIdentity',
+  'verificationUri',
+  'userCode',
+  'expiresAt',
+  'connection',
+  'actions',
+  'operation',
+  'href',
+  'repositoryId',
+  'nameWithOwner',
+  'title',
+  'body',
+  'updatedAt',
+  'closedAt',
+  'createdAt',
+  'progress',
+  'total',
+  'completed',
+  'failure',
+  'availability',
+  'enabledProjects',
+  'evidence',
+  'overrides',
+  'accountId',
 ])
 
 function decode<S extends z.ZodType>(schema: S, input: unknown): DecodeResult<z.output<S>> {
@@ -99,6 +209,32 @@ export function decodeCommandEnvelope(input: unknown): DecodeResult<CommandEnvel
 }
 export function decodeRequestRejection(input: unknown): DecodeResult<RequestRejection> {
   return decode(requestRejectionSchema, input)
+}
+
+export function decodeApplicationState(
+  input: unknown,
+): DecodeResult<z.output<typeof applicationStateSchema>> {
+  return decode(applicationStateSchema, input)
+}
+export function decodeStateEnvelope(input: unknown): DecodeResult<StateEnvelope> {
+  return decode(stateEnvelopeSchema, input)
+}
+export function decodeQueryResultEnvelope(input: unknown): DecodeResult<QueryResultEnvelope> {
+  return decode(queryResultEnvelopeSchema, input)
+}
+export function decodeCommandResultEnvelope(
+  input: unknown,
+  expectedCommand?: Command,
+): DecodeResult<CommandResultEnvelope> {
+  const result = decode(commandResultEnvelopeSchema, input)
+  if (
+    result.ok &&
+    expectedCommand &&
+    result.value.outcome.ok &&
+    !commandResultFor(expectedCommand, result.value.outcome.result)
+  )
+    return { ok: false, issues: [{ path: '$.outcome.result', message: 'invalid_result' }] }
+  return result
 }
 
 export function requestRejectionStatus(

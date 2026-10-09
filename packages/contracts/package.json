@@ -4,8 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./codecs": "./src/codecs.ts",
+    "./identity": "./src/identity.ts",
+    "./state": "./src/state.ts",
     "./operations": "./src/operations.ts",
     "./wire": "./src/wire.ts"
   },

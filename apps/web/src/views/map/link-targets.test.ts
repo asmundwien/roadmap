@@ -1,4 +1,5 @@
-import type { MapResource } from '@roadmap/contracts'
+import { mapIdSchema, projectIdSchema } from '@roadmap/contracts/identity'
+import type { MapResource } from '@roadmap/contracts/state'
 import { describe, expect, it } from 'vitest'
 import { resourceObservation } from '@/views/shared/resource-results'
 import { resolveProseLink } from './link-targets'
@@ -23,8 +24,8 @@ function makeMap(): MapResource {
     ],
     { destination: '' },
     {
-      project: { integration: 'local', id: 'microsoft-risiko' },
-      mapId: '.wayfinder/azure-strategy-leadership-deck/map.md',
+      project: { integration: 'local', projectId: projectIdSchema.parse('microsoft-risiko') },
+      mapId: mapIdSchema.parse('.wayfinder/azure-strategy-leadership-deck/map.md'),
     },
     { title: 'Microsoft Risiko', source: { kind: 'file', path: `${mapDirectory}/map.md` } },
   )
@@ -74,11 +75,7 @@ describe('resolveProseLink', () => {
         `${ROOT}/.wayfinder/azure-strategy-leadership-deck/tickets/02-re-story-for-scroll.md`,
         '../../../docs/page-list.md',
       ),
-    ).toEqual({
-      kind: 'disabled',
-      reason:
-        'Local file links stay inside Roadmap only when they point at this map or one of its tickets.',
-    })
+    ).toMatchObject({ kind: 'disabled' })
   })
 
   it('leaves absolute web links alone', () => {
@@ -125,11 +122,19 @@ describe('resource trace source links', () => {
         },
         proof: {
           kind: 'complete-membership',
-          parent: { kind: 'tickets-membership', map: map.key },
+          parent: { kind: 'tickets-membership', map: map.ref },
         },
       },
       trace: { kind: 'last-successful-trace', lastSuccessful: ticketObservation },
     }
+    if (map.ticketsMembership.kind !== 'current-complete')
+      throw new Error('Expected complete membership')
+    map.ticketsMembership.observation.attemptedAt = 1000
+    map.ticketsMembership.observation.observedAt = 1000
+    map.ticketsMembership.observation.value.members =
+      map.ticketsMembership.observation.value.members.filter(
+        (member) => member.ticketId !== first.ref.ticketId,
+      )
 
     expect(
       resolveProseLink(

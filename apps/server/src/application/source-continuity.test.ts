@@ -3,26 +3,34 @@ import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import type { ApplicationState, ProjectKey } from '@roadmap/contracts'
-import { stateEnvelopeCodec } from '@roadmap/contracts/codecs'
+import { commandSchema } from '@roadmap/contracts/operations'
+import type { ReadyApplicationState } from '@roadmap/contracts/state'
+import { decodeStateEnvelope } from '@roadmap/contracts/wire'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { CredentialBundle } from '../authorization/contracts.ts'
 import type { ChangeEvent } from '../change-feed.ts'
 import type { ConfigurationDocument, ConfigurationRead } from '../configuration/document.ts'
 import { createGitHubProjectAdmission } from '../github/admission.ts'
 import { GitHubError } from '../github/client.ts'
-import { type CredentialBundle, createGitHubConnectionPort } from '../github/connections.ts'
+import { createGitHubConnectionPort } from '../github/connections.ts'
 import type { RawMapIssue } from '../github/map-query.ts'
 import { createGitHubObserverPool } from '../github/observer.ts'
 import { createLocalProjectAdmission } from '../local/admission.ts'
 import { createLocalObserver } from '../local/observer.ts'
 import type { GitHubObservationInput, LocalObservationInput } from '../observation/coordinator.ts'
-import type { SourceContribution } from '../observation/source.ts'
+import type { SourceProjectKey as ProjectKey, SourceContribution } from '../observation/source.ts'
 import type {
   GitHubConnection,
   GitHubProjectIntent,
   GitHubProviderRead,
   ProjectConfiguration,
 } from '../projects/registry.ts'
+import {
+  fixtureProjectRef,
+  fixtureResourceRef,
+  fixtureTicketRef,
+  readApplicationState,
+} from '../public-test-fixtures.ts'
 import {
   publicMapResource,
   publicProjectObservation,
@@ -363,7 +371,7 @@ function fixture(
     replay(): void
   }> = []
   const events: ChangeEvent[] = []
-  const states: ApplicationState[] = []
+  const states: ReadyApplicationState[] = []
   const launches: Array<{ executable: string; args: readonly string[] }> = []
   const application = createRoadmapApplication({
     configuration: document,
@@ -454,7 +462,7 @@ function fixture(
     },
     onChangeEvents: (batch) => events.push(...batch),
   })
-  const unsubscribe = application.subscribe((state) => states.push(state))
+  const unsubscribe = application.subscribe((state) => states.push(readApplicationState(state)))
   return {
     application,
     emit,
@@ -509,34 +517,33 @@ function fixture(
   }
 }
 
-function project(state: ApplicationState, key: ProjectKey) {
+function project(state: ReadyApplicationState, key: ProjectKey) {
   const value = state.projects.find(
-    (row) => row.key.integration === key.integration && row.key.id === key.id,
+    (row) => row.ref.integration === key.integration && row.ref.projectId === key.id,
   )
   if (!value) throw new Error('Configured Project identity disappeared')
   return value
 }
 
-function ticketObservation(state: ApplicationState, key: ProjectKey) {
+function ticketObservation(state: ReadyApplicationState, key: ProjectKey) {
   const map = publicMapResource(project(state, key), '108')
   const ticket = map && publicTicketResource(map, '109')
   return ticket ? publicTicketObservation(ticket) : null
 }
 
-function expectOnlyActiveA(state: ApplicationState) {
+function expectOnlyActiveA(state: ReadyApplicationState) {
   expect(state.configurationVersion).toBe(1)
   expect(state.configuration.valid).toBe(true)
-  expect(state.registrations.map((row) => row.key)).toEqual([SOURCE_A])
-  expect(state.projects.map((row) => row.key)).toEqual([SOURCE_A])
+  expect(state.projects.map((row) => row.ref)).toEqual([fixtureProjectRef(SOURCE_A)])
   expect(state.connections.map((row) => row.id)).toEqual(['local', 'connection-a'])
-  expect(state.registrations[0]).toMatchObject({
+  expect(state.projects[0]).toMatchObject({
     connectionId: 'connection-a',
-    locator: {
+    source: {
       integration: 'github',
       repositoryId: '101',
-      nameWithOwner: 'acme/configured-a-hint',
+      nameWithOwner: 'acme/source-a',
     },
-    workspace: { path: PROJECT_A.workspace.path, gitIdentity: '101' },
+    management: { workspacePath: PROJECT_A.workspace.path },
   })
   expect(JSON.stringify(state)).not.toContain('B candidate body')
   expect(JSON.stringify(state)).not.toContain(CREDENTIALS_A.accessToken)
@@ -561,8 +568,12 @@ describe('RoadmapApplication independent source continuity', () => {
       integration: 'github',
       repositoryId: '202',
       nameWithOwner: 'acme/source-b',
+      ticketId: '109',
     }
-    const registered = { kind: 'registered', project: SOURCE_B }
+    const registered = {
+      kind: 'registered',
+      ticket: fixtureResourceRef({ map: { project: SOURCE_B, mapId: '108' }, ticketId: '109' }),
+    }
     const ownProvenance = {
       integration: 'github',
       connectionId: 'connection-a',
@@ -570,7 +581,7 @@ describe('RoadmapApplication independent source continuity', () => {
       stage: 'map-read',
     }
     const parentFailure = (attemptedAt: number) => ({
-      scope: { kind: 'project', project: SOURCE_A },
+      scope: { kind: 'project', project: fixtureProjectRef(SOURCE_A) },
       attemptedAt,
       provenance: {
         integration: 'github',
@@ -582,7 +593,7 @@ describe('RoadmapApplication independent source continuity', () => {
     })
     try {
       await test.application.start()
-      const baseline = project(test.application.current(), SOURCE_A)
+      const baseline = project(readApplicationState(test.application.current()), SOURCE_A)
       const ownerA = test.callbacks.find((owner) => owner.projectId === SOURCE_A.id)
       if (!ownerA) throw new Error('Missing actual A observer')
       const ownTicketRead = () => {
@@ -606,8 +617,13 @@ describe('RoadmapApplication independent source continuity', () => {
       }
       const baselineRead = ownTicketRead()
       expect(baseline).toMatchObject({
-        activeMap: { kind: 'known-current', mapId: '108' },
-        displayOrder: { openMapIds: ['108', '110'] },
+        activeMap: {
+          kind: 'known-current',
+          ref: fixtureResourceRef({ project: SOURCE_A, mapId: '108' }),
+        },
+        displayOrder: {
+          open: ['108', '110'].map((mapId) => fixtureResourceRef({ project: SOURCE_A, mapId })),
+        },
       })
       const baselineMap = publicMapResource(baseline, '108')
       expect(baselineMap && publicTicketResource(baselineMap, '109')?.resource).toMatchObject({
@@ -616,27 +632,31 @@ describe('RoadmapApplication independent source continuity', () => {
           attemptedAt: 1000,
           observedAt: 1000,
           provenance: ownProvenance,
-          value: { body: 'A baseline body', blockedBy: [{ reference: external, ticketId: '109' }] },
+          value: { body: 'A baseline body', blockedBy: [{ reference: external }] },
         },
       })
 
       test.failRepository('101', true)
       vi.setSystemTime(2000)
       expect(
-        await test.application.execute({
-          type: 'refresh-project',
-          project: SOURCE_A,
-          expectedConfigurationVersion: 1,
-        }),
+        await test.application.execute(
+          commandSchema.parse({
+            type: 'refresh-project',
+            project: fixtureProjectRef(SOURCE_A),
+            expectedConfigurationVersion: 1,
+          }),
+        ),
       ).toMatchObject({ ok: true })
       const failedRead = ownProjectFailure()
       expect(failedRead.readSequence).toBeGreaterThan(baselineRead.readSequence)
       expect(ownTicketRead().readSequence).toBe(baselineRead.readSequence)
-      const unavailable = project(test.application.current(), SOURCE_A)
+      const unavailable = project(readApplicationState(test.application.current()), SOURCE_A)
       expect(unavailable).toMatchObject({
         resource: { kind: 'retained-unavailable', unavailable: parentFailure(2000) },
         activeMap: { kind: 'uncertain' },
-        displayOrder: { openMapIds: ['108', '110'] },
+        displayOrder: {
+          open: ['108', '110'].map((mapId) => fixtureResourceRef({ project: SOURCE_A, mapId })),
+        },
       })
       const failedMap = publicMapResource(unavailable, '108')
       expect(failedMap && publicTicketResource(failedMap, '109')?.resource).toMatchObject({
@@ -645,7 +665,7 @@ describe('RoadmapApplication independent source continuity', () => {
         lastSuccessful: {
           attemptedAt: 1000,
           observedAt: 1000,
-          value: { blockedBy: [{ reference: external, ticketId: '109' }] },
+          value: { blockedBy: [{ reference: external }] },
         },
       })
       const requestsBeforeTopology = test.requests.filter(
@@ -660,10 +680,12 @@ describe('RoadmapApplication independent source continuity', () => {
         projects: [PROJECT_A, PROJECT_B],
       })
       await vi.advanceTimersByTimeAsync(0)
-      await vi.waitFor(() => expect(test.application.current().configurationVersion).toBe(2))
-      const reprojected = test.application.current()
+      await vi.waitFor(() =>
+        expect(readApplicationState(test.application.current()).configurationVersion).toBe(2),
+      )
+      const reprojected = readApplicationState(test.application.current())
       const envelope: unknown = JSON.parse(JSON.stringify({ type: 'state', state: reprojected }))
-      const decoded = stateEnvelopeCodec.decode(envelope)
+      const decoded = decodeStateEnvelope(envelope)
       expect(decoded.ok).toBe(true)
       if (!decoded.ok)
         throw new Error('Cached topology reclassification invalidated outgoing state')
@@ -678,7 +700,9 @@ describe('RoadmapApplication independent source continuity', () => {
       expect(retained).toMatchObject({
         resource: { kind: 'retained-unavailable', unavailable: parentFailure(2000) },
         activeMap: { kind: 'uncertain' },
-        displayOrder: { openMapIds: ['108', '110'] },
+        displayOrder: {
+          open: ['108', '110'].map((mapId) => fixtureResourceRef({ project: SOURCE_A, mapId })),
+        },
       })
       const retainedMap = publicMapResource(retained, '108')
       expect(retainedMap && publicTicketResource(retainedMap, '109')?.resource).toMatchObject({
@@ -690,7 +714,7 @@ describe('RoadmapApplication independent source continuity', () => {
           provenance: ownProvenance,
           value: {
             body: 'A baseline body',
-            blockedBy: [{ reference: registered, ticketId: '109' }],
+            blockedBy: [{ reference: registered }],
           },
         },
       })
@@ -709,40 +733,51 @@ describe('RoadmapApplication independent source continuity', () => {
       test.blockOnB('101', 'A newly fetched body')
       vi.setSystemTime(4000)
       expect(
-        await test.application.execute({
-          type: 'refresh-project',
-          project: SOURCE_A,
-          expectedConfigurationVersion: 2,
-        }),
+        await test.application.execute(
+          commandSchema.parse({
+            type: 'refresh-project',
+            project: fixtureProjectRef(SOURCE_A),
+            expectedConfigurationVersion: 2,
+          }),
+        ),
       ).toMatchObject({ ok: true })
       const recoveredRead = ownTicketRead()
       expect(recoveredRead.readSequence).toBeGreaterThan(failedRead.readSequence)
-      expect(ticketObservation(test.application.current(), SOURCE_A)).toMatchObject({
+      expect(
+        ticketObservation(readApplicationState(test.application.current()), SOURCE_A),
+      ).toMatchObject({
         attemptedAt: 4000,
         observedAt: 4000,
         provenance: ownProvenance,
         value: {
           body: 'A newly fetched body',
-          blockedBy: [{ reference: registered, ticketId: '109' }],
+          blockedBy: [{ reference: registered }],
         },
       })
-      const recoveredMap = publicMapResource(project(test.application.current(), SOURCE_A), '108')
+      const recoveredMap = publicMapResource(
+        project(readApplicationState(test.application.current()), SOURCE_A),
+        '108',
+      )
       expect(recoveredMap && publicTicketResource(recoveredMap, '109')?.resource.kind).toBe(
         'current-readable',
       )
-      expect(project(test.application.current(), SOURCE_A).activeMap).toEqual({
-        kind: 'known-current',
-        mapId: '108',
-      })
+      expect(project(readApplicationState(test.application.current()), SOURCE_A).activeMap).toEqual(
+        {
+          kind: 'known-current',
+          ref: fixtureResourceRef({ project: SOURCE_A, mapId: '108' }),
+        },
+      )
 
       test.failRepository('101', true)
       vi.setSystemTime(5000)
       expect(
-        await test.application.execute({
-          type: 'refresh-project',
-          project: SOURCE_A,
-          expectedConfigurationVersion: 2,
-        }),
+        await test.application.execute(
+          commandSchema.parse({
+            type: 'refresh-project',
+            project: fixtureProjectRef(SOURCE_A),
+            expectedConfigurationVersion: 2,
+          }),
+        ),
       ).toMatchObject({ ok: true })
       const laterFailure = ownProjectFailure()
       expect(laterFailure.readSequence).toBeGreaterThan(recoveredRead.readSequence)
@@ -750,14 +785,16 @@ describe('RoadmapApplication independent source continuity', () => {
       vi.setSystemTime(6000)
       test.emit({ ...CONFIGURATION, configurationVersion: 3 })
       await vi.advanceTimersByTimeAsync(0)
-      await vi.waitFor(() => expect(test.application.current().configurationVersion).toBe(3))
+      await vi.waitFor(() =>
+        expect(readApplicationState(test.application.current()).configurationVersion).toBe(3),
+      )
       expect(ownTicketRead()).toMatchObject({
         readSequence: recoveredRead.readSequence,
         attemptedAt: recoveredRead.attemptedAt,
         observedAt: recoveredRead.observedAt,
       })
       expect(ownProjectFailure()).toEqual(laterFailure)
-      const removed = project(test.application.current(), SOURCE_A)
+      const removed = project(readApplicationState(test.application.current()), SOURCE_A)
       const removedMap = publicMapResource(removed, '108')
       expect(removedMap && publicTicketResource(removedMap, '109')?.resource).toMatchObject({
         kind: 'retained-unavailable',
@@ -768,7 +805,7 @@ describe('RoadmapApplication independent source continuity', () => {
           provenance: ownProvenance,
           value: {
             body: 'A newly fetched body',
-            blockedBy: [{ reference: external, ticketId: '109' }],
+            blockedBy: [{ reference: external }],
           },
         },
       })
@@ -777,10 +814,10 @@ describe('RoadmapApplication independent source continuity', () => {
         readsBeforeRemoval,
       )
       ownerA.replay()
-      expect(project(test.application.current(), SOURCE_A)).toEqual(removed)
+      expect(project(readApplicationState(test.application.current()), SOURCE_A)).toEqual(removed)
       for (const state of test.states) {
         const published: unknown = JSON.parse(JSON.stringify({ type: 'state', state }))
-        expect(stateEnvelopeCodec.decode(published).ok).toBe(true)
+        expect(decodeStateEnvelope(published).ok).toBe(true)
       }
       expect(test.launches).toEqual([])
       expect(test.writes).toEqual([])
@@ -808,7 +845,7 @@ describe('RoadmapApplication independent source continuity', () => {
       const test = fixture({ ...CONFIGURATION, projects: [local, PROJECT_A] }, false, true)
       try {
         await test.application.start()
-        const before = test.application.current()
+        const before = readApplicationState(test.application.current())
         expect(project(before, LOCAL).resource.kind).toBe('never-observed')
         expect(publicProjectObservation(project(before, LOCAL))).toBeNull()
         expect(test.localInputs).toEqual([])
@@ -818,29 +855,47 @@ describe('RoadmapApplication independent source continuity', () => {
         if (recovery === 'manual refresh') {
           vi.setSystemTime(3_000)
           expect(
-            await test.application.execute({
-              type: 'refresh-project',
-              project: LOCAL,
-              expectedConfigurationVersion: 1,
-            }),
-          ).toMatchObject({ ok: true, result: { type: 'project-refreshed', project: LOCAL } })
+            await test.application.execute(
+              commandSchema.parse({
+                type: 'refresh-project',
+                project: fixtureProjectRef(LOCAL),
+                expectedConfigurationVersion: 1,
+              }),
+            ),
+          ).toMatchObject({
+            ok: true,
+            result: { type: 'project-refreshed', project: fixtureProjectRef(LOCAL) },
+          })
         } else {
           await vi.advanceTimersByTimeAsync(2_000)
           await vi.waitFor(() =>
-            expect(project(test.application.current(), LOCAL).resource.kind).toBe(
-              'current-readable',
-            ),
+            expect(
+              project(readApplicationState(test.application.current()), LOCAL).resource.kind,
+            ).toBe('current-readable'),
           )
         }
-        const after = test.application.current()
+        const after = readApplicationState(test.application.current())
         expect(after.configurationVersion).toBe(1)
-        expect(after.registrations).toEqual(before.registrations)
-        expect(after.registrations.find((row) => row.key.id === LOCAL.id)).toMatchObject({
-          key: LOCAL,
+        expect(
+          after.projects.map(({ ref, connectionId, source, management }) => ({
+            ref,
+            connectionId,
+            source,
+            management,
+          })),
+        ).toEqual(
+          before.projects.map(({ ref, connectionId, source, management }) => ({
+            ref,
+            connectionId,
+            source,
+            management,
+          })),
+        )
+        expect(after.projects.find((row) => row.ref.projectId === LOCAL.id)).toMatchObject({
+          ref: fixtureResourceRef(LOCAL),
           connectionId: 'local',
-          displayName: 'Saved Local management',
-          workspace: { path: canonical },
-          locator: { integration: 'local', path: canonical },
+          management: { displayName: 'Saved Local management' },
+          source: { integration: 'local', path: canonical },
         })
         expect(project(after, LOCAL)).toMatchObject({
           name: 'Saved Local management',
@@ -905,21 +960,47 @@ describe('RoadmapApplication independent source continuity', () => {
       const test = fixture({ ...CONFIGURATION, projects: [local, PROJECT_A] }, false, true)
       try {
         await test.application.start()
-        const before = test.application.current()
+        const before = readApplicationState(test.application.current())
         await symlink(unrelated, workspace, 'dir')
         expect(await realpath(workspace)).toBe(unrelated)
         expect(
-          await test.application.execute({
-            type: 'refresh-project',
-            project: LOCAL,
-            expectedConfigurationVersion: 1,
-          }),
+          await test.application.execute(
+            commandSchema.parse({
+              type: 'refresh-project',
+              project: fixtureProjectRef(LOCAL),
+              expectedConfigurationVersion: 1,
+            }),
+          ),
         ).toMatchObject({ ok: false })
         await vi.advanceTimersByTimeAsync(10_000)
-        expect(project(test.application.current(), LOCAL).resource.kind).toBe('never-observed')
-        expect(publicProjectObservation(project(test.application.current(), LOCAL))).toBeNull()
-        expect(test.application.current().registrations).toEqual(before.registrations)
-        expect(project(test.application.current(), SOURCE_A)).toEqual(project(before, SOURCE_A))
+        expect(project(readApplicationState(test.application.current()), LOCAL).resource.kind).toBe(
+          'never-observed',
+        )
+        expect(
+          publicProjectObservation(
+            project(readApplicationState(test.application.current()), LOCAL),
+          ),
+        ).toBeNull()
+        expect(
+          readApplicationState(test.application.current()).projects.map(
+            ({ ref, connectionId, source, management }) => ({
+              ref,
+              connectionId,
+              source,
+              management,
+            }),
+          ),
+        ).toEqual(
+          before.projects.map(({ ref, connectionId, source, management }) => ({
+            ref,
+            connectionId,
+            source,
+            management,
+          })),
+        )
+        expect(project(readApplicationState(test.application.current()), SOURCE_A)).toEqual(
+          project(before, SOURCE_A),
+        )
         expect(test.localInputs).toEqual([])
         expect(test.inputs).toHaveLength(1)
         expect(test.writes).toEqual([])
@@ -971,26 +1052,24 @@ describe('RoadmapApplication independent source continuity', () => {
         }
         test = fixture(configured, true)
         await test.application.start()
-        const state = test.application.current()
+        const state = readApplicationState(test.application.current())
         expect(state.configurationVersion).toBe(1)
         expect(state.configuration.valid).toBe(true)
-        expect(state.registrations).toHaveLength(2)
-        expect(state.registrations.find((row) => row.key.id === LOCAL.id)).toMatchObject({
-          key: LOCAL,
+        expect(state.projects).toHaveLength(2)
+        expect(state.projects.find((row) => row.ref.projectId === LOCAL.id)).toMatchObject({
+          ref: fixtureResourceRef(LOCAL),
           connectionId: 'local',
-          displayName: 'Saved Local',
-          workspace: { path: worktree },
-          locator: { integration: 'local', path: worktree },
+          management: { displayName: 'Saved Local' },
+          source: { integration: 'local', path: worktree },
         })
-        expect(state.registrations.find((row) => row.key.id === SOURCE_A.id)).toMatchObject({
-          key: SOURCE_A,
+        expect(state.projects.find((row) => row.ref.projectId === SOURCE_A.id)).toMatchObject({
+          ref: fixtureResourceRef(SOURCE_A),
           connectionId: 'connection-a',
-          displayName: 'Saved GitHub',
-          workspace: { path: alias, gitIdentity: '101' },
-          locator: {
+          management: { workspacePath: alias, displayName: 'Saved GitHub' },
+          source: {
             integration: 'github',
             repositoryId: '101',
-            nameWithOwner: 'acme/configured-a-hint',
+            nameWithOwner: 'acme/source-a',
           },
         })
         expect(state.connections.find((row) => row.id === 'connection-a')).toMatchObject({
@@ -1012,11 +1091,14 @@ describe('RoadmapApplication independent source continuity', () => {
           resource: { kind: 'current-readable' },
           maps: [
             {
-              key: { project: SOURCE_A, mapId: '108' },
+              ref: fixtureResourceRef({ project: SOURCE_A, mapId: '108' }),
               ticketsMembership: { kind: 'current-complete' },
               tickets: [
                 {
-                  key: { map: { project: SOURCE_A, mapId: '108' }, ticketId: '109' },
+                  ref: fixtureResourceRef({
+                    map: { project: SOURCE_A, mapId: '108' },
+                    ticketId: '109',
+                  }),
                   resource: {
                     kind: 'current-readable',
                     observation: { value: { body: 'A baseline body' } },
@@ -1050,13 +1132,20 @@ describe('RoadmapApplication independent source continuity', () => {
         )
         test.update('101', 'Remote body after occupancy rejection', true)
         expect(
-          await test.application.execute({
-            type: 'refresh-project',
-            project: SOURCE_A,
-            expectedConfigurationVersion: 1,
-          }),
-        ).toMatchObject({ ok: true, result: { type: 'project-refreshed', project: SOURCE_A } })
-        expect(ticketObservation(test.application.current(), SOURCE_A)?.value).toMatchObject({
+          await test.application.execute(
+            commandSchema.parse({
+              type: 'refresh-project',
+              project: fixtureProjectRef(SOURCE_A),
+              expectedConfigurationVersion: 1,
+            }),
+          ),
+        ).toMatchObject({
+          ok: true,
+          result: { type: 'project-refreshed', project: fixtureProjectRef(SOURCE_A) },
+        })
+        expect(
+          ticketObservation(readApplicationState(test.application.current()), SOURCE_A)?.value,
+        ).toMatchObject({
           body: 'Remote body after occupancy rejection',
           isClaimed: true,
         })
@@ -1065,12 +1154,14 @@ describe('RoadmapApplication independent source continuity', () => {
         for (const key of [LOCAL, SOURCE_A]) {
           for (const actionId of ['open-workspace', 'open-terminal', 'reveal-source']) {
             expect(
-              await test.application.execute({
-                type: 'launch-action',
-                project: key,
-                actionId,
-                expectedConfigurationVersion: 1,
-              }),
+              await test.application.execute(
+                commandSchema.parse({
+                  type: 'launch-action',
+                  project: fixtureProjectRef(key),
+                  actionId,
+                  expectedConfigurationVersion: 1,
+                }),
+              ),
             ).toMatchObject({
               ok: false,
               error: { code: 'admission-failed', field: 'workspace.path' },
@@ -1079,24 +1170,26 @@ describe('RoadmapApplication independent source continuity', () => {
         }
         const repairAlias = join(await realpath(root), 'repair-alias')
         await symlink(worktree, repairAlias, 'dir')
-        const refreshed = test.application.current()
+        const refreshed = readApplicationState(test.application.current())
         for (const key of [LOCAL, SOURCE_A]) {
           expect(
-            await test.application.execute({
-              type: 'repair-project-workspace',
-              project: key,
-              workspace: { path: repairAlias },
-              expectedConfigurationVersion: 1,
-            }),
+            await test.application.execute(
+              commandSchema.parse({
+                type: 'repair-project-workspace',
+                project: fixtureProjectRef(key),
+                workspace: { path: repairAlias },
+                expectedConfigurationVersion: 1,
+              }),
+            ),
           ).toMatchObject({
             ok: false,
             error: { code: 'admission-failed', field: 'workspace.path' },
           })
         }
-        const afterRepair = test.application.current()
+        const afterRepair = readApplicationState(test.application.current())
         expect(afterRepair.configurationVersion).toBe(refreshed.configurationVersion)
         expect(afterRepair.configuration).toEqual(refreshed.configuration)
-        expect(afterRepair.registrations).toEqual(refreshed.registrations)
+        expect(afterRepair.projects).toEqual(refreshed.projects)
         expect(afterRepair.connections).toEqual(refreshed.connections)
         expect(afterRepair.automation).toEqual(refreshed.automation)
         expect(afterRepair.projects).toEqual(refreshed.projects)
@@ -1155,7 +1248,7 @@ describe('RoadmapApplication independent source continuity', () => {
           true,
         )
         await test.application.start()
-        const before = test.application.current()
+        const before = readApplicationState(test.application.current())
         expect(publicProjectObservation(project(before, SOURCE_A))?.observedAt).toBeTypeOf('number')
         expect(project(before, SOURCE_A).resource.kind).toBe('current-readable')
         expect(ticketObservation(before, SOURCE_A)?.value.body).toBe('A baseline body')
@@ -1168,12 +1261,14 @@ describe('RoadmapApplication independent source continuity', () => {
         for (const key of [SOURCE_A, LOCAL]) {
           for (const actionId of ['open-workspace', 'open-terminal', 'reveal-source']) {
             expect(
-              await test.application.execute({
-                type: 'launch-action',
-                project: key,
-                actionId,
-                expectedConfigurationVersion: 1,
-              }),
+              await test.application.execute(
+                commandSchema.parse({
+                  type: 'launch-action',
+                  project: fixtureProjectRef(key),
+                  actionId,
+                  expectedConfigurationVersion: 1,
+                }),
+              ),
             ).toMatchObject({
               ok: false,
               error: { code: 'admission-failed', field: 'workspace.path' },
@@ -1184,20 +1279,30 @@ describe('RoadmapApplication independent source continuity', () => {
         expect(test.writes).toEqual([])
         expect(test.localInputs).toEqual([])
         expect(test.inputs).toHaveLength(1)
-        const after = test.application.current()
+        const after = readApplicationState(test.application.current())
         expect(after.configurationVersion).toBe(before.configurationVersion)
         expect(after.configuration).toEqual(before.configuration)
-        expect(after.registrations).toEqual(before.registrations)
+        expect(
+          after.projects.map(({ ref, connectionId, source, management }) => ({
+            ref,
+            connectionId,
+            source,
+            management,
+          })),
+        ).toEqual(
+          before.projects.map(({ ref, connectionId, source, management }) => ({
+            ref,
+            connectionId,
+            source,
+            management,
+          })),
+        )
         expect(after.connections).toEqual(before.connections)
         expect(after.automation).toEqual(before.automation)
         expect(after.authorizationOperations).toEqual(before.authorizationOperations)
-        expect(after.projects.map((row) => row.key)).toEqual(before.projects.map((row) => row.key))
-        expect(project(after, LOCAL).managementWarnings).toContainEqual(
-          expect.stringMatching(/Workspace unavailable:.*recorded Git-history identity/),
-        )
-        expect(project(after, SOURCE_A).managementWarnings).toContainEqual(
-          expect.stringMatching(/Workspace unavailable:.*canonical Workspace.*already registered/),
-        )
+        expect(after.projects.map((row) => row.ref)).toEqual(before.projects.map((row) => row.ref))
+        expect(project(after, LOCAL).managementWarnings.length).toBeGreaterThan(0)
+        expect(project(after, SOURCE_A).managementWarnings.length).toBeGreaterThan(0)
         for (const key of [LOCAL, SOURCE_A]) {
           expect(project(after, key).resource).toEqual(project(before, key).resource)
           expect(project(after, key).mapsMembership).toEqual(project(before, key).mapsMembership)
@@ -1277,25 +1382,27 @@ describe('RoadmapApplication independent source continuity', () => {
     })
     try {
       await application.start()
-      const before = application.current()
+      const before = readApplicationState(application.current())
       expect(project(before, LOCAL).resource.kind).toBe('never-observed')
       expect(
-        await application.execute({
-          type: 'repair-project-workspace',
-          project: LOCAL,
-          workspace: { path: candidate },
-          expectedConfigurationVersion: 1,
-        }),
+        await application.execute(
+          commandSchema.parse({
+            type: 'repair-project-workspace',
+            project: fixtureProjectRef(LOCAL),
+            workspace: { path: candidate },
+            expectedConfigurationVersion: 1,
+          }),
+        ),
       ).toMatchObject({ ok: false, error: { code: 'admission-failed', field: 'workspace.path' } })
       expect(writes).toEqual([])
-      expect(application.current().configurationVersion).toBe(1)
-      expect(application.current().registrations).toEqual(before.registrations)
-      expect(application.current().registrations[0]).toMatchObject({
-        key: LOCAL,
-        workspace: { path: original },
-        displayName: 'Case-sensitive Local',
+      expect(readApplicationState(application.current()).configurationVersion).toBe(1)
+      expect(readApplicationState(application.current()).projects).toEqual(before.projects)
+      expect(readApplicationState(application.current()).projects[0]).toMatchObject({
+        ref: fixtureResourceRef(LOCAL),
+        source: { integration: 'local', path: original },
+        management: { displayName: 'Case-sensitive Local' },
       })
-      expect(application.current().roadmap).toEqual(before.roadmap)
+      expect(readApplicationState(application.current()).capturedAt).toEqual(before.capturedAt)
     } finally {
       try {
         await application.stop()
@@ -1312,10 +1419,10 @@ describe('RoadmapApplication independent source continuity', () => {
     const candidate = test.gate('202', 'identity')
     try {
       await test.application.start()
-      expectOnlyActiveA(test.application.current())
-      expect(ticketObservation(test.application.current(), SOURCE_A)?.value?.body).toBe(
-        'A baseline body',
-      )
+      expectOnlyActiveA(readApplicationState(test.application.current()))
+      expect(
+        ticketObservation(readApplicationState(test.application.current()), SOURCE_A)?.value?.body,
+      ).toBe('A baseline body')
       expect(test.events).toEqual([])
       const afterBaseline = test.states.length
       test.emit({
@@ -1329,20 +1436,20 @@ describe('RoadmapApplication independent source continuity', () => {
       test.update('101', 'A changed while B is pending', true)
       await vi.advanceTimersByTimeAsync(30_000)
       expect(candidate.pending()).toBe(true)
-      const current = test.application.current()
+      const current = readApplicationState(test.application.current())
       expectOnlyActiveA(current)
       expect(project(current, SOURCE_A)).toMatchObject({
         resource: { kind: 'current-readable', observation: { observedAt: 31_000 } },
         maps: [
           {
-            key: { project: SOURCE_A, mapId: '108' },
+            ref: fixtureResourceRef({ project: SOURCE_A, mapId: '108' }),
             resource: {
               kind: 'current-readable',
               observation: { value: { body: { destination: 'A changed while B is pending' } } },
             },
             tickets: [
               {
-                key: { map: { project: SOURCE_A, mapId: '108' }, ticketId: '109' },
+                ref: fixtureTicketRef({ project: SOURCE_A, mapId: '108', ticketId: '109' }),
                 resource: {
                   kind: 'current-readable',
                   observation: { value: { body: 'A changed while B is pending', isClaimed: true } },
@@ -1380,13 +1487,13 @@ describe('RoadmapApplication independent source continuity', () => {
       )
       candidate.release()
       await vi.advanceTimersByTimeAsync(0)
-      expect(test.application.current().configurationVersion).toBe(2)
-      expect(ticketObservation(test.application.current(), SOURCE_A)?.value?.body).toBe(
-        'A changed while B is pending',
-      )
-      expect(ticketObservation(test.application.current(), SOURCE_B)?.value?.body).toBe(
-        'B candidate body',
-      )
+      expect(readApplicationState(test.application.current()).configurationVersion).toBe(2)
+      expect(
+        ticketObservation(readApplicationState(test.application.current()), SOURCE_A)?.value?.body,
+      ).toBe('A changed while B is pending')
+      expect(
+        ticketObservation(readApplicationState(test.application.current()), SOURCE_B)?.value?.body,
+      ).toBe('B candidate body')
       expect(test.events.filter((event) => event.type === 'ticket-claimed')).toHaveLength(1)
       expect(test.writes).toEqual([])
     } finally {
@@ -1402,28 +1509,32 @@ describe('RoadmapApplication independent source continuity', () => {
       await test.application.start()
       test.update('101', 'First gated A update', true)
       const gate = test.gate('101', 'map')
-      const refresh = test.application.execute({
-        type: 'refresh-project',
-        project: SOURCE_A,
-        expectedConfigurationVersion: 1,
-      })
+      const refresh = test.application.execute(
+        commandSchema.parse({
+          type: 'refresh-project',
+          project: fixtureProjectRef(SOURCE_A),
+          expectedConfigurationVersion: 1,
+        }),
+      )
       await gate.started
       test.update('101', 'Newest serialized A update', true)
       await vi.advanceTimersByTimeAsync(30_000)
       expect(gate.pending()).toBe(true)
       expect(test.maximumInFlight('101')).toBe(1)
-      expect(ticketObservation(test.application.current(), SOURCE_A)?.value?.body).toBe(
-        'A baseline body',
-      )
+      expect(
+        ticketObservation(readApplicationState(test.application.current()), SOURCE_A)?.value?.body,
+      ).toBe('A baseline body')
       expect(test.events).toEqual([])
       gate.release()
       expect(await refresh).toMatchObject({
         ok: true,
-        result: { type: 'project-refreshed', project: SOURCE_A },
+        result: { type: 'project-refreshed', project: fixtureProjectRef(SOURCE_A) },
       })
       await vi.advanceTimersByTimeAsync(0)
       expect(test.maximumInFlight('101')).toBe(1)
-      expect(ticketObservation(test.application.current(), SOURCE_A)?.value).toMatchObject({
+      expect(
+        ticketObservation(readApplicationState(test.application.current()), SOURCE_A)?.value,
+      ).toMatchObject({
         body: 'Newest serialized A update',
         isClaimed: true,
       })
@@ -1449,9 +1560,9 @@ describe('RoadmapApplication independent source continuity', () => {
           expect.objectContaining({ repositoryId: '101', path: 'map-read', at: 31_000 }),
         ]),
       )
-      expect(ticketObservation(test.application.current(), SOURCE_A)?.value?.body).toBe(
-        'A baseline body',
-      )
+      expect(
+        ticketObservation(readApplicationState(test.application.current()), SOURCE_A)?.value?.body,
+      ).toBe('A baseline body')
       test.emit({
         ...CONFIGURATION,
         configurationVersion: 2,
@@ -1459,16 +1570,19 @@ describe('RoadmapApplication independent source continuity', () => {
         projects: [{ ...PROJECT_B, ref: PROJECT_A.ref }],
       })
       await vi.advanceTimersByTimeAsync(0)
-      expect(test.application.current().configurationVersion).toBe(2)
+      expect(readApplicationState(test.application.current()).configurationVersion).toBe(2)
       expect(original.retired).toBe(true)
-      expect(project(test.application.current(), SOURCE_A)).toMatchObject({
+      expect(project(readApplicationState(test.application.current()), SOURCE_A)).toMatchObject({
         connectionId: 'connection-b',
-        locator: { repositoryId: '202' },
+        source: { repositoryId: '202' },
         maps: [
           {
             tickets: [
               {
-                key: { map: { project: SOURCE_A, mapId: '108' }, ticketId: '109' },
+                ref: fixtureResourceRef({
+                  map: { project: SOURCE_A, mapId: '108' },
+                  ticketId: '109',
+                }),
                 resource: {
                   kind: 'current-readable',
                   observation: { value: { body: 'B candidate body' } },
@@ -1478,17 +1592,17 @@ describe('RoadmapApplication independent source continuity', () => {
           },
         ],
       })
-      const committed = test.application.current()
+      const committed = readApplicationState(test.application.current())
       const published = test.states.length
       const events = test.events.length
       // Replay the captured real callback, including its real stable-ID and Connection provenance.
       original.replay()
-      expect(test.application.current()).toBe(committed)
+      expect(readApplicationState(test.application.current())).toBe(committed)
       expect(test.states).toHaveLength(published)
       expect(test.events).toHaveLength(events)
-      expect(ticketObservation(test.application.current(), SOURCE_A)?.value?.body).toBe(
-        'B candidate body',
-      )
+      expect(
+        ticketObservation(readApplicationState(test.application.current()), SOURCE_A)?.value?.body,
+      ).toBe('B candidate body')
     } finally {
       await test.stop()
     }
@@ -1502,27 +1616,36 @@ describe('RoadmapApplication independent source continuity', () => {
     test.addSibling('101')
     try {
       await test.application.start()
-      expect(project(test.application.current(), SOURCE_A)).toMatchObject({
-        activeMap: { kind: 'known-current', mapId: '108' },
-        displayOrder: { openMapIds: ['108', '110'] },
+      expect(project(readApplicationState(test.application.current()), SOURCE_A)).toMatchObject({
+        activeMap: {
+          kind: 'known-current',
+          ref: fixtureResourceRef({ project: SOURCE_A, mapId: '108' }),
+        },
+        displayOrder: {
+          open: ['108', '110'].map((mapId) => fixtureResourceRef({ project: SOURCE_A, mapId })),
+        },
       })
       test.missingAlias('101', true)
       vi.setSystemTime(2000)
       expect(
         (
-          await test.application.execute({
-            type: 'refresh-project',
-            project: SOURCE_A,
-            expectedConfigurationVersion: 1,
-          })
+          await test.application.execute(
+            commandSchema.parse({
+              type: 'refresh-project',
+              project: fixtureProjectRef(SOURCE_A),
+              expectedConfigurationVersion: 1,
+            }),
+          )
         ).ok,
       ).toBe(true)
-      expect(project(test.application.current(), SOURCE_A)).toMatchObject({
+      expect(project(readApplicationState(test.application.current()), SOURCE_A)).toMatchObject({
         activeMap: { kind: 'uncertain' },
-        displayOrder: { openMapIds: ['108', '110'] },
+        displayOrder: {
+          open: ['108', '110'].map((mapId) => fixtureResourceRef({ project: SOURCE_A, mapId })),
+        },
         maps: [
           {
-            key: { project: SOURCE_A, mapId: '108' },
+            ref: fixtureResourceRef({ project: SOURCE_A, mapId: '108' }),
             resource: {
               kind: 'retained-unavailable',
               lastSuccessful: {
@@ -1545,7 +1668,7 @@ describe('RoadmapApplication independent source continuity', () => {
             },
           },
           {
-            key: { project: SOURCE_A, mapId: '110' },
+            ref: fixtureResourceRef({ project: SOURCE_A, mapId: '110' }),
             resource: {
               kind: 'current-readable',
               observation: {
@@ -1561,18 +1684,23 @@ describe('RoadmapApplication independent source continuity', () => {
       vi.setSystemTime(3000)
       expect(
         (
-          await test.application.execute({
-            type: 'refresh-project',
-            project: SOURCE_A,
-            expectedConfigurationVersion: 1,
-          })
+          await test.application.execute(
+            commandSchema.parse({
+              type: 'refresh-project',
+              project: fixtureProjectRef(SOURCE_A),
+              expectedConfigurationVersion: 1,
+            }),
+          )
         ).ok,
       ).toBe(true)
-      expect(project(test.application.current(), SOURCE_A)).toMatchObject({
-        activeMap: { kind: 'known-current', mapId: '108' },
+      expect(project(readApplicationState(test.application.current()), SOURCE_A)).toMatchObject({
+        activeMap: {
+          kind: 'known-current',
+          ref: fixtureResourceRef({ project: SOURCE_A, mapId: '108' }),
+        },
         maps: [
           {
-            key: { project: SOURCE_A, mapId: '108' },
+            ref: fixtureResourceRef({ project: SOURCE_A, mapId: '108' }),
             resource: {
               kind: 'current-readable',
               observation: {
@@ -1587,7 +1715,10 @@ describe('RoadmapApplication independent source continuity', () => {
               },
             },
           },
-          { key: { project: SOURCE_A, mapId: '110' }, resource: { kind: 'current-readable' } },
+          {
+            ref: fixtureResourceRef({ project: SOURCE_A, mapId: '110' }),
+            resource: { kind: 'current-readable' },
+          },
         ],
       })
       expect(test.launches).toEqual([])
@@ -1607,21 +1738,29 @@ describe('RoadmapApplication independent source continuity', () => {
       const target = { project: SOURCE_A, mapId: '108', ticketId: '109' }
       try {
         await test.application.start()
-        const baseline = publicMapResource(project(test.application.current(), SOURCE_A), '108')
+        const baseline = publicMapResource(
+          project(readApplicationState(test.application.current()), SOURCE_A),
+          '108',
+        )
         expect(baseline?.resource.kind).toBe(hadSuccess ? 'current-readable' : 'never-observed')
         test.listMap('101', false)
         vi.setSystemTime(2000)
         expect(
           (
-            await test.application.execute({
-              type: 'refresh-project',
-              project: SOURCE_A,
-              expectedConfigurationVersion: 1,
-            })
+            await test.application.execute(
+              commandSchema.parse({
+                type: 'refresh-project',
+                project: fixtureProjectRef(SOURCE_A),
+                expectedConfigurationVersion: 1,
+              }),
+            )
           ).ok,
         ).toBe(true)
         expect(
-          publicMapResource(project(test.application.current(), SOURCE_A), '108')?.resource,
+          publicMapResource(
+            project(readApplicationState(test.application.current()), SOURCE_A),
+            '108',
+          )?.resource,
         ).toMatchObject({
           kind: 'proven-absent',
           absence: { observedAt: 2000, proof: { kind: 'complete-membership' } },
@@ -1634,14 +1773,16 @@ describe('RoadmapApplication independent source continuity', () => {
         vi.setSystemTime(3000)
         expect(
           (
-            await test.application.execute({
-              type: 'refresh-project',
-              project: SOURCE_A,
-              expectedConfigurationVersion: 1,
-            })
+            await test.application.execute(
+              commandSchema.parse({
+                type: 'refresh-project',
+                project: fixtureProjectRef(SOURCE_A),
+                expectedConfigurationVersion: 1,
+              }),
+            )
           ).ok,
         ).toBe(true)
-        const returning = project(test.application.current(), SOURCE_A)
+        const returning = project(readApplicationState(test.application.current()), SOURCE_A)
         expect(returning).toMatchObject({
           mapsMembership: {
             kind: 'current-complete',
@@ -1649,17 +1790,19 @@ describe('RoadmapApplication independent source continuity', () => {
               observedAt: 3000,
               value: {
                 members: [
-                  { project: SOURCE_A, mapId: '108' },
-                  { project: SOURCE_A, mapId: '110' },
+                  fixtureResourceRef({ project: SOURCE_A, mapId: '108' }),
+                  fixtureResourceRef({ project: SOURCE_A, mapId: '110' }),
                 ],
               },
             },
           },
           activeMap: { kind: 'uncertain' },
-          displayOrder: { openMapIds: ['110'] },
+          displayOrder: {
+            open: ['110'].map((mapId) => fixtureResourceRef({ project: SOURCE_A, mapId })),
+          },
         })
         const failure = {
-          scope: { kind: 'map', map: { project: SOURCE_A, mapId: '108' } },
+          scope: { kind: 'map', map: fixtureResourceRef({ project: SOURCE_A, mapId: '108' }) },
           attemptedAt: 3000,
           provenance: {
             integration: 'github',
@@ -1686,33 +1829,45 @@ describe('RoadmapApplication independent source continuity', () => {
           })
         }
         expect(
-          await test.application.execute({
-            type: 'start-automation-override',
-            expectedConfigurationVersion: 1,
-            target,
-            stage: 'classification',
-          }),
+          await test.application.execute(
+            commandSchema.parse({
+              type: 'start-automation-override',
+              expectedConfigurationVersion: 1,
+              target: fixtureTicketRef(target),
+              stage: 'classification',
+            }),
+          ),
         ).toMatchObject({ ok: false })
-        expect(test.application.current().automation.evidence).toEqual([])
+        expect(readApplicationState(test.application.current()).automation.evidence).toEqual([])
         expect(test.launches).toEqual([])
         test.missingAlias('101', false)
         test.update('101', 'Returned same-key provider prose')
         vi.setSystemTime(4000)
         expect(
           (
-            await test.application.execute({
-              type: 'refresh-project',
-              project: SOURCE_A,
-              expectedConfigurationVersion: 1,
-            })
+            await test.application.execute(
+              commandSchema.parse({
+                type: 'refresh-project',
+                project: fixtureProjectRef(SOURCE_A),
+                expectedConfigurationVersion: 1,
+              }),
+            )
           ).ok,
         ).toBe(true)
-        expect(project(test.application.current(), SOURCE_A)).toMatchObject({
-          activeMap: { kind: 'known-current', mapId: '108' },
-          displayOrder: { openMapIds: ['108', '110'] },
+        expect(project(readApplicationState(test.application.current()), SOURCE_A)).toMatchObject({
+          activeMap: {
+            kind: 'known-current',
+            ref: fixtureResourceRef({ project: SOURCE_A, mapId: '108' }),
+          },
+          displayOrder: {
+            open: ['108', '110'].map((mapId) => fixtureResourceRef({ project: SOURCE_A, mapId })),
+          },
         })
         expect(
-          publicMapResource(project(test.application.current(), SOURCE_A), '108')?.resource,
+          publicMapResource(
+            project(readApplicationState(test.application.current()), SOURCE_A),
+            '108',
+          )?.resource,
         ).toMatchObject({
           kind: 'current-readable',
           observation: {

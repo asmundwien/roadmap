@@ -1,10 +1,10 @@
 import type {
   MapResource,
   MapResourceResult,
+  Project,
   ProjectResourceResult,
-  RegisteredProject,
   TicketResourceResult,
-} from '@roadmap/contracts'
+} from '@roadmap/contracts/state'
 
 type ResourceResult = ProjectResourceResult | MapResourceResult | TicketResourceResult
 type ProjectObservation = Extract<
@@ -85,21 +85,23 @@ export function resourceMessage(result: ResourceResult): string {
   }
 }
 
-export function orderedMaps(project: Pick<RegisteredProject, 'maps' | 'displayOrder'>): {
+export function orderedMaps(project: Pick<Project, 'maps' | 'displayOrder'>): {
   open: MapResource[]
   closed: MapResource[]
   unplaced: MapResource[]
 } {
-  const byId = new Map(project.maps.map((map) => [map.key.mapId, map]))
-  const placed = new Set([...project.displayOrder.openMapIds, ...project.displayOrder.closedMapIds])
-  const resolve = (ids: string[]) =>
-    ids.flatMap((id) => {
-      const map = byId.get(id)
+  const byId = new Map(project.maps.map((map) => [map.ref.mapId, map]))
+  const placed = new Set(
+    [...project.displayOrder.open, ...project.displayOrder.closed].map((ref) => ref.mapId),
+  )
+  const resolve = (refs: Project['displayOrder']['open']) =>
+    refs.flatMap((ref) => {
+      const map = byId.get(ref.mapId)
       return map === undefined ? [] : [map]
     })
   return {
-    open: resolve(project.displayOrder.openMapIds),
-    closed: resolve(project.displayOrder.closedMapIds),
-    unplaced: project.maps.filter((map) => !placed.has(map.key.mapId)),
+    open: resolve(project.displayOrder.open),
+    closed: resolve(project.displayOrder.closed),
+    unplaced: project.maps.filter((map) => !placed.has(map.ref.mapId)),
   }
 }

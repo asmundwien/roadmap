@@ -1,4 +1,4 @@
-import type { Connection } from '@roadmap/contracts'
+import type { Connection } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 
 type AvailabilityLabelProps = { connection: Connection }

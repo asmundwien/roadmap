@@ -1,11 +1,11 @@
 import { type EdgeLabel, Graph, type GraphLabel, layout, type NodeLabel } from '@dagrejs/dagre'
+import type { ProjectRef } from '@roadmap/contracts/identity'
 import type {
   Blocker,
   MapResource,
-  ProjectKey,
   TicketResource,
   TicketResourceResult,
-} from '@roadmap/contracts'
+} from '@roadmap/contracts/state'
 import { type Edge, MarkerType, type Node, Position } from '@xyflow/react'
 import { resourceObservation } from '@/views/shared/resource-results'
 
@@ -25,24 +25,36 @@ export type MapGraph = {
 const TICKET_NODE_WIDTH = 340
 const TICKET_NODE_HEIGHT = 324
 
-function scopedTicketId(map: MapResource['key'], ticketId: string): string {
-  return JSON.stringify(['ticket', map.project.integration, map.project.id, map.mapId, ticketId])
+function scopedTicketId(map: MapResource['ref'], ticketId: string): string {
+  return JSON.stringify([
+    'ticket',
+    map.project.integration,
+    map.project.projectId,
+    map.mapId,
+    ticketId,
+  ])
 }
 
 export function blockerNodeId(blocker: Blocker): string {
-  const { reference, ticketId } = blocker
+  const { reference } = blocker
   switch (reference.kind) {
     case 'registered':
       return JSON.stringify([
         'registered',
-        reference.project.integration,
-        reference.project.id,
-        ticketId,
+        reference.ticket.map.project.integration,
+        reference.ticket.map.project.projectId,
+        reference.ticket.map.mapId,
+        reference.ticket.ticketId,
       ])
     case 'external':
-      return JSON.stringify(['external', reference.integration, reference.nameWithOwner, ticketId])
+      return JSON.stringify([
+        'external',
+        reference.integration,
+        reference.nameWithOwner,
+        reference.ticketId,
+      ])
     case 'unresolved':
-      return JSON.stringify(['unresolved', reference.locator, ticketId])
+      return JSON.stringify(['unresolved', reference.locator, reference.ticketId])
     default: {
       const exhaustive: never = reference
       return exhaustive
@@ -50,8 +62,8 @@ export function blockerNodeId(blocker: Blocker): string {
   }
 }
 
-function sameProject(left: ProjectKey, right: ProjectKey): boolean {
-  return left.integration === right.integration && left.id === right.id
+function sameProject(left: ProjectRef, right: ProjectRef): boolean {
+  return left.integration === right.integration && left.projectId === right.projectId
 }
 
 function ticketNode(id: string, data: MapNodeData): MapNode {
@@ -73,12 +85,14 @@ function ticketNode(id: string, data: MapNodeData): MapNode {
 
 function addBlockerNode(
   nodes: Map<string, MapNode>,
-  map: MapResource['key'],
+  map: MapResource['ref'],
   blocker: Blocker,
 ): string {
   const source =
-    blocker.reference.kind === 'registered' && sameProject(map.project, blocker.reference.project)
-      ? scopedTicketId(map, blocker.ticketId)
+    blocker.reference.kind === 'registered' &&
+    sameProject(map.project, blocker.reference.ticket.map.project) &&
+    map.mapId === blocker.reference.ticket.map.mapId
+      ? scopedTicketId(map, blocker.reference.ticket.ticketId)
       : blockerNodeId(blocker)
   const existing = nodes.get(source)
   if (!existing) {
@@ -91,7 +105,8 @@ function addBlockerNode(
           blocker.reference.kind === 'unresolved'
             ? 'unresolved'
             : blocker.reference.kind === 'registered' &&
-                sameProject(map.project, blocker.reference.project)
+                sameProject(map.project, blocker.reference.ticket.map.project) &&
+                map.mapId === blocker.reference.ticket.map.mapId
               ? 'missing'
               : 'external',
       }),
@@ -135,7 +150,7 @@ function addBlockerEdge(
     target,
     type: 'default',
     markerEnd: { type: MarkerType.ArrowClosed },
-    ariaLabel: `${blocker.displayId ?? blocker.ticketId} blocks ${resourceObservation(ticket.resource)?.value.displayId ?? ticket.key.ticketId}`,
+    ariaLabel: `${blocker.displayId ?? (blocker.reference.kind === 'registered' ? blocker.reference.ticket.ticketId : blocker.reference.ticketId)} blocks ${resourceObservation(ticket.resource)?.value.displayId ?? ticket.ref.ticketId}`,
     selectable: false,
     reconnectable: false,
   })
@@ -162,9 +177,9 @@ function populateDependencies(
   for (const ticket of map.tickets) {
     const observation = resourceObservation(ticket.resource)
     if (observation === null) continue
-    const target = scopedTicketId(map.key, ticket.key.ticketId)
+    const target = scopedTicketId(map.ref, ticket.ref.ticketId)
     for (const blocker of observation.value.blockedBy) {
-      const source = addBlockerNode(nodes, map.key, blocker)
+      const source = addBlockerNode(nodes, map.ref, blocker)
       addBlockerEdge(edges, source, target, blocker, ticket)
     }
   }
@@ -178,7 +193,7 @@ export function mapGraph(map: MapResource, previous?: MapGraph): MapGraph {
   for (const ticket of map.tickets) {
     const observation = resourceObservation(ticket.resource)
     if (observation === null) continue
-    const id = scopedTicketId(map.key, ticket.key.ticketId)
+    const id = scopedTicketId(map.ref, ticket.ref.ticketId)
     nodes.set(id, ticketNode(id, { kind: 'ticket', ticket, observation }))
   }
   populateDependencies(map, nodes, edges)

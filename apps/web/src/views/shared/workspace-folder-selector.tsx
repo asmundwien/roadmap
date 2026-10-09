@@ -1,4 +1,4 @@
-import type { Query, QueryResult } from '@roadmap/contracts'
+import type { Query, QueryResult } from '@roadmap/contracts/operations'
 import { Button } from '@roadmap/ui/button'
 import classNames from 'classnames/bind'
 import { useState } from 'react'

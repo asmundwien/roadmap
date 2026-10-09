@@ -1,15 +1,27 @@
 import { mkdir, mkdtemp, realpath, rename, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { ApplicationState, ProjectKey } from '@roadmap/contracts'
-import { stateEnvelopeCodec } from '@roadmap/contracts/codecs'
+import { commandSchema } from '@roadmap/contracts/operations'
+import type { ReadyApplicationState } from '@roadmap/contracts/state'
+import { decodeStateEnvelope } from '@roadmap/contracts/wire'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { type AutomationDatabase, appendAutomationDatabase } from '../automation/database.ts'
 import type { ConfigurationDocument, ConfigurationRead } from '../configuration/document.ts'
 import { createLocalProjectAdmission } from '../local/admission.ts'
 import { createLocalObserver } from '../local/observer.ts'
-import type { ObservationBatch, SourceContribution, SourceObserver } from '../observation/source.ts'
+import type {
+  ObservationBatch,
+  SourceProjectKey as ProjectKey,
+  SourceContribution,
+  SourceObserver,
+} from '../observation/source.ts'
 import type { ProjectConfiguration } from '../projects/registry.ts'
+import {
+  fixtureProjectRef,
+  fixtureResourceRef,
+  fixtureTicketRef,
+  readApplicationState,
+} from '../public-test-fixtures.ts'
 import { readLocalProject } from '../wayfinder/from-local.ts'
 import { createRoadmapApplication } from './application.ts'
 import { createApplicationOperations } from './operations.ts'
@@ -47,34 +59,35 @@ const MAP_BODY =
   '## Destination\n\nSame-time map prose.\n\n## Notes\n\n## Decisions so far\n\n## Not yet specified\n\n## Out of scope\n'
 const TICKET_BODY = 'Same-time ticket prose.'
 
-function publicProject(state: ApplicationState) {
-  const project = state.projects.find((entry) => entry.key.id === PROJECT.id)
+function publicProject(state: ReadyApplicationState) {
+  const project = state.projects.find((entry) => entry.ref.projectId === PROJECT.id)
   if (!project) throw new Error('The configured Local Project is missing')
   return project
 }
 
-function publicMap(state: ApplicationState) {
-  const map = publicProject(state).maps.find((entry) => entry.key.mapId === FIRST)
+function publicMap(state: ReadyApplicationState) {
+  const map = publicProject(state).maps.find((entry) => entry.ref.mapId === FIRST)
   if (!map) throw new Error('The selected Local map lost its identity')
   return map
 }
 
-function publicTicket(state: ApplicationState) {
-  const ticket = publicMap(state).tickets.find((entry) => entry.key.ticketId === '1')
+function publicTicket(state: ReadyApplicationState) {
+  const ticket = publicMap(state).tickets.find((entry) => entry.ref.ticketId === '1')
   if (!ticket) throw new Error('The selected Local ticket lost its identity')
   return ticket
 }
 
-function outgoing(state: ApplicationState) {
+function outgoing(state: ReadyApplicationState) {
   const serialized = JSON.stringify({ type: 'state', state })
   expect(serialized).not.toContain('readSequence')
   expect(serialized).not.toContain('sourceBindings')
   const envelope: unknown = JSON.parse(serialized)
-  const decoded = stateEnvelopeCodec.decode(envelope)
+  const decoded = decodeStateEnvelope(envelope)
   expect(decoded.ok).toBe(true)
   if (!decoded.ok) throw new Error('The actual application publication failed consumer decoding')
   expect(JSON.stringify(decoded.value)).not.toContain(SECRET)
-  return decoded.value.state
+  expect(decoded.value.state.phase).toBe('ready')
+  return readApplicationState(decoded.value.state)
 }
 
 function ownTicketRead(batch: ObservationBatch) {
@@ -94,7 +107,7 @@ async function fixture() {
   let clock = T
   const batches: ObservationBatch[] = []
   const contributions: SourceContribution[] = []
-  const publications: ApplicationState[] = []
+  const publications: ReadyApplicationState[] = []
   const effects: string[] = []
   const listeners = new Set<(read: ConfigurationRead) => void>()
   const command = {
@@ -205,7 +218,7 @@ async function fixture() {
     },
   })
   const unsubscribe = application.subscribe((state) => {
-    publications.push(outgoing(state))
+    if (state.phase === 'ready') publications.push(outgoing(readApplicationState(state)))
   })
   try {
     for (const [directory, modified] of [
@@ -240,13 +253,15 @@ async function fixture() {
       },
       async refresh(at = T) {
         clock = at
-        const outcome = await application.execute({
-          type: 'refresh-project',
-          project: PROJECT,
-          expectedConfigurationVersion: configured.configurationVersion,
-        })
+        const outcome = await application.execute(
+          commandSchema.parse({
+            type: 'refresh-project',
+            project: fixtureProjectRef(PROJECT),
+            expectedConfigurationVersion: configured.configurationVersion,
+          }),
+        )
         expect(outcome.ok).toBe(true)
-        return outgoing(application.current())
+        return outgoing(readApplicationState(application.current()))
       },
       async enable() {
         configured = {
@@ -255,7 +270,9 @@ async function fixture() {
           automation: { ...configured.automation, enabled: true },
         }
         for (const listener of listeners) listener({ ok: true, document: configured })
-        await vi.waitFor(() => expect(application.current().configurationVersion).toBe(2))
+        await vi.waitFor(() =>
+          expect(readApplicationState(application.current()).configurationVersion).toBe(2),
+        )
       },
       async stop() {
         filesystem.failures.clear()
@@ -273,15 +290,21 @@ async function fixture() {
   }
 }
 
-function baseline(state: ApplicationState) {
+function baseline(state: ReadyApplicationState) {
   expect(publicProject(state)).toMatchObject({
     resource: {
       kind: 'current-readable',
       observation: { observedAt: T, completeness: { kind: 'complete' } },
     },
     mapsMembership: { kind: 'current-complete', observation: { observedAt: T } },
-    displayOrder: { openMapIds: [FIRST, SECOND], closedMapIds: [] },
-    activeMap: { kind: 'known-current', mapId: FIRST },
+    displayOrder: {
+      open: [FIRST, SECOND].map((mapId) => fixtureResourceRef({ project: PROJECT, mapId })),
+      closed: [],
+    },
+    activeMap: {
+      kind: 'known-current',
+      ref: fixtureResourceRef({ project: PROJECT, mapId: FIRST }),
+    },
   })
   expect(publicMap(state)).toMatchObject({
     resource: {
@@ -316,12 +339,12 @@ describe('RoadmapApplication actual source read identity at one clock value', ()
   it('keeps unchanged actual child reads current at T when the required map fails at T without authorizing order or admission', async () => {
     const test = await fixture()
     try {
-      baseline(outgoing(test.application.current()))
+      baseline(outgoing(readApplicationState(test.application.current())))
       const initial = ownTicketRead(test.latestBatch())
-      expect(test.application.current().automation.overrides).toEqual(
+      expect(readApplicationState(test.application.current()).automation.overrides).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            target: { project: PROJECT, mapId: FIRST, ticketId: '1' },
+            target: fixtureTicketRef({ project: PROJECT, mapId: FIRST, ticketId: '1' }),
             classification: { status: 'eligible' },
           }),
         ]),
@@ -368,7 +391,9 @@ describe('RoadmapApplication actual source read identity at one clock value', ()
       )
       expect(publicProject(state)).toMatchObject({
         activeMap: { kind: 'uncertain' },
-        displayOrder: { openMapIds: [FIRST, SECOND] },
+        displayOrder: {
+          open: [FIRST, SECOND].map((mapId) => fixtureResourceRef({ project: PROJECT, mapId })),
+        },
       })
       expect(publicMap(state).resource).toMatchObject({
         kind: 'retained-unavailable',
@@ -389,17 +414,19 @@ describe('RoadmapApplication actual source read identity at one clock value', ()
         observation: { observedAt: T },
       })
       expect(
-        await test.application.execute({
-          type: 'start-automation-override',
-          expectedConfigurationVersion: 1,
-          target: { project: PROJECT, mapId: FIRST, ticketId: '1' },
-          stage: 'classification',
-        }),
+        await test.application.execute(
+          commandSchema.parse({
+            type: 'start-automation-override',
+            expectedConfigurationVersion: 1,
+            target: fixtureTicketRef({ project: PROJECT, mapId: FIRST, ticketId: '1' }),
+            stage: 'classification',
+          }),
+        ),
       ).toMatchObject({ ok: false })
       await test.enable()
-      expect(test.application.current().automation.evidence).toEqual([])
+      expect(readApplicationState(test.application.current()).automation.evidence).toEqual([])
       expect(test.effects).toEqual([])
-      outgoing(test.application.current())
+      outgoing(readApplicationState(test.application.current()))
     } finally {
       await test.stop()
     }
@@ -411,7 +438,7 @@ describe('RoadmapApplication actual source read identity at one clock value', ()
     async (scope) => {
       const test = await fixture()
       try {
-        baseline(outgoing(test.application.current()))
+        baseline(outgoing(readApplicationState(test.application.current())))
         const path =
           scope === 'map'
             ? join(test.root, '.wayfinder/first')
@@ -437,8 +464,18 @@ describe('RoadmapApplication actual source read identity at one clock value', ()
             ]),
           )
           expect(publicProject(absentState)).toMatchObject({
-            activeMap: { kind: 'known-current', mapId: scope === 'map' ? SECOND : FIRST },
-            displayOrder: { openMapIds: scope === 'map' ? [SECOND] : [FIRST, SECOND] },
+            activeMap: {
+              kind: 'known-current',
+              ref: fixtureResourceRef({
+                project: PROJECT,
+                mapId: scope === 'map' ? SECOND : FIRST,
+              }),
+            },
+            displayOrder: {
+              open: (scope === 'map' ? [SECOND] : [FIRST, SECOND]).map((mapId) =>
+                fixtureResourceRef({ project: PROJECT, mapId }),
+              ),
+            },
           })
         }
         await rename(backup, path)
@@ -472,7 +509,7 @@ describe('RoadmapApplication actual source read identity at one clock value', ()
   it('retains unchanged cached children through a newer root failure rather than counting publication as a read', async () => {
     const test = await fixture()
     try {
-      baseline(outgoing(test.application.current()))
+      baseline(outgoing(readApplicationState(test.application.current())))
       const initial = ownTicketRead(test.latestBatch())
       filesystem.calls.length = 0
       filesystem.failures.set(
@@ -503,7 +540,7 @@ describe('RoadmapApplication actual source read identity at one clock value', ()
         },
         unavailable: {
           kind: 'source-failure',
-          scope: { kind: 'project', project: PROJECT },
+          scope: { kind: 'project', project: fixtureProjectRef(PROJECT) },
           attemptedAt: 2000,
         },
       })
@@ -513,7 +550,9 @@ describe('RoadmapApplication actual source read identity at one clock value', ()
       })
       expect(publicProject(state)).toMatchObject({
         activeMap: { kind: 'uncertain' },
-        displayOrder: { openMapIds: [FIRST, SECOND] },
+        displayOrder: {
+          open: [FIRST, SECOND].map((mapId) => fixtureResourceRef({ project: PROJECT, mapId })),
+        },
       })
       expect(test.effects).toEqual([])
     } finally {

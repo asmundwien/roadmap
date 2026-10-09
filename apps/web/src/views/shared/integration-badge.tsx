@@ -1,4 +1,4 @@
-import type { Integration } from '@roadmap/contracts'
+import type { Integration } from '@roadmap/contracts/identity'
 import { Badge } from '@roadmap/ui/badge'
 
 const INTEGRATION_META = {

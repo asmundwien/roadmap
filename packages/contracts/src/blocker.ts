@@ -1,36 +1,35 @@
 import { z } from 'zod'
+import { ticketIdSchema, ticketRefSchema } from './identity.ts'
+import { hrefSchema } from './internal/actions.ts'
 import { requestDataSchema } from './internal/request-data.ts'
-
-const projectKeySchema = requestDataSchema.pipe(
-  z.strictObject({
-    integration: z.enum(['github', 'local']),
-    id: z.string(),
-  }),
-)
 
 const blockerReferenceSchema = requestDataSchema.pipe(
   z.discriminatedUnion('kind', [
-    z.strictObject({ kind: z.literal('registered'), project: projectKeySchema }),
+    z.strictObject({ kind: z.literal('registered'), ticket: ticketRefSchema }),
     z.strictObject({
       kind: z.literal('external'),
       integration: z.literal('github'),
       nameWithOwner: z.string(),
       repositoryId: z.string().optional(),
+      ticketId: ticketIdSchema,
     }),
-    z.strictObject({ kind: z.literal('unresolved'), locator: z.string() }),
+    z.strictObject({
+      kind: z.literal('unresolved'),
+      locator: z.string(),
+      ticketId: ticketIdSchema,
+    }),
   ]),
 )
 
-/** Browser-safe blocker evidence. Only registered references carry admitted project identity. */
+/** Reference scope and observed blocker state are independent facts. */
 export const blockerSchema = requestDataSchema.pipe(
   z.strictObject({
     reference: blockerReferenceSchema,
-    ticketId: z.string(),
     displayId: z.string().optional(),
     title: z.string().optional(),
-    url: z.string().optional(),
+    url: hrefSchema.optional(),
     state: z.enum(['open', 'closed', 'unknown']),
   }),
 )
-
 export type Blocker = z.output<typeof blockerSchema>
+export type BlockerState = Blocker['state']

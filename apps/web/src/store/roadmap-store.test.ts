@@ -1,9 +1,22 @@
-import type {
-  ApplicationState,
-  CommandOutcome,
-  QueryResult,
-  RegisteredProject,
-} from '@roadmap/contracts'
+import {
+  actionIdSchema,
+  authorizationOperationIdSchema,
+  configurationVersionSchema,
+  connectionIdSchema,
+  mapIdSchema,
+  projectIdSchema,
+  projectRefSchema,
+  serverEpochSchema,
+  stateSequenceSchema,
+  ticketIdSchema,
+} from '@roadmap/contracts/identity'
+import type { CommandOutcome, QueryResult } from '@roadmap/contracts/operations'
+import {
+  applicationStateSchema,
+  connectionSchema,
+  type Project,
+  type ReadyApplicationState,
+} from '@roadmap/contracts/state'
 import { describe, expect, it } from 'vitest'
 import { neverReadProject } from '@/views/overview/test-fixtures'
 import { createRoadmapStore, type SocketLike } from './roadmap-store'
@@ -31,22 +44,48 @@ class FakeSocket implements SocketLike {
   }
 }
 
-function project(name: string): RegisteredProject {
-  return neverReadProject({ integration: 'github', id: name }, name)
+function project(name: string): Project {
+  return neverReadProject({ integration: 'github', projectId: name }, name)
 }
 
 function state(
   stateSequence: number,
   serverEpoch = 'epoch-a',
-  projects: RegisteredProject[] = [],
-): ApplicationState {
+  projects: Project[] = [],
+): ReadyApplicationState {
   return {
-    serverEpoch,
-    stateSequence,
-    configurationVersion: 1,
+    phase: 'ready',
+    mode: 'mutable',
+    serverEpoch: serverEpochSchema.parse(serverEpoch),
+    stateSequence: stateSequenceSchema.parse(stateSequence),
+    configurationVersion: configurationVersionSchema.parse(1),
     supportedIntegrations: [],
-    connections: [],
-    registrations: [],
+    connections: [
+      ...new Map(
+        projects.map((project) => [
+          project.connectionId,
+          connectionSchema.parse(
+            project.integration === 'local'
+              ? {
+                  id: project.connectionId,
+                  integration: 'local',
+                  name: 'Local',
+                  builtIn: true,
+                  availability: { status: 'available' },
+                }
+              : {
+                  id: project.connectionId,
+                  integration: 'github',
+                  name: 'GitHub',
+                  builtIn: false,
+                  githubIdentity: { id: project.connectionId, login: 'fixture' },
+                  availability: { status: 'available' },
+                },
+          ),
+        ]),
+      ).values(),
+    ],
+
     projects,
     authorizationOperations: [],
     configuration: { valid: true, issues: [], notices: [] },
@@ -57,11 +96,16 @@ function state(
       evidence: [],
       overrides: [],
     },
-    roadmap: { capturedAt: stateSequence * 1000 },
+    capturedAt: stateSequence * 1000,
   }
 }
 
-function wire(value: ApplicationState): string {
+function readyStateOf(store: ReturnType<typeof createRoadmapStore>): ReadyApplicationState | null {
+  const state = store.getSnapshot().state
+  return state?.phase === 'ready' ? state : null
+}
+
+function wire(value: ReadyApplicationState): string {
   return JSON.stringify({ type: 'state', state: value })
 }
 
@@ -74,14 +118,17 @@ function jsonResponse(value: unknown, status = 200): Response {
 
 const refreshCommand = {
   type: 'refresh-project',
-  expectedConfigurationVersion: 1,
-  project: { integration: 'github', id: 'a/one' },
+  expectedConfigurationVersion: configurationVersionSchema.parse(1),
+  project: { integration: 'github', projectId: projectIdSchema.parse('a/one') },
 } satisfies Parameters<ReturnType<typeof createRoadmapStore>['execute']>[0]
 
-function refreshOutcome(next: ApplicationState): CommandOutcome {
+function refreshOutcome(next: ReadyApplicationState): CommandOutcome {
   return {
     ok: true,
-    result: { type: 'project-refreshed', project: { integration: 'github', id: 'a/one' } },
+    result: {
+      type: 'project-refreshed',
+      project: { integration: 'github', projectId: projectIdSchema.parse('a/one') },
+    },
     state: next,
   }
 }
@@ -221,12 +268,19 @@ const commandResultPairs: {
   name: string
   command: Parameters<ReturnType<typeof createRoadmapStore>['execute']>[0]
   result: Extract<CommandOutcome, { ok: true }>['result']
-  mismatches: { name: string; result: Extract<CommandOutcome, { ok: true }>['result'] }[]
+  mismatches: { name: string; result: unknown }[]
 }[] = [
   {
     name: 'authorization start',
-    command: { type: 'begin-github-authorization', expectedConfigurationVersion: 1, name: 'Work' },
-    result: { type: 'authorization-started', operationId: 'authorization-1' },
+    command: {
+      type: 'begin-github-authorization',
+      expectedConfigurationVersion: configurationVersionSchema.parse(1),
+      name: 'Work',
+    },
+    result: {
+      type: 'authorization-started',
+      operationId: authorizationOperationIdSchema.parse('authorization-1'),
+    },
     mismatches: [
       {
         name: 'operation family',
@@ -238,10 +292,13 @@ const commandResultPairs: {
     name: 'authorization retry',
     command: {
       type: 'retry-github-authorization',
-      expectedConfigurationVersion: 1,
-      operationId: 'authorization-1',
+      expectedConfigurationVersion: configurationVersionSchema.parse(1),
+      operationId: authorizationOperationIdSchema.parse('authorization-1'),
     },
-    result: { type: 'authorization-started', operationId: 'authorization-1' },
+    result: {
+      type: 'authorization-started',
+      operationId: authorizationOperationIdSchema.parse('authorization-1'),
+    },
     mismatches: [
       {
         name: 'operation identifier',
@@ -253,11 +310,14 @@ const commandResultPairs: {
     name: 'configuration update',
     command: {
       type: 'rename-connection',
-      expectedConfigurationVersion: 1,
-      connectionId: 'connection-1',
+      expectedConfigurationVersion: configurationVersionSchema.parse(1),
+      connectionId: connectionIdSchema.parse('connection-1'),
       name: 'Work',
     },
-    result: { type: 'configuration-updated', configurationVersion: 1 },
+    result: {
+      type: 'configuration-updated',
+      configurationVersion: configurationVersionSchema.parse(1),
+    },
     mismatches: [
       {
         name: 'result/state configuration version',
@@ -270,10 +330,13 @@ const commandResultPairs: {
     name: 'project refresh',
     command: {
       type: 'refresh-project',
-      expectedConfigurationVersion: 1,
-      project: { integration: 'github', id: 'a/one' },
+      expectedConfigurationVersion: configurationVersionSchema.parse(1),
+      project: { integration: 'github', projectId: projectIdSchema.parse('a/one') },
     },
-    result: { type: 'project-refreshed', project: { integration: 'github', id: 'a/one' } },
+    result: {
+      type: 'project-refreshed',
+      project: { integration: 'github', projectId: projectIdSchema.parse('a/one') },
+    },
     mismatches: [
       {
         name: 'operation family',
@@ -281,11 +344,17 @@ const commandResultPairs: {
       },
       {
         name: 'project identifier',
-        result: { type: 'project-refreshed', project: { integration: 'github', id: 'b/two' } },
+        result: {
+          type: 'project-refreshed',
+          project: { integration: 'github', projectId: 'b/two' },
+        },
       },
       {
         name: 'project integration',
-        result: { type: 'project-refreshed', project: { integration: 'local', id: 'a/one' } },
+        result: {
+          type: 'project-refreshed',
+          project: { integration: 'local', projectId: 'a/one' },
+        },
       },
     ],
   },
@@ -293,10 +362,13 @@ const commandResultPairs: {
     name: 'authorization cancellation',
     command: {
       type: 'cancel-github-authorization',
-      expectedConfigurationVersion: 1,
-      operationId: 'authorization-1',
+      expectedConfigurationVersion: configurationVersionSchema.parse(1),
+      operationId: authorizationOperationIdSchema.parse('authorization-1'),
     },
-    result: { type: 'authorization-cancelled', operationId: 'authorization-1' },
+    result: {
+      type: 'authorization-cancelled',
+      operationId: authorizationOperationIdSchema.parse('authorization-1'),
+    },
     mismatches: [
       {
         name: 'operation identifier',
@@ -306,8 +378,12 @@ const commandResultPairs: {
   },
   {
     name: 'action launch',
-    command: { type: 'launch-action', expectedConfigurationVersion: 1, actionId: 'action-1' },
-    result: { type: 'action-launched', actionId: 'action-1' },
+    command: {
+      type: 'launch-action',
+      expectedConfigurationVersion: configurationVersionSchema.parse(1),
+      actionId: actionIdSchema.parse('action-1'),
+    },
+    result: { type: 'action-launched', actionId: actionIdSchema.parse('action-1') },
     mismatches: [
       { name: 'action identifier', result: { type: 'action-launched', actionId: 'action-2' } },
     ],
@@ -316,20 +392,24 @@ const commandResultPairs: {
     name: 'automation override',
     command: {
       type: 'start-automation-override',
-      expectedConfigurationVersion: 1,
+      expectedConfigurationVersion: configurationVersionSchema.parse(1),
       target: {
-        project: { integration: 'github', id: 'a/one' },
-        mapId: 'map-1',
-        ticketId: 'ticket-1',
+        map: {
+          project: { integration: 'github', projectId: projectIdSchema.parse('a/one') },
+          mapId: mapIdSchema.parse('map-1'),
+        },
+        ticketId: ticketIdSchema.parse('ticket-1'),
       },
       stage: 'classification',
     },
     result: {
       type: 'automation-override-started',
       target: {
-        project: { integration: 'github', id: 'a/one' },
-        mapId: 'map-1',
-        ticketId: 'ticket-1',
+        map: {
+          project: { integration: 'github', projectId: projectIdSchema.parse('a/one') },
+          mapId: mapIdSchema.parse('map-1'),
+        },
+        ticketId: ticketIdSchema.parse('ticket-1'),
       },
       stage: 'classification',
     },
@@ -339,8 +419,7 @@ const commandResultPairs: {
         result: {
           type: 'automation-override-started',
           target: {
-            project: { integration: 'github', id: 'b/two' },
-            mapId: 'map-1',
+            map: { project: { integration: 'github', projectId: 'b/two' }, mapId: 'map-1' },
             ticketId: 'ticket-1',
           },
           stage: 'classification',
@@ -351,8 +430,7 @@ const commandResultPairs: {
         result: {
           type: 'automation-override-started',
           target: {
-            project: { integration: 'local', id: 'a/one' },
-            mapId: 'map-1',
+            map: { project: { integration: 'local', projectId: 'a/one' }, mapId: 'map-1' },
             ticketId: 'ticket-1',
           },
           stage: 'classification',
@@ -363,8 +441,7 @@ const commandResultPairs: {
         result: {
           type: 'automation-override-started',
           target: {
-            project: { integration: 'github', id: 'a/one' },
-            mapId: 'map-2',
+            map: { project: { integration: 'github', projectId: 'a/one' }, mapId: 'map-2' },
             ticketId: 'ticket-1',
           },
           stage: 'classification',
@@ -375,8 +452,7 @@ const commandResultPairs: {
         result: {
           type: 'automation-override-started',
           target: {
-            project: { integration: 'github', id: 'a/one' },
-            mapId: 'map-1',
+            map: { project: { integration: 'github', projectId: 'a/one' }, mapId: 'map-1' },
             ticketId: 'ticket-2',
           },
           stage: 'classification',
@@ -387,8 +463,7 @@ const commandResultPairs: {
         result: {
           type: 'automation-override-started',
           target: {
-            project: { integration: 'github', id: 'a/one' },
-            mapId: 'map-1',
+            map: { project: { integration: 'github', projectId: 'a/one' }, mapId: 'map-1' },
             ticketId: 'ticket-1',
           },
           stage: 'wayfinder',
@@ -455,7 +530,7 @@ describe('createRoadmapStore', () => {
     sockets[0]?.emit('message', wire(state(2, 'epoch-a', [project('b/two')])))
 
     expect(store.getSnapshot().transport).toBe('live')
-    expect(store.getSnapshot().state?.projects.map((value) => value.name)).toEqual(['b/two'])
+    expect(readyStateOf(store)?.projects.map((value) => value.name)).toEqual(['b/two'])
   })
 
   it('stays not-ready when the socket opens without a valid baseline', async () => {
@@ -531,7 +606,7 @@ describe('createRoadmapStore', () => {
         synchronization: 'synchronized',
         state: { serverEpoch: 'epoch-b', stateSequence: 2 },
       })
-      expect(store.getSnapshot().state?.projects[0]?.name).toBe('continued-b')
+      expect(readyStateOf(store)?.projects[0]?.name).toBe('continued-b')
     },
   )
 
@@ -557,7 +632,7 @@ describe('createRoadmapStore', () => {
         synchronization: 'synchronized',
         state: { serverEpoch: 'epoch-b', stateSequence: expectedSequence },
       })
-      expect(store.getSnapshot().state?.projects[0]?.name).toBe(expectedProject)
+      expect(readyStateOf(store)?.projects[0]?.name).toBe(expectedProject)
       expect(sockets).toHaveLength(1)
     },
   )
@@ -608,11 +683,11 @@ describe('createRoadmapStore', () => {
       synchronization: 'synchronized',
       state: { serverEpoch: 'epoch-b', stateSequence: 4 },
     })
-    expect(store.getSnapshot().state?.projects[0]?.name).toBe('retained-maximum')
+    expect(readyStateOf(store)?.projects[0]?.name).toBe('retained-maximum')
     sockets[1]?.emit('message', wire(state(3, 'epoch-b', [project('older')])))
-    expect(store.getSnapshot().state?.projects[0]?.name).toBe('retained-maximum')
+    expect(readyStateOf(store)?.projects[0]?.name).toBe('retained-maximum')
     sockets[1]?.emit('message', wire(state(5, 'epoch-b', [project('resumed')])))
-    expect(store.getSnapshot().state?.projects[0]?.name).toBe('resumed')
+    expect(readyStateOf(store)?.projects[0]?.name).toBe('resumed')
     stop()
   })
 
@@ -731,7 +806,7 @@ describe('createRoadmapStore', () => {
       synchronization: 'retained',
       state: { serverEpoch: 'epoch-b', stateSequence: 4 },
     })
-    expect(store.getSnapshot().state?.projects[0]?.name).toBe('retained-b')
+    expect(readyStateOf(store)?.projects[0]?.name).toBe('retained-b')
     await flushTimers()
     expect(sockets).toHaveLength(2)
     sockets[1]?.emit('open')
@@ -743,7 +818,7 @@ describe('createRoadmapStore', () => {
       synchronization: 'synchronized',
       state: { serverEpoch: 'epoch-c', stateSequence: 1 },
     })
-    expect(store.getSnapshot().state?.projects[0]?.name).toBe('baseline-c')
+    expect(readyStateOf(store)?.projects[0]?.name).toBe('baseline-c')
     sockets[1]?.emit('message', wire(state(2, 'epoch-c')))
     expect(store.getSnapshot().state?.stateSequence).toBe(2)
     stop()
@@ -808,7 +883,7 @@ describe('createRoadmapStore', () => {
     socket?.emit('message', wire(state(4, 'epoch-a', [project('newest-a')])))
     socket?.emit('message', wire(state(4, 'epoch-a', [project('equal-a')])))
     socket?.emit('message', wire(state(3, 'epoch-a', [project('older-a')])))
-    expect(store.getSnapshot().state?.projects[0]?.name).toBe('newest-a')
+    expect(readyStateOf(store)?.projects[0]?.name).toBe('newest-a')
 
     socket?.emit('message', wire(state(0, 'epoch-b', [project('unproven-b')])))
     expect(store.getSnapshot()).toMatchObject({
@@ -816,7 +891,7 @@ describe('createRoadmapStore', () => {
       state: { serverEpoch: 'epoch-a', stateSequence: 4 },
     })
     socket?.emit('message', wire(state(5, 'epoch-a', [project('continued-a')])))
-    expect(store.getSnapshot().state?.projects[0]?.name).toBe('continued-a')
+    expect(readyStateOf(store)?.projects[0]?.name).toBe('continued-a')
   })
 
   it('accepts independently observable Automation evidence', () => {
@@ -826,9 +901,14 @@ describe('createRoadmapStore', () => {
     next.automation.evidence = [
       {
         target: {
-          project: { integration: 'github', id: 'asmundwien/roadmap' },
-          mapId: '81',
-          ticketId: '82',
+          map: {
+            project: {
+              integration: 'github',
+              projectId: projectIdSchema.parse('asmundwien/roadmap'),
+            },
+            mapId: mapIdSchema.parse('81'),
+          },
+          ticketId: ticketIdSchema.parse('82'),
         },
         classification: {
           status: 'completed',
@@ -850,7 +930,7 @@ describe('createRoadmapStore', () => {
 
     sockets[0]?.emit('message', wire(next))
 
-    expect(store.getSnapshot().state?.automation.evidence).toEqual(next.automation.evidence)
+    expect(readyStateOf(store)?.automation.evidence).toEqual(next.automation.evidence)
   })
 
   it('rejects contradictory fields in Automation evidence', () => {
@@ -869,9 +949,11 @@ describe('createRoadmapStore', () => {
             evidence: [
               {
                 target: {
-                  project: { integration: 'local', id: 'invalid' },
-                  mapId: 'map',
-                  ticketId: 'ticket',
+                  map: {
+                    project: { integration: 'local', projectId: projectIdSchema.parse('invalid') },
+                    mapId: mapIdSchema.parse('map'),
+                  },
+                  ticketId: ticketIdSchema.parse('ticket'),
                 },
                 classification: {
                   status: 'running',
@@ -913,7 +995,7 @@ describe('createRoadmapStore', () => {
 
     expect(store.getSnapshot().transport).toBe('disconnected')
     expect(store.getSnapshot().synchronization).toBe('retained')
-    expect(store.getSnapshot().state?.projects[0]?.name).toBe('kept')
+    expect(readyStateOf(store)?.projects[0]?.name).toBe('kept')
     await flushTimers()
     sockets[1]?.emit('close')
     await flushTimers()
@@ -948,8 +1030,8 @@ describe('createRoadmapStore', () => {
     sockets[0]?.emit('message', wire(state(1)))
     const execution = store.execute({
       type: 'rename-connection',
-      expectedConfigurationVersion: 1,
-      connectionId: 'github-1',
+      expectedConfigurationVersion: configurationVersionSchema.parse(1),
+      connectionId: connectionIdSchema.parse('github-1'),
       name: 'Renamed',
     })
     expect(store.getSnapshot().command.inFlight).toBe(true)
@@ -973,20 +1055,23 @@ describe('createRoadmapStore', () => {
 
     const execution = store.execute({
       type: 'refresh-project',
-      expectedConfigurationVersion: 1,
-      project: { integration: 'github', id: 'a/one' },
+      expectedConfigurationVersion: configurationVersionSchema.parse(1),
+      project: { integration: 'github', projectId: projectIdSchema.parse('a/one') },
     })
     sockets[0]?.emit('message', wire(state(3, 'epoch-a', [project('newer')])))
     const outcome: CommandOutcome = {
       ok: true,
-      result: { type: 'project-refreshed', project: { integration: 'github', id: 'a/one' } },
+      result: {
+        type: 'project-refreshed',
+        project: { integration: 'github', projectId: projectIdSchema.parse('a/one') },
+      },
       state: state(2, 'epoch-a', [project('older-response')]),
     }
     response.resolve(jsonResponse({ type: 'command-result', outcome }))
     await execution
 
     expect(store.getSnapshot().state?.stateSequence).toBe(3)
-    expect(store.getSnapshot().state?.projects[0]?.name).toBe('newer')
+    expect(readyStateOf(store)?.projects[0]?.name).toBe('newer')
   })
 
   it('surfaces HTTP failure ambiguity without replacing authoritative state', async () => {
@@ -999,8 +1084,8 @@ describe('createRoadmapStore', () => {
     await expect(
       store.execute({
         type: 'refresh-project',
-        expectedConfigurationVersion: 1,
-        project: { integration: 'github', id: 'a/one' },
+        expectedConfigurationVersion: configurationVersionSchema.parse(1),
+        project: { integration: 'github', projectId: projectIdSchema.parse('a/one') },
       }),
     ).rejects.toBeInstanceOf(Error)
     expect(store.getSnapshot().state?.stateSequence).toBe(1)
@@ -1017,8 +1102,8 @@ describe('createRoadmapStore', () => {
     await expect(
       store.execute({
         type: 'launch-action',
-        expectedConfigurationVersion: 1,
-        actionId: 'action-1',
+        expectedConfigurationVersion: configurationVersionSchema.parse(1),
+        actionId: actionIdSchema.parse('action-1'),
       }),
     ).rejects.toBeInstanceOf(Error)
     expect(store.getSnapshot().command.error?.message).not.toContain('private-token')
@@ -1044,8 +1129,8 @@ describe('createRoadmapStore', () => {
 
       const delivery = await store.execute({
         type: 'refresh-project',
-        expectedConfigurationVersion: 1,
-        project: { integration: 'github', id: 'a/one' },
+        expectedConfigurationVersion: configurationVersionSchema.parse(1),
+        project: { integration: 'github', projectId: projectIdSchema.parse('a/one') },
       })
 
       expect(delivery).toMatchObject({
@@ -1121,7 +1206,10 @@ describe('createRoadmapStore', () => {
   it('keeps command completion unknown for a valid application envelope on HTTP 500', async () => {
     const outcome: CommandOutcome = {
       ok: true,
-      result: { type: 'project-refreshed', project: { integration: 'github', id: 'a/one' } },
+      result: {
+        type: 'project-refreshed',
+        project: projectRefSchema.parse({ integration: 'github', projectId: 'a/one' }),
+      },
       state: state(99),
     }
     let attempts = 0
@@ -1137,8 +1225,8 @@ describe('createRoadmapStore', () => {
     await expect(
       store.execute({
         type: 'refresh-project',
-        expectedConfigurationVersion: 1,
-        project: { integration: 'github', id: 'a/one' },
+        expectedConfigurationVersion: configurationVersionSchema.parse(1),
+        project: projectRefSchema.parse({ integration: 'github', projectId: 'a/one' }),
       }),
     ).rejects.toBeInstanceOf(Error)
 
@@ -1192,8 +1280,8 @@ describe('createRoadmapStore', () => {
       await expect(
         store.execute({
           type: 'refresh-project',
-          expectedConfigurationVersion: 1,
-          project: { integration: 'github', id: 'a/one' },
+          expectedConfigurationVersion: configurationVersionSchema.parse(1),
+          project: projectRefSchema.parse({ integration: 'github', projectId: 'a/one' }),
         }),
       ).rejects.toBeInstanceOf(Error)
 
@@ -1246,8 +1334,8 @@ describe('createRoadmapStore', () => {
       await expect(
         store.execute({
           type: 'refresh-project',
-          expectedConfigurationVersion: 1,
-          project: { integration: 'github', id: 'a/one' },
+          expectedConfigurationVersion: configurationVersionSchema.parse(1),
+          project: projectRefSchema.parse({ integration: 'github', projectId: 'a/one' }),
         }),
       ).rejects.toBeInstanceOf(Error)
 
@@ -1307,7 +1395,7 @@ describe('createRoadmapStore', () => {
       `rejects a successful ${name} result with the wrong $name without replacing state`,
       async ({ result: wrongResult }) => {
         let attempts = 0
-        const outcome: CommandOutcome = { ok: true, result: wrongResult, state: state(99) }
+        const outcome: unknown = { ok: true, result: wrongResult, state: state(99) }
         const fetchRequest: typeof fetch = async () => {
           attempts += 1
           return jsonResponse({ type: 'command-result', outcome })
@@ -1329,6 +1417,140 @@ describe('createRoadmapStore', () => {
     )
   }
 
+  it.each([{ phase: 'stopping' }, { phase: 'stopped' }, { phase: 'failed' }] satisfies {
+    phase: 'stopping' | 'stopped' | 'failed'
+  }[])(
+    'uses the actual retained saved configuration version in a $phase completion',
+    async ({ phase }) => {
+      const saved = { ...state(98), configurationVersion: configurationVersionSchema.parse(2) }
+      const outcome: CommandOutcome = {
+        ok: true,
+        result: {
+          type: 'configuration-updated',
+          configurationVersion: configurationVersionSchema.parse(2),
+        },
+        state: applicationStateSchema.parse({
+          phase,
+          serverEpoch: 'epoch-a',
+          stateSequence: 99,
+          capturedAt: 99000,
+          retained: saved,
+          ...(phase === 'failed' ? { cause: 'Shutdown failed after the write.' } : {}),
+        }),
+      }
+      const command = {
+        type: 'set-automation-enabled',
+        expectedConfigurationVersion: configurationVersionSchema.parse(1),
+        enabled: true,
+      } satisfies Parameters<ReturnType<typeof createRoadmapStore>['execute']>[0]
+      const { store, sockets } = harness(async () =>
+        jsonResponse({ type: 'command-result', outcome }),
+      )
+      store.start()
+      sockets[0]?.emit('message', wire(state(1)))
+
+      await expect(store.execute(command)).resolves.toEqual(outcome)
+      expect(store.getSnapshot().state).toEqual(outcome.state)
+      expect(store.getSnapshot().command).toEqual({ inFlight: false, error: null })
+
+      const wrongOutcome: unknown = {
+        ...outcome,
+        result: { type: 'configuration-updated', configurationVersion: 1 },
+      }
+      const rejected = harness(async () =>
+        jsonResponse({ type: 'command-result', outcome: wrongOutcome }),
+      )
+      rejected.store.start()
+      rejected.sockets[0]?.emit('message', wire(state(1)))
+      const previous = rejected.store.getSnapshot().state
+
+      await expect(rejected.store.execute(command)).rejects.toBeInstanceOf(Error)
+      expect(rejected.store.getSnapshot().state).toBe(previous)
+      expect(rejected.store.getSnapshot().command).toMatchObject({
+        inFlight: false,
+        error: { code: 'transport-failed' },
+      })
+    },
+  )
+
+  it.each([
+    { phase: 'idle' },
+    { phase: 'starting' },
+    { phase: 'stopping', retained: null },
+    { phase: 'stopped', retained: null },
+    { phase: 'failed', retained: null, cause: 'No saved state.' },
+  ])(
+    'refuses a configuration update without saved version evidence in $phase',
+    async (publication) => {
+      const outcome: unknown = {
+        ok: true,
+        result: { type: 'configuration-updated', configurationVersion: 2 },
+        state: { ...publication, serverEpoch: 'epoch-a', stateSequence: 99, capturedAt: 99000 },
+      }
+      const { store, sockets } = harness(async () =>
+        jsonResponse({ type: 'command-result', outcome }),
+      )
+      store.start()
+      sockets[0]?.emit('message', wire(state(1)))
+      const previous = store.getSnapshot().state
+
+      await expect(
+        store.execute({
+          type: 'set-automation-enabled',
+          expectedConfigurationVersion: configurationVersionSchema.parse(1),
+          enabled: true,
+        }),
+      ).rejects.toBeInstanceOf(Error)
+      expect(store.getSnapshot().state).toBe(previous)
+      expect(store.getSnapshot().command).toMatchObject({
+        inFlight: false,
+        error: { code: 'transport-failed' },
+      })
+    },
+  )
+
+  it.each(['epoch-a', 'epoch-b'])(
+    'preserves a valid configuration completion independently of state replacement in %s',
+    async (serverEpoch) => {
+      const outcome: CommandOutcome = {
+        ok: true,
+        result: {
+          type: 'configuration-updated',
+          configurationVersion: configurationVersionSchema.parse(2),
+        },
+        state: {
+          ...state(2, serverEpoch),
+          configurationVersion: configurationVersionSchema.parse(2),
+        },
+      }
+      const { store, sockets } = harness(async () =>
+        jsonResponse({ type: 'command-result', outcome }),
+      )
+      store.start()
+      sockets[0]?.emit(
+        'message',
+        wire({
+          ...state(4),
+          configurationVersion: configurationVersionSchema.parse(3),
+        }),
+      )
+      const previous = store.getSnapshot().state
+
+      await expect(
+        store.execute({
+          type: 'set-automation-enabled',
+          expectedConfigurationVersion: configurationVersionSchema.parse(1),
+          enabled: true,
+        }),
+      ).resolves.toEqual(outcome)
+      expect(store.getSnapshot().state).toBe(previous)
+      expect(store.getSnapshot().command).toEqual({ inFlight: false, error: null })
+      expect(store.getSnapshot().synchronization).toBe(
+        serverEpoch === 'epoch-a' ? 'synchronized' : 'retained',
+      )
+    },
+  )
+
   it('uses a fresh request UUID for each explicit attempt without automatically replaying rejection', async () => {
     const requestIds: (string | null)[] = []
     const fetchRequest: typeof fetch = async (input, init) => {
@@ -1343,8 +1565,8 @@ describe('createRoadmapStore', () => {
     const retainedState = store.getSnapshot().state
     const command: Parameters<typeof store.execute>[0] = {
       type: 'refresh-project',
-      expectedConfigurationVersion: 1,
-      project: { integration: 'github', id: 'a/one' },
+      expectedConfigurationVersion: configurationVersionSchema.parse(1),
+      project: projectRefSchema.parse({ integration: 'github', projectId: 'a/one' }),
     }
 
     await expect(store.execute(command)).resolves.toMatchObject({ kind: 'not-admitted' })

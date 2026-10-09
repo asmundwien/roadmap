@@ -1,9 +1,6 @@
-import type {
-  AuthorizationOperation,
-  Command,
-  Connection,
-  RegisteredProject,
-} from '@roadmap/contracts'
+import type { ConfigurationVersion, ConnectionId } from '@roadmap/contracts/identity'
+import type { Command } from '@roadmap/contracts/operations'
+import type { AuthorizationOperation, Connection, Project } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
 import { ControlGroup } from '@roadmap/ui/control-group'
@@ -12,6 +9,7 @@ import { Surface, SurfaceTitle } from '@roadmap/ui/surface'
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { routePaths } from '@/router'
+import { authorizationStatus } from '@/views/settings/connections/connection-details'
 import { AuthorizationControls, DeviceCode } from '@/views/shared/authorization-presentation'
 
 type RunCommand = (command: Command) => Promise<boolean>
@@ -19,7 +17,7 @@ type RunCommand = (command: Command) => Promise<boolean>
 type AuthorizationGroupProps = {
   connection: Connection
   authorization: AuthorizationOperation | undefined
-  configurationVersion: number
+  configurationVersion: ConfigurationVersion
   blocked: boolean
   run: RunCommand
 }
@@ -35,7 +33,7 @@ export function AuthorizationGroup({
     if (
       authorization &&
       authorization.status !== 'granted' &&
-      authorization.status !== 'cancelled'
+      !(authorization.status === 'terminal' && authorization.outcome === 'cancelled')
     ) {
       void run({
         type: 'retry-github-authorization',
@@ -61,25 +59,17 @@ export function AuthorizationGroup({
           <DeviceCode>
             <small>{authorization.verificationUri}</small>
             <strong>{authorization.userCode}</strong>
-            <span>
-              {authorization.expiresAt
-                ? `Expires ${new Date(authorization.expiresAt).toLocaleTimeString()}`
-                : 'Waiting for GitHub'}
-            </span>
+            <span>{`Expires ${new Date(authorization.expiresAt).toLocaleTimeString()}`}</span>
           </DeviceCode>
           <AuthorizationControls>
-            {authorization.verificationUri && (
-              <Link href={authorization.verificationUri} external>
-                Open GitHub
-              </Link>
-            )}
+            <Link href={authorization.verificationUri} external>
+              Open GitHub
+            </Link>
             <ControlGroup>
               <Button
                 type="button"
-                disabled={!authorization.userCode}
                 onClick={() => {
-                  if (authorization.userCode)
-                    void navigator.clipboard.writeText(authorization.userCode)
+                  void navigator.clipboard.writeText(authorization.userCode)
                 }}
               >
                 Copy code
@@ -104,16 +94,16 @@ export function AuthorizationGroup({
         <>
           {authorization &&
             authorization.status !== 'granted' &&
-            authorization.status !== 'cancelled' && (
+            !(authorization.status === 'terminal' && authorization.outcome === 'cancelled') && (
               <Alert>
-                <strong>Authorization {authorization.status}</strong>
-                <span>{authorization.cause}</span>
+                <strong>{authorizationStatus(authorization)}</strong>
+                <span>{'cause' in authorization ? authorization.cause : undefined}</span>
               </Alert>
             )}
           <Button type="button" disabled={blocked} onClick={reauthenticate}>
             {authorization &&
             authorization.status !== 'granted' &&
-            authorization.status !== 'cancelled'
+            !(authorization.status === 'terminal' && authorization.outcome === 'cancelled')
               ? 'Retry authorization'
               : 'Reauthenticate'}
           </Button>
@@ -124,9 +114,9 @@ export function AuthorizationGroup({
 }
 
 type RemoveConnectionGroupProps = {
-  connectionId: string
-  dependents: RegisteredProject[]
-  configurationVersion: number
+  connectionId: ConnectionId
+  dependents: Project[]
+  configurationVersion: ConfigurationVersion
   blocked: boolean
   run: RunCommand
 }

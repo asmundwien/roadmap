@@ -1,14 +1,20 @@
-import type { ApplicationState } from '@roadmap/contracts'
+import { commandSchema } from '@roadmap/contracts/operations'
+import type { ReadyApplicationState } from '@roadmap/contracts/state'
 import { describe, expect, it, vi } from 'vitest'
+import type { CredentialBundle } from '../authorization/contracts.ts'
 import type { ChangeEvent } from '../change-feed.ts'
 import type {
   ConfigurationDocument,
   ConfigurationRead,
   ConfigurationWrite,
 } from '../configuration/document.ts'
-import type { CredentialBundle } from '../github/connections.ts'
 import type { ObservationBatch, SourceObservationHealth } from '../observation/source.ts'
 import type { ProjectConfiguration } from '../projects/registry.ts'
+import {
+  fixtureProjectRef,
+  fixtureResourceRef,
+  readApplicationState,
+} from '../public-test-fixtures.ts'
 import {
   controlledSourceFixture,
   createSourceFixtureOwner,
@@ -147,7 +153,6 @@ function notificationProject(claimed = false, closed = false): FixtureProject {
       missingSections: [],
     },
     tickets: [ticket],
-    frontier: claimed || closed ? [] : [ticket],
     progress: { total: 1, completed: closed ? 1 : 0 },
     ticketsComplete: true,
     warnings: [],
@@ -211,10 +216,10 @@ function configuredProjects(projects: readonly FixtureProject[]): ProjectConfigu
   }
 }
 
-function observedProjectIds(state: ApplicationState): string[] {
+function observedProjectIds(state: ReadyApplicationState): string[] {
   return state.projects
     .filter((project) => publicProjectObservation(project) !== null)
-    .map((project) => project.key.id)
+    .map((project) => project.ref.projectId)
 }
 
 describe('RoadmapApplication', () => {
@@ -250,7 +255,7 @@ describe('RoadmapApplication', () => {
     )
     let created = false
     const events: ChangeEvent[] = []
-    const states: ApplicationState[] = []
+    const states: ReadyApplicationState[] = []
     const application = createRoadmapApplication({
       configuration: configuration.document,
       admissions: fixtureAdmissions,
@@ -267,7 +272,7 @@ describe('RoadmapApplication', () => {
       onChangeEvents: (batch) => events.push(...batch),
       serverEpoch: 'neutral-edit-test',
     })
-    application.subscribe((state) => states.push(state))
+    application.subscribe((state) => states.push(readApplicationState(state)))
     try {
       await application.start()
       const command =
@@ -276,24 +281,31 @@ describe('RoadmapApplication', () => {
           : type === 'rename-project'
             ? {
                 type,
-                project: project.key,
+                project: fixtureProjectRef(project.key),
                 name: 'Renamed notifications',
                 expectedConfigurationVersion: 1,
               }
             : type === 'set-automation-enabled'
               ? { type, enabled: true, expectedConfigurationVersion: 1 }
-              : { type, project: project.key, enabled: true, expectedConfigurationVersion: 1 }
-      expect((await application.execute(command)).ok).toBe(true)
-      expect(application.current().configurationVersion).toBe(2)
+              : {
+                  type,
+                  project: fixtureProjectRef(project.key),
+                  enabled: true,
+                  expectedConfigurationVersion: 1,
+                }
+      expect((await application.execute(commandSchema.parse(command))).ok).toBe(true)
+      expect(readApplicationState(application.current()).configurationVersion).toBe(2)
       if (type === 'rename-connection') {
-        expect(application.current().connections[0]?.name).toBe('On this Mac')
+        expect(readApplicationState(application.current()).connections[0]?.name).toBe('On this Mac')
       } else if (type === 'rename-project') {
-        expect(application.current().projects[0]?.name).toBe('Renamed notifications')
+        expect(readApplicationState(application.current()).projects[0]?.name).toBe(
+          'Renamed notifications',
+        )
       } else if (type === 'set-automation-enabled') {
-        expect(application.current().automation.enabled).toBe(true)
+        expect(readApplicationState(application.current()).automation.enabled).toBe(true)
       } else {
-        expect(application.current().automation.enabledProjects).toEqual([
-          { integration: 'local', id: 'notifications' },
+        expect(readApplicationState(application.current()).automation.enabledProjects).toEqual([
+          { integration: 'local', projectId: 'notifications' },
         ])
       }
       for (const state of states) {
@@ -305,9 +317,10 @@ describe('RoadmapApplication', () => {
       }
       expect(events).toEqual([])
       original.push(read([notificationProject(true)], 3_000))
-      const claimedTicket = application.current().projects[0]?.maps[0]?.tickets[0]
+      const claimedTicket = readApplicationState(application.current()).projects[0]?.maps[0]
+        ?.tickets[0]
       expect(claimedTicket && publicTicketObservation(claimedTicket)?.value.isClaimed).toBe(true)
-      const claimedProject = application.current().projects[0]
+      const claimedProject = readApplicationState(application.current()).projects[0]
       expect(claimedProject && publicProjectObservation(claimedProject)?.observedAt).toBe(3_000)
       expect(events.filter((event) => event.type === 'ticket-claimed')).toEqual([
         {
@@ -320,7 +333,7 @@ describe('RoadmapApplication', () => {
         },
       ])
       original.push(read([notificationProject(true)], 4_000))
-      const repeatedProject = application.current().projects[0]
+      const repeatedProject = readApplicationState(application.current()).projects[0]
       expect(repeatedProject && publicProjectObservation(repeatedProject)?.observedAt).toBe(4_000)
       expect(events.filter((event) => event.type === 'ticket-claimed')).toHaveLength(1)
     } finally {
@@ -444,8 +457,8 @@ describe('RoadmapApplication', () => {
       onChangeEvents: (batch) => events.push(...batch),
       serverEpoch: 'replacement-test',
     })
-    const states: ApplicationState[] = []
-    application.subscribe((state) => states.push(state))
+    const states: ReadyApplicationState[] = []
+    application.subscribe((state) => states.push(readApplicationState(state)))
     try {
       await application.start()
       credentials = {
@@ -475,17 +488,17 @@ describe('RoadmapApplication', () => {
       })
       await replacement.started
       local.push(localRead([notificationProject(true)], 2_000))
-      const localClaimed = application
-        .current()
-        .projects.find((project) => project.key.integration === 'local')?.maps[0]?.tickets[0]
+      const localClaimed = readApplicationState(application.current()).projects.find(
+        (project) => project.ref.integration === 'local',
+      )?.maps[0]?.tickets[0]
       expect(localClaimed && publicTicketObservation(localClaimed)?.value.isClaimed).toBe(true)
       expect(events.filter((event) => event.type === 'ticket-claimed')).toHaveLength(1)
       for (const state of states) {
         expect(state.configurationVersion).toBe(1)
         expect(
-          state.registrations.find((row) => row.key.integration === 'github')?.locator,
+          state.projects.find((row) => row.ref.integration === 'github')?.source,
         ).toMatchObject({ nameWithOwner: 'acme/original' })
-        expect(state.projects.find((row) => row.key.integration === 'github')).toMatchObject({
+        expect(state.projects.find((row) => row.ref.integration === 'github')).toMatchObject({
           name: 'acme/original',
           resource: { kind: 'current-readable', observation: { observedAt: 1_000 } },
         })
@@ -494,24 +507,25 @@ describe('RoadmapApplication', () => {
         ).toEqual({ status: 'available', observedAt: 1_000 })
       }
       original.push(read([github], 1_500, registered))
-      expect(application.current().configurationVersion).toBe(1)
+      expect(readApplicationState(application.current()).configurationVersion).toBe(1)
       expect(
-        application
-          .current()
-          .projects.find(
-            (project) => project.key.integration === 'github' && project.key.id === github.key.id,
-          ),
+        readApplicationState(application.current()).projects.find(
+          (project) =>
+            project.ref.integration === 'github' && project.ref.projectId === github.key.id,
+        ),
       ).toMatchObject({
         name: 'acme/original',
         resource: { kind: 'current-readable', observation: { observedAt: 1_500 } },
       })
       gate.resolve()
-      await vi.waitFor(() => expect(application.current().configurationVersion).toBe(2))
+      await vi.waitFor(() =>
+        expect(readApplicationState(application.current()).configurationVersion).toBe(2),
+      )
       for (const state of states.filter((state) => state.configurationVersion === 2)) {
         expect(
-          state.registrations.find((row) => row.key.integration === 'github')?.locator,
+          state.projects.find((row) => row.ref.integration === 'github')?.source,
         ).toMatchObject({ nameWithOwner: 'acme/renamed' })
-        expect(state.projects.find((row) => row.key.integration === 'github')).toMatchObject({
+        expect(state.projects.find((row) => row.ref.integration === 'github')).toMatchObject({
           name: 'acme/renamed',
           resource: { kind: 'current-readable', observation: { observedAt: 3_000 } },
         })
@@ -519,16 +533,16 @@ describe('RoadmapApplication', () => {
           state.connections.find((connection) => connection.id === 'github')?.availability.status,
         ).toBe('unavailable')
       }
-      const committedSequence = application.current().stateSequence
+      const committedSequence = readApplicationState(application.current()).stateSequence
       original.push(read([{ ...github, name: 'retired-callback' }], 4_000, registered))
-      expect(application.current().stateSequence).toBe(committedSequence)
-      expect(states.at(-1)?.projects.find((row) => row.key.integration === 'github')?.name).toBe(
+      expect(readApplicationState(application.current()).stateSequence).toBe(committedSequence)
+      expect(states.at(-1)?.projects.find((row) => row.ref.integration === 'github')?.name).toBe(
         'acme/renamed',
       )
       local.push(localRead([notificationProject(true, true)], 5_000))
-      const localClosed = application
-        .current()
-        .projects.find((project) => project.key.integration === 'local')?.maps[0]?.tickets[0]
+      const localClosed = readApplicationState(application.current()).projects.find(
+        (project) => project.ref.integration === 'local',
+      )?.maps[0]?.tickets[0]
       expect(localClosed && publicTicketObservation(localClosed)?.value.state).toBe('closed')
       expect(events.filter((event) => event.type === 'ticket-claimed')).toHaveLength(1)
       expect(events.filter((event) => event.type === 'ticket-closed')).toEqual([
@@ -540,16 +554,14 @@ describe('RoadmapApplication', () => {
           }),
         },
       ])
-      const remoteLatest = application
-        .current()
-        .projects.find(
-          (project) => project.key.integration === 'github' && project.key.id === github.key.id,
-        )
-      const localLatest = application
-        .current()
-        .projects.find(
-          (project) => project.key.integration === 'local' && project.key.id === 'notifications',
-        )
+      const remoteLatest = readApplicationState(application.current()).projects.find(
+        (project) =>
+          project.ref.integration === 'github' && project.ref.projectId === github.key.id,
+      )
+      const localLatest = readApplicationState(application.current()).projects.find(
+        (project) =>
+          project.ref.integration === 'local' && project.ref.projectId === 'notifications',
+      )
       expect(remoteLatest && publicProjectObservation(remoteLatest)?.observedAt).toBe(3_000)
       expect(localLatest && publicProjectObservation(localLatest)?.observedAt).toBe(5_000)
     } finally {
@@ -586,12 +598,12 @@ describe('RoadmapApplication', () => {
     })
     try {
       await application.start()
-      const projects = application.current().projects
+      const projects = readApplicationState(application.current()).projects
       expect(projects.map((project) => project.activeMap)).toEqual([
         { kind: 'known-empty' },
         { kind: 'known-empty' },
       ])
-      const remote = projects.find((project) => project.key.integration === 'github')
+      const remote = projects.find((project) => project.integration === 'github')
       expect(remote && publicProjectObservation(remote)?.value.warnings).toEqual([
         'Source diagnostic',
       ])
@@ -599,8 +611,9 @@ describe('RoadmapApplication', () => {
       expect(github.warnings).toEqual(['Source diagnostic'])
       adapter.push(read([local], 1_000))
       expect(
-        application.current().projects.find((project) => project.key.integration === 'local')
-          ?.activeMap,
+        readApplicationState(application.current()).projects.find(
+          (project) => project.ref.integration === 'local',
+        )?.activeMap,
       ).toEqual({ kind: 'known-empty' })
     } finally {
       await application.stop()
@@ -640,8 +653,8 @@ describe('RoadmapApplication', () => {
     adapter.release()
     await starting
     expect(states).toHaveBeenCalledOnce()
-    expect(application.current().roadmap.capturedAt).toBeGreaterThan(0)
-    expect(observedProjectIds(application.current())).toEqual(['ready'])
+    expect(application.current().capturedAt).toBeGreaterThan(0)
+    expect(observedProjectIds(readApplicationState(application.current()))).toEqual(['ready'])
     await application.stop()
   })
 
@@ -683,9 +696,11 @@ describe('RoadmapApplication', () => {
     const configuration = memoryConfiguration({ ok: true, document: registered })
     const read = createSourceFixtureOwner()
     const adapter = immediateObserver(read([localProject('demo')], 25))
+    const launch = vi.fn(async () => {})
     const application = createRoadmapApplication({
       configuration: configuration.document,
       admissions: fixtureAdmissions,
+      operations: createApplicationOperations({ launch }),
       observers: {
         local: () => adapter.observer,
         github: (input) =>
@@ -699,7 +714,7 @@ describe('RoadmapApplication', () => {
 
     adapter.push(unavailable('demo', read.nextReadSequence()))
 
-    expect(application.current().projects).toMatchObject([
+    expect(readApplicationState(application.current()).projects).toMatchObject([
       {
         name: 'demo',
         resource: {
@@ -708,10 +723,32 @@ describe('RoadmapApplication', () => {
           unavailable: { cause: 'Workspace cannot be read.' },
         },
         actions: expect.arrayContaining([
-          { id: 'open-workspace', label: 'Open in VS Code', kind: 'server-launch' },
-          { id: 'reveal-source', label: 'View source folder', kind: 'server-launch' },
+          expect.objectContaining({ kind: 'server-launch', operation: 'open-workspace' }),
+          expect.objectContaining({ kind: 'server-launch', operation: 'reveal-source' }),
         ]),
       },
+    ])
+    const retained = readApplicationState(application.current()).projects[0]
+    if (!retained) throw new Error('Missing retained Project')
+    for (const operation of ['open-workspace', 'reveal-source']) {
+      const action = retained.actions.find(
+        (action) => action.kind === 'server-launch' && action.operation === operation,
+      )
+      if (!action) throw new Error(`Missing ${operation} action`)
+      expect(
+        await application.execute(
+          commandSchema.parse({
+            type: 'launch-action',
+            actionId: action.id,
+            project: retained.ref,
+            expectedConfigurationVersion: 1,
+          }),
+        ),
+      ).toMatchObject({ ok: true })
+    }
+    expect(launch.mock.calls).toEqual([
+      ['/usr/bin/open', ['-a', 'Visual Studio Code', '/tmp/demo']],
+      ['/usr/bin/open', ['-R', '/tmp/demo']],
     ])
     await application.stop()
   })
@@ -782,7 +819,7 @@ describe('RoadmapApplication', () => {
     })
     try {
       await application.start()
-      expect(application.current().projects[0]?.resource).toMatchObject({
+      expect(readApplicationState(application.current()).projects[0]?.resource).toMatchObject({
         kind: 'current-readable',
         observation: { observedAt: 1_000 },
       })
@@ -810,16 +847,18 @@ describe('RoadmapApplication', () => {
         read([{ ...localProject('local-source'), warnings: ['A Local file changed.'] }], clock),
       )
 
-      const retained = application
-        .current()
-        .projects.find((project) => project.key.integration === 'github')
-      expect(retained?.key).toEqual({ integration: 'github', id: 'opaque/github-key' })
+      const retained = readApplicationState(application.current()).projects.find(
+        (project) => project.ref.integration === 'github',
+      )
+      expect(retained?.ref).toEqual({ integration: 'github', projectId: 'opaque/github-key' })
       expect(retained?.resource).toMatchObject({
         kind: 'retained-unavailable',
         lastSuccessful: { observedAt: 1_000 },
       })
       expect(
-        application.current().connections.find((connection) => connection.id === 'github'),
+        readApplicationState(application.current()).connections.find(
+          (connection) => connection.id === 'github',
+        ),
       ).toMatchObject({ availability: { observedAt: 1_000 } })
     } finally {
       await application.stop()
@@ -878,22 +917,18 @@ describe('RoadmapApplication', () => {
 
     await application.start()
 
-    expect(application.current().projects[0]).toMatchObject({
-      key: { integration: 'github', id: 'stable/route' },
+    expect(readApplicationState(application.current()).projects[0]).toMatchObject({
+      ref: fixtureResourceRef({ integration: 'github', id: 'stable/route' }),
       name: 'acme/renamed',
       actions: expect.arrayContaining([
-        {
-          id: 'open-roadmap',
-          label: 'Open in Roadmap',
+        expect.objectContaining({
           kind: 'roadmap',
           href: '/projects/github/stable%2Froute',
-        },
-        {
-          id: 'open-source',
-          label: 'Open on GitHub',
+        }),
+        expect.objectContaining({
           kind: 'external-link',
           href: 'https://github.com/acme/renamed',
-        },
+        }),
       ]),
     })
     await application.stop()
@@ -945,17 +980,29 @@ describe('RoadmapApplication', () => {
     })
     await application.start()
 
-    expect(application.current().projects[0]?.actions).toContainEqual({
-      id: 'reveal-source',
-      label: 'View source folder',
-      kind: 'server-launch',
+    const project = readApplicationState(application.current()).projects[0]
+    expect(project).toMatchObject({
+      source: {
+        integration: 'github',
+        repositoryId: '42',
+        nameWithOwner: 'acme/app',
+        url: 'https://github.com/acme/app',
+      },
+      management: { workspacePath: '/committed/source' },
     })
-    const result = await application.execute({
-      type: 'launch-action',
-      expectedConfigurationVersion: application.current().configurationVersion,
-      actionId: 'reveal-source',
-      project: key,
-    })
+    const action = project?.actions.find(
+      (action) => action.kind === 'server-launch' && action.operation === 'reveal-source',
+    )
+    if (!project || !action) throw new Error('Missing reveal-source action')
+    const result = await application.execute(
+      commandSchema.parse({
+        type: 'launch-action',
+        expectedConfigurationVersion: readApplicationState(application.current())
+          .configurationVersion,
+        actionId: action.id,
+        project: project.ref,
+      }),
+    )
     expect(result).toMatchObject({ ok: true })
     expect(launch).toHaveBeenCalledWith('/usr/bin/open', ['-R', '/committed/source'])
     await application.stop()
@@ -1013,20 +1060,20 @@ describe('RoadmapApplication', () => {
     })
     await application.start()
 
-    for (const project of application.current().projects) {
-      expect(project.actions).toContainEqual({
-        id: 'open-terminal',
-        label: 'Open Terminal',
-        kind: 'server-launch',
-      })
-    }
-    for (const project of [localKey, githubKey]) {
-      const result = await application.execute({
-        type: 'launch-action',
-        expectedConfigurationVersion: application.current().configurationVersion,
-        actionId: 'open-terminal',
-        project,
-      })
+    for (const project of readApplicationState(application.current()).projects) {
+      const action = project.actions.find(
+        (action) => action.kind === 'server-launch' && action.operation === 'open-terminal',
+      )
+      if (!action) throw new Error('Missing open-terminal action')
+      const result = await application.execute(
+        commandSchema.parse({
+          type: 'launch-action',
+          expectedConfigurationVersion: readApplicationState(application.current())
+            .configurationVersion,
+          actionId: action.id,
+          project: project.ref,
+        }),
+      )
       expect(result).toMatchObject({ ok: true })
     }
     expect(launch.mock.calls).toEqual([
@@ -1053,12 +1100,14 @@ describe('RoadmapApplication', () => {
     })
     await application.start()
 
-    const outcome = await application.execute({
-      type: 'rename-connection',
-      connectionId: 'local',
-      name: 'On this Mac',
-      expectedConfigurationVersion: 0,
-    })
+    const outcome = await application.execute(
+      commandSchema.parse({
+        type: 'rename-connection',
+        connectionId: 'local',
+        name: 'On this Mac',
+        expectedConfigurationVersion: 0,
+      }),
+    )
 
     expect(outcome).toMatchObject({ ok: false, error: { code: 'conflict' } })
     expect(configuration.writes).toEqual([])
@@ -1097,46 +1146,52 @@ describe('RoadmapApplication', () => {
     })
     await application.start()
 
-    expect(application.current().automation).toEqual({
+    expect(readApplicationState(application.current()).automation).toEqual({
       enabled: false,
       enabledProjects: [],
       availability: { status: 'ready' },
       evidence: [],
       overrides: [],
     })
-    const projectOn = await application.execute({
-      type: 'set-project-automation-enabled',
-      project: { integration: 'local', id: project.ref.projectId },
-      enabled: true,
-      expectedConfigurationVersion: 1,
-    })
+    const projectOn = await application.execute(
+      commandSchema.parse({
+        type: 'set-project-automation-enabled',
+        project: fixtureProjectRef(project.ref),
+        enabled: true,
+        expectedConfigurationVersion: 1,
+      }),
+    )
     expect(projectOn).toMatchObject({ ok: true, state: { configurationVersion: 2 } })
-    const globalOn = await application.execute({
-      type: 'set-automation-enabled',
-      enabled: true,
-      expectedConfigurationVersion: 2,
-    })
+    const globalOn = await application.execute(
+      commandSchema.parse({
+        type: 'set-automation-enabled',
+        enabled: true,
+        expectedConfigurationVersion: 2,
+      }),
+    )
     expect(globalOn).toMatchObject({
       ok: true,
       state: {
         automation: {
           enabled: true,
-          enabledProjects: [{ integration: 'local', id: project.ref.projectId }],
+          enabledProjects: [{ integration: 'local', projectId: 'demo' }],
         },
         configurationVersion: 3,
       },
     })
-    const globalOff = await application.execute({
-      type: 'set-automation-enabled',
-      enabled: false,
-      expectedConfigurationVersion: 3,
-    })
+    const globalOff = await application.execute(
+      commandSchema.parse({
+        type: 'set-automation-enabled',
+        enabled: false,
+        expectedConfigurationVersion: 3,
+      }),
+    )
     expect(globalOff).toMatchObject({
       ok: true,
       state: {
         automation: {
           enabled: false,
-          enabledProjects: [{ integration: 'local', id: project.ref.projectId }],
+          enabledProjects: [{ integration: 'local', projectId: 'demo' }],
         },
       },
     })
@@ -1160,18 +1215,20 @@ describe('RoadmapApplication', () => {
     })
     await application.start()
 
-    expect(application.current().automation).toMatchObject({
+    expect(readApplicationState(application.current()).automation).toMatchObject({
       enabled: false,
       availability: {
         status: 'unavailable',
         cause: expect.stringContaining('Classification Harness Command'),
       },
     })
-    const outcome = await application.execute({
-      type: 'set-automation-enabled',
-      enabled: true,
-      expectedConfigurationVersion: 1,
-    })
+    const outcome = await application.execute(
+      commandSchema.parse({
+        type: 'set-automation-enabled',
+        enabled: true,
+        expectedConfigurationVersion: 1,
+      }),
+    )
     expect(outcome).toMatchObject({ ok: false, error: { code: 'validation' } })
     expect(configuration.writes).toEqual([])
     await application.stop()
@@ -1206,11 +1263,13 @@ describe('RoadmapApplication', () => {
     })
     await application.start()
 
-    const outcome = await application.execute({
-      type: 'set-automation-enabled',
-      enabled: true,
-      expectedConfigurationVersion: 1,
-    })
+    const outcome = await application.execute(
+      commandSchema.parse({
+        type: 'set-automation-enabled',
+        enabled: true,
+        expectedConfigurationVersion: 1,
+      }),
+    )
     expect(outcome).toMatchObject({
       ok: false,
       error: { code: 'persistence-failed', message: 'Disk is read-only.' },
@@ -1242,16 +1301,22 @@ describe('RoadmapApplication', () => {
         { path: '$.automation.wayfinderCommand.command', message: 'Must be a non-empty string.' },
       ],
     })
-    await vi.waitFor(() => expect(application.current().configuration.valid).toBe(false))
-    expect(application.current().connections[0]?.name).toBe('Local')
-    expect(application.current().automation.availability.status).toBe('unavailable')
+    await vi.waitFor(() =>
+      expect(readApplicationState(application.current()).configuration.valid).toBe(false),
+    )
+    expect(readApplicationState(application.current()).connections[0]?.name).toBe('Local')
+    expect(readApplicationState(application.current()).automation.availability.status).toBe(
+      'unavailable',
+    )
 
-    const gated = await application.execute({
-      type: 'rename-connection',
-      connectionId: 'local',
-      name: 'On this Mac',
-      expectedConfigurationVersion: 1,
-    })
+    const gated = await application.execute(
+      commandSchema.parse({
+        type: 'rename-connection',
+        connectionId: 'local',
+        name: 'On this Mac',
+        expectedConfigurationVersion: 1,
+      }),
+    )
     expect(gated).toMatchObject({ ok: false, error: { code: 'configuration-invalid' } })
 
     configuration.emit({
@@ -1263,11 +1328,11 @@ describe('RoadmapApplication', () => {
       },
     })
     await vi.waitFor(() => {
-      expect(application.current().configurationVersion).toBe(2)
-      expect(application.current().configuration.valid).toBe(true)
-      expect(application.current().connections[0]?.name).toBe('On this Mac')
+      expect(readApplicationState(application.current()).configurationVersion).toBe(2)
+      expect(readApplicationState(application.current()).configuration.valid).toBe(true)
+      expect(readApplicationState(application.current()).connections[0]?.name).toBe('On this Mac')
     })
-    expect(application.current().connections[0]?.name).toBe('On this Mac')
+    expect(readApplicationState(application.current()).connections[0]?.name).toBe('On this Mac')
     await application.stop()
   })
 
@@ -1328,24 +1393,28 @@ describe('RoadmapApplication', () => {
         observedAt: 1_000,
       })
       await vi.waitFor(() => {
-        const active = application.current().projects[0]
+        const active = readApplicationState(application.current()).projects[0]
         expect(active && publicProjectObservation(active)?.value.warnings).toEqual(['Still live'])
       })
-      expect(application.current().configurationVersion).toBe(1)
-      expect(observedProjectIds(application.current())).toEqual(['demo'])
+      expect(readApplicationState(application.current()).configurationVersion).toBe(1)
+      expect(observedProjectIds(readApplicationState(application.current()))).toEqual(['demo'])
 
       replacementGate.resolve()
-      await vi.waitFor(() => expect(application.current().configurationVersion).toBe(2))
+      await vi.waitFor(() =>
+        expect(readApplicationState(application.current()).configurationVersion).toBe(2),
+      )
       expect(first.stopped).toBe(true)
-      expect(observedProjectIds(application.current())).toEqual(['replacement'])
-      const committed = application.current()
+      expect(observedProjectIds(readApplicationState(application.current()))).toEqual([
+        'replacement',
+      ])
+      const committed = readApplicationState(application.current())
       if (!retiredUpdate) throw new Error('Expected the retired source subscription.')
       retiredUpdate({
         project: { integration: 'local', id: 'demo' },
         attempts: read([{ ...localProject('demo'), warnings: ['Late callback'] }], 2_000).attempts,
         health: { status: 'available', observedAt: 2_000 },
       })
-      expect(application.current()).toBe(committed)
+      expect(readApplicationState(application.current())).toBe(committed)
     } finally {
       replacementGate.resolve()
       await application.stop()
@@ -1374,21 +1443,23 @@ describe('RoadmapApplication', () => {
     })
     await application.start()
 
-    const outcome = await application.execute({
-      type: 'register-project',
-      candidate: {
-        integration: 'local',
-        connectionId: 'local',
-        workspace: { path: '/tmp/microsoft-risiko' },
-      },
-      expectedConfigurationVersion: 1,
-    })
+    const outcome = await application.execute(
+      commandSchema.parse({
+        type: 'register-project',
+        candidate: {
+          integration: 'local',
+          connectionId: 'local',
+          workspace: { path: '/tmp/microsoft-risiko' },
+        },
+        expectedConfigurationVersion: 1,
+      }),
+    )
 
     expect(outcome.ok).toBe(true)
-    expect(outcome.state.configurationVersion).toBe(2)
-    expect(outcome.state.projects).toContainEqual(
+    expect(readApplicationState(outcome.state).configurationVersion).toBe(2)
+    expect(readApplicationState(outcome.state).projects).toContainEqual(
       expect.objectContaining({
-        key: { integration: 'local', id: 'microsoft-risiko' },
+        ref: fixtureResourceRef({ integration: 'local', id: 'microsoft-risiko' }),
         resource: expect.objectContaining({ kind: 'never-observed' }),
       }),
     )
@@ -1442,22 +1513,24 @@ describe('RoadmapApplication', () => {
     })
     await application.start()
 
-    const outcome = await application.execute({
-      type: 'register-project',
-      candidate: {
-        integration: 'local',
-        connectionId: 'local',
-        workspace: { path: '/unclean' },
-      },
-      expectedConfigurationVersion: 1,
-    })
+    const outcome = await application.execute(
+      commandSchema.parse({
+        type: 'register-project',
+        candidate: {
+          integration: 'local',
+          connectionId: 'local',
+          workspace: { path: '/unclean' },
+        },
+        expectedConfigurationVersion: 1,
+      }),
+    )
 
     expect(outcome.ok).toBe(true)
     expect(configuration.writes[0]?.projects).toEqual([normalized])
-    expect(application.current().registrations).toContainEqual(
+    expect(readApplicationState(application.current()).projects).toContainEqual(
       expect.objectContaining({
-        key: { integration: 'local', id: 'canonical' },
-        workspace: { path: '/canonical' },
+        ref: fixtureResourceRef({ integration: 'local', id: 'canonical' }),
+        source: { integration: 'local', path: '/canonical' },
       }),
     )
     await application.stop()
@@ -1520,12 +1593,14 @@ describe('RoadmapApplication', () => {
     })
     await application.start()
 
-    const outcome = await application.execute({
-      type: 'repair-project-workspace',
-      project: { integration: 'local', id: 'demo' },
-      workspace: { path: '/candidate' },
-      expectedConfigurationVersion: 1,
-    })
+    const outcome = await application.execute(
+      commandSchema.parse({
+        type: 'repair-project-workspace',
+        project: fixtureProjectRef({ integration: 'local', id: 'demo' }),
+        workspace: { path: '/candidate' },
+        expectedConfigurationVersion: 1,
+      }),
+    )
 
     expect(outcome.ok).toBe(true)
     expect(configuration.writes[0]?.projects[0]?.workspace).toEqual({
@@ -1564,7 +1639,9 @@ describe('RoadmapApplication', () => {
 
     await application.start()
     expect(cleanupOrphans).toHaveBeenCalledWith(new Set(['local']))
-    expect(JSON.stringify(application.current())).not.toMatch(/token|secret|credential/i)
+    expect(JSON.stringify(readApplicationState(application.current()))).not.toMatch(
+      /token|secret|credential/i,
+    )
     await application.stop()
   })
 
@@ -1629,7 +1706,6 @@ describe('RoadmapApplication', () => {
         }),
         ticket('unknown-blocker', { blockedBy: [{ ...openBlocker, state: 'unknown' }] }),
       ],
-      frontier: [],
       progress: { total: 7, completed: 1 },
       ticketsComplete: true,
       warnings: [],
@@ -1654,10 +1730,10 @@ describe('RoadmapApplication', () => {
     })
     try {
       await application.start()
-      const projected = application.current().projects[0]?.maps[0]
+      const projected = readApplicationState(application.current()).projects[0]?.maps[0]
       expect(
         projected?.tickets.map((entry) => [
-          entry.key.ticketId,
+          entry.ref.ticketId,
           publicTicketObservation(entry)?.value.state,
         ]),
       ).toEqual([
@@ -1676,10 +1752,10 @@ describe('RoadmapApplication', () => {
               entry.resource.kind === 'current-readable' &&
               entry.resource.observation.value.state === 'frontier',
           )
-          .map((entry) => entry.key.ticketId),
+          .map((entry) => entry.ref.ticketId),
       ).toEqual(['first', 'external-closed'])
       const externalClosed = projected?.tickets.find(
-        (entry) => entry.key.ticketId === 'external-closed',
+        (entry) => entry.ref.ticketId === 'external-closed',
       )
       expect(externalClosed && publicTicketObservation(externalClosed)?.value.blockedBy[0]).toEqual(
         {
@@ -1687,8 +1763,8 @@ describe('RoadmapApplication', () => {
             kind: 'external',
             integration: 'github',
             nameWithOwner: 'outside/repository',
+            ticketId: '7',
           },
-          ticketId: '7',
           state: 'closed',
           url: 'https://github.com/outside/repository/issues/7',
         },
@@ -1707,14 +1783,16 @@ describe('RoadmapApplication', () => {
           20,
         ),
       )
-      const incomplete = application
-        .current()
-        .projects[0]?.maps[0]?.tickets.find((entry) => entry.key.ticketId === 'incomplete')
+      const incomplete = readApplicationState(
+        application.current(),
+      ).projects[0]?.maps[0]?.tickets.find((entry) => entry.ref.ticketId === 'incomplete')
       expect(incomplete?.resource).toMatchObject({
         kind: 'current-readable',
         observation: { value: { state: 'blocked', blockersComplete: false } },
       })
-      expect(application.current().projects[0]?.activeMap.kind).toBe('uncertain')
+      expect(readApplicationState(application.current()).projects[0]?.activeMap.kind).toBe(
+        'uncertain',
+      )
       const unknown = read(
         [
           {
@@ -1743,9 +1821,9 @@ describe('RoadmapApplication', () => {
           }
         }),
       })
-      const unknownTicket = application
-        .current()
-        .projects[0]?.maps[0]?.tickets.find((entry) => entry.key.ticketId === 'unknown-status')
+      const unknownTicket = readApplicationState(
+        application.current(),
+      ).projects[0]?.maps[0]?.tickets.find((entry) => entry.ref.ticketId === 'unknown-status')
       expect(unknownTicket?.resource).toMatchObject({
         kind: 'current-readable',
         observation: {
@@ -1753,7 +1831,9 @@ describe('RoadmapApplication', () => {
           value: { state: 'blocked', status: 'unknown' },
         },
       })
-      expect(application.current().projects[0]?.activeMap.kind).toBe('uncertain')
+      expect(readApplicationState(application.current()).projects[0]?.activeMap.kind).toBe(
+        'uncertain',
+      )
     } finally {
       await application.stop()
     }
@@ -1774,19 +1854,21 @@ describe('RoadmapApplication', () => {
     })
     await application.start()
     try {
-      const before = application.current()
+      const before = readApplicationState(application.current())
       control.push(read([localProject('unknown')], 200))
-      expect(application.current().stateSequence).toBe(before.stateSequence)
-      expect(observedProjectIds(application.current())).toEqual(['demo'])
-      expect(application.current().projects.some((project) => project.key.id === 'unknown')).toBe(
-        false,
-      )
+      expect(readApplicationState(application.current()).stateSequence).toBe(before.stateSequence)
+      expect(observedProjectIds(readApplicationState(application.current()))).toEqual(['demo'])
+      expect(
+        readApplicationState(application.current()).projects.some(
+          (project) => project.ref.projectId === 'unknown',
+        ),
+      ).toBe(false)
       control.push(
         read([{ ...localProject('demo'), sourcePath: '/tmp/not-the-configured-source' }], 300),
       )
-      expect(application.current().stateSequence).toBe(before.stateSequence)
-      expect(application.current().projects).toEqual(before.projects)
-      expect(application.current().projects[0]?.resource).toMatchObject({
+      expect(readApplicationState(application.current()).stateSequence).toBe(before.stateSequence)
+      expect(readApplicationState(application.current()).projects).toEqual(before.projects)
+      expect(readApplicationState(application.current()).projects[0]?.resource).toMatchObject({
         kind: 'current-readable',
         observation: { observedAt: 100 },
       })

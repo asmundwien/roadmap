@@ -1,25 +1,32 @@
+import { connectionIdSchema, projectIdSchema } from '@roadmap/contracts/identity'
 import type {
-  ApplicationState,
   Connection,
   MapResource,
-  RegisteredProject,
-} from '@roadmap/contracts'
+  Project,
+  ReadyApplicationState,
+} from '@roadmap/contracts/state'
 import { describe, expect, it } from 'vitest'
+import { makeApplicationState } from '@/views/map/test-fixtures'
 import { presentProjects } from './project-presentation'
 import { absentMap, currentProject, neverReadProject, readableMap } from './test-fixtures'
 
 const connection: Connection = {
-  id: 'local',
+  id: connectionIdSchema.parse('local'),
   integration: 'local',
   name: 'On this Mac',
   builtIn: true,
   availability: { status: 'available', observedAt: 1_000 },
 }
 function state(
-  projects: RegisteredProject[],
+  projects: Project[],
   connections: Connection[] = [connection],
-): Pick<ApplicationState, 'projects' | 'connections' | 'configuration'> {
-  return { projects, connections, configuration: { valid: true, issues: [], notices: [] } }
+  configuration: ReadyApplicationState['configuration'] = { valid: true, issues: [], notices: [] },
+): ReadyApplicationState {
+  return makeApplicationState(projects, {
+    connections,
+    configuration,
+    mode: configuration.valid ? 'mutable' : 'read-only',
+  })
 }
 function map(
   id: string,
@@ -27,7 +34,12 @@ function map(
   status: 'open' | 'closed' = 'open',
   updatedAt = 3_000,
 ): MapResource {
-  return readableMap({ integration: 'local', id }, mapId, status, updatedAt)
+  return readableMap(
+    { integration: 'local', projectId: projectIdSchema.parse(id) },
+    mapId,
+    status,
+    updatedAt,
+  )
 }
 function unknownProgress(map: MapResource): MapResource {
   if (map.resource.kind !== 'current-readable') throw new Error('Expected readable fixture')
@@ -43,7 +55,7 @@ function unknownProgress(map: MapResource): MapResource {
     },
   }
 }
-function uncertain(project: RegisteredProject): RegisteredProject {
+function uncertain(project: Project): Project {
   return {
     ...project,
     activeMap: {
@@ -61,7 +73,7 @@ describe('presentProjects', () => {
         currentProject('active', [map('active', 'active')]),
         currentProject('resting', [map('resting', 'closed', 'closed')]),
         currentProject('empty'),
-        neverReadProject({ integration: 'local', id: 'unread' }),
+        neverReadProject({ integration: 'local', projectId: projectIdSchema.parse('unread') }),
       ]),
     )
     expect(result.active.map((entry) => entry.project.name)).toEqual(['active'])
@@ -80,7 +92,7 @@ describe('presentProjects', () => {
     const first = map('project', 'first')
     const second = map('project', 'second', 'open', 9_000)
     const project = uncertain(currentProject('project', [first, second]))
-    project.displayOrder = { openMapIds: ['first'], closedMapIds: [] }
+    project.displayOrder = { open: [first.ref], closed: [] }
     const result = presentProjects(state([project]))
     expect(result.active).toEqual([])
     expect(result.uncertain[0]?.activeMap).toBeNull()
@@ -145,7 +157,10 @@ describe('presentProjects', () => {
   })
 
   it('keeps configuration, Connection, source and Workspace warnings independent', () => {
-    const project = neverReadProject({ integration: 'local', id: 'warned' })
+    const project = neverReadProject({
+      integration: 'local',
+      projectId: projectIdSchema.parse('warned'),
+    })
     project.managementWarnings = ['Workspace proof is unavailable.']
     const input = state(
       [project],
@@ -155,12 +170,12 @@ describe('presentProjects', () => {
           availability: { status: 'authorization-required', cause: 'Authorization is required.' },
         },
       ],
+      {
+        valid: false,
+        issues: [{ path: 'projects[0]', message: 'Configuration is invalid.' }],
+        notices: [],
+      },
     )
-    input.configuration = {
-      valid: false,
-      issues: [{ path: 'projects[0]', message: 'Configuration is invalid.' }],
-      notices: [],
-    }
     expect(presentProjects(input).attention.map((item) => item.kind)).toEqual([
       'configuration',
       'connection',

@@ -1,9 +1,20 @@
-import type {
-  ApplicationState,
-  Connection,
-  MapResource,
-  RegisteredProject,
-} from '@roadmap/contracts'
+import {
+  actionIdSchema,
+  configurationVersionSchema,
+  connectionIdSchema,
+  mapIdSchema,
+  projectIdSchema,
+  serverEpochSchema,
+  stateSequenceSchema,
+  ticketIdSchema,
+} from '@roadmap/contracts/identity'
+import {
+  type Connection,
+  type MapResource,
+  type Project,
+  type ReadyApplicationState,
+  readyApplicationStateSchema,
+} from '@roadmap/contracts/state'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router'
@@ -16,34 +27,34 @@ import {
   readableMap,
   readableTicket,
 } from '@/views/overview/test-fixtures'
-import { ProjectRegistrationPage } from './page'
+import { ProjectSettingsPage } from './page'
 
-const project: RegisteredProject = {
+const project: Project = {
   ...currentProject('my workspace'),
-  workspace: { path: '/tmp/my-workspace' },
   name: 'My workspace',
 }
 
 const connection: Connection = {
-  id: 'local',
+  id: connectionIdSchema.parse('local'),
   integration: 'local',
   name: 'On this Mac',
   builtIn: true,
   availability: { status: 'available', observedAt: 1_000 },
 }
 
-const baseMap = readableMap(project.key, 'map')
+const baseMap = readableMap(project.ref, 'map')
 const affectedTicket = readableTicket(baseMap, 'ticket')
 const affectedMap: MapResource = {
   ...baseMap,
   tickets: [affectedTicket],
+  frontier: [affectedTicket.ref],
   ticketsMembership:
     baseMap.ticketsMembership.kind === 'current-complete'
       ? {
           kind: 'current-complete',
           observation: {
             ...baseMap.ticketsMembership.observation,
-            value: { members: [affectedTicket.key] },
+            value: { members: [affectedTicket.ref] },
           },
         }
       : baseMap.ticketsMembership,
@@ -57,13 +68,25 @@ if (
 }
 const absentTicketMap: MapResource = {
   ...absentMap(affectedMap),
+  ticketsMembership:
+    affectedMap.ticketsMembership.kind === 'current-complete'
+      ? {
+          kind: 'current-complete',
+          observation: {
+            ...affectedMap.ticketsMembership.observation,
+            attemptedAt: 2_000,
+            observedAt: 2_000,
+            value: { members: [] },
+          },
+        }
+      : affectedMap.ticketsMembership,
   tickets: [
     {
-      key: affectedTicket.key,
+      ref: affectedTicket.ref,
       resource: {
         kind: 'proven-absent',
         absence: {
-          scope: { kind: 'ticket', ticket: affectedTicket.key },
+          scope: { kind: 'ticket', ticket: affectedTicket.ref },
           attemptedAt: 2_000,
           observedAt: 2_000,
           provenance: {
@@ -73,7 +96,7 @@ const absentTicketMap: MapResource = {
           },
           proof: {
             kind: 'complete-membership',
-            parent: { kind: 'tickets-membership', map: affectedMap.key },
+            parent: { kind: 'tickets-membership', map: affectedMap.ref },
           },
         },
         trace: {
@@ -91,17 +114,17 @@ const retainedMap: MapResource = {
     lastSuccessful: affectedMap.resource.observation,
     unavailable: {
       kind: 'no-current-evidence',
-      scope: { kind: 'map', map: affectedMap.key },
+      scope: { kind: 'map', map: affectedMap.ref },
       cause: 'No current source observation is available.',
     },
   },
 }
 
 function renderPage(
-  projects: RegisteredProject[],
+  projects: Project[],
   initial = true,
   valid = true,
-  automation: ApplicationState['automation'] = {
+  automation: ReadyApplicationState['automation'] = {
     enabled: false,
     enabledProjects: [],
     availability: { status: 'ready' },
@@ -110,19 +133,21 @@ function renderPage(
   },
   inFlight = false,
 ): string {
-  const state: ApplicationState = {
-    serverEpoch: 'test',
-    stateSequence: 1,
-    configurationVersion: 1,
+  const state = readyApplicationStateSchema.parse({
+    phase: 'ready',
+    mode: valid ? 'mutable' : 'read-only',
+    serverEpoch: serverEpochSchema.parse('test'),
+    stateSequence: stateSequenceSchema.parse(1),
+    configurationVersion: configurationVersionSchema.parse(1),
     supportedIntegrations: [],
     connections: [connection],
-    registrations: [],
+
     projects,
     authorizationOperations: [],
     configuration: { valid, issues: [], notices: [] },
     automation,
-    roadmap: { capturedAt: 0 },
-  }
+    capturedAt: 0,
+  })
   const store: RoadmapStore = {
     subscribe: () => () => undefined,
     getSnapshot: () =>
@@ -154,17 +179,17 @@ function renderPage(
       createElement(
         RoadmapProvider,
         { store },
-        createElement(ProjectRegistrationPage, { projectKey: project.key }),
+        createElement(ProjectSettingsPage, { projectRef: project.ref }),
       ),
     ),
   )
 }
 
-describe('ProjectRegistrationPage', () => {
+describe('ProjectSettingsPage', () => {
   it('preserves the project preference while global Automation is paused', () => {
     const markup = renderPage([project], true, true, {
       enabled: false,
-      enabledProjects: [project.key],
+      enabledProjects: [project.ref],
       availability: { status: 'ready' },
       evidence: [],
       overrides: [],
@@ -175,12 +200,20 @@ describe('ProjectRegistrationPage', () => {
   it('requires explicit acknowledgement before enabling a project with an unknown Session outcome', () => {
     const markup = renderPage([project], true, true, {
       enabled: true,
-      enabledProjects: [project.key],
+      enabledProjects: [project.ref],
       availability: { status: 'ready' },
       evidence: [
         {
-          target: { project: project.key, mapId: 'map', ticketId: 'ticket' },
-          classification: { status: 'running', admission: 'automatic' },
+          target: {
+            map: { project: project.ref, mapId: mapIdSchema.parse('map') },
+            ticketId: ticketIdSchema.parse('ticket'),
+          },
+          classification: {
+            status: 'completed',
+            admission: 'automatic',
+            processResult: { status: 'exited', code: 0 },
+            verdict: { value: 'afk', reason: 'Recorded AFK evidence.' },
+          },
           wayfinder: {
             status: 'outcome-unknown',
             admission: 'automatic',
@@ -199,20 +232,37 @@ describe('ProjectRegistrationPage', () => {
   })
 
   it.each([
-    { interruptedProject: project.key, acknowledged: true },
-    { interruptedProject: { integration: 'github', id: project.key.id }, acknowledged: false },
-    { interruptedProject: { integration: 'local', id: 'another project' }, acknowledged: false },
-  ] satisfies { interruptedProject: RegisteredProject['key']; acknowledged: boolean }[])(
+    { interruptedProject: project.ref, acknowledged: true },
+    {
+      interruptedProject: { integration: 'github', projectId: project.ref.projectId },
+      acknowledged: false,
+    },
+    {
+      interruptedProject: {
+        integration: 'local',
+        projectId: projectIdSchema.parse('another project'),
+      },
+      acknowledged: false,
+    },
+  ] satisfies { interruptedProject: Project['ref']; acknowledged: boolean }[])(
     'does not block this project for acknowledged or another project interruption: %j',
     ({ interruptedProject, acknowledged }) => {
       const markup = renderPage([project], true, true, {
         enabled: true,
-        enabledProjects: [project.key],
+        enabledProjects: [project.ref],
         availability: { status: 'ready' },
         evidence: [
           {
-            target: { project: interruptedProject, mapId: 'map', ticketId: 'ticket' },
-            classification: { status: 'running', admission: 'automatic' },
+            target: {
+              map: { project: interruptedProject, mapId: mapIdSchema.parse('map') },
+              ticketId: ticketIdSchema.parse('ticket'),
+            },
+            classification: {
+              status: 'completed',
+              admission: 'automatic',
+              processResult: { status: 'exited', code: 0 },
+              verdict: { value: 'afk', reason: 'Recorded AFK evidence.' },
+            },
             wayfinder: {
               status: 'outcome-unknown',
               admission: 'automatic',
@@ -233,7 +283,7 @@ describe('ProjectRegistrationPage', () => {
   it('allows project preference changes while Harness Commands are unavailable', () => {
     const markup = renderPage([project], true, true, {
       enabled: false,
-      enabledProjects: [project.key],
+      enabledProjects: [project.ref],
       availability: { status: 'unavailable', cause: 'Harness command missing.' },
       evidence: [],
       overrides: [],
@@ -249,7 +299,7 @@ describe('ProjectRegistrationPage', () => {
   ])(
     'blocks ordinary and recovery controls while changes are blocked: %j',
     ({ valid, inFlight }) => {
-      const automation: ApplicationState['automation'] = {
+      const automation: ReadyApplicationState['automation'] = {
         enabled: true,
         enabledProjects: [],
         availability: { status: 'ready' },
@@ -266,8 +316,16 @@ describe('ProjectRegistrationPage', () => {
           ...automation,
           evidence: [
             {
-              target: { project: project.key, mapId: 'map', ticketId: 'ticket' },
-              classification: { status: 'running', admission: 'automatic' },
+              target: {
+                map: { project: project.ref, mapId: mapIdSchema.parse('map') },
+                ticketId: ticketIdSchema.parse('ticket'),
+              },
+              classification: {
+                status: 'completed',
+                admission: 'automatic',
+                processResult: { status: 'exited', code: 0 },
+                verdict: { value: 'afk', reason: 'Recorded AFK evidence.' },
+              },
               wayfinder: {
                 status: 'outcome-unknown',
                 admission: 'automatic',
@@ -288,29 +346,42 @@ describe('ProjectRegistrationPage', () => {
     { maps: [absentMap(affectedMap)], linked: true },
     { maps: [absentTicketMap], linked: true },
     { maps: [retainedMap], linked: true },
-    { maps: [{ ...affectedMap, tickets: [] }], linked: false },
+    { maps: [baseMap], linked: false },
     { maps: [], linked: false },
   ])(
     'links durable interruption evidence to keyed current or historical resources: %j',
     ({ maps, linked }) => {
-      const markup = renderPage([{ ...project, maps }], true, true, {
-        enabled: true,
-        enabledProjects: [],
-        availability: { status: 'ready' },
-        evidence: [
-          {
-            target: { project: project.key, mapId: 'map', ticketId: 'ticket' },
-            classification: { status: 'running', admission: 'automatic' },
-            wayfinder: {
-              status: 'outcome-unknown',
-              admission: 'automatic',
-              reason: 'Server stopped.',
-              acknowledged: false,
+      const markup = renderPage(
+        [{ ...currentProject(project.ref.projectId, maps), name: project.name }],
+        true,
+        true,
+        {
+          enabled: true,
+          enabledProjects: [],
+          availability: { status: 'ready' },
+          evidence: [
+            {
+              target: {
+                map: { project: project.ref, mapId: mapIdSchema.parse('map') },
+                ticketId: ticketIdSchema.parse('ticket'),
+              },
+              classification: {
+                status: 'completed',
+                admission: 'automatic',
+                processResult: { status: 'exited', code: 0 },
+                verdict: { value: 'afk', reason: 'Recorded AFK evidence.' },
+              },
+              wayfinder: {
+                status: 'outcome-unknown',
+                admission: 'automatic',
+                reason: 'Server stopped.',
+                acknowledged: false,
+              },
             },
-          },
-        ],
-        overrides: [],
-      })
+          ],
+          overrides: [],
+        },
+      )
       expect(markup.includes('href="/projects/local/my%20workspace/maps/map/tickets/ticket"')).toBe(
         linked,
       )
@@ -320,18 +391,30 @@ describe('ProjectRegistrationPage', () => {
   it('does not offer Workspace repair merely because source evidence is unavailable', () => {
     if (project.resource.kind !== 'current-readable')
       throw new Error('Expected readable Project fixture')
-    const unavailable: RegisteredProject = {
+    const unavailable: Project = {
       ...project,
       resource: {
         kind: 'retained-unavailable',
         lastSuccessful: project.resource.observation,
         unavailable: {
           kind: 'no-current-evidence',
-          scope: { kind: 'project', project: project.key },
+          scope: { kind: 'project', project: project.ref },
           cause: 'No current source observation is available.',
         },
       },
-      actions: [{ id: 'open-workspace', label: 'Open workspace', kind: 'server-launch' }],
+      activeMap: {
+        kind: 'uncertain',
+        reason: 'project-unavailable',
+        cause: 'Project source is currently unavailable.',
+      },
+      actions: [
+        {
+          id: actionIdSchema.parse('open-workspace'),
+          label: 'Open workspace',
+          kind: 'server-launch',
+          operation: 'open-workspace',
+        },
+      ],
     }
     expect(renderPage([unavailable])).not.toContain('New Workspace')
   })

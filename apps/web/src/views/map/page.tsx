@@ -1,4 +1,5 @@
-import type { MapResource, ProjectKey, RegisteredProject } from '@roadmap/contracts'
+import type { MapId, ProjectRef, TicketId, TicketRef } from '@roadmap/contracts/identity'
+import type { MapResource, Project } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 import { Link as SourceLink } from '@roadmap/ui/link'
 import { Page, PageDescription, PageHeader, PageTitle } from '@roadmap/ui/page'
@@ -20,49 +21,52 @@ import { TicketModal } from './ticket-modal'
 const cx = classNames.bind(styles)
 
 type MapPageProps = {
-  projectKey: ProjectKey
-  mapId: string | null
-  ticketId: string | null
+  projectRef: ProjectRef
+  mapId: MapId | null
+  ticketId: TicketId | null
 }
 
-export function MapPage({ projectKey, mapId, ticketId }: MapPageProps) {
+export function MapPage({ projectRef, mapId, ticketId }: MapPageProps) {
   const navigate = useNavigate()
   const { projects } = useRoadmap()
-  const project = projects.find((candidate) => sameProject(candidate.key, projectKey))
+  const project = projects.find((candidate) => sameProject(candidate.ref, projectRef))
   const selectedId =
     mapId ??
     (project?.activeMap.kind === 'known-current'
-      ? project.activeMap.mapId
+      ? project.activeMap.ref.mapId
       : project?.activeMap.kind === 'known-empty'
-        ? (project.displayOrder.closedMapIds[0] ?? null)
+        ? (project.displayOrder.closed[0]?.mapId ?? null)
         : null)
   const map =
     selectedId === null
       ? undefined
-      : project?.maps.find((candidate) => candidate.key.mapId === selectedId)
+      : project?.maps.find((candidate) => candidate.ref.mapId === selectedId)
   const observation = project === undefined ? null : resourceObservation(project.resource)
-  const onOpenTicket = (id: string) => {
-    if (map) void navigate(ticketPath({ map: map.key, ticketId: id }))
+  const selectedTicket: TicketRef | null =
+    mapId === null || ticketId === null ? null : { map: { project: projectRef, mapId }, ticketId }
+  const onOpenTicket = (id: TicketId) => {
+    if (map) void navigate(ticketPath({ map: map.ref, ticketId: id }))
   }
   const onOpenMap = () => {
-    if (map) void navigate(mapPath(map.key), { replace: true })
+    const ref = map?.ref ?? selectedTicket?.map
+    if (ref) void navigate(mapPath(ref), { replace: true })
   }
 
   return (
     <Page>
       <PageHeader>
-        <PageTitle>{project?.name ?? projectKey.id}</PageTitle>
+        <PageTitle>{project?.name ?? projectRef.projectId}</PageTitle>
         <PageDescription>{projectDescription(project)}</PageDescription>
         <div className={cx('project-context')}>
-          <IntegrationBadge integration={projectKey.integration} />
-          <span className={cx('source-path')}>{projectKey.id}</span>
-          {project && <Link href={projectSettingsPath(project.key)}>Project settings</Link>}
+          <IntegrationBadge integration={projectRef.integration} />
+          <span className={cx('source-path')}>{projectRef.projectId}</span>
+          {project && <Link href={projectSettingsPath(project.ref)}>Project settings</Link>}
         </div>
-        {observation?.value.source.integration === 'local' && (
-          <p className={cx('source-path')}>{observation.value.source.path}</p>
+        {project?.integration === 'local' && (
+          <p className={cx('source-path')}>{project.source.path}</p>
         )}
-        {observation?.value.source.integration === 'github' && (
-          <SourceLink href={observation.value.source.url}>Project source</SourceLink>
+        {project?.integration === 'github' && (
+          <SourceLink href={project.source.url}>Project source</SourceLink>
         )}
       </PageHeader>
       {!project ? (
@@ -90,9 +94,10 @@ export function MapPage({ projectKey, mapId, ticketId }: MapPageProps) {
                 <SelectedMap
                   map={map}
                   activeMapId={
-                    project.activeMap.kind === 'known-current' ? project.activeMap.mapId : undefined
+                    project.activeMap.kind === 'known-current'
+                      ? project.activeMap.ref.mapId
+                      : undefined
                   }
-                  ticketId={ticketId}
                   onOpenTicket={onOpenTicket}
                   onOpenMap={onOpenMap}
                 />
@@ -111,11 +116,18 @@ export function MapPage({ projectKey, mapId, ticketId }: MapPageProps) {
           </div>
         </>
       )}
+      <TicketModal
+        map={map ?? null}
+        selected={selectedTicket}
+        onClose={onOpenMap}
+        onOpenTicket={onOpenTicket}
+        onOpenMap={onOpenMap}
+      />
     </Page>
   )
 }
 
-function projectDescription(project: RegisteredProject | undefined): string {
+function projectDescription(project: Project | undefined): string {
   if (!project) return 'Project map'
   if (project.activeMap.kind === 'uncertain') return 'Active map is uncertain'
   return project.activeMap.kind === 'known-current'
@@ -126,17 +138,16 @@ function projectDescription(project: RegisteredProject | undefined): string {
 type SelectedMapProps = {
   map: MapResource
   activeMapId: string | undefined
-  ticketId: string | null
-  onOpenTicket: (id: string) => void
+  onOpenTicket: (id: TicketId) => void
   onOpenMap: () => void
 }
 
-function SelectedMap({ map, activeMapId, ticketId, onOpenTicket, onOpenMap }: SelectedMapProps) {
+function SelectedMap({ map, activeMapId, onOpenTicket, onOpenMap }: SelectedMapProps) {
   const content = resourceObservation(map.resource)?.value
   const status =
     map.resource.kind === 'proven-absent'
       ? 'Historical map'
-      : map.key.mapId === activeMapId
+      : map.ref.mapId === activeMapId
         ? 'Active map'
         : content?.status === 'open'
           ? 'Open map'
@@ -147,9 +158,9 @@ function SelectedMap({ map, activeMapId, ticketId, onOpenTicket, onOpenMap }: Se
     <>
       <Surface>
         <header className={cx('map-heading')}>
-          <h2>{content?.title ?? content?.displayId ?? map.key.mapId}</h2>
+          <h2>{content?.title ?? content?.displayId ?? map.ref.mapId}</h2>
           <SurfaceDescription>
-            {content?.displayId ?? map.key.mapId} · {status}
+            {content?.displayId ?? map.ref.mapId} · {status}
             {content &&
               ` · ${content.progress === null ? 'Closed ticket count unknown' : `${content.progress.completed} closed tickets`}`}
           </SurfaceDescription>
@@ -164,13 +175,6 @@ function SelectedMap({ map, activeMapId, ticketId, onOpenTicket, onOpenMap }: Se
         <MapContainer map={map} onOpenTicket={onOpenTicket} />
       </Surface>
       <MapContent map={map} onOpenTicket={onOpenTicket} onOpenMap={onOpenMap} />
-      <TicketModal
-        map={map}
-        ticketId={ticketId}
-        onClose={onOpenMap}
-        onOpenTicket={onOpenTicket}
-        onOpenMap={onOpenMap}
-      />
     </>
   )
 }

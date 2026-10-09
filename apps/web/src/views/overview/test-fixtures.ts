@@ -1,45 +1,79 @@
+import {
+  connectionIdSchema,
+  githubProjectRefSchema,
+  localProjectRefSchema,
+  mapRefSchema,
+  type ProjectRef,
+  projectRefSchema,
+  ticketRefSchema,
+} from '@roadmap/contracts/identity'
 import type {
   MapResource,
   MapResourceResult,
-  ProjectKey,
-  RegisteredProject,
+  Project,
   TicketResource,
-} from '@roadmap/contracts'
+} from '@roadmap/contracts/state'
 
-export function neverReadProject(key: ProjectKey, name = key.id): RegisteredProject {
-  return {
-    key,
-    name,
-    connectionId: key.integration,
-    locator:
-      key.integration === 'local'
-        ? { integration: 'local', path: `/tmp/${key.id}` }
-        : { integration: 'github', repositoryId: key.id, nameWithOwner: `test/${key.id}` },
-    workspace: { path: `/tmp/${key.id}` },
+export function neverReadProject(
+  input: Parameters<typeof projectRefSchema.parse>[0],
+  name?: string,
+): Project {
+  const ref = projectRefSchema.parse(input)
+  const common = {
+    name: name ?? ref.projectId,
+    connectionId: connectionIdSchema.parse(ref.integration),
     actions: [],
     managementWarnings: [],
-    resource: { kind: 'never-observed', scope: { kind: 'project', project: key }, current: null },
+    resource: { kind: 'never-observed', scope: { kind: 'project', project: ref }, current: null },
     mapsMembership: { kind: 'never-observed', current: null },
     maps: [],
-    displayOrder: { openMapIds: [], closedMapIds: [] },
+    displayOrder: { open: [], closed: [] },
     activeMap: {
       kind: 'uncertain',
       reason: 'never-observed',
       cause: 'Active map has never been established.',
     },
-  }
+  } as const
+  return ref.integration === 'local'
+    ? {
+        ...common,
+        actions: [],
+        managementWarnings: [],
+        maps: [],
+        displayOrder: { open: [], closed: [] },
+        integration: 'local',
+        ref: localProjectRefSchema.parse(ref),
+        source: { integration: 'local', path: `/tmp/${ref.projectId}` },
+        management: {},
+      }
+    : {
+        ...common,
+        actions: [],
+        managementWarnings: [],
+        maps: [],
+        displayOrder: { open: [], closed: [] },
+        integration: 'github',
+        ref: githubProjectRefSchema.parse(ref),
+        source: {
+          integration: 'github',
+          repositoryId: ref.projectId,
+          nameWithOwner: `test/${ref.projectId}`,
+          url: `https://example.test/test/${ref.projectId}`,
+        },
+        management: { workspacePath: `/tmp/${ref.projectId}` },
+      }
 }
 
 export function readableMap(
-  project: ProjectKey,
+  project: ProjectRef,
   mapId: string,
   status: 'open' | 'closed' = 'open',
   updatedAt = 1_000,
 ): MapResource {
-  const key = { project, mapId }
-  const path = `/tmp/${project.id}/maps/${mapId}.md`
+  const key = mapRefSchema.parse({ project, mapId })
+  const path = `/tmp/${project.projectId}/maps/${mapId}.md`
   return {
-    key,
+    ref: key,
     resource: {
       kind: 'current-readable',
       observation: {
@@ -78,7 +112,7 @@ export function readableMap(
         observedAt: updatedAt,
         provenance: {
           integration: 'local',
-          path: `/tmp/${project.id}/tickets`,
+          path: `/tmp/${project.projectId}/tickets`,
           operation: 'enumerate',
         },
         completeness: { kind: 'complete' },
@@ -86,14 +120,15 @@ export function readableMap(
       },
     },
     tickets: [],
+    frontier: [],
   }
 }
 
 export function readableTicket(map: MapResource, ticketId: string): TicketResource {
-  const key = { map: map.key, ticketId }
-  const path = `/tmp/${map.key.project.id}/tickets/${ticketId}.md`
+  const key = ticketRefSchema.parse({ map: map.ref, ticketId })
+  const path = `/tmp/${map.ref.project.projectId}/tickets/${ticketId}.md`
   return {
-    key,
+    ref: key,
     resource: {
       kind: 'current-readable',
       observation: {
@@ -106,7 +141,7 @@ export function readableTicket(map: MapResource, ticketId: string): TicketResour
           source: { kind: 'file', path },
           status: 'open',
           body: '',
-          typeEvidence: { kind: 'recognized', value: 'task', labels: ['wayfinder:task'] },
+          typeEvidence: { kind: 'recognized', value: 'task', labels: ['task'] },
           state: 'frontier',
           isClaimed: false,
           isBlocked: false,
@@ -120,19 +155,31 @@ export function readableTicket(map: MapResource, ticketId: string): TicketResour
   }
 }
 
-export function currentProject(id: string, maps: MapResource[] = []): RegisteredProject {
-  const project = neverReadProject({ integration: 'local', id })
-  const path = `/tmp/${id}`
+export function currentProject(id: string, maps: MapResource[] = [], path = `/tmp/${id}`): Project {
+  const project = neverReadProject({ integration: 'local', projectId: id })
   const active = maps.find(
     (map) =>
       map.resource.kind === 'current-readable' && map.resource.observation.value.status === 'open',
   )
+  const currentMaps = maps.filter((map) => map.resource.kind !== 'proven-absent')
+  const unavailable = currentMaps.some((map) => map.resource.kind !== 'current-readable')
+  const incomplete = currentMaps.some(
+    (map) =>
+      map.resource.kind === 'current-readable' &&
+      (map.resource.observation.completeness.kind !== 'complete' ||
+        map.resource.observation.value.progress === null ||
+        map.ticketsMembership.kind !== 'current-complete'),
+  )
   return {
     ...project,
+    integration: 'local',
+    ref: localProjectRefSchema.parse(project.ref),
+    source: { integration: 'local', path },
+    management: {},
     resource: {
       kind: 'current-readable',
       observation: {
-        scope: { kind: 'project', project: project.key },
+        scope: { kind: 'project', project: project.ref },
         attemptedAt: 1_000,
         observedAt: 1_000,
         provenance: { integration: 'local', path, operation: 'inspect-root' },
@@ -144,50 +191,62 @@ export function currentProject(id: string, maps: MapResource[] = []): Registered
     mapsMembership: {
       kind: 'current-complete',
       observation: {
-        scope: { kind: 'maps-membership', project: project.key },
+        scope: { kind: 'maps-membership', project: project.ref },
         attemptedAt: 1_000,
         observedAt: 1_000,
         provenance: { integration: 'local', path: `${path}/maps`, operation: 'enumerate' },
         completeness: { kind: 'complete' },
-        value: { members: maps.map((map) => map.key) },
+        value: { members: currentMaps.map((map) => map.ref) },
       },
     },
     displayOrder: {
-      openMapIds: maps
+      open: maps
         .filter(
           (map) =>
             map.resource.kind === 'current-readable' &&
             map.resource.observation.value.status === 'open',
         )
-        .map((map) => map.key.mapId),
-      closedMapIds: maps
+        .map((map) => map.ref),
+      closed: maps
         .filter(
           (map) =>
             map.resource.kind === 'current-readable' &&
             map.resource.observation.value.status === 'closed',
         )
-        .map((map) => map.key.mapId),
+        .map((map) => map.ref),
     },
-    activeMap: active
-      ? { kind: 'known-current', mapId: active.key.mapId }
-      : { kind: 'known-empty' },
+    activeMap: unavailable
+      ? {
+          kind: 'uncertain',
+          reason: 'map-unavailable',
+          cause: 'A map required for ordering is currently unavailable.',
+        }
+      : incomplete
+        ? {
+            kind: 'uncertain',
+            reason: 'map-incomplete',
+            cause: 'A map required for ordering is incomplete.',
+          }
+        : active
+          ? { kind: 'known-current', ref: active.ref }
+          : { kind: 'known-empty' },
   }
 }
 
 export function absentMap(map: MapResource): MapResource {
   const resource = map.resource
   const observation = resource.kind === 'current-readable' ? resource.observation : null
-  const path = `/tmp/${map.key.project.id}/maps`
+  const path = `/tmp/${map.ref.project.projectId}/maps`
   const result: MapResourceResult = {
     kind: 'proven-absent',
     absence: {
-      scope: { kind: 'map', map: map.key },
+      scope: { kind: 'map', map: map.ref },
       attemptedAt: 2_000,
       observedAt: 2_000,
       provenance: { integration: 'local', path, operation: 'enumerate' },
       proof: {
         kind: 'complete-membership',
-        parent: { kind: 'maps-membership', project: map.key.project },
+        parent: { kind: 'maps-membership', project: map.ref.project },
       },
     },
     trace: observation

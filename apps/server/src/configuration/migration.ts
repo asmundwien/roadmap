@@ -1,4 +1,6 @@
 import { realpath } from 'node:fs/promises'
+import { CLASSIFICATION_RESULT_SCHEMA_MARKER } from '../application/classification-contract.ts'
+import { SESSION_REPORT_SCHEMA_MARKER } from '../application/session-report-contract.ts'
 import { LOCAL_PROJECTS_PATH, readLocalProjectRegistry } from '../local-projects.ts'
 import type {
   ConfiguredConnection,
@@ -7,8 +9,6 @@ import type {
   ProjectConfiguration,
   ProjectConfigurationIntent,
 } from '../projects/registry.ts'
-import { CLASSIFICATION_RESULT_SCHEMA_MARKER } from './classification-contract.ts'
-import { SESSION_REPORT_SCHEMA_MARKER } from './session-report-contract.ts'
 
 export interface ConfigurationMigrationInput {
   schemaVersion: 1 | 2 | 3 | 4 | 5

@@ -1,4 +1,5 @@
-import type { AuthorizationOperation } from '@roadmap/contracts'
+import type { AuthorizationOperationId } from '@roadmap/contracts/identity'
+import type { AuthorizationOperation } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 import { Icon, icon } from '@roadmap/ui/icon'
 import {
@@ -21,7 +22,7 @@ type ConnectionSetupSectionProps = {
   notice: string | null
   authorizations: AuthorizationOperation[]
   hasConnections: boolean
-  onOpenAuthorization: (operationId: string) => void
+  onOpenAuthorization: (operationId: AuthorizationOperationId) => void
 }
 
 export function ConnectionSetupSection({
@@ -69,7 +70,10 @@ export function ConnectionSetupSection({
           >
             <span>
               <strong>GitHub authorization · {authorizationStatus(authorization)}</strong>
-              <small>{authorization.cause ?? 'Open the device authorization progress.'}</small>
+              <small>
+                {('cause' in authorization ? authorization.cause : undefined) ??
+                  'Open the device authorization progress.'}
+              </small>
             </span>
             <Icon icon={icon.internalLink} />
           </button>

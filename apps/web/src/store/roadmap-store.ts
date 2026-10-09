@@ -1,19 +1,16 @@
 import type {
-  ApplicationState,
   Command,
   CommandOutcome,
   Query,
   QueryResult,
   SafeError,
-} from '@roadmap/contracts'
+} from '@roadmap/contracts/operations'
+import type { ApplicationState } from '@roadmap/contracts/state'
 import {
-  commandResultEnvelopeCodec,
-  queryResultEnvelopeCodec,
-  stateEnvelopeCodec,
-} from '@roadmap/contracts/codecs'
-
-import {
+  decodeCommandResultEnvelope,
+  decodeQueryResultEnvelope,
   decodeRequestRejection,
+  decodeStateEnvelope,
   REQUEST_ID_HEADER,
   type RequestRejection,
   requestRejectionStatus,
@@ -213,7 +210,7 @@ export function createRoadmapStore(
       if (generation !== current || watchers === 0) return
       const message = parseJson(event.data)
       if (message === null) return
-      const decoded = stateEnvelopeCodec.decode(message)
+      const decoded = decodeStateEnvelope(message)
       if (!decoded.ok) return
       acceptSocketState(current, decoded.value.state)
     })
@@ -261,8 +258,8 @@ export function createRoadmapStore(
       if (response.status !== 200) {
         return transportQueryFailure('The query did not receive a valid server response.')
       }
-      const decoded = queryResultEnvelopeCodec.decode(body)
-      if (!decoded.ok || !queryResultMatches(queryValue, decoded.value.result)) {
+      const decoded = decodeQueryResultEnvelope(body)
+      if (!decoded.ok) {
         return transportQueryFailure('Server returned an invalid query result.')
       }
       return decoded.value.result
@@ -293,8 +290,8 @@ export function createRoadmapStore(
       if (response.status !== 200) {
         throw new Error('The command did not receive a valid server response.')
       }
-      const decoded = commandResultEnvelopeCodec.decode(body)
-      if (!decoded.ok || !commandOutcomeMatches(command, decoded.value.outcome)) {
+      const decoded = decodeCommandResultEnvelope(body, command)
+      if (!decoded.ok) {
         throw new Error('Server returned an invalid command result.')
       }
       completionError = decoded.value.outcome.ok ? null : decoded.value.outcome.error
@@ -363,7 +360,7 @@ function defaultReconnectDelay(attempt: number): number {
 function parseJson(data: unknown): unknown | null {
   if (typeof data !== 'string') return null
   try {
-    return JSON.parse(data) as unknown
+    return JSON.parse(data)
   } catch {
     return null
   }
@@ -392,63 +389,5 @@ function attributableRejection(
     ok: false,
     rejection: decoded.value,
     error: { code: 'admission-failed', message: decoded.value.message },
-  }
-}
-
-function queryResultMatches(query: Query, result: QueryResult): boolean {
-  if (!result.ok) return true
-  switch (query.type) {
-    case 'select-workspace':
-      return result.type === 'workspace-selection'
-    default: {
-      const _exhaustive: never = query.type
-      return _exhaustive
-    }
-  }
-}
-
-function commandOutcomeMatches(command: Command, outcome: CommandOutcome): boolean {
-  if (!outcome.ok) return true
-  const result = outcome.result
-  switch (command.type) {
-    case 'begin-github-authorization':
-      return result.type === 'authorization-started'
-    case 'retry-github-authorization':
-      return result.type === 'authorization-started' && result.operationId === command.operationId
-    case 'cancel-github-authorization':
-      return result.type === 'authorization-cancelled' && result.operationId === command.operationId
-    case 'refresh-project':
-      return (
-        result.type === 'project-refreshed' &&
-        result.project.integration === command.project.integration &&
-        result.project.id === command.project.id
-      )
-    case 'launch-action':
-      return result.type === 'action-launched' && result.actionId === command.actionId
-    case 'start-automation-override':
-      return (
-        result.type === 'automation-override-started' &&
-        result.stage === command.stage &&
-        result.target.project.integration === command.target.project.integration &&
-        result.target.project.id === command.target.project.id &&
-        result.target.mapId === command.target.mapId &&
-        result.target.ticketId === command.target.ticketId
-      )
-    case 'rename-connection':
-    case 'remove-connection':
-    case 'register-project':
-    case 'rename-project':
-    case 'repair-project-workspace':
-    case 'remove-project':
-    case 'set-automation-enabled':
-    case 'set-project-automation-enabled':
-      return (
-        result.type === 'configuration-updated' &&
-        result.configurationVersion === outcome.state.configurationVersion
-      )
-    default: {
-      const _exhaustive: never = command
-      return _exhaustive
-    }
   }
 }

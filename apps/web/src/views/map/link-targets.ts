@@ -1,8 +1,9 @@
-import type { MapResource, TicketResource } from '@roadmap/contracts'
+import type { TicketId } from '@roadmap/contracts/identity'
+import type { MapResource, TicketResource } from '@roadmap/contracts/state'
 import { resourceObservation } from '@/views/shared/resource-results'
 
 export type ProseLinkTarget =
-  | { kind: 'selection'; selection: { kind: 'map' } | { kind: 'ticket'; id: string } }
+  | { kind: 'selection'; selection: { kind: 'map' } | { kind: 'ticket'; id: TicketId } }
   | { kind: 'href'; href: string }
   | { kind: 'disabled'; reason: string }
 
@@ -23,7 +24,7 @@ export function resolveProseLink(
   if (!href) return null
   if (href.startsWith('#')) return { kind: 'disabled', reason: LOCAL_LINK_DISABLED }
   if (isAbsoluteHref(href)) return { kind: 'href', href }
-  if (map.key.project.integration !== 'local' || !sourcePath) return null
+  if (map.ref.project.integration !== 'local' || !sourcePath) return null
 
   const resolvedPath = resolveFileHref(sourcePath, href)
   if (!resolvedPath) return { kind: 'disabled', reason: LOCAL_LINK_DISABLED }
@@ -32,7 +33,7 @@ export function resolveProseLink(
     return { kind: 'selection', selection: { kind: 'map' } }
 
   const ticket = ticketBySourcePath(map.tickets, resolvedPath)
-  if (ticket) return { kind: 'selection', selection: { kind: 'ticket', id: ticket.key.ticketId } }
+  if (ticket) return { kind: 'selection', selection: { kind: 'ticket', id: ticket.ref.ticketId } }
 
   return { kind: 'disabled', reason: LOCAL_LINK_DISABLED }
 }

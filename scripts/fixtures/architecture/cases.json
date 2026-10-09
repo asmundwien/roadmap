@@ -1,0 +1,323 @@
+[
+  {
+    "name": "contracts-node-fs",
+    "leaf": "contracts",
+    "file": "packages/contracts/src/fixture.ts",
+    "rule": "contracts-browser-only",
+    "source": "export { readFile } from 'node:fs'\n"
+  },
+  {
+    "name": "contracts-node-child-process",
+    "leaf": "contracts",
+    "file": "packages/contracts/src/fixture.ts",
+    "rule": "contracts-browser-only",
+    "source": "import type { ChildProcess } from 'node:child_process'\nexport type DecoderProcess = ChildProcess\n"
+  },
+  {
+    "name": "web-application-relative",
+    "leaf": "web",
+    "file": "apps/web/src/fixture.ts",
+    "rule": "web-not-to-server-private",
+    "source": "export { createRoadmapApplication } from '../../../../apps/server/src/application/application.ts'\n"
+  },
+  {
+    "name": "web-configuration-type",
+    "leaf": "web",
+    "file": "apps/web/src/fixture.ts",
+    "rule": "web-not-to-server-private",
+    "source": "import type { ConfigurationDocument } from '../../../../apps/server/src/configuration/document.ts'\nexport type LeakedDocument = ConfigurationDocument\n"
+  },
+  {
+    "name": "web-credential-dynamic",
+    "leaf": "web",
+    "file": "apps/web/src/fixture.ts",
+    "rule": "web-not-to-server-private",
+    "source": "export const credentials = () => import('../../../../apps/server/src/application/credential-vault.ts')\n"
+  },
+  {
+    "name": "web-private-alias",
+    "leaf": "web",
+    "file": "apps/web/src/fixture.ts",
+    "rule": "web-not-to-server-private",
+    "source": "export type { ConfigurationDocument } from '@/../../server/src/configuration/document'\n"
+  },
+  {
+    "name": "web-contract-root",
+    "leaf": "web",
+    "file": "apps/web/src/fixture.ts",
+    "rule": "not-to-unresolvable",
+    "exportPath": "@roadmap/contracts",
+    "source": "export * from '@roadmap/contracts'\n"
+  },
+  {
+    "name": "web-contract-codecs",
+    "leaf": "web",
+    "file": "apps/web/src/fixture.ts",
+    "rule": "not-to-unresolvable",
+    "exportPath": "@roadmap/contracts/codecs",
+    "source": "export * from '@roadmap/contracts/codecs'\n"
+  },
+  {
+    "name": "web-contract-private-deep",
+    "leaf": "web",
+    "file": "apps/web/src/fixture.ts",
+    "rule": "not-to-unresolvable",
+    "exportPath": "@roadmap/contracts/src/internal/request-data.ts",
+    "source": "export * from '@roadmap/contracts/src/internal/request-data.ts'\n"
+  },
+  {
+    "name": "private-public-state",
+    "leaf": "server",
+    "file": "apps/server/src/projects/fixture.ts",
+    "rule": "server-private-not-to-public-dto",
+    "source": "export type { ApplicationState } from '@roadmap/contracts/state'\n"
+  },
+  {
+    "name": "private-public-operations",
+    "leaf": "server",
+    "file": "apps/server/src/projects/fixture.ts",
+    "rule": "server-private-not-to-public-dto",
+    "source": "export type { Command } from '@roadmap/contracts/operations'\n"
+  },
+  {
+    "name": "private-public-wire",
+    "leaf": "server",
+    "file": "apps/server/src/projects/fixture.ts",
+    "rule": "server-private-not-to-public-dto",
+    "source": "export { decodeStateEnvelope } from '@roadmap/contracts/wire'\n"
+  },
+  {
+    "name": "policy-composition",
+    "leaf": "server",
+    "file": "apps/server/src/projects/fixture.ts",
+    "rule": "server-policy-not-to-adapters-or-composition",
+    "source": "import '../../../../../apps/server/src/main.ts'\n"
+  },
+  {
+    "name": "policy-adapter",
+    "leaf": "server",
+    "file": "apps/server/src/projects/fixture.ts",
+    "rule": "server-policy-not-to-adapters-or-composition",
+    "source": "export { createLocalObserver } from '../../../../../apps/server/src/local/observer.ts'\n"
+  },
+  {
+    "name": "adapters-cross-provider",
+    "leaf": "server",
+    "file": "apps/server/src/github/observer.ts",
+    "rule": "adapters-not-to-adapters",
+    "source": "export { createLocalObserver } from '../../../../../apps/server/src/local/observer.ts'\n"
+  },
+  {
+    "name": "policy-configuration-migration",
+    "leaf": "server",
+    "file": "apps/server/src/projects/fixture.ts",
+    "rule": "server-policy-not-to-adapters-or-composition",
+    "source": "export { migrateConfiguration } from '../../../../../apps/server/src/configuration/migration.ts'\n"
+  },
+  {
+    "name": "provider-not-to-legacy-storage",
+    "leaf": "server",
+    "file": "apps/server/src/github/observer.ts",
+    "rule": "adapters-not-to-adapters",
+    "source": "export { readLocalProjectRegistry } from '../../../../../apps/server/src/local-projects.ts'\n"
+  },
+  {
+    "name": "policy-host-fs",
+    "leaf": "server",
+    "file": "apps/server/src/projects/fixture.ts",
+    "rule": "host-capabilities-only-in-adapters",
+    "source": "export { readFile } from 'node:fs/promises'\n"
+  },
+  {
+    "name": "policy-builtin-fs",
+    "leaf": "server",
+    "file": "apps/server/src/projects/fixture.ts",
+    "rule": "host-capabilities-only-in-adapters",
+    "source": "export const fs = process.getBuiltinModule('node:fs')\n"
+  },
+  {
+    "name": "policy-builtin-child-process",
+    "leaf": "server",
+    "file": "apps/server/src/projects/fixture.ts",
+    "rule": "host-capabilities-only-in-adapters",
+    "source": "export const processModule = process.getBuiltinModule('node:child_process')\n"
+  },
+  {
+    "name": "server-reverse-web",
+    "leaf": "server",
+    "file": "apps/server/src/projects/fixture.ts",
+    "rule": "server-not-to-web-ui-docs",
+    "source": "export { createRoadmapStore } from '../../../../../apps/web/src/store/roadmap-store.ts'\n"
+  },
+  {
+    "name": "contracts-reverse-ui",
+    "leaf": "contracts",
+    "file": "packages/contracts/src/fixture.ts",
+    "rule": "contracts-browser-only",
+    "source": "export { Button } from '../../../../packages/ui/src/components/button/button.tsx'\n"
+  },
+  {
+    "name": "ui-domain-type",
+    "leaf": "ui",
+    "file": "packages/ui/src/fixture.ts",
+    "rule": "ui-not-to-roadmap-domain",
+    "source": "export type { ApplicationState } from '../../../../packages/contracts/src/state.ts'\n"
+  },
+  {
+    "name": "ui-reverse-docs",
+    "leaf": "ui",
+    "file": "packages/ui/src/fixture.ts",
+    "rule": "ui-not-to-roadmap-domain",
+    "source": "import '../../../../apps/docs/src/examples/component-examples.tsx'\n"
+  },
+  {
+    "name": "docs-domain-type",
+    "leaf": "docs",
+    "file": "apps/docs/src/fixture.ts",
+    "rule": "docs-only-to-ui",
+    "source": "export type { ApplicationState } from '../../../../packages/contracts/src/state.ts'\n"
+  },
+  {
+    "name": "docs-web",
+    "leaf": "docs",
+    "file": "apps/docs/src/fixture.ts",
+    "rule": "docs-only-to-ui",
+    "source": "export { createRoadmapStore } from '../../../../apps/web/src/store/roadmap-store.ts'\n"
+  },
+  {
+    "name": "views-bypass-store",
+    "leaf": "web",
+    "file": "apps/web/src/views/fixture.ts",
+    "rule": "web-views-through-store",
+    "source": "export { createRoadmapStore } from '../../../../../apps/web/src/store/roadmap-store.ts'\n"
+  },
+  {
+    "name": "web-contract-private-relative",
+    "leaf": "web",
+    "file": "apps/web/src/fixture.ts",
+    "rule": "web-not-to-private-contract-subpaths",
+    "source": "export { requestDataSchema } from '../../../../packages/contracts/src/internal/request-data.ts'\n"
+  },
+  {
+    "name": "identity-not-to-state",
+    "leaf": "contracts",
+    "file": "packages/contracts/src/identity.ts",
+    "rule": "contracts-leaf-direction",
+    "source": "export type { ApplicationState } from '../../../../packages/contracts/src/state.ts'\n"
+  },
+  {
+    "name": "state-not-to-operations",
+    "leaf": "contracts",
+    "file": "packages/contracts/src/state.ts",
+    "rule": "contracts-leaf-direction",
+    "source": "export type { Command } from '../../../../packages/contracts/src/operations.ts'\n"
+  },
+  {
+    "name": "operations-not-to-wire",
+    "leaf": "contracts",
+    "file": "packages/contracts/src/operations.ts",
+    "rule": "contracts-leaf-direction",
+    "source": "export { decodeStateEnvelope } from '../../../../packages/contracts/src/wire.ts'\n"
+  },
+  {
+    "name": "projection-not-to-operations",
+    "leaf": "server",
+    "file": "apps/server/src/application/projection.ts",
+    "rule": "projection-only-to-public-state",
+    "source": "export type { Command } from '@roadmap/contracts/operations'\n"
+  },
+  {
+    "name": "operations-not-to-state",
+    "leaf": "server",
+    "file": "apps/server/src/application/operations.ts",
+    "rule": "operations-only-to-public-operations",
+    "source": "export type { ApplicationState } from '@roadmap/contracts/state'\n"
+  },
+  {
+    "name": "facade-not-to-wire",
+    "leaf": "server",
+    "file": "apps/server/src/application/application.ts",
+    "rule": "application-not-to-wire",
+    "source": "export { decodeStateEnvelope } from '@roadmap/contracts/wire'\n"
+  },
+  {
+    "name": "transport-not-to-state",
+    "leaf": "server",
+    "file": "apps/server/src/transport.ts",
+    "rule": "transport-only-to-public-wire",
+    "source": "export type { ApplicationState } from '@roadmap/contracts/state'\n"
+  },
+  {
+    "name": "transport-not-to-private-owner",
+    "leaf": "server",
+    "file": "apps/server/src/transport.ts",
+    "rule": "transport-through-application",
+    "source": "export type { ConfigurationDocument } from '../../../../apps/server/src/configuration/document.ts'\n"
+  },
+  {
+    "name": "projection-contract-private-relative",
+    "leaf": "server",
+    "file": "apps/server/src/application/projection.ts",
+    "rule": "consumers-only-to-contract-leaves",
+    "source": "export { requestDataSchema } from '../../../../../packages/contracts/src/internal/request-data.ts'\n"
+  },
+  {
+    "name": "transport-contract-private-relative",
+    "leaf": "server",
+    "file": "apps/server/src/transport.ts",
+    "rule": "consumers-only-to-contract-leaves",
+    "source": "export { requestDataSchema } from '../../../../packages/contracts/src/internal/request-data.ts'\n"
+  },
+  {
+    "name": "private-policy-projection",
+    "leaf": "server",
+    "file": "apps/server/src/projects/fixture.ts",
+    "rule": "server-policy-not-to-adapters-or-composition",
+    "source": "export { projectApplicationState } from '../../../../../apps/server/src/application/projection.ts'\n"
+  },
+  {
+    "name": "production-test-fixture-proxy",
+    "leaf": "server",
+    "file": "apps/server/src/projects/fixture.ts",
+    "rule": "production-not-to-test-fixtures",
+    "source": "export { createSourceFixtureOwner } from '../../../../../apps/server/src/source-test-fixtures.ts'\n"
+  },
+  {
+    "name": "contracts-reverse-server",
+    "leaf": "contracts",
+    "file": "packages/contracts/src/fixture.ts",
+    "rule": "contracts-browser-only",
+    "source": "export type { ConfigurationDocument } from '../../../../apps/server/src/configuration/document.ts'\n"
+  },
+  {
+    "name": "server-reverse-ui",
+    "leaf": "server",
+    "file": "apps/server/src/projects/fixture.ts",
+    "rule": "server-not-to-web-ui-docs",
+    "source": "export { Button } from '../../../../../packages/ui/src/components/button/button.tsx'\n"
+  },
+  {
+    "name": "server-reverse-docs",
+    "leaf": "server",
+    "file": "apps/server/src/projects/fixture.ts",
+    "rule": "server-not-to-web-ui-docs",
+    "source": "import '../../../../../apps/docs/src/examples/component-examples.tsx'\n"
+  },
+  {
+    "name": "docs-server",
+    "leaf": "docs",
+    "file": "apps/docs/src/fixture.ts",
+    "rule": "docs-only-to-ui",
+    "source": "export type { ConfigurationDocument } from '../../../../apps/server/src/configuration/document.ts'\n"
+  },
+  {
+    "name": "type-only-cycle",
+    "leaf": "contracts",
+    "file": "packages/contracts/src/fixture.ts",
+    "rule": "no-circular",
+    "source": "import type { B } from './cycle.ts'\nexport type A = { b: B }\n",
+    "companions": {
+      "packages/contracts/src/cycle.ts": "import type { A } from './fixture.ts'\nexport type B = { a: A }\n"
+    }
+  }
+]

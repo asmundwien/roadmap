@@ -1,21 +1,18 @@
 import type { IncomingMessage, Server, ServerResponse } from 'node:http'
 import type { Duplex } from 'node:stream'
-import type { ApplicationState } from '@roadmap/contracts'
 import {
   type CommandResultEnvelope,
-  commandResultEnvelopeCodec,
-  type QueryResultEnvelope,
-  queryResultEnvelopeCodec,
-  type StateEnvelope,
-  stateEnvelopeCodec,
-} from '@roadmap/contracts/codecs'
-import {
   decodeCommandEnvelope,
+  decodeCommandResultEnvelope,
   decodeQueryEnvelope,
+  decodeQueryResultEnvelope,
+  decodeStateEnvelope,
+  type QueryResultEnvelope,
   REQUEST_ID_HEADER,
   type RequestRejection,
   requestIdSchema,
   requestRejectionStatus,
+  type StateEnvelope,
 } from '@roadmap/contracts/wire'
 import { WebSocket, WebSocketServer } from 'ws'
 import type { RoadmapApplication } from './application/application.ts'
@@ -51,7 +48,7 @@ export function createRoadmapTransport(options: RoadmapTransportOptions): Roadma
   const requests = new Map<ApiRequestLifetime, Promise<void>>()
   let closing: Promise<void> | undefined
 
-  const broadcast = (state: ApplicationState): void => {
+  const broadcast = (state: ReturnType<RoadmapApplication['current']>): void => {
     if (closing || options.application.diagnostics().lifecycle.phase !== 'ready') return
     const encoded = encodeState(state)
     if (encoded === null) return
@@ -262,7 +259,7 @@ async function handleApiRequest(
       if (!lifetime.admit()) return
       const result = await options.application.query(decoded.value.query)
       const envelope: QueryResultEnvelope = { type: 'query-result', result }
-      await lifetime.sendJson(200, envelope, false, queryResultEnvelopeCodec.decode)
+      await lifetime.sendJson(200, envelope, false, decodeQueryResultEnvelope)
     } else {
       const decoded = decodeCommandEnvelope(input)
       if (!decoded.ok) {
@@ -272,7 +269,9 @@ async function handleApiRequest(
       if (!lifetime.admit()) return
       const outcome = await options.application.execute(decoded.value.command)
       const envelope: CommandResultEnvelope = { type: 'command-result', outcome }
-      await lifetime.sendJson(200, envelope, false, commandResultEnvelopeCodec.decode)
+      await lifetime.sendJson(200, envelope, false, (input) =>
+        decodeCommandResultEnvelope(input, decoded.value.command),
+      )
     }
   }
 
@@ -325,10 +324,10 @@ async function handleApiRequest(
   }
 }
 
-function encodeState(state: ApplicationState): string | null {
+function encodeState(state: ReturnType<RoadmapApplication['current']>): string | null {
   const envelope: StateEnvelope = { type: 'state', state }
   try {
-    return encodeOutgoing(envelope, stateEnvelopeCodec.decode)
+    return encodeOutgoing(envelope, decodeStateEnvelope)
   } catch {
     reportTransportFailure('application state encoding')
     return null

@@ -1,3 +1,4 @@
+import type { ConnectionId } from '@roadmap/contracts/identity'
 import { Alert } from '@roadmap/ui/alert'
 import { Link as ExternalLink } from '@roadmap/ui/link'
 import { Page, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
@@ -12,7 +13,7 @@ import pageStyles from './page.module.css'
 
 const cx = classNames.bind(pageStyles)
 
-type ConnectionPageProps = { connectionId: string }
+type ConnectionPageProps = { connectionId: ConnectionId }
 
 export function ConnectionPage({ connectionId }: ConnectionPageProps) {
   const { connections, supportedIntegrations, configuration } = useRoadmap()

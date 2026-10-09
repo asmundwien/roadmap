@@ -2,8 +2,14 @@ import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { setTimeout as delay, setImmediate as nextTurn } from 'node:timers/promises'
-import type { ProjectKey, TicketTypeEvidence } from '@roadmap/contracts'
+import { commandSchema } from '@roadmap/contracts/operations'
+import type { TicketTypeEvidence } from '@roadmap/contracts/state'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type {
+  CredentialBundle,
+  CredentialVault,
+  GitHubConnectionPort,
+} from '../authorization/contracts.ts'
 import {
   type AutomationAppend,
   type AutomationDatabase,
@@ -13,20 +19,19 @@ import {
   createAutomationDatabaseDocument,
   replayAutomationDatabase,
 } from '../automation/database.ts'
-import {
-  type AutomationLaunch,
-  type AutomationLauncher,
-  type ClassificationProcessResult,
-  createAutomationLauncher,
-  type WayfinderProcessResult,
+import type {
+  AutomationLaunch,
+  AutomationLauncher,
+  ClassificationProcessResult,
+  WayfinderProcessResult,
 } from '../automation/engine.ts'
+import { createAutomationLauncher } from '../automation/launcher.ts'
 import type { AutomationEvidence, AutomationTarget } from '../automation/model.ts'
 import type {
   ConfigurationDocument,
   ConfigurationRead,
   ConfigurationWrite,
 } from '../configuration/document.ts'
-import type { CredentialBundle, GitHubConnectionPort } from '../github/connections.ts'
 import type {
   GitHubObservationInput,
   LocalObservationInput,
@@ -34,6 +39,7 @@ import type {
 } from '../observation/coordinator.ts'
 import type {
   ObservationAttempt,
+  SourceProjectKey as ProjectKey,
   SourceContribution,
   SourceObserver,
 } from '../observation/source.ts'
@@ -46,6 +52,13 @@ import type {
   ProjectRevalidationRequest,
 } from '../projects/registry.ts'
 import {
+  fixtureAutomationEvidence,
+  fixtureProjectRef,
+  fixtureResourceRef,
+  fixtureTicketRef,
+  readApplicationState,
+} from '../public-test-fixtures.ts'
+import {
   createSourceFixtureOwner,
   type FixtureMap,
   type FixtureProject,
@@ -54,7 +67,6 @@ import {
 } from '../source-test-fixtures.ts'
 import { isRecord } from '../type-guards.ts'
 import { createRoadmapApplication } from './application.ts'
-import type { CredentialVault } from './credential-vault.ts'
 import { sessionReportSchemaJson } from './session-report-contract.ts'
 
 const TASK: TicketTypeEvidence = { kind: 'recognized', value: 'task', labels: ['task'] }
@@ -116,7 +128,6 @@ function map(
       missingSections: [],
     },
     tickets,
-    frontier: tickets.filter((candidate) => candidate.state === 'frontier'),
     progress: { total: tickets.length, completed: 0 },
     ticketsComplete: true,
     warnings: [],
@@ -232,7 +243,6 @@ function controlledObservers(initial: FixtureProject[]) {
       ...entry,
       sourcePath,
       tickets,
-      frontier: tickets.filter((ticket) => ticket.state === 'frontier'),
     }
   }
 
@@ -800,7 +810,9 @@ describe('Automation admission after durable append', () => {
         const classification = await launches.classificationEntered
         current.configured.emit(INVALID_CONFIGURATION)
         await vi.waitFor(() =>
-          expect(current.application.current().automation.availability.status).toBe('unavailable'),
+          expect(
+            readApplicationState(current.application.current()).automation.availability.status,
+          ).toBe('unavailable'),
         )
         classification.resolve(
           processResult(
@@ -823,29 +835,33 @@ describe('Automation admission after durable append', () => {
         await delay(20)
         expect(launches.classifications).toHaveLength(1)
         expect(launches.dispatches).toEqual([])
-        expect(current.application.current().configurationVersion).toBe(1)
-        expect(current.application.current().projects[0]?.key).toEqual(sourceProject.key)
-        expect(current.application.current().automation.overrides).not.toEqual([])
+        expect(readApplicationState(current.application.current()).configurationVersion).toBe(1)
+        expect(readApplicationState(current.application.current()).projects[0]?.ref).toEqual(
+          fixtureProjectRef(sourceProject.key),
+        )
         expect(
-          current.application
-            .current()
-            .automation.overrides.every(
-              (entry) =>
-                entry.classification.status === 'ineligible' &&
-                entry.wayfinder.status === 'ineligible',
-            ),
+          readApplicationState(current.application.current()).automation.overrides,
+        ).not.toEqual([])
+        expect(
+          readApplicationState(current.application.current()).automation.overrides.every(
+            (entry) =>
+              entry.classification.status === 'ineligible' &&
+              entry.wayfinder.status === 'ineligible',
+          ),
         ).toBe(true)
         expect(
-          await current.application.execute({
-            type: 'start-automation-override',
-            expectedConfigurationVersion: 1,
-            target: {
-              project: sourceProject.key,
-              mapId: 'map',
-              ticketId: scenario === 'fresh target' ? '2' : '1',
-            },
-            stage: scenario === 'fresh target' ? 'classification' : 'wayfinder',
-          }),
+          await current.application.execute(
+            commandSchema.parse({
+              type: 'start-automation-override',
+              expectedConfigurationVersion: 1,
+              target: fixtureTicketRef({
+                project: sourceProject.key,
+                mapId: 'map',
+                ticketId: scenario === 'fresh target' ? '2' : '1',
+              }),
+              stage: scenario === 'fresh target' ? 'classification' : 'wayfinder',
+            }),
+          ),
         ).toMatchObject({ ok: false, error: { code: 'configuration-invalid' } })
       } finally {
         const stopping = current.application.stop()
@@ -899,17 +915,24 @@ describe('Automation admission after durable append', () => {
             automation: { ...disabled.automation, enabled: true },
           }
           try {
-            expect(current.application.current().automation.overrides).toContainEqual(
-              expect.objectContaining({ target, [stage]: { status: 'eligible' } }),
+            expect(
+              readApplicationState(current.application.current()).automation.overrides,
+            ).toContainEqual(
+              expect.objectContaining({
+                target: fixtureTicketRef(target),
+                [stage]: { status: 'eligible' },
+              }),
             )
             const pending =
               admission === 'override'
-                ? current.application.execute({
-                    type: 'start-automation-override',
-                    expectedConfigurationVersion: 1,
-                    target,
-                    stage,
-                  })
+                ? current.application.execute(
+                    commandSchema.parse({
+                      type: 'start-automation-override',
+                      expectedConfigurationVersion: 1,
+                      target: fixtureTicketRef(target),
+                      stage,
+                    }),
+                  )
                 : null
             if (admission === 'automatic') current.configured.emit(enabled)
             await gate.waitForEntry()
@@ -922,9 +945,10 @@ describe('Automation admission after durable append', () => {
             if (change === 'invalid configuration') {
               current.configured.emit(INVALID_CONFIGURATION)
               await vi.waitFor(() =>
-                expect(current.application.current().automation.availability.status).toBe(
-                  'unavailable',
-                ),
+                expect(
+                  readApplicationState(current.application.current()).automation.availability
+                    .status,
+                ).toBe('unavailable'),
               )
             } else if (
               [
@@ -968,15 +992,17 @@ describe('Automation admission after durable append', () => {
               })
               if (admission === 'automatic')
                 await vi.waitFor(() =>
-                  expect(current.application.current().configurationVersion).toBe(3),
+                  expect(
+                    readApplicationState(current.application.current()).configurationVersion,
+                  ).toBe(3),
                 )
             } else if (change === 'missing source') current.source.push([project('revoked', [])])
             else if (change === 'source failure') {
-              const baseline = current.application.current().projects[0]
+              const baseline = readApplicationState(current.application.current()).projects[0]
               if (!baseline) throw new Error('The admitted Project must have a baseline.')
               const unavailable = {
                 kind: 'source-failure',
-                scope: { kind: 'maps-membership', project: sourceProject.key },
+                scope: { kind: 'maps-membership', project: fixtureProjectRef(sourceProject.key) },
                 attemptedAt: 101,
                 provenance: {
                   integration: 'local',
@@ -986,7 +1012,7 @@ describe('Automation admission after durable append', () => {
                 failure: { kind: 'filesystem', operation: 'enumerate', code: 'EACCES' },
               }
               current.source.fail(sourceProject.key)
-              const failed = current.application.current().projects[0]
+              const failed = readApplicationState(current.application.current()).projects[0]
               expect(failed).toMatchObject({
                 resource: { kind: 'current-readable', observation: { observedAt: 100 } },
                 mapsMembership: { kind: 'unavailable', unavailable },
@@ -997,7 +1023,7 @@ describe('Automation admission after durable append', () => {
               for (const map of baseline.maps) {
                 if (map.resource.kind !== 'current-readable')
                   throw new Error('The admitted map must have a readable baseline.')
-                const retainedMap = failed?.maps.find((entry) => entry.key.mapId === map.key.mapId)
+                const retainedMap = failed?.maps.find((entry) => entry.ref.mapId === map.ref.mapId)
                 expect(retainedMap?.resource).toEqual({
                   kind: 'retained-unavailable',
                   lastSuccessful: map.resource.observation,
@@ -1009,7 +1035,7 @@ describe('Automation admission after durable append', () => {
                   if (ticket.resource.kind !== 'current-readable')
                     throw new Error('The admitted ticket must have a readable baseline.')
                   expect(
-                    retainedMap?.tickets.find((entry) => entry.key.ticketId === ticket.key.ticketId)
+                    retainedMap?.tickets.find((entry) => entry.ref.ticketId === ticket.ref.ticketId)
                       ?.resource,
                   ).toEqual({
                     kind: 'retained-unavailable',
@@ -1019,9 +1045,10 @@ describe('Automation admission after durable append', () => {
                   expect(ticket.resource.observation.observedAt).toBe(100)
                 }
               }
-              expect(current.application.current().connections[0]?.availability.status).toBe(
-                'degraded',
-              )
+              expect(
+                readApplicationState(current.application.current()).connections[0]?.availability
+                  .status,
+              ).toBe('degraded')
             } else {
               const changedTicket = ticket('1', TASK, {
                 isClaimed: change === 'claimed',
@@ -1068,13 +1095,17 @@ describe('Automation admission after durable append', () => {
             expect(reservation).toHaveLength(1)
             expect(nonlaunch).toHaveLength(1)
             expect(nonlaunch[0]?.opportunityId).toBe(reservation[0]?.opportunityId)
-            expect(current.application.current().automation.evidence[0]?.target).toEqual(target)
+            expect(
+              readApplicationState(current.application.current()).automation.evidence[0]?.target,
+            ).toEqual(fixtureTicketRef(target))
             expect(launches.classifications).toEqual([])
             expect(launches.dispatches).toEqual([])
             expect(database.events().some((event) => event.type === 'wayfinder-running')).toBe(
               false,
             )
-            expect(current.application.current().automation.evidence[0]).toMatchObject(
+            expect(
+              readApplicationState(current.application.current()).automation.evidence[0],
+            ).toMatchObject(
               stage === 'classification'
                 ? { classification: { status: 'launch-failed', admission } }
                 : {
@@ -1084,22 +1115,30 @@ describe('Automation admission after durable append', () => {
             )
             current.configured.emit({ ...enabled, configurationVersion: 4 })
             current.source.push([project('revoked', [])])
-            expect(current.application.current().automation.evidence[0]?.target).toEqual(target)
-            expect(current.application.current().automation.evidence[0]?.[stage]).toMatchObject({
+            expect(
+              readApplicationState(current.application.current()).automation.evidence[0]?.target,
+            ).toEqual(fixtureTicketRef(target))
+            expect(
+              readApplicationState(current.application.current()).automation.evidence[0]?.[stage],
+            ).toMatchObject({
               status: 'launch-failed',
               admission,
             })
             current.source.push([sourceProject])
             await vi.waitFor(() =>
-              expect(current.application.current().configurationVersion).toBe(4),
+              expect(readApplicationState(current.application.current()).configurationVersion).toBe(
+                4,
+              ),
             )
             expect(
-              await current.application.execute({
-                type: 'start-automation-override',
-                expectedConfigurationVersion: 4,
-                target,
-                stage,
-              }),
+              await current.application.execute(
+                commandSchema.parse({
+                  type: 'start-automation-override',
+                  expectedConfigurationVersion: 4,
+                  target: fixtureTicketRef(target),
+                  stage,
+                }),
+              ),
             ).toMatchObject({ ok: false })
             expect(database.events().filter((event) => event.type === startType)).toHaveLength(1)
             expect(launches.classifications).toEqual([])
@@ -1152,15 +1191,22 @@ describe('Automation admission after durable append', () => {
           configuration: disabled,
         })
         try {
-          expect(current.application.current().automation.overrides).toContainEqual(
-            expect.objectContaining({ target, [stage]: { status: 'eligible' } }),
+          expect(
+            readApplicationState(current.application.current()).automation.overrides,
+          ).toContainEqual(
+            expect.objectContaining({
+              target: fixtureTicketRef(target),
+              [stage]: { status: 'eligible' },
+            }),
           )
-          const pending = current.application.execute({
-            type: 'start-automation-override',
-            expectedConfigurationVersion: 1,
-            target,
-            stage,
-          })
+          const pending = current.application.execute(
+            commandSchema.parse({
+              type: 'start-automation-override',
+              expectedConfigurationVersion: 1,
+              target: fixtureTicketRef(target),
+              stage,
+            }),
+          )
           await gate.waitForEntry()
           expect(launches.classifications).toEqual([])
           expect(launches.dispatches).toEqual([])
@@ -1200,7 +1246,9 @@ describe('Automation admission after durable append', () => {
           ).toBe(false)
           if (change !== 'unrelated source')
             await vi.waitFor(() =>
-              expect(current.application.current().configurationVersion).toBe(2),
+              expect(readApplicationState(current.application.current()).configurationVersion).toBe(
+                2,
+              ),
             )
         } finally {
           gate.release()
@@ -1236,17 +1284,24 @@ describe('Automation admission after durable append', () => {
           configuration: disabled,
         })
         try {
-          expect(current.application.current().automation.overrides).toContainEqual(
-            expect.objectContaining({ target, [stage]: { status: 'eligible' } }),
+          expect(
+            readApplicationState(current.application.current()).automation.overrides,
+          ).toContainEqual(
+            expect.objectContaining({
+              target: fixtureTicketRef(target),
+              [stage]: { status: 'eligible' },
+            }),
           )
           const pending =
             admission === 'override'
-              ? current.application.execute({
-                  type: 'start-automation-override',
-                  expectedConfigurationVersion: 1,
-                  target,
-                  stage,
-                })
+              ? current.application.execute(
+                  commandSchema.parse({
+                    type: 'start-automation-override',
+                    expectedConfigurationVersion: 1,
+                    target: fixtureTicketRef(target),
+                    stage,
+                  }),
+                )
               : null
           if (admission === 'automatic')
             current.configured.emit({
@@ -1255,18 +1310,18 @@ describe('Automation admission after durable append', () => {
               automation: { ...disabled.automation, enabled: true },
             })
           await gate.waitForEntry()
-          const githubResource = current.application
-            .current()
-            .projects.find((entry) => entry.key.integration === 'github')
+          const githubResource = readApplicationState(current.application.current()).projects.find(
+            (entry) => entry.ref.integration === 'github',
+          )
           const retainedObservedAt =
             githubResource && publicProjectObservation(githubResource)?.observedAt
           expect(retainedObservedAt).toBe(100)
           expect(launches.classifications).toEqual([])
           expect(launches.dispatches).toEqual([])
           current.source.pushProject(project('local-neutral', [ticket('2')]))
-          const stillRetained = current.application
-            .current()
-            .projects.find((entry) => entry.key.integration === 'github')
+          const stillRetained = readApplicationState(current.application.current()).projects.find(
+            (entry) => entry.ref.integration === 'github',
+          )
           expect(stillRetained && publicProjectObservation(stillRetained)?.observedAt).toBe(
             retainedObservedAt,
           )
@@ -1328,15 +1383,22 @@ describe('Automation admission after durable append', () => {
           configuration: configuration([sourceProject], { enabled: false }),
         })
         try {
-          expect(current.application.current().automation.overrides).toContainEqual(
-            expect.objectContaining({ target, [stage]: { status: 'eligible' } }),
+          expect(
+            readApplicationState(current.application.current()).automation.overrides,
+          ).toContainEqual(
+            expect.objectContaining({
+              target: fixtureTicketRef(target),
+              [stage]: { status: 'eligible' },
+            }),
           )
-          const pending = current.application.execute({
-            type: 'start-automation-override',
-            expectedConfigurationVersion: 1,
-            target,
-            stage,
-          })
+          const pending = current.application.execute(
+            commandSchema.parse({
+              type: 'start-automation-override',
+              expectedConfigurationVersion: 1,
+              target: fixtureTicketRef(target),
+              stage,
+            }),
+          )
           await gate.waitForEntry()
           if (failedAppend === 'nonlaunch')
             current.source.push([
@@ -1356,15 +1418,19 @@ describe('Automation admission after durable append', () => {
                 ? { classification: { status: 'running', admission: 'override' } }
                 : { wayfinder: { status: 'launching', admission: 'override' } },
             )
-          expect(current.application.current().automation.evidence).toEqual(database.evidence())
+          expect(readApplicationState(current.application.current()).automation.evidence).toEqual(
+            database.evidence().map(fixtureAutomationEvidence),
+          )
           current.source.push([sourceProject])
           expect(
-            await current.application.execute({
-              type: 'start-automation-override',
-              expectedConfigurationVersion: 1,
-              target,
-              stage,
-            }),
+            await current.application.execute(
+              commandSchema.parse({
+                type: 'start-automation-override',
+                expectedConfigurationVersion: 1,
+                target: fixtureTicketRef(target),
+                stage,
+              }),
+            ),
           ).toMatchObject({ ok: false })
           expect(launches.classifications).toEqual([])
           expect(launches.dispatches).toEqual([])
@@ -1412,12 +1478,14 @@ describe('Automation admission after durable append', () => {
         configuration: configuration([sourceProject], { enabledProjects: [] }),
       })
       try {
-        const pending = current.application.execute({
-          type: 'set-project-automation-enabled',
-          expectedConfigurationVersion: 1,
-          project: sourceProject.key,
-          enabled: true,
-        })
+        const pending = current.application.execute(
+          commandSchema.parse({
+            type: 'set-project-automation-enabled',
+            expectedConfigurationVersion: 1,
+            project: fixtureProjectRef(sourceProject.key),
+            enabled: true,
+          }),
+        )
         await gate.waitForEntry()
         expect(current.configured.writes).toEqual([])
         expect(database.evidence()[0]?.wayfinder).toMatchObject({
@@ -1432,7 +1500,9 @@ describe('Automation admission after durable append', () => {
           status: 'outcome-unknown',
           acknowledged: !fail,
         })
-        expect(current.application.current().automation.evidence).toEqual(database.evidence())
+        expect(readApplicationState(current.application.current()).automation.evidence).toEqual(
+          database.evidence().map(fixtureAutomationEvidence),
+        )
         if (!fail)
           expect(
             database
@@ -1478,12 +1548,14 @@ describe('Automation admission after durable append', () => {
       let command: ReturnType<typeof current.application.execute> | null = null
       try {
         if (admission === 'override') {
-          command = current.application.execute({
-            type: 'start-automation-override',
-            expectedConfigurationVersion: 1,
-            target,
-            stage,
-          })
+          command = current.application.execute(
+            commandSchema.parse({
+              type: 'start-automation-override',
+              expectedConfigurationVersion: 1,
+              target: fixtureTicketRef(target),
+              stage,
+            }),
+          )
         } else {
           current.configured.emit({
             ...disabled,
@@ -1669,43 +1741,49 @@ describe('RoadmapApplication Automation', () => {
       database,
       configuration: configuration([sourceProject], { enabledProjects: [] }),
     })
-    expect(current.application.current().automation.enabledProjects).toEqual([])
+    expect(readApplicationState(current.application.current()).automation.enabledProjects).toEqual(
+      [],
+    )
     expect(
-      current.application
-        .current()
-        .automation.evidence.find((entry) => entry.target.ticketId === '1')?.wayfinder,
+      readApplicationState(current.application.current()).automation.evidence.find(
+        (entry) => entry.target.ticketId === '1',
+      )?.wayfinder,
     ).toMatchObject({
       status: 'outcome-unknown',
       admission: 'automatic',
       acknowledged: false,
     })
 
-    const blocked = await current.application.execute({
-      type: 'start-automation-override',
-      expectedConfigurationVersion: 1,
-      target: { project: sourceProject.key, mapId: 'map', ticketId: '2' },
-      stage: 'wayfinder',
-    })
+    const blocked = await current.application.execute(
+      commandSchema.parse({
+        type: 'start-automation-override',
+        expectedConfigurationVersion: 1,
+        target: fixtureTicketRef({ project: sourceProject.key, mapId: 'map', ticketId: '2' }),
+        stage: 'wayfinder',
+      }),
+    )
     expect(blocked).toMatchObject({
       ok: false,
       error: { message: expect.stringContaining('must be acknowledged') },
     })
 
-    const enabled = await current.application.execute({
-      type: 'set-project-automation-enabled',
-      expectedConfigurationVersion: 1,
-      project: sourceProject.key,
-      enabled: true,
-    })
+    const enabled = await current.application.execute(
+      commandSchema.parse({
+        type: 'set-project-automation-enabled',
+        expectedConfigurationVersion: 1,
+        project: fixtureProjectRef(sourceProject.key),
+        enabled: true,
+      }),
+    )
 
     expect(enabled).toMatchObject({ ok: true, result: { configurationVersion: 2 } })
     expect(
       database.events().find((event) => event.type === 'wayfinder-outcome-unknown-acknowledged'),
     ).toMatchObject({ opportunityId: 'opportunity-0', unknownEventId: unknown.id })
     expect(
-      current.application
-        .current()
-        .automation.evidence.find((entry) => entry.target.ticketId === '1')?.wayfinder,
+      readApplicationState(current.application.current()).automation.evidence.find(
+        (entry) => entry.target.ticketId === '1',
+      )?.wayfinder,
     ).toMatchObject({ status: 'outcome-unknown', acknowledged: true })
     await vi.waitFor(() => expect(launches.dispatches).toHaveLength(1))
     expect(launches.dispatches[0]?.environment.ROADMAP_TICKET_ID).toBe('2')
@@ -1743,12 +1821,14 @@ describe('RoadmapApplication Automation', () => {
     })
     try {
       expect(
-        await current.application.execute({
-          type: 'set-project-automation-enabled',
-          expectedConfigurationVersion: 1,
-          project: sourceProject.key,
-          enabled: true,
-        }),
+        await current.application.execute(
+          commandSchema.parse({
+            type: 'set-project-automation-enabled',
+            expectedConfigurationVersion: 1,
+            project: fixtureProjectRef(sourceProject.key),
+            enabled: true,
+          }),
+        ),
       ).toMatchObject({ ok: true })
       await vi.waitFor(() =>
         expect(
@@ -1769,18 +1849,19 @@ describe('RoadmapApplication Automation', () => {
       ])
       launches.sessions[0]?.reject(new Error('The second Session result was lost.'))
       await vi.waitFor(() =>
-        expect(current.application.current().automation.enabledProjects).toEqual([]),
+        expect(
+          readApplicationState(current.application.current()).automation.enabledProjects,
+        ).toEqual([]),
       )
       expect(
-        current.application
-          .current()
-          .automation.evidence.find((entry) => entry.target.ticketId === '1')?.wayfinder,
+        readApplicationState(current.application.current()).automation.evidence.find(
+          (entry) => entry.target.ticketId === '1',
+        )?.wayfinder,
       ).toMatchObject({ status: 'outcome-unknown', acknowledged: true })
       expect(
-        current.application
-          .current()
-          .automation.evidence.find((entry) => entry.target.ticketId === running.target.ticketId)
-          ?.wayfinder,
+        readApplicationState(current.application.current()).automation.evidence.find(
+          (entry) => entry.target.ticketId === running.target.ticketId,
+        )?.wayfinder,
       ).toMatchObject({ status: 'outcome-unknown', acknowledged: false })
       const secondUnknown = database
         .events()
@@ -1795,23 +1876,27 @@ describe('RoadmapApplication Automation', () => {
           .events()
           .filter((event) => event.type === 'wayfinder-outcome-unknown-acknowledged'),
       ).toMatchObject([{ unknownEventId: 'first-unknown' }])
-      const version = current.application.current().configurationVersion
+      const version = readApplicationState(current.application.current()).configurationVersion
       expect(
-        await current.application.execute({
-          type: 'start-automation-override',
-          expectedConfigurationVersion: version,
-          target: queued.target,
-          stage: 'wayfinder',
-        }),
+        await current.application.execute(
+          commandSchema.parse({
+            type: 'start-automation-override',
+            expectedConfigurationVersion: version,
+            target: fixtureTicketRef(queued.target),
+            stage: 'wayfinder',
+          }),
+        ),
       ).toMatchObject({ ok: false, error: { code: 'validation' } })
       expect(launches.dispatches).toHaveLength(1)
       expect(
-        await current.application.execute({
-          type: 'set-project-automation-enabled',
-          expectedConfigurationVersion: version,
-          project: sourceProject.key,
-          enabled: true,
-        }),
+        await current.application.execute(
+          commandSchema.parse({
+            type: 'set-project-automation-enabled',
+            expectedConfigurationVersion: version,
+            project: fixtureProjectRef(sourceProject.key),
+            enabled: true,
+          }),
+        ),
       ).toMatchObject({ ok: true })
       expect(
         database
@@ -1864,16 +1949,20 @@ describe('RoadmapApplication Automation', () => {
       configuration: configuration([sourceProject], { enabledProjects: [] }),
     })
 
-    const enabled = await current.application.execute({
-      type: 'set-project-automation-enabled',
-      expectedConfigurationVersion: 1,
-      project: sourceProject.key,
-      enabled: true,
-    })
+    const enabled = await current.application.execute(
+      commandSchema.parse({
+        type: 'set-project-automation-enabled',
+        expectedConfigurationVersion: 1,
+        project: fixtureProjectRef(sourceProject.key),
+        enabled: true,
+      }),
+    )
 
     expect(enabled).toMatchObject({ ok: false, error: { code: 'persistence-failed' } })
     expect(current.configured.writes).toEqual([])
-    expect(current.application.current().automation.enabledProjects).toEqual([])
+    expect(readApplicationState(current.application.current()).automation.enabledProjects).toEqual(
+      [],
+    )
     await current.application.stop()
   })
 
@@ -1910,28 +1999,34 @@ describe('RoadmapApplication Automation', () => {
       configurationWriteResult: { ok: false, kind: 'persistence', message: 'Disk is read-only.' },
     })
 
-    const enabled = await current.application.execute({
-      type: 'set-project-automation-enabled',
-      expectedConfigurationVersion: 1,
-      project: sourceProject.key,
-      enabled: true,
-    })
+    const enabled = await current.application.execute(
+      commandSchema.parse({
+        type: 'set-project-automation-enabled',
+        expectedConfigurationVersion: 1,
+        project: fixtureProjectRef(sourceProject.key),
+        enabled: true,
+      }),
+    )
 
     expect(enabled).toMatchObject({ ok: false, error: { code: 'persistence-failed' } })
     expect(
       database.events().find((event) => event.type === 'wayfinder-outcome-unknown-acknowledged'),
     ).toMatchObject({ unknownEventId: unknown.id })
     expect(
-      current.application
-        .current()
-        .automation.evidence.find((entry) => entry.target.ticketId === '1')?.wayfinder,
+      readApplicationState(current.application.current()).automation.evidence.find(
+        (entry) => entry.target.ticketId === '1',
+      )?.wayfinder,
     ).toMatchObject({
       status: 'outcome-unknown',
       acknowledged: true,
     })
-    expect(current.application.current().automation.evidence).toEqual(database.evidence())
+    expect(readApplicationState(current.application.current()).automation.evidence).toEqual(
+      database.evidence().map(fixtureAutomationEvidence),
+    )
     expect(launches.dispatches).toEqual([])
-    expect(current.application.current().automation.enabledProjects).toEqual([])
+    expect(readApplicationState(current.application.current()).automation.enabledProjects).toEqual(
+      [],
+    )
     await current.application.stop()
   })
 
@@ -1951,9 +2046,9 @@ describe('RoadmapApplication Automation', () => {
 
     expect(launches.sessions).toHaveLength(1)
     expect(
-      current.application
-        .current()
-        .automation.overrides.find((control) => control.target.ticketId === '2')?.wayfinder,
+      readApplicationState(current.application.current()).automation.overrides.find(
+        (control) => control.target.ticketId === '2',
+      )?.wayfinder,
     ).toEqual({
       status: 'ineligible',
       reason: 'Another Wayfinder Session is in progress for this Project.',
@@ -1962,15 +2057,17 @@ describe('RoadmapApplication Automation', () => {
     launches.sessions[0]?.resolve(wayfinderResult())
     await vi.waitFor(() => expect(launches.sessions).toHaveLength(2))
     expect(
-      current.application
-        .current()
-        .automation.evidence.find((evidence) => evidence.target.ticketId === '2')?.wayfinder,
+      readApplicationState(current.application.current()).automation.evidence.find(
+        (evidence) => evidence.target.ticketId === '2',
+      )?.wayfinder,
     ).toMatchObject({ status: 'running' })
 
     launches.sessions[1]?.resolve(wayfinderResult())
     await vi.waitFor(() =>
       expect(
-        current.application.current().automation.evidence.map((evidence) => evidence.wayfinder),
+        readApplicationState(current.application.current()).automation.evidence.map(
+          (evidence) => evidence.wayfinder,
+        ),
       ).toEqual([
         expect.objectContaining({ status: 'finished' }),
         expect.objectContaining({ status: 'finished' }),
@@ -1996,7 +2093,9 @@ describe('RoadmapApplication Automation', () => {
     expect(launches.sessions).toHaveLength(2)
     await vi.waitFor(() =>
       expect(
-        current.application.current().automation.evidence.map((evidence) => evidence.wayfinder),
+        readApplicationState(current.application.current()).automation.evidence.map(
+          (evidence) => evidence.wayfinder,
+        ),
       ).toEqual([
         expect.objectContaining({ status: 'running' }),
         expect.objectContaining({ status: 'running' }),
@@ -2033,7 +2132,9 @@ describe('RoadmapApplication Automation', () => {
       configurationVersion: 2,
       automation: { ...disabled.automation, enabledProjects: [sourceProject.key] },
     })
-    await vi.waitFor(() => expect(current.application.current().configurationVersion).toBe(2))
+    await vi.waitFor(() =>
+      expect(readApplicationState(current.application.current()).configurationVersion).toBe(2),
+    )
     await delay(10)
     expect(launches.sessions).toHaveLength(0)
     expect(current.database.events().map((event) => event.type)).toEqual([
@@ -2157,20 +2258,28 @@ describe('RoadmapApplication Automation', () => {
     })
     const target = { project: sourceProject.key, mapId: 'map', ticketId: '1' }
 
-    expect(current.application.current().automation.overrides).toContainEqual({
-      target,
-      classification: { status: 'eligible' },
-      wayfinder: { status: 'ineligible', reason: 'Run Classification first.' },
-    })
-    const classification = await current.application.execute({
-      type: 'start-automation-override',
-      expectedConfigurationVersion: 1,
-      target,
-      stage: 'classification',
-    })
+    expect(readApplicationState(current.application.current()).automation.overrides).toContainEqual(
+      {
+        target: fixtureTicketRef(target),
+        classification: { status: 'eligible' },
+        wayfinder: { status: 'ineligible', reason: 'Run Classification first.' },
+      },
+    )
+    const classification = await current.application.execute(
+      commandSchema.parse({
+        type: 'start-automation-override',
+        expectedConfigurationVersion: 1,
+        target: fixtureTicketRef(target),
+        stage: 'classification',
+      }),
+    )
     expect(classification).toMatchObject({
       ok: true,
-      result: { type: 'automation-override-started', target, stage: 'classification' },
+      result: {
+        type: 'automation-override-started',
+        target: fixtureTicketRef(target),
+        stage: 'classification',
+      },
       state: { automation: { enabled: false, enabledProjects: [] } },
     })
     expect(launches.classifications).toHaveLength(1)
@@ -2179,32 +2288,42 @@ describe('RoadmapApplication Automation', () => {
       admission: 'override',
     })
     expect(
-      current.application
-        .current()
-        .automation.overrides.find((control) => control.target.ticketId === '2')?.classification,
+      readApplicationState(current.application.current()).automation.overrides.find(
+        (control) => control.target.ticketId === '2',
+      )?.classification,
     ).toEqual({ status: 'ineligible', reason: 'Another Classification Run is in progress.' })
 
     launches.classifications[0]?.resolve(processResult())
     await vi.waitFor(() =>
-      expect(current.application.current().automation.overrides[0]?.wayfinder).toEqual({
+      expect(
+        readApplicationState(current.application.current()).automation.overrides[0]?.wayfinder,
+      ).toEqual({
         status: 'eligible',
       }),
     )
     expect(launches.dispatches).toHaveLength(0)
-    expect(current.application.current().automation.overrides[0]?.classification).toEqual({
+    expect(
+      readApplicationState(current.application.current()).automation.overrides[0]?.classification,
+    ).toEqual({
       status: 'ineligible',
       reason: 'This Automation opportunity has already been classified.',
     })
 
-    const wayfinder = await current.application.execute({
-      type: 'start-automation-override',
-      expectedConfigurationVersion: 1,
-      target,
-      stage: 'wayfinder',
-    })
+    const wayfinder = await current.application.execute(
+      commandSchema.parse({
+        type: 'start-automation-override',
+        expectedConfigurationVersion: 1,
+        target: fixtureTicketRef(target),
+        stage: 'wayfinder',
+      }),
+    )
     expect(wayfinder).toMatchObject({
       ok: true,
-      result: { type: 'automation-override-started', target, stage: 'wayfinder' },
+      result: {
+        type: 'automation-override-started',
+        target: fixtureTicketRef(target),
+        stage: 'wayfinder',
+      },
     })
     await vi.waitFor(() =>
       expect(current.database.evidence()[0]?.wayfinder).toEqual({
@@ -2213,7 +2332,9 @@ describe('RoadmapApplication Automation', () => {
       }),
     )
     expect(launches.dispatches).toHaveLength(1)
-    expect(current.application.current().automation.overrides[0]?.wayfinder).toEqual({
+    expect(
+      readApplicationState(current.application.current()).automation.overrides[0]?.wayfinder,
+    ).toEqual({
       status: 'ineligible',
       reason: 'A Wayfinder Session is already recorded for this opportunity.',
     })
@@ -2233,12 +2354,14 @@ describe('RoadmapApplication Automation', () => {
     })
     const target = { project: sourceProject.key, mapId: 'map', ticketId: '1' }
 
-    await current.application.execute({
-      type: 'start-automation-override',
-      expectedConfigurationVersion: 1,
-      target,
-      stage: 'classification',
-    })
+    await current.application.execute(
+      commandSchema.parse({
+        type: 'start-automation-override',
+        expectedConfigurationVersion: 1,
+        target: fixtureTicketRef(target),
+        stage: 'classification',
+      }),
+    )
     current.configured.emit({
       ...disabled,
       configurationVersion: 2,
@@ -2284,16 +2407,20 @@ describe('RoadmapApplication Automation', () => {
       configuration: configuration([sourceProject], { enabled: false, enabledProjects: [] }),
     })
 
-    expect(current.application.current().automation.overrides[0]?.wayfinder).toEqual({
+    expect(
+      readApplicationState(current.application.current()).automation.overrides[0]?.wayfinder,
+    ).toEqual({
       status: 'ineligible',
       reason: 'Classification did not produce an AFK Verdict.',
     })
-    const rejected = await current.application.execute({
-      type: 'start-automation-override',
-      expectedConfigurationVersion: 1,
-      target,
-      stage: 'wayfinder',
-    })
+    const rejected = await current.application.execute(
+      commandSchema.parse({
+        type: 'start-automation-override',
+        expectedConfigurationVersion: 1,
+        target: fixtureTicketRef(target),
+        stage: 'wayfinder',
+      }),
+    )
     expect(rejected).toMatchObject({
       ok: false,
       error: { code: 'validation', message: 'Classification did not produce an AFK Verdict.' },
@@ -2312,12 +2439,14 @@ describe('RoadmapApplication Automation', () => {
       launcher: launches.launcher,
       configuration: configuration([sourceProject], { enabled: false, enabledProjects: [] }),
     })
-    const rejected = await current.application.execute({
-      type: 'start-automation-override',
-      expectedConfigurationVersion: 1,
-      target: { project: sourceProject.key, mapId: 'map', ticketId: 'claimed' },
-      stage: 'classification',
-    })
+    const rejected = await current.application.execute(
+      commandSchema.parse({
+        type: 'start-automation-override',
+        expectedConfigurationVersion: 1,
+        target: fixtureTicketRef({ project: sourceProject.key, mapId: 'map', ticketId: 'claimed' }),
+        stage: 'classification',
+      }),
+    )
     expect(rejected).toMatchObject({ ok: false, error: { code: 'validation' } })
     expect(current.database.events()).toEqual([])
     expect(launches.classifications).toHaveLength(0)
@@ -2530,7 +2659,9 @@ describe('RoadmapApplication Automation', () => {
       }),
     )
     await vi.waitFor(() =>
-      expect(current.application.current().automation.enabledProjects).toEqual([]),
+      expect(
+        readApplicationState(current.application.current()).automation.enabledProjects,
+      ).toEqual([]),
     )
     await current.application.stop()
   })
@@ -2581,15 +2712,15 @@ describe('RoadmapApplication Automation', () => {
     })
 
     try {
-      expect(current.application.current().projects[0]).toMatchObject({
-        key: { integration: 'github', id: 'harness-pointers' },
+      expect(readApplicationState(current.application.current()).projects[0]).toMatchObject({
+        ref: fixtureResourceRef({ integration: 'github', id: 'harness-pointers' }),
         connectionId: 'github',
-        locator: {
+        source: {
           integration: 'github',
           repositoryId: 'harness-pointers',
           nameWithOwner: 'owner/harness-pointers',
         },
-        workspace: { path: workspace },
+        management: { workspacePath: workspace },
         resource: { kind: 'current-readable' },
       })
       expect(launches.classifications).toHaveLength(1)
@@ -2612,13 +2743,13 @@ describe('RoadmapApplication Automation', () => {
       launches.sessions[0]?.resolve(wayfinderResult())
 
       await vi.waitFor(() =>
-        expect(current.application.current().automation.evidence).toEqual([
+        expect(readApplicationState(current.application.current()).automation.evidence).toEqual([
           expect.objectContaining({
-            target: {
+            target: fixtureTicketRef({
               project: { integration: 'github', id: 'harness-pointers' },
               mapId: 'map',
               ticketId: '9',
-            },
+            }),
             classification: {
               status: 'completed',
               admission: 'automatic',
@@ -2637,7 +2768,9 @@ describe('RoadmapApplication Automation', () => {
           }),
         ]),
       )
-      expect(current.application.current().automation.evidence).toEqual(current.database.evidence())
+      expect(readApplicationState(current.application.current()).automation.evidence).toEqual(
+        current.database.evidence().map(fixtureAutomationEvidence),
+      )
     } finally {
       await current.application.stop()
     }
@@ -2779,7 +2912,11 @@ describe('RoadmapApplication Automation', () => {
       { timeout: 5_000 },
     )
     await vi.waitFor(() =>
-      expect(application.current().automation.evidence.map((entry) => entry.wayfinder)).toEqual([
+      expect(
+        readApplicationState(application.current()).automation.evidence.map(
+          (entry) => entry.wayfinder,
+        ),
+      ).toEqual([
         expect.objectContaining({ status: 'finished' }),
         expect.objectContaining({ status: 'finished' }),
       ]),

@@ -1,4 +1,5 @@
-import type { SupportedIntegration } from '@roadmap/contracts'
+import type { AuthorizationOperationId } from '@roadmap/contracts/identity'
+import type { SupportedIntegration } from '@roadmap/contracts/state'
 import { Button } from '@roadmap/ui/button'
 import { Icon, icon } from '@roadmap/ui/icon'
 import { Page, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
@@ -14,7 +15,9 @@ import pageStyles from './page.module.css'
 
 const cx = classNames.bind(pageStyles)
 
-type ConnectionPane = { kind: 'add' } | { kind: 'authorization'; operationId: string }
+type ConnectionPane =
+  | { kind: 'add' }
+  | { kind: 'authorization'; operationId: AuthorizationOperationId }
 
 export function ConnectionSettings() {
   const {
@@ -37,9 +40,9 @@ export function ConnectionSettings() {
   const operation: ConnectionOperation = { execute }
   const looseOperations = authorizationOperations.filter(
     (authorization) =>
-      !authorization.connectionId &&
       authorization.status !== 'granted' &&
-      authorization.status !== 'cancelled',
+      authorization.connectionId === undefined &&
+      !(authorization.status === 'terminal' && authorization.outcome === 'cancelled'),
   )
 
   return (

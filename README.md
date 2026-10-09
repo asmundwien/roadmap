@@ -9,7 +9,7 @@ Roadmap is a pnpm workspace:
 - `apps/web` is the Vite and React SPA.
 - `apps/server` maintains the single `ApplicationState` and owns all external integrations.
 - [apps/docs](apps/docs/README.md) is the standalone catalog for shared components and design tokens.
-- `packages/contracts` owns browser-safe Zod 4 operation and wire schemas, inferred request types, shared domain types, and the remaining state/result codecs.
+- `packages/contracts` owns authoritative browser-safe Zod 4 schemas and inferred external types through four exports: `identity`, `state`, `operations`, and `wire`. Backend domain, persisted intent, credentials, and durable events remain server-private.
 - `packages/ui` is the design system: tokens and presentational components, with no domain knowledge.
 
 The server sends full state replacements over WebSocket. HTTP carries queries and commands. Only a validated baseline from the current socket generation establishes browser authority. HTTP captures that authority when a request starts and cannot seed startup state. A valid different-session HTTP outcome can initiate fresh WebSocket synchronization, but cannot replace state itself. The browser never receives credentials.
@@ -18,7 +18,9 @@ Before the first authoritative state, the provider shows an explicit waiting sta
 
 The browser distinguishes attributable pre-admission rejection, decoded application outcome, and completion unknown after response loss. A newer snapshot is not a universal receipt. A lost host-launch reply without durable operation-specific evidence stays unknown. There is no automatic completion reconciliation, HTTP retry, replay, or receipt mechanism.
 
-See [docs/architecture.md](docs/architecture.md) for the authority transition and operation-evidence tables, the HTTP admission and failure contract, and the remaining public-read cutover. It records the implementation contract for [What establishes the authoritative server session across HTTP and WebSocket?](https://github.com/asmundwien/roadmap/issues/107), not a claim of completed runtime proof or repository-wide architecture enforcement. [CONTEXT.md](CONTEXT.md) defines the domain language.
+`state.projects` is the sole public Project and read-resource collection. Each Project carries its scoped identity, Connection association, management facts, source metadata, maps, tickets, reachability, and provenance. Map and Project views do not join registrations or raw roadmap Projects. Retained content keeps its actual graph, prose, and source links; incomplete readable content, never-observed resources, unavailability, proven absence, and known-empty membership remain distinct.
+
+See [docs/architecture.md](docs/architecture.md) for private-to-public translation, variants, export and import rules, compiler projects, verification commands, and proof limits. [CONTEXT.md](CONTEXT.md) defines the domain language. Issue #113 retains ownership of final operation semantics and state-free HTTP outcomes; the current state-bearing command outcomes use only the new state schema.
 
 ## Development
 
@@ -46,6 +48,16 @@ pnpm typecheck
 pnpm test
 pnpm knip
 ```
+
+`pnpm check` includes the repository architecture gate. `pnpm typecheck` includes separate contract/browser/server compilation and public-export positive and invalid-construction fixtures. To run the boundary checks or build the actual browser app directly:
+
+```sh
+pnpm architecture
+node scripts/check-contract-types.mjs
+pnpm --filter @roadmap/web build
+```
+
+The web production build checks resolved modules before tree shaking for Node, server, credential, and host-launch dependencies. The root `pnpm build` script invokes itself recursively; it is not the browser build command. These commands describe the installed gates, not a record that the final checks passed. Runtime observation and schema validation do not prove host-effect completion, deployment fallback, or durable Session chronology.
 
 Vitest runs in Node. DOM tests need jsdom and Testing Library.
 

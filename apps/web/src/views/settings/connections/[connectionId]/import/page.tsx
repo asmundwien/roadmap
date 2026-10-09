@@ -1,4 +1,5 @@
-import type { Connection, ProjectKey } from '@roadmap/contracts'
+import type { ConnectionId, ProjectRef } from '@roadmap/contracts/identity'
+import type { Connection } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
 import { Link as ExternalLink } from '@roadmap/ui/link'
@@ -11,7 +12,7 @@ import { projectSettingsPath, routePaths } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
 import {
-  admittedProjectKey,
+  admittedProjectRef,
   projectRegistrationDraft,
   projectRegistrationError,
 } from '@/views/shared/project-registration'
@@ -20,7 +21,7 @@ import { SettingsFormActions } from '@/views/shared/settings-form-actions'
 import { ErrorText } from '@/views/shared/settings-shared'
 import { WorkspaceFolderSelector } from '@/views/shared/workspace-folder-selector'
 
-type ProjectImportPageProps = { connectionId: string }
+type ProjectImportPageProps = { connectionId: ConnectionId }
 
 export function ProjectImportPage({ connectionId }: ProjectImportPageProps) {
   const { connections, supportedIntegrations, configuration } = useRoadmap()
@@ -70,7 +71,7 @@ function ProjectImportForm({
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [generalError, setGeneralError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState<{ project: ProjectKey | null } | null>(null)
+  const [saved, setSaved] = useState<{ project: ProjectRef | null } | null>(null)
   const blocked = saving || command.inFlight || !configurationValid
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -93,7 +94,17 @@ function ProjectImportForm({
       })
       if (outcome.ok) {
         setSaved({
-          project: admittedProjectKey(outcome.state.projects, draft.candidate) ?? null,
+          project:
+            admittedProjectRef(
+              outcome.state.phase === 'ready'
+                ? outcome.state.projects
+                : outcome.state.phase === 'failed' ||
+                    outcome.state.phase === 'stopping' ||
+                    outcome.state.phase === 'stopped'
+                  ? (outcome.state.retained?.projects ?? [])
+                  : [],
+              draft.candidate,
+            ) ?? null,
         })
         return
       }

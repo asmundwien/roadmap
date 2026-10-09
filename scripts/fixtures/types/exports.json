@@ -1,0 +1,642 @@
+{
+  "identity": [
+    {
+      "name": "integrationSchema",
+      "type": false
+    },
+    {
+      "name": "connectionIdSchema",
+      "type": false
+    },
+    {
+      "name": "projectIdSchema",
+      "type": false
+    },
+    {
+      "name": "mapIdSchema",
+      "type": false
+    },
+    {
+      "name": "ticketIdSchema",
+      "type": false
+    },
+    {
+      "name": "authorizationOperationIdSchema",
+      "type": false
+    },
+    {
+      "name": "actionIdSchema",
+      "type": false
+    },
+    {
+      "name": "serverEpochSchema",
+      "type": false
+    },
+    {
+      "name": "stateSequenceSchema",
+      "type": false
+    },
+    {
+      "name": "configurationVersionSchema",
+      "type": false
+    },
+    {
+      "name": "correlationIdSchema",
+      "type": false
+    },
+    {
+      "name": "localProjectRefSchema",
+      "type": false
+    },
+    {
+      "name": "githubProjectRefSchema",
+      "type": false
+    },
+    {
+      "name": "projectRefSchema",
+      "type": false
+    },
+    {
+      "name": "mapRefSchema",
+      "type": false
+    },
+    {
+      "name": "ticketRefSchema",
+      "type": false
+    },
+    {
+      "name": "Integration",
+      "type": true
+    },
+    {
+      "name": "ConnectionId",
+      "type": true
+    },
+    {
+      "name": "ProjectId",
+      "type": true
+    },
+    {
+      "name": "MapId",
+      "type": true
+    },
+    {
+      "name": "TicketId",
+      "type": true
+    },
+    {
+      "name": "AuthorizationOperationId",
+      "type": true
+    },
+    {
+      "name": "ActionId",
+      "type": true
+    },
+    {
+      "name": "ServerEpoch",
+      "type": true
+    },
+    {
+      "name": "StateSequence",
+      "type": true
+    },
+    {
+      "name": "ConfigurationVersion",
+      "type": true
+    },
+    {
+      "name": "CorrelationId",
+      "type": true
+    },
+    {
+      "name": "ProjectRef",
+      "type": true
+    },
+    {
+      "name": "LocalProjectRef",
+      "type": true
+    },
+    {
+      "name": "GitHubProjectRef",
+      "type": true
+    },
+    {
+      "name": "MapRef",
+      "type": true
+    },
+    {
+      "name": "TicketRef",
+      "type": true
+    }
+  ],
+  "state": [
+    {
+      "name": "ticketTypeEvidenceSchema",
+      "type": false
+    },
+    {
+      "name": "projectResourceSchema",
+      "type": false
+    },
+    {
+      "name": "mapResourceSchema",
+      "type": false
+    },
+    {
+      "name": "ticketResourceSchema",
+      "type": false
+    },
+    {
+      "name": "mapMembershipSchema",
+      "type": false
+    },
+    {
+      "name": "ticketMembershipSchema",
+      "type": false
+    },
+    {
+      "name": "activeMapSchema",
+      "type": false
+    },
+    {
+      "name": "ProjectResourceResult",
+      "type": true
+    },
+    {
+      "name": "MapResourceResult",
+      "type": true
+    },
+    {
+      "name": "TicketResourceResult",
+      "type": true
+    },
+    {
+      "name": "MapMembershipResult",
+      "type": true
+    },
+    {
+      "name": "TicketMembershipResult",
+      "type": true
+    },
+    {
+      "name": "ActiveMapResult",
+      "type": true
+    },
+    {
+      "name": "MapResource",
+      "type": true
+    },
+    {
+      "name": "TicketResource",
+      "type": true
+    },
+    {
+      "name": "ProjectResourceValue",
+      "type": true
+    },
+    {
+      "name": "MapResourceValue",
+      "type": true
+    },
+    {
+      "name": "TicketResourceValue",
+      "type": true
+    },
+    {
+      "name": "UnavailableEvidence",
+      "type": true
+    },
+    {
+      "name": "TicketTypeEvidence",
+      "type": true
+    },
+    {
+      "name": "TicketState",
+      "type": true
+    },
+    {
+      "name": "Assignee",
+      "type": true
+    },
+    {
+      "name": "Decision",
+      "type": true
+    },
+    {
+      "name": "MapSection",
+      "type": true
+    },
+    {
+      "name": "MapBody",
+      "type": true
+    },
+    {
+      "name": "MapProgress",
+      "type": true
+    },
+    {
+      "name": "projectSchema",
+      "type": false
+    },
+    {
+      "name": "Project",
+      "type": true
+    },
+    {
+      "name": "blockerSchema",
+      "type": false
+    },
+    {
+      "name": "Blocker",
+      "type": true
+    },
+    {
+      "name": "BlockerState",
+      "type": true
+    },
+    {
+      "name": "projectActionSchema",
+      "type": false
+    },
+    {
+      "name": "linkActionSchema",
+      "type": false
+    },
+    {
+      "name": "serverLaunchActionSchema",
+      "type": false
+    },
+    {
+      "name": "ProjectAction",
+      "type": true
+    },
+    {
+      "name": "LinkAction",
+      "type": true
+    },
+    {
+      "name": "ServerLaunchAction",
+      "type": true
+    },
+    {
+      "name": "connectionAvailabilitySchema",
+      "type": false
+    },
+    {
+      "name": "githubConnectionIdentitySchema",
+      "type": false
+    },
+    {
+      "name": "localConnectionSchema",
+      "type": false
+    },
+    {
+      "name": "githubConnectionSchema",
+      "type": false
+    },
+    {
+      "name": "connectionSchema",
+      "type": false
+    },
+    {
+      "name": "supportedIntegrationSchema",
+      "type": false
+    },
+    {
+      "name": "authorizationOperationSchema",
+      "type": false
+    },
+    {
+      "name": "configurationIssueSchema",
+      "type": false
+    },
+    {
+      "name": "configurationStatusSchema",
+      "type": false
+    },
+    {
+      "name": "automationAdmissionSchema",
+      "type": false
+    },
+    {
+      "name": "automationOverrideStageSchema",
+      "type": false
+    },
+    {
+      "name": "automationOverrideAvailabilitySchema",
+      "type": false
+    },
+    {
+      "name": "automationOverrideControlSchema",
+      "type": false
+    },
+    {
+      "name": "automationProcessResultSchema",
+      "type": false
+    },
+    {
+      "name": "classificationVerdictSchema",
+      "type": false
+    },
+    {
+      "name": "classificationAttemptSchema",
+      "type": false
+    },
+    {
+      "name": "sessionReportSchema",
+      "type": false
+    },
+    {
+      "name": "sessionReportEvidenceSchema",
+      "type": false
+    },
+    {
+      "name": "wayfinderSessionSchema",
+      "type": false
+    },
+    {
+      "name": "automationEvidenceSchema",
+      "type": false
+    },
+    {
+      "name": "automationAvailabilitySchema",
+      "type": false
+    },
+    {
+      "name": "automationStateSchema",
+      "type": false
+    },
+    {
+      "name": "readyApplicationStateSchema",
+      "type": false
+    },
+    {
+      "name": "applicationStateSchema",
+      "type": false
+    },
+    {
+      "name": "ConnectionAvailability",
+      "type": true
+    },
+    {
+      "name": "GitHubConnectionIdentity",
+      "type": true
+    },
+    {
+      "name": "Connection",
+      "type": true
+    },
+    {
+      "name": "LocalConnection",
+      "type": true
+    },
+    {
+      "name": "GitHubConnection",
+      "type": true
+    },
+    {
+      "name": "SupportedIntegration",
+      "type": true
+    },
+    {
+      "name": "AuthorizationOperation",
+      "type": true
+    },
+    {
+      "name": "ConfigurationIssue",
+      "type": true
+    },
+    {
+      "name": "ConfigurationStatus",
+      "type": true
+    },
+    {
+      "name": "AutomationAdmission",
+      "type": true
+    },
+    {
+      "name": "AutomationOverrideStage",
+      "type": true
+    },
+    {
+      "name": "AutomationOverrideAvailability",
+      "type": true
+    },
+    {
+      "name": "AutomationOverrideControl",
+      "type": true
+    },
+    {
+      "name": "AutomationProcessResult",
+      "type": true
+    },
+    {
+      "name": "ClassificationVerdict",
+      "type": true
+    },
+    {
+      "name": "ClassificationAttempt",
+      "type": true
+    },
+    {
+      "name": "SessionReport",
+      "type": true
+    },
+    {
+      "name": "SessionReportEvidence",
+      "type": true
+    },
+    {
+      "name": "WayfinderSession",
+      "type": true
+    },
+    {
+      "name": "AutomationEvidence",
+      "type": true
+    },
+    {
+      "name": "AutomationAvailability",
+      "type": true
+    },
+    {
+      "name": "AutomationState",
+      "type": true
+    },
+    {
+      "name": "ReadyApplicationState",
+      "type": true
+    },
+    {
+      "name": "ApplicationState",
+      "type": true
+    },
+    {
+      "name": "RecognizedTicketType",
+      "type": true
+    },
+    {
+      "name": "TicketType",
+      "type": true
+    },
+    {
+      "name": "ticketTypeOf",
+      "type": false
+    }
+  ],
+  "operations": [
+    {
+      "name": "querySchema",
+      "type": false
+    },
+    {
+      "name": "commandSchema",
+      "type": false
+    },
+    {
+      "name": "Query",
+      "type": true
+    },
+    {
+      "name": "Command",
+      "type": true
+    },
+    {
+      "name": "safeErrorSchema",
+      "type": false
+    },
+    {
+      "name": "queryResultSchema",
+      "type": false
+    },
+    {
+      "name": "commandResultSchema",
+      "type": false
+    },
+    {
+      "name": "commandOutcomeSchema",
+      "type": false
+    },
+    {
+      "name": "SafeError",
+      "type": true
+    },
+    {
+      "name": "QueryResult",
+      "type": true
+    },
+    {
+      "name": "CommandResult",
+      "type": true
+    },
+    {
+      "name": "CommandOutcome",
+      "type": true
+    },
+    {
+      "name": "CommandResultFor",
+      "type": true
+    },
+    {
+      "name": "commandResultFor",
+      "type": false
+    }
+  ],
+  "wire": [
+    {
+      "name": "REQUEST_ID_HEADER",
+      "type": false
+    },
+    {
+      "name": "requestIdSchema",
+      "type": false
+    },
+    {
+      "name": "queryEnvelopeSchema",
+      "type": false
+    },
+    {
+      "name": "commandEnvelopeSchema",
+      "type": false
+    },
+    {
+      "name": "stateEnvelopeSchema",
+      "type": false
+    },
+    {
+      "name": "queryResultEnvelopeSchema",
+      "type": false
+    },
+    {
+      "name": "commandResultEnvelopeSchema",
+      "type": false
+    },
+    {
+      "name": "requestRejectionSchema",
+      "type": false
+    },
+    {
+      "name": "QueryEnvelope",
+      "type": true
+    },
+    {
+      "name": "CommandEnvelope",
+      "type": true
+    },
+    {
+      "name": "RequestRejection",
+      "type": true
+    },
+    {
+      "name": "StateEnvelope",
+      "type": true
+    },
+    {
+      "name": "QueryResultEnvelope",
+      "type": true
+    },
+    {
+      "name": "CommandResultEnvelope",
+      "type": true
+    },
+    {
+      "name": "DecodeIssue",
+      "type": true
+    },
+    {
+      "name": "DecodeResult",
+      "type": true
+    },
+    {
+      "name": "decodeQueryEnvelope",
+      "type": false
+    },
+    {
+      "name": "decodeCommandEnvelope",
+      "type": false
+    },
+    {
+      "name": "decodeRequestRejection",
+      "type": false
+    },
+    {
+      "name": "decodeApplicationState",
+      "type": false
+    },
+    {
+      "name": "decodeStateEnvelope",
+      "type": false
+    },
+    {
+      "name": "decodeQueryResultEnvelope",
+      "type": false
+    },
+    {
+      "name": "decodeCommandResultEnvelope",
+      "type": false
+    },
+    {
+      "name": "requestRejectionStatus",
+      "type": false
+    }
+  ]
+}

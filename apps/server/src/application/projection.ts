@@ -1,29 +1,31 @@
-import type {
-  ActiveMapResult,
-  ApplicationState,
-  AuthorizationOperation,
-  Blocker,
-  ConnectionAvailability,
-  MapMembershipResult,
-  MapResourceResult,
-  MapResourceValue,
-  ProjectKey,
-  ProjectRegistration,
-  ProjectResourceResult,
-  RegisteredProject,
-  SupportedIntegration,
-  TicketMembershipResult,
-  TicketResourceResult,
-  TicketResourceValue,
-  UnavailableEvidence,
-} from '@roadmap/contracts'
+import {
+  connectionIdSchema,
+  mapRefSchema,
+  type ProjectRef,
+  projectRefSchema,
+  type TicketRef,
+  ticketRefSchema,
+} from '@roadmap/contracts/identity'
+import {
+  type Connection,
+  type ConnectionAvailability,
+  type ReadyApplicationState,
+  readyApplicationStateSchema,
+  type SupportedIntegration,
+} from '@roadmap/contracts/state'
+import type { AuthorizationFact } from '../authorization/contracts.ts'
+import type { AutomationEvidence, AutomationOverrideControl } from '../automation/model.ts'
 import type { CommittedObservation } from '../observation/coordinator.ts'
 import type {
   AbsentAttempt,
   ObservationAttempt,
   SourceBlocker,
   SourceMapContent,
+  SourceMapKey,
+  SourceProjectKey,
+  SourceScope,
   SourceTicketContent,
+  SourceTicketKey,
 } from '../observation/source.ts'
 import type {
   ConfiguredConnection,
@@ -40,12 +42,6 @@ import type {
   UnavailableEvidence as CatalogUnavailable,
   ResourceCatalogSnapshot,
 } from '../resources/catalog.ts'
-
-export interface PublicSourceProjection {
-  roadmap: ApplicationState['roadmap']
-  registrations: ProjectRegistration[]
-  projects: RegisteredProject[]
-}
 
 export function projectResourceCounts(snapshot: ResourceCatalogSnapshot | null): {
   projects: number | null
@@ -71,19 +67,18 @@ export function projectResourceCounts(snapshot: ResourceCatalogSnapshot | null):
 }
 
 /** Projects persisted intent against real source evidence, without activating source owners. */
-export function projectResources(
+function projectResources(
   snapshot: ResourceCatalogSnapshot,
   configuration: ProjectConfiguration = snapshot.committed.registry,
   sourceLifetimeOwned = true,
-): PublicSourceProjection {
+) {
   const existing =
     configuration === snapshot.committed.registry
       ? null
       : new Map(snapshot.projects.map((project) => [projectKey(project.key), project]))
-  const registrations = configuration.projects.map(projectConfiguredRegistration)
-  const projects = configuration.projects.map((intent, index): RegisteredProject => {
-    const registration = registrations[index] ?? projectConfiguredRegistration(intent)
-    const prior = existing ? existing.get(projectKey(registration.key)) : snapshot.projects[index]
+  const projects = configuration.projects.map((intent, index) => {
+    const key = projectRefKey(intent)
+    const prior = existing ? existing.get(projectKey(key)) : snapshot.projects[index]
     const project = prior
       ? !existing ||
         sameSourceIntent(prior.intent, intent, snapshot.committed.registry, configuration)
@@ -93,43 +88,93 @@ export function projectResources(
     const admission = snapshot.committed.registry.admissions.find((record) =>
       sameProject(projectRefKey(record.intent), project.key),
     )
-    const known = successfulProject(project.resource)
+    const successful = successfulProject(project.resource)
+    const known =
+      successful &&
+      'locator' in intent &&
+      (successful.value.source.integration !== 'github' ||
+        successful.value.source.repositoryId !== intent.locator.repositoryId)
+        ? null
+        : successful
+    const source =
+      'locator' in intent
+        ? {
+            integration: 'github',
+            repositoryId: intent.locator.repositoryId,
+            nameWithOwner:
+              known?.value.source.integration === 'github'
+                ? known.value.source.nameWithOwner
+                : intent.locator.nameWithOwner,
+            url:
+              known?.value.source.integration === 'github'
+                ? known.value.source.url
+                : `https://github.com/${intent.locator.nameWithOwner}`,
+          }
+        : { integration: 'local', path: intent.workspace.path }
     return {
-      ...registration,
-      name: registration.displayName ?? known?.value.name ?? registration.key.id,
+      integration: intent.ref.integration,
+      ref: toProjectRef(key),
+      connectionId: intent.connectionId,
+      source,
+      management: {
+        ...('locator' in intent ? { workspacePath: intent.workspace.path } : {}),
+        ...(intent.displayName === undefined ? {} : { displayName: intent.displayName }),
+      },
+      name: intent.displayName ?? known?.value.name ?? key.id,
       resource: projectProjectResult(project.resource),
       mapsMembership: projectMapsMembership(project.mapsMembership),
-      maps: project.maps.map((map) => ({
-        key: map.key,
-        resource: projectMapResult(map.resource),
-        ticketsMembership: projectTicketsMembership(map.ticketsMembership),
-        tickets: map.tickets.map((ticket) => ({
-          key: ticket.key,
-          resource: projectTicketResult(ticket.resource),
-        })),
-      })),
+      maps: project.maps.map((map) => {
+        const resolveBlocker = (blocker: SourceBlocker) =>
+          projectBlocker(blocker, snapshot, map.key)
+        return {
+          ref: toMapRef(map.key),
+          resource: projectMapResult(map.resource),
+          ticketsMembership: projectTicketsMembership(map.ticketsMembership),
+          tickets: map.tickets.map((ticket) => ({
+            ref: toTicketRef(ticket.key),
+            resource: projectTicketResult(ticket.resource, resolveBlocker),
+          })),
+          frontier: map.tickets.flatMap((ticket) => {
+            const resource = ticket.resource
+            const observation =
+              resource.kind === 'current-readable'
+                ? resource.observation
+                : resource.kind === 'retained-unavailable'
+                  ? resource.lastSuccessful
+                  : resource.kind === 'proven-absent' &&
+                      resource.trace.kind === 'last-successful-trace'
+                    ? resource.trace.lastSuccessful
+                    : null
+            const content = observation?.value
+            return observation?.completeness.kind === 'complete' &&
+              content &&
+              content.status === 'open' &&
+              !content.isClaimed &&
+              content.blockersComplete &&
+              content.blockedBy.every((blocker) => blocker.state === 'closed')
+              ? [toTicketRef(ticket.key)]
+              : []
+          }),
+        }
+      }),
       displayOrder: {
-        openMapIds: [...project.displayOrder.openMapIds],
-        closedMapIds: [...project.displayOrder.closedMapIds],
+        open: project.displayOrder.openMapIds.map((mapId) => toMapRef({ project: key, mapId })),
+        closed: project.displayOrder.closedMapIds.map((mapId) => toMapRef({ project: key, mapId })),
       },
-      activeMap: projectActiveMap(project.activeMap),
+      activeMap: projectActiveMap(project.activeMap, key),
       managementWarnings: !sourceLifetimeOwned
         ? ['Roadmap is not running; Workspace admission is unavailable.']
         : admission?.workspace.status === 'unavailable'
           ? [`Workspace unavailable: ${admission.workspace.error.message}`]
           : [],
       actions: projectActions(
-        registration,
+        intent,
         sourceLifetimeOwned ? admission : undefined,
         known?.value.source,
       ),
     }
   })
-  return {
-    roadmap: { capturedAt: snapshot.committed.observation.committedAt },
-    registrations,
-    projects,
-  }
+  return { projects }
 }
 
 function unobservedProject(intent: ProjectConfigurationIntent): CatalogProject {
@@ -281,12 +326,12 @@ function isObservationScope<A extends Observed, K extends A['scope']['kind']>(
   return observation.scope.kind === kind
 }
 
-function projectProjectResult(resource: CatalogProjectResult): ProjectResourceResult {
+function projectProjectResult(resource: CatalogProjectResult) {
   switch (resource.kind) {
     case 'never-observed':
       return {
         kind: 'never-observed',
-        scope: resource.scope,
+        scope: projectScope(resource.scope),
         current: resource.current ? projectUnavailable(resource.current) : null,
       }
     case 'current-readable':
@@ -314,12 +359,12 @@ function projectProjectResult(resource: CatalogProjectResult): ProjectResourceRe
       }
   }
 }
-function projectMapResult(resource: CatalogMapResult): MapResourceResult {
+function projectMapResult(resource: CatalogMapResult) {
   switch (resource.kind) {
     case 'never-observed':
       return {
         kind: 'never-observed',
-        scope: resource.scope,
+        scope: projectScope(resource.scope),
         current: resource.current ? projectUnavailable(resource.current) : null,
       }
     case 'current-readable':
@@ -344,23 +389,26 @@ function projectMapResult(resource: CatalogMapResult): MapResourceResult {
       }
   }
 }
-function projectTicketResult(resource: CatalogTicketResult): TicketResourceResult {
+function projectTicketResult(
+  resource: CatalogTicketResult,
+  resolveBlocker: (blocker: SourceBlocker) => unknown,
+) {
   switch (resource.kind) {
     case 'never-observed':
       return {
         kind: 'never-observed',
-        scope: resource.scope,
+        scope: projectScope(resource.scope),
         current: resource.current ? projectUnavailable(resource.current) : null,
       }
     case 'current-readable':
       return {
         kind: 'current-readable',
-        observation: projectTicketObservation(resource.observation),
+        observation: projectTicketObservation(resource.observation, resolveBlocker),
       }
     case 'retained-unavailable':
       return {
         kind: 'retained-unavailable',
-        lastSuccessful: projectTicketObservation(resource.lastSuccessful),
+        lastSuccessful: projectTicketObservation(resource.lastSuccessful, resolveBlocker),
         unavailable: projectUnavailable(resource.unavailable),
       }
     case 'proven-absent':
@@ -372,12 +420,15 @@ function projectTicketResult(resource: CatalogTicketResult): TicketResourceResul
             ? { kind: 'no-known-trace' }
             : {
                 kind: 'last-successful-trace',
-                lastSuccessful: projectTicketObservation(resource.trace.lastSuccessful),
+                lastSuccessful: projectTicketObservation(
+                  resource.trace.lastSuccessful,
+                  resolveBlocker,
+                ),
               },
       }
   }
 }
-function projectMapsMembership(membership: CatalogProject['mapsMembership']): MapMembershipResult {
+function projectMapsMembership(membership: CatalogProject['mapsMembership']) {
   switch (membership.kind) {
     case 'never-observed':
       return {
@@ -407,9 +458,7 @@ function projectMapsMembership(membership: CatalogProject['mapsMembership']): Ma
       }
   }
 }
-function projectTicketsMembership(
-  membership: CatalogProject['maps'][number]['ticketsMembership'],
-): TicketMembershipResult {
+function projectTicketsMembership(membership: CatalogProject['maps'][number]['ticketsMembership']) {
   switch (membership.kind) {
     case 'never-observed':
       return {
@@ -440,29 +489,25 @@ function projectTicketsMembership(
   }
 }
 type Observed = Extract<ObservationAttempt, { kind: 'observed' }>
-type PublicObservationMetadata = Omit<
-  Extract<ProjectResourceResult, { kind: 'current-readable' }>['observation'],
-  'value'
->
-type PublicAbsence = Extract<ProjectResourceResult, { kind: 'proven-absent' }>['absence']
-function observationMetadata<A extends Observed>(
-  observation: A,
-): Pick<A, keyof PublicObservationMetadata> {
+function observationMetadata(observation: Observed) {
   return {
-    scope: observation.scope,
+    scope: projectScope(observation.scope),
     attemptedAt: observation.attemptedAt,
     observedAt: observation.observedAt,
-    provenance: observation.provenance,
+    provenance: projectProvenance(observation.provenance),
     completeness: observation.completeness,
   }
 }
-function absenceMetadata<A extends AbsentAttempt>(absence: A): Pick<A, keyof PublicAbsence> {
+function absenceMetadata(absence: AbsentAttempt) {
   return {
-    scope: absence.scope,
+    scope: projectScope(absence.scope),
     attemptedAt: absence.attemptedAt,
     observedAt: absence.observedAt,
-    provenance: absence.provenance,
-    proof: absence.proof,
+    provenance: projectProvenance(absence.provenance),
+    proof:
+      absence.proof.kind === 'complete-membership'
+        ? { kind: absence.proof.kind, parent: projectScope(absence.proof.parent) }
+        : { ...absence.proof },
   }
 }
 function projectProjectObservation(observation: Extract<Observed, { scope: { kind: 'project' } }>) {
@@ -478,52 +523,64 @@ function projectProjectObservation(observation: Extract<Observed, { scope: { kin
 function projectMapObservation(observation: Extract<Observed, { scope: { kind: 'map' } }>) {
   return { ...observationMetadata(observation), value: projectMapValue(observation.value) }
 }
-function projectTicketObservation(observation: Extract<Observed, { scope: { kind: 'ticket' } }>) {
-  return { ...observationMetadata(observation), value: projectTicketValue(observation.value) }
+function projectTicketObservation(
+  observation: Extract<Observed, { scope: { kind: 'ticket' } }>,
+  resolveBlocker: (blocker: SourceBlocker) => unknown,
+) {
+  return {
+    ...observationMetadata(observation),
+    value: projectTicketValue(observation.value, resolveBlocker),
+  }
 }
-function projectMapMembershipObservation<
-  A extends Extract<Observed, { scope: { kind: 'maps-membership' } }>,
->(observation: A) {
-  return { ...observationMetadata(observation), value: { members: [...observation.value.members] } }
+function projectMapMembershipObservation(
+  observation: Extract<Observed, { scope: { kind: 'maps-membership' } }>,
+) {
+  return {
+    ...observationMetadata(observation),
+    value: { members: observation.value.members.map(toMapRef) },
+  }
 }
-function projectTicketMembershipObservation<
-  A extends Extract<Observed, { scope: { kind: 'tickets-membership' } }>,
->(observation: A) {
-  return { ...observationMetadata(observation), value: { members: [...observation.value.members] } }
+function projectTicketMembershipObservation(
+  observation: Extract<Observed, { scope: { kind: 'tickets-membership' } }>,
+) {
+  return {
+    ...observationMetadata(observation),
+    value: { members: observation.value.members.map(toTicketRef) },
+  }
 }
-function projectUnavailable(evidence: CatalogUnavailable): UnavailableEvidence {
+function projectUnavailable(evidence: CatalogUnavailable) {
   switch (evidence.kind) {
     case 'no-current-evidence':
       return {
         kind: 'no-current-evidence',
-        scope: evidence.scope,
+        scope: projectScope(evidence.scope),
         cause: 'No current source observation is available.',
       }
     case 'incomplete-ancestor':
       return {
         kind: 'incomplete-ancestor',
-        scope: evidence.scope,
+        scope: projectScope(evidence.scope),
         attemptedAt: evidence.attemptedAt,
         observedAt: evidence.observedAt,
-        provenance: evidence.provenance,
+        provenance: projectProvenance(evidence.provenance),
         completeness: evidence.completeness,
         cause: 'Current ancestor source evidence is incomplete.',
       }
     case 'source-failure':
       return {
         kind: 'source-failure',
-        scope: evidence.scope,
+        scope: projectScope(evidence.scope),
         attemptedAt: evidence.attemptedAt,
-        provenance: evidence.provenance,
+        provenance: projectProvenance(evidence.provenance),
         failure: evidence.failure,
         cause: evidence.cause,
       }
   }
 }
-function projectActiveMap(active: CatalogProject['activeMap']): ActiveMapResult {
+function projectActiveMap(active: CatalogProject['activeMap'], project: SourceProjectKey) {
   switch (active.kind) {
     case 'known-current':
-      return { kind: 'known-current', mapId: active.mapId }
+      return { kind: 'known-current', ref: toMapRef({ project, mapId: active.mapId }) }
     case 'known-empty':
       return { kind: 'known-empty' }
     case 'uncertain': {
@@ -586,23 +643,49 @@ function successfulProject(resource: CatalogProjectResult) {
       return null
   }
 }
-function projectBlocker(blocker: SourceBlocker): Blocker {
-  const { ticketId, ...reference } = blocker.reference
+function projectBlocker(
+  blocker: SourceBlocker,
+  snapshot: ResourceCatalogSnapshot,
+  originatingMap: SourceMapKey,
+) {
+  const reference = blocker.reference
+  let projected: unknown
+  if (reference.kind === 'registered' && reference.project.integration === 'local') {
+    projected = {
+      kind: 'registered',
+      ticket: toTicketRef({ map: originatingMap, ticketId: reference.ticketId }),
+    }
+  } else if (reference.kind === 'registered') {
+    const matches = snapshot.projects
+      .filter((project) => sameProject(project.key, reference.project))
+      .flatMap((project) => project.maps.flatMap((map) => map.tickets))
+      .filter((ticket) => ticket.key.ticketId === reference.ticketId)
+    const match = matches.length === 1 ? matches[0] : undefined
+    projected = match
+      ? { kind: 'registered', ticket: toTicketRef(match.key) }
+      : {
+          kind: 'unresolved',
+          locator: JSON.stringify([reference.project.integration, reference.project.id]),
+          ticketId: reference.ticketId,
+        }
+  } else projected = { ...reference }
   return {
-    reference,
-    ticketId,
+    reference: projected,
     state: blocker.state,
     ...(blocker.displayId === undefined ? {} : { displayId: blocker.displayId }),
     ...(blocker.title === undefined ? {} : { title: blocker.title }),
     ...(blocker.url === undefined ? {} : { url: blocker.url }),
   }
 }
-function projectTicketValue(ticket: SourceTicketContent): TicketResourceValue {
-  const blockedBy = ticket.blockedBy.map(projectBlocker)
+function projectTicketValue(
+  ticket: SourceTicketContent,
+  resolveBlocker: (blocker: SourceBlocker) => unknown,
+) {
+  const blockedBy = ticket.blockedBy.map(resolveBlocker)
   const isBlocked =
     ticket.status === 'unknown' ||
     !ticket.blockersComplete ||
-    blockedBy.some((blocker) => blocker.state !== 'closed')
+    ticket.blockedBy.some((blocker) => blocker.state !== 'closed')
   const state =
     ticket.status === 'closed'
       ? 'closed'
@@ -611,7 +694,7 @@ function projectTicketValue(ticket: SourceTicketContent): TicketResourceValue {
         : ticket.isClaimed
           ? 'claimed'
           : 'frontier'
-  const typeEvidence: TicketResourceValue['typeEvidence'] =
+  const typeEvidence =
     ticket.typeEvidence.kind === 'missing'
       ? { kind: 'missing', labels: [] }
       : ticket.typeEvidence.kind === 'recognized'
@@ -639,7 +722,7 @@ function projectTicketValue(ticket: SourceTicketContent): TicketResourceValue {
     warnings: [...ticket.warnings],
   }
 }
-function projectMapValue(map: SourceMapContent): MapResourceValue {
+function projectMapValue(map: SourceMapContent) {
   return {
     ...(map.displayId === undefined ? {} : { displayId: map.displayId }),
     ...(map.title === undefined ? {} : { title: map.title }),
@@ -662,53 +745,113 @@ function projectMapValue(map: SourceMapContent): MapResourceValue {
 }
 
 export function projectApplicationState(input: {
-  committed: CommittedObservation
+  resources: ResourceCatalogSnapshot
   intent: ProjectConfiguration
-  retainedConnections: readonly ApplicationState['connections'][number][] | null
-  source: PublicSourceProjection
+  retainedConnections: readonly Connection[] | null
+  sourceLifetimeOwned: boolean
   serverEpoch: string
   stateSequence: number
+  capturedAt: number
+  mode: 'mutable' | 'read-only'
   supportedIntegrations: readonly SupportedIntegration[]
-  authorizationOperations: readonly AuthorizationOperation[]
-  configuration: ApplicationState['configuration']
-  automation: ApplicationState['automation']
-}): ApplicationState {
-  return {
+  authorizationOperations:
+    | readonly AuthorizationFact[]
+    | readonly ReadyApplicationState['authorizationOperations'][number][]
+  configuration: ReadyApplicationState['configuration']
+  automation: {
+    enabled: boolean
+    enabledProjects: readonly SourceProjectKey[]
+    availability: ReadyApplicationState['automation']['availability']
+    evidence: readonly AutomationEvidence[]
+    overrides: readonly AutomationOverrideControl[]
+  }
+}): ReadyApplicationState {
+  const connections = input.intent.connections.map((connection) => ({
+    ...connection,
+    availability:
+      input.retainedConnections === null
+        ? connectionHealth(input.resources.committed, connection)
+        : (input.retainedConnections.find((retained) => sameConnectionAccount(retained, connection))
+            ?.availability ?? unobservedConnectionAvailability()),
+  }))
+  const authorizationOperations = input.authorizationOperations
+    .map((operation) => {
+      if (operation.status === 'starting') return null
+      if (operation.status === 'granted') {
+        const id = 'connection' in operation ? operation.connection.id : operation.connectionId
+        const accountId =
+          'connection' in operation ? operation.connection.accountId : operation.accountId
+        const current = connections.some(
+          (candidate) =>
+            candidate.id === id &&
+            candidate.integration === 'github' &&
+            candidate.githubIdentity.id === accountId,
+        )
+        return {
+          id: operation.id,
+          status: 'granted',
+          connection: { kind: current ? 'current' : 'historical', id, accountId },
+        }
+      }
+      if (operation.status === 'waiting' || operation.status === 'terminal') return { ...operation }
+      return {
+        id: operation.id,
+        status: 'terminal',
+        outcome: operation.status,
+        ...(operation.connectionId === undefined ? {} : { connectionId: operation.connectionId }),
+        ...(operation.status === 'failed' || operation.status === 'denied'
+          ? { cause: operation.cause }
+          : {}),
+      }
+    })
+    .filter((operation) => operation !== null)
+  return readyApplicationStateSchema.parse({
+    phase: 'ready',
+    mode: input.mode,
     serverEpoch: input.serverEpoch,
     stateSequence: input.stateSequence,
+    capturedAt: input.capturedAt,
     configurationVersion: input.intent.configurationVersion,
     supportedIntegrations: [...input.supportedIntegrations],
-    connections: input.intent.connections.map((connection) => ({
-      ...connection,
-      availability:
-        input.retainedConnections === null
-          ? connectionHealth(input.committed, connection)
-          : (input.retainedConnections.find((retained) =>
-              sameConnectionAccount(retained, connection),
-            )?.availability ?? unobservedConnectionAvailability()),
-    })),
-    registrations: input.source.registrations,
-    projects: input.source.projects,
-    authorizationOperations: [...input.authorizationOperations],
+    connections,
+    projects: projectResources(input.resources, input.intent, input.sourceLifetimeOwned).projects,
+    authorizationOperations,
     configuration: input.configuration,
-    automation: input.automation,
-    roadmap: input.source.roadmap,
-  }
+    automation: {
+      ...input.automation,
+      enabledProjects: input.automation.enabledProjects.map(toProjectRef),
+      evidence: input.automation.evidence.map((evidence) => ({
+        target: toTicketRef({
+          map: { project: evidence.target.project, mapId: evidence.target.mapId },
+          ticketId: evidence.target.ticketId,
+        }),
+        classification: evidence.classification,
+        ...(evidence.wayfinder === undefined ? {} : { wayfinder: evidence.wayfinder }),
+      })),
+      overrides: input.automation.overrides.map((control) => ({
+        target: toTicketRef({
+          map: { project: control.target.project, mapId: control.target.mapId },
+          ticketId: control.target.ticketId,
+        }),
+        classification: control.classification,
+        wayfinder: control.wayfinder,
+      })),
+    },
+  })
 }
-type ConnectionIdentity = Pick<
-  ApplicationState['connections'][number],
-  'id' | 'integration' | 'githubIdentity'
->
 
-function sameConnectionAccount(a: ConnectionIdentity, b: ConnectionIdentity): boolean {
+function sameConnectionAccount(
+  a: ConfiguredConnection | Connection,
+  b: ConfiguredConnection | Connection,
+): boolean {
   return (
     a.id === b.id &&
     a.integration === b.integration &&
     (a.integration === 'local' ||
-      (a.githubIdentity !== undefined && a.githubIdentity.id === b.githubIdentity?.id))
+      b.integration === 'local' ||
+      a.githubIdentity.id === b.githubIdentity.id)
   )
 }
-
 function unobservedConnectionAvailability(): ConnectionAvailability {
   return {
     status: 'unavailable',
@@ -766,52 +909,53 @@ function connectionHealth(
     ? { status: 'available' }
     : { status: 'authorization-required', cause: 'Authorization is required.' }
 }
-function projectConfiguredRegistration(intent: ProjectConfigurationIntent): ProjectRegistration {
-  return {
-    key: projectRefKey(intent),
-    connectionId: intent.connectionId,
-    ...(intent.displayName === undefined ? {} : { displayName: intent.displayName }),
-    workspace:
-      'locator' in intent
-        ? { path: intent.workspace.path, gitIdentity: intent.locator.repositoryId }
-        : { ...intent.workspace },
-    locator:
-      'locator' in intent
-        ? { integration: 'github', ...intent.locator }
-        : { integration: 'local', path: intent.workspace.path },
-  }
-}
-function projectRefKey(intent: ProjectConfigurationIntent): ProjectKey {
+function projectRefKey(intent: ProjectConfigurationIntent): SourceProjectKey {
   return { integration: intent.ref.integration, id: intent.ref.projectId }
 }
 function projectActions(
-  registration: ProjectRegistration,
+  intent: ProjectConfigurationIntent,
   admission: ProjectAdmissionRecord | undefined,
   source: Extract<Observed, { scope: { kind: 'project' } }>['value']['source'] | undefined,
-): RegisteredProject['actions'] {
-  const actions: RegisteredProject['actions'] = [
+) {
+  const actions: unknown[] = [
     {
       id: 'open-roadmap',
       label: 'Open in Roadmap',
       kind: 'roadmap',
-      href: `/projects/${registration.key.integration}/${encodeURIComponent(registration.key.id)}`,
+      href: `/projects/${intent.ref.integration}/${encodeURIComponent(intent.ref.projectId)}`,
     },
   ]
   if (
     admission?.workspace.status === 'admitted' &&
-    admission.intent.connectionId === registration.connectionId &&
-    (registration.locator.integration === 'github'
+    admission.intent.connectionId === intent.connectionId &&
+    ('locator' in intent
       ? 'matchedRepositoryId' in admission.workspace.proof &&
-        admission.workspace.proof.matchedRepositoryId === registration.locator.repositoryId &&
-        admission.workspace.proof.verifiedConnectionId === registration.connectionId
+        admission.workspace.proof.matchedRepositoryId === intent.locator.repositoryId &&
+        admission.workspace.proof.verifiedConnectionId === intent.connectionId
       : !('matchedRepositoryId' in admission.workspace.proof))
-  )
+  ) {
     actions.push(
-      { id: 'open-workspace', label: 'Open in VS Code', kind: 'server-launch' },
-      { id: 'open-terminal', label: 'Open Terminal', kind: 'server-launch' },
-      { id: 'reveal-source', label: 'View source folder', kind: 'server-launch' },
+      {
+        id: 'open-workspace',
+        label: 'Open in VS Code',
+        kind: 'server-launch',
+        operation: 'open-workspace',
+      },
+      {
+        id: 'open-terminal',
+        label: 'Open Terminal',
+        kind: 'server-launch',
+        operation: 'open-terminal',
+      },
+      {
+        id: 'reveal-source',
+        label: 'View source folder',
+        kind: 'server-launch',
+        operation: 'reveal-source',
+      },
     )
-  if (registration.locator.integration === 'github')
+  }
+  if ('locator' in intent)
     actions.push({
       id: 'open-source',
       label: 'Open on GitHub',
@@ -819,13 +963,39 @@ function projectActions(
       href:
         source?.integration === 'github'
           ? source.url
-          : `https://github.com/${registration.locator.nameWithOwner}`,
+          : `https://github.com/${intent.locator.nameWithOwner}`,
     })
   return actions
 }
-function sameProject(a: ProjectKey, b: ProjectKey): boolean {
+function toProjectRef(project: SourceProjectKey): ProjectRef {
+  return projectRefSchema.parse({ integration: project.integration, projectId: project.id })
+}
+function toMapRef(map: SourceMapKey) {
+  return mapRefSchema.parse({ project: toProjectRef(map.project), mapId: map.mapId })
+}
+function toTicketRef(ticket: SourceTicketKey): TicketRef {
+  return ticketRefSchema.parse({ map: toMapRef(ticket.map), ticketId: ticket.ticketId })
+}
+function projectScope(scope: SourceScope) {
+  switch (scope.kind) {
+    case 'project':
+    case 'maps-membership':
+      return { kind: scope.kind, project: toProjectRef(scope.project) }
+    case 'map':
+    case 'tickets-membership':
+      return { kind: scope.kind, map: toMapRef(scope.map) }
+    case 'ticket':
+      return { kind: scope.kind, ticket: toTicketRef(scope.ticket) }
+  }
+}
+function projectProvenance(provenance: Observed['provenance']) {
+  return provenance.integration === 'github'
+    ? { ...provenance, connectionId: connectionIdSchema.parse(provenance.connectionId) }
+    : { ...provenance }
+}
+function sameProject(a: SourceProjectKey, b: SourceProjectKey): boolean {
   return a.integration === b.integration && a.id === b.id
 }
-function projectKey(project: ProjectKey): string {
+function projectKey(project: SourceProjectKey): string {
   return JSON.stringify([project.integration, project.id])
 }

@@ -1,6 +1,21 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignore": ["scripts/fixtures/**"],
   "workspaces": {
+    ".": {
+      "entry": [
+        "config/dependency-cruiser/base.mjs",
+        "config/dependency-cruiser/contracts.mjs",
+        "config/dependency-cruiser/docs.mjs",
+        "config/dependency-cruiser/server.mjs",
+        "config/dependency-cruiser/typescript-resolve.mjs",
+        "config/dependency-cruiser/ui.mjs",
+        "config/dependency-cruiser/web.mjs",
+        "scripts/browser-architecture-plugin.d.mts",
+        "scripts/check-architecture-fixtures.mjs",
+        "scripts/run-browser-build-fixture.mjs"
+      ]
+    },
     "apps/server": {
       "ignoreBinaries": ["terminal-notifier"]
     }

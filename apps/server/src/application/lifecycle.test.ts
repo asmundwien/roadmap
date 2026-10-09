@@ -2,7 +2,8 @@ import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setImmediate } from 'node:timers/promises'
-import type { ApplicationState } from '@roadmap/contracts'
+import { commandSchema } from '@roadmap/contracts/operations'
+import type { ApplicationState, ReadyApplicationState } from '@roadmap/contracts/state'
 import { describe, expect, it } from 'vitest'
 import type { AutomationDatabaseDocument } from '../automation/database.ts'
 import type { AutomationLauncher } from '../automation/engine.ts'
@@ -16,6 +17,7 @@ import { createLocalObserver } from '../local/observer.ts'
 import type { SourceObserverFactories } from '../observation/coordinator.ts'
 import type { SourceObserver } from '../observation/source.ts'
 import type { ProjectConfiguration } from '../projects/registry.ts'
+import { readApplicationState } from '../public-test-fixtures.ts'
 import { readLocalProject } from '../wayfinder/from-local.ts'
 import { createRoadmapApplication } from './application.ts'
 import { createApplicationOperations } from './operations.ts'
@@ -94,6 +96,100 @@ const noLaunch: AutomationLauncher = {
 }
 
 describe('RoadmapApplication terminal lifecycle', () => {
+  it.each(['confirmed', 'unconfirmed', 'cleanup-rejected'])(
+    'preserves the actual drained saved document in final stopped state after %s',
+    async (caseName) => {
+      const configuration = configurationFixture()
+      const entered = Promise.withResolvers<void>()
+      const released = Promise.withResolvers<void>()
+      const application = createRoadmapApplication({
+        configuration: {
+          ...configuration.document,
+          async write(next): Promise<ConfigurationWrite> {
+            entered.resolve()
+            await released.promise
+            configuration.writes.push(next)
+            return {
+              ok: true,
+              durability: caseName === 'unconfirmed' ? 'unconfirmed' : 'confirmed',
+            }
+          },
+          async stop() {
+            if (caseName === 'cleanup-rejected') throw new Error('Actual fixture cleanup failure.')
+          },
+        },
+        admissions: {},
+        observers: noSources(),
+      })
+      await application.start()
+      const command = application.execute(
+        commandSchema.parse({
+          type: 'rename-connection',
+          connectionId: 'local',
+          name: 'Actually saved during stop',
+          expectedConfigurationVersion: 1,
+        }),
+      )
+      await entered.promise
+      const stopping = outcome(application.stop())
+      released.resolve()
+      const result = await command
+      const stopped = await stopping
+      expect(result.ok).toBe(caseName !== 'unconfirmed')
+      expect(stopped.ok).toBe(caseName !== 'cleanup-rejected')
+      expect(configuration.writes).toMatchObject([
+        { configurationVersion: 2, connections: [{ name: 'Actually saved during stop' }] },
+      ])
+      expect(application.current()).toMatchObject({
+        phase: 'stopped',
+        retained: {
+          configurationVersion: 2,
+          connections: [{ id: 'local', name: 'Actually saved during stop' }],
+        },
+      })
+    },
+  )
+  it('distinguishes initial unreadiness from a ready known-empty Project authority', async () => {
+    const loaded = Promise.withResolvers<ConfigurationRead>()
+    const entered = Promise.withResolvers<void>()
+    const configuration = configurationFixture()
+    const application = createRoadmapApplication({
+      configuration: {
+        ...configuration.document,
+        async load() {
+          entered.resolve()
+          return loaded.promise
+        },
+      },
+      admissions: {},
+      observers: noSources(),
+    })
+    const published: ReadyApplicationState[] = []
+    application.subscribe((state) => published.push(readApplicationState(state)))
+    expect(application.current()).toMatchObject({ phase: 'idle' })
+    expect(application.current()).not.toHaveProperty('projects')
+    const starting = application.start()
+    try {
+      await entered.promise
+      expect(application.current()).toMatchObject({ phase: 'starting' })
+      expect(application.current()).not.toHaveProperty('projects')
+      expect(published).toEqual([])
+      loaded.resolve({ ok: true, document: CONFIGURATION })
+      await starting
+      expect(application.current()).toMatchObject({ phase: 'ready', projects: [] })
+      expect(application.current()).not.toHaveProperty('registrations')
+      expect(application.current()).not.toHaveProperty('roadmap')
+      expect(published).not.toEqual([])
+      await application.stop()
+      expect(application.current()).toMatchObject({ phase: 'stopped' })
+      expect(application.current()).not.toHaveProperty('projects')
+    } finally {
+      loaded.resolve({ ok: true, document: CONFIGURATION })
+      await starting.catch(() => {})
+      await application.stop()
+    }
+  })
+
   it('makes stop before start terminal without loading or subscribing to configuration', async () => {
     const configuration = configurationFixture()
     const application = createRoadmapApplication({
@@ -105,8 +201,8 @@ describe('RoadmapApplication terminal lifecycle', () => {
     await application.stop()
     expect(await outcome(application.start())).toMatchObject({ ok: false })
     await application.stop()
-    const states: ApplicationState[] = []
-    application.subscribe((state) => states.push(state))
+    const states: ReadyApplicationState[] = []
+    application.subscribe((state) => states.push(readApplicationState(state)))
     configuration.emit({ ok: true, document: { ...CONFIGURATION, configurationVersion: 2 } })
 
     expect(configuration.effects).toEqual({ loads: 0, subscriptions: 0, disposals: 0, stops: 1 })
@@ -144,7 +240,7 @@ describe('RoadmapApplication terminal lifecycle', () => {
       await application.start()
       expect(configuration.effects.loads).toBe(1)
       expect(configuration.effects.subscriptions).toBe(1)
-      expect(application.current().configurationVersion).toBe(1)
+      expect(readApplicationState(application.current()).configurationVersion).toBe(1)
       expect(application.diagnostics().lifecycle).toEqual({ phase: 'ready', mode: 'mutable' })
       expect(application.diagnostics()).toMatchObject({
         projects: 0,
@@ -258,8 +354,8 @@ describe('RoadmapApplication terminal lifecycle', () => {
         admissions: {},
         observers: noSources(),
       })
-      const states: ApplicationState[] = []
-      application.subscribe((state) => states.push(structuredClone(state)))
+      const states: ReadyApplicationState[] = []
+      application.subscribe((state) => states.push(structuredClone(readApplicationState(state))))
       const starting = outcome(application.start())
       const concurrentStarting = outcome(application.start())
       await entered.promise
@@ -278,7 +374,7 @@ describe('RoadmapApplication terminal lifecycle', () => {
         expect(await concurrentStarting).toMatchObject({ ok: false })
         expect(await stopping).toEqual({ ok: true, value: undefined })
         configuration.emit({ ok: true, document: { ...CONFIGURATION, configurationVersion: 2 } })
-        application.subscribe((state) => states.push(structuredClone(state)))
+        application.subscribe((state) => states.push(structuredClone(readApplicationState(state))))
         expect(configuration.effects.subscriptions).toBe(0)
         expect(configuration.subscriptions).toBe(0)
         expect(configuration.effects.stops).toBe(1)
@@ -311,7 +407,7 @@ describe('RoadmapApplication terminal lifecycle', () => {
     })
     const watched = new Set<string>()
     const events: string[] = []
-    const states: ApplicationState[] = []
+    const states: ReadyApplicationState[] = []
     const application = createRoadmapApplication({
       configuration: configuration.document,
       admissions: { local: createLocalProjectAdmission() },
@@ -340,7 +436,7 @@ describe('RoadmapApplication terminal lifecycle', () => {
         },
       },
     })
-    application.subscribe((state) => states.push(structuredClone(state)))
+    application.subscribe((state) => states.push(structuredClone(readApplicationState(state))))
     let starting: ReturnType<typeof outcome<void>> | undefined
     let stopping: ReturnType<typeof outcome<void>> | undefined
     try {
@@ -364,7 +460,8 @@ describe('RoadmapApplication terminal lifecycle', () => {
       expect(configuration.subscriptions).toBe(0)
       expect(configuration.effects.disposals).toBe(1)
       expect(states).toHaveLength(statesAtStop)
-      expect(application.current().projects).toEqual([])
+      expect(application.current()).toMatchObject({ phase: 'stopped', retained: null })
+      expect(application.current()).not.toHaveProperty('projects')
       expect(application.diagnostics().lifecycle).toEqual({ phase: 'stopped' })
     } finally {
       readGate.resolve()
@@ -488,12 +585,14 @@ describe('RoadmapApplication terminal lifecycle', () => {
           await entered.promise
         }
         expect(
-          await application.execute({
-            type: 'rename-connection',
-            connectionId: 'local',
-            name: 'Changed',
-            expectedConfigurationVersion: phase === 'stopping' ? 1 : 0,
-          }),
+          await application.execute(
+            commandSchema.parse({
+              type: 'rename-connection',
+              connectionId: 'local',
+              name: 'Changed',
+              expectedConfigurationVersion: phase === 'stopping' ? 1 : 0,
+            }),
+          ),
         ).toMatchObject({ ok: false, error: { code: 'not-supported' } })
         expect(await application.query({ type: 'select-workspace' })).toMatchObject({
           ok: false,
@@ -591,18 +690,22 @@ describe('RoadmapApplication terminal lifecycle', () => {
     })
     try {
       await application.start()
-      expect(application.current().configuration).toMatchObject({ valid: false })
+      expect(readApplicationState(application.current()).configuration).toMatchObject({
+        valid: false,
+      })
       expect(await application.query({ type: 'select-workspace' })).toEqual({
         ok: true,
         type: 'workspace-selection',
       })
       expect(
-        await application.execute({
-          type: 'rename-connection',
-          connectionId: 'local',
-          name: 'Changed',
-          expectedConfigurationVersion: 0,
-        }),
+        await application.execute(
+          commandSchema.parse({
+            type: 'rename-connection',
+            connectionId: 'local',
+            name: 'Changed',
+            expectedConfigurationVersion: 0,
+          }),
+        ),
       ).toMatchObject({ ok: false, error: { code: 'configuration-invalid' } })
       expect(configuration.writes).toEqual([])
       expect(application.diagnostics().lifecycle).toEqual({ phase: 'ready', mode: 'read-only' })
@@ -679,9 +782,11 @@ describe('RoadmapApplication terminal lifecycle', () => {
     })
     try {
       await application.start()
-      expect(application.current().projects[0]?.resource.kind).toBe('never-observed')
-      expect(application.current().projects[0]?.maps).toEqual([])
-      expect(application.current().configuration.valid).toBe(true)
+      expect(readApplicationState(application.current()).projects[0]?.resource.kind).toBe(
+        'never-observed',
+      )
+      expect(readApplicationState(application.current()).projects[0]?.maps).toEqual([])
+      expect(readApplicationState(application.current()).configuration.valid).toBe(true)
       expect(application.diagnostics()).toMatchObject({
         lifecycle: { phase: 'ready', mode: 'mutable' },
         projects: 1,
@@ -743,8 +848,8 @@ describe('RoadmapApplication terminal lifecycle', () => {
         },
       },
     })
-    const states: ApplicationState[] = []
-    application.subscribe((state) => states.push(structuredClone(state)))
+    const states: ReadyApplicationState[] = []
+    application.subscribe((state) => states.push(structuredClone(readApplicationState(state))))
     let stopping: ReturnType<typeof outcome<void>> | undefined
     try {
       await Promise.all(
@@ -753,7 +858,11 @@ describe('RoadmapApplication terminal lifecycle', () => {
         ),
       )
       await application.start()
-      expect(application.current().projects.map((project) => project.key.id)).toEqual(['active'])
+      expect(
+        readApplicationState(application.current()).projects.map(
+          (project) => project.ref.projectId,
+        ),
+      ).toEqual(['active'])
       configuration.emit({
         ok: true,
         document: {
@@ -790,8 +899,12 @@ describe('RoadmapApplication terminal lifecycle', () => {
       candidateGate.resolve()
       expect(await stopping).toEqual({ ok: true, value: undefined })
       expect(configuration.subscriptions).toBe(0)
-      expect(application.current().configurationVersion).toBe(1)
-      expect(application.current().projects.map((project) => project.key.id)).toEqual(['active'])
+      expect(readApplicationState(application.current()).configurationVersion).toBe(1)
+      expect(
+        readApplicationState(application.current()).projects.map(
+          (project) => project.ref.projectId,
+        ),
+      ).toEqual(['active'])
       expect(states).toHaveLength(publicationsAtStop)
       expect(application.diagnostics().lifecycle).toEqual({ phase: 'stopped' })
     } finally {

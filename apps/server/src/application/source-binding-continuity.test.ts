@@ -1,11 +1,14 @@
 import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { ApplicationState, AutomationTarget, ProjectKey } from '@roadmap/contracts'
-import { stateEnvelopeCodec } from '@roadmap/contracts/codecs'
+import { commandSchema } from '@roadmap/contracts/operations'
+import type { ReadyApplicationState } from '@roadmap/contracts/state'
+import { decodeStateEnvelope } from '@roadmap/contracts/wire'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { CredentialBundle } from '../authorization/contracts.ts'
 import { type AutomationDatabase, appendAutomationDatabase } from '../automation/database.ts'
 import type { AutomationLaunch, ClassificationProcessResult } from '../automation/engine.ts'
+import type { AutomationTarget } from '../automation/model.ts'
 import {
   type ConfigurationDocument,
   type ConfigurationRead,
@@ -13,15 +16,20 @@ import {
 } from '../configuration/document.ts'
 import { createGitHubProjectAdmission } from '../github/admission.ts'
 import { GitHubError } from '../github/client.ts'
-import { type CredentialBundle, createGitHubConnectionPort } from '../github/connections.ts'
+import { createGitHubConnectionPort } from '../github/connections.ts'
 import { createGitHubObserverPool } from '../github/observer.ts'
 import type { GitHubObservationInput } from '../observation/coordinator.ts'
-import type { SourceContribution } from '../observation/source.ts'
+import type { SourceProjectKey as ProjectKey, SourceContribution } from '../observation/source.ts'
 import type {
   GitHubConnection,
   GitHubProviderRead,
   ProjectConfiguration,
 } from '../projects/registry.ts'
+import {
+  fixtureResourceRef,
+  fixtureTicketRef,
+  readApplicationState,
+} from '../public-test-fixtures.ts'
 import { createRoadmapApplication } from './application.ts'
 import { createApplicationOperations } from './operations.ts'
 
@@ -96,10 +104,11 @@ async function fixture() {
   if (!old || !replacement) throw new Error('Both binding fixtures are required.')
   let oldPoll: OldPoll = 'success'
   let missingNewAlias = false
+  let newRepositoryFailure = false
   const reads: Array<{ repositoryId: string; connectionId: string; path: string; at: number }> = []
   const sourceEvidence: Array<{ repositoryId: string; contribution: SourceContribution }> = []
   const inputs: GitHubObservationInput[] = []
-  const states: ApplicationState[] = []
+  const states: ReadyApplicationState[] = []
   const launches: AutomationLaunch[] = []
   let database: AutomationDatabase = { schemaVersion: 3, opportunities: [], events: [] }
   const processes: Array<ReturnType<typeof Promise.withResolvers<ClassificationProcessResult>>> = []
@@ -188,6 +197,8 @@ async function fixture() {
         const repository = await authorized(path)
         if (path === `/repositories/${repository.id}`) {
           if (repository === old && oldPoll === 'repository failure')
+            throw new GitHubError({ kind: 'transient', cause: 'network' })
+          if (repository === replacement && newRepositoryFailure)
             throw new GitHubError({ kind: 'transient', cause: 'network' })
           return { id: Number(repository.id), full_name: repository.name }
         }
@@ -352,7 +363,9 @@ async function fixture() {
       },
     },
   })
-  const unsubscribe = application.subscribe((state) => states.push(structuredClone(state)))
+  const unsubscribe = application.subscribe((state) =>
+    states.push(structuredClone(readApplicationState(state))),
+  )
   return {
     application,
     clock,
@@ -364,9 +377,18 @@ async function fixture() {
     launches,
     newWorkspace,
     database: () => database,
-    replace(options: { oldPoll: OldPoll; missingNewAlias?: boolean }) {
+    setOldRepository(name: string, poll: OldPoll) {
+      old.name = name
+      oldPoll = poll
+    },
+    replace(options: {
+      oldPoll: OldPoll
+      missingNewAlias?: boolean
+      newRepositoryFailure?: boolean
+    }) {
       oldPoll = options.oldPoll
       missingNewAlias = options.missingNewAlias ?? false
+      newRepositoryFailure = options.newRepositoryFailure ?? false
       configuration = valid({
         ...initial,
         configurationVersion: 2,
@@ -395,32 +417,32 @@ async function fixture() {
   }
 }
 
-function decoded(state: ApplicationState) {
+function decoded(state: ReadyApplicationState) {
   const serialized = JSON.stringify({ type: 'state', state })
   expect(serialized).not.toContain('readSequence')
   expect(serialized).not.toContain('sourceBindings')
-  const result = stateEnvelopeCodec.decode(JSON.parse(serialized))
+  const result = decodeStateEnvelope(JSON.parse(serialized))
   expect(result.ok, JSON.stringify(result)).toBe(true)
   if (!result.ok) throw new Error('The binding publication must satisfy the public decoder.')
-  return result.value.state
+  return readApplicationState(result.value.state)
 }
-function project(state: ApplicationState) {
+function project(state: ReadyApplicationState) {
   const value = state.projects.find(
-    (row) => row.key.integration === PROJECT.integration && row.key.id === PROJECT.id,
+    (row) => row.ref.integration === PROJECT.integration && row.ref.projectId === PROJECT.id,
   )
   if (!value) throw new Error('The same opaque public Project key must remain registered.')
   return value
 }
-function map(state: ApplicationState, mapId = '7') {
-  const value = project(state).maps.find((row) => row.key.mapId === mapId)
+function map(state: ReadyApplicationState, mapId = '7') {
+  const value = project(state).maps.find((row) => row.ref.mapId === mapId)
   if (!value) throw new Error('Known map identity must remain addressable.')
   return value
 }
-function eligible(state: ApplicationState) {
+function eligible(state: ReadyApplicationState) {
   return state.automation.overrides.find(
     (row) =>
-      row.target.project.id === PROJECT.id &&
-      row.target.mapId === '7' &&
+      row.target.map.project.projectId === PROJECT.id &&
+      row.target.map.mapId === '7' &&
       row.target.ticketId === '8',
   )?.classification.status
 }
@@ -431,13 +453,21 @@ async function pendingOverlap(
   missingNewAlias = false,
 ) {
   await test.application.start()
-  expect(eligible(decoded(test.application.current()))).toBe('eligible')
+  expect(eligible(decoded(readApplicationState(test.application.current())))).toBe('eligible')
   test.clock.value = 10
   test.replace({ oldPoll, missingNewAlias })
   await test.baseline.started
-  const pending = decoded(test.application.current())
+  const pending = decoded(readApplicationState(test.application.current()))
   expect(pending.configurationVersion).toBe(1)
-  expect(project(pending)).toMatchObject({ connectionId: OLD.id, locator: { repositoryId: '101' } })
+  expect(project(pending)).toMatchObject({
+    connectionId: OLD.id,
+    source: {
+      integration: 'github',
+      repositoryId: '101',
+      nameWithOwner: 'fixture/old-owner',
+      url: 'https://github.com/fixture/old-owner',
+    },
+  })
   expect(pending.connections.find((row) => row.id === NEW.id)).toMatchObject({
     githubIdentity: { id: '77', login: 'new-account' },
   })
@@ -450,7 +480,7 @@ async function pendingOverlap(
   ])
   test.clock.value = 20
   await vi.advanceTimersByTimeAsync(30_000)
-  const polled = decoded(test.application.current())
+  const polled = decoded(readApplicationState(test.application.current()))
   expect(polled.configurationVersion).toBe(1)
   expect(test.reads).toContainEqual({
     repositoryId: '101',
@@ -481,19 +511,21 @@ async function pendingOverlap(
         (event) => event.type === 'classification-started' || event.type === 'wayfinder-launching',
       ),
   ).toEqual([])
-  const queuedOverride = test.application.execute({
-    type: 'start-automation-override',
-    expectedConfigurationVersion: 1,
-    target: TARGET,
-    stage: 'classification',
-  })
+  const queuedOverride = test.application.execute(
+    commandSchema.parse({
+      type: 'start-automation-override',
+      expectedConfigurationVersion: 1,
+      target: fixtureTicketRef(TARGET),
+      stage: 'classification',
+    }),
+  )
   test.clock.value = 30
   test.baseline.release()
   await vi.advanceTimersByTimeAsync(0)
   expect(await queuedOverride).toMatchObject({ ok: false })
-  expect(test.application.current().configurationVersion).toBe(2)
+  expect(readApplicationState(test.application.current()).configurationVersion).toBe(2)
   expect(test.launches).toEqual([])
-  const committed = decoded(test.application.current())
+  const committed = decoded(readApplicationState(test.application.current()))
   expect(committed.connections.find((row) => row.id === NEW.id)).toMatchObject({
     githubIdentity: { id: '77', login: 'new-account' },
     availability: { status: 'available' },
@@ -504,11 +536,16 @@ async function pendingOverlap(
   return committed
 }
 
-function expectCurrentBinding(state: ApplicationState) {
+function expectCurrentBinding(state: ReadyApplicationState) {
   const current = project(state)
   expect(current).toMatchObject({
     connectionId: NEW.id,
-    locator: { repositoryId: '202', nameWithOwner: 'fixture/new-owner' },
+    source: {
+      integration: 'github',
+      repositoryId: '202',
+      nameWithOwner: 'fixture/new-owner',
+      url: 'https://github.com/fixture/new-owner',
+    },
     resource: {
       kind: 'current-readable',
       observation: {
@@ -540,14 +577,17 @@ function expectCurrentBinding(state: ApplicationState) {
         },
         value: {
           members: [
-            { project: PROJECT, mapId: '7' },
-            { project: PROJECT, mapId: '9' },
+            fixtureResourceRef({ project: PROJECT, mapId: '7' }),
+            fixtureResourceRef({ project: PROJECT, mapId: '9' }),
           ],
         },
       },
     },
-    displayOrder: { openMapIds: ['7', '9'], closedMapIds: [] },
-    activeMap: { kind: 'known-current', mapId: '7' },
+    displayOrder: {
+      open: ['7', '9'].map((mapId) => fixtureResourceRef({ project: PROJECT, mapId })),
+      closed: [],
+    },
+    activeMap: { kind: 'known-current', ref: fixtureResourceRef({ project: PROJECT, mapId: '7' }) },
   })
   for (const [mapId, ticketId] of [
     ['7', '8'],
@@ -580,7 +620,7 @@ function expectCurrentBinding(state: ApplicationState) {
         provenance: { connectionId: NEW.id, repositoryId: '202' },
       },
     })
-    expect(currentMap.tickets.find((row) => row.key.ticketId === ticketId)?.resource).toMatchObject(
+    expect(currentMap.tickets.find((row) => row.ref.ticketId === ticketId)?.resource).toMatchObject(
       {
         kind: 'current-readable',
         observation: {
@@ -604,6 +644,114 @@ function expectCurrentBinding(state: ApplicationState) {
 afterEach(() => vi.useRealTimers())
 
 describe('RoadmapApplication same-key source binding replacement', () => {
+  it('associates the current source and action with an unavailable replacement repository while retaining old metadata as history', async () => {
+    vi.useFakeTimers()
+    const test = await fixture()
+    try {
+      await test.application.start()
+      expect(project(decoded(readApplicationState(test.application.current()))).source).toEqual({
+        integration: 'github',
+        repositoryId: '101',
+        nameWithOwner: 'fixture/old-owner',
+        url: 'https://github.com/fixture/old-owner',
+      })
+      test.clock.value = 10
+      test.replace({ oldPoll: 'success', newRepositoryFailure: true })
+      await vi.waitFor(() =>
+        expect(readApplicationState(test.application.current()).configurationVersion).toBe(2),
+      )
+      const state = decoded(readApplicationState(test.application.current()))
+      const current = project(state)
+      expect(current.resource).toMatchObject({
+        kind: 'retained-unavailable',
+        lastSuccessful: {
+          observedAt: 1,
+          provenance: { connectionId: OLD.id, repositoryId: '101' },
+          value: {
+            name: 'fixture/old-owner',
+            source: {
+              integration: 'github',
+              repositoryId: '101',
+              nameWithOwner: 'fixture/old-owner',
+              url: 'https://github.com/fixture/old-owner',
+            },
+          },
+        },
+        unavailable: {
+          attemptedAt: 10,
+          provenance: { connectionId: NEW.id, repositoryId: '202' },
+        },
+      })
+      expect(current.actions.find((action) => action.id === 'open-source')).toEqual({
+        id: 'open-source',
+        label: 'Open on GitHub',
+        kind: 'external-link',
+        href: 'https://github.com/fixture/new-owner',
+      })
+      expect(current).toMatchObject({
+        connectionId: NEW.id,
+        source: {
+          integration: 'github',
+          repositoryId: '202',
+          nameWithOwner: 'fixture/new-owner',
+          url: 'https://github.com/fixture/new-owner',
+        },
+      })
+      expect(current.name).not.toBe('fixture/old-owner')
+      expect(test.launches).toEqual([])
+      for (const publication of test.states) decoded(publication)
+    } finally {
+      await test.stop()
+    }
+  })
+
+  it('retains an observed repository rename through same-identity failure and recovery', async () => {
+    vi.useFakeTimers()
+    const test = await fixture()
+    try {
+      await test.application.start()
+      for (const [time, poll, kind] of [
+        [10, 'success', 'current-readable'],
+        [20, 'repository failure', 'retained-unavailable'],
+        [30, 'success', 'current-readable'],
+      ] as const) {
+        test.clock.value = time
+        test.setOldRepository('fixture/renamed-owner', poll)
+        expect(
+          await test.application.execute(
+            commandSchema.parse({
+              type: 'refresh-project',
+              project: { integration: 'github', projectId: PROJECT.id },
+              expectedConfigurationVersion: 1,
+            }),
+          ),
+        ).toMatchObject({ ok: true })
+        const current = project(decoded(readApplicationState(test.application.current())))
+        expect(current).toMatchObject({
+          source: {
+            integration: 'github',
+            repositoryId: '101',
+            nameWithOwner: 'fixture/renamed-owner',
+            url: 'https://github.com/fixture/renamed-owner',
+          },
+          resource: { kind },
+        })
+        expect(current.actions.find((action) => action.id === 'open-source')).toMatchObject({
+          kind: 'external-link',
+          href: 'https://github.com/fixture/renamed-owner',
+        })
+        if (current.resource.kind === 'retained-unavailable')
+          expect(current.resource.lastSuccessful).toMatchObject({
+            observedAt: 10,
+            value: { source: { repositoryId: '101', nameWithOwner: 'fixture/renamed-owner' } },
+          })
+      }
+      expect(test.launches).toEqual([])
+    } finally {
+      await test.stop()
+    }
+  })
+
   // Rejecting a committed replacement by retired-owner timestamps loses real current authority.
   it.each(['success', 'complete absence', 'repository failure'] satisfies OldPoll[])(
     'admits the actual new baseline despite an overlapping old-owner %s at a later Project time',
@@ -640,12 +788,14 @@ describe('RoadmapApplication same-key source binding replacement', () => {
         )
         expect(eligible(committed)).toBe('eligible')
         expect(
-          await test.application.execute({
-            type: 'start-automation-override',
-            expectedConfigurationVersion: 2,
-            target: TARGET,
-            stage: 'classification',
-          }),
+          await test.application.execute(
+            commandSchema.parse({
+              type: 'start-automation-override',
+              expectedConfigurationVersion: 2,
+              target: fixtureTicketRef(TARGET),
+              stage: 'classification',
+            }),
+          ),
         ).toMatchObject({ ok: true })
         expect(test.launches).toHaveLength(1)
         expect(test.launches[0]).toMatchObject({
@@ -735,12 +885,14 @@ describe('RoadmapApplication same-key source binding replacement', () => {
       })
       expect(eligible(committed)).not.toBe('eligible')
       expect(
-        await test.application.execute({
-          type: 'start-automation-override',
-          expectedConfigurationVersion: 2,
-          target: TARGET,
-          stage: 'classification',
-        }),
+        await test.application.execute(
+          commandSchema.parse({
+            type: 'start-automation-override',
+            expectedConfigurationVersion: 2,
+            target: fixtureTicketRef(TARGET),
+            stage: 'classification',
+          }),
+        ),
       ).toMatchObject({ ok: false })
       expect(test.launches).toEqual([])
       for (const state of test.states) decoded(state)

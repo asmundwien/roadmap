@@ -4,10 +4,10 @@ import { open, readFile, rename, unlink } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, normalize } from 'node:path'
 import { z } from 'zod'
 import { CLASSIFICATION_RESULT_SCHEMA_MARKER } from '../application/classification-contract.ts'
-import { type ConfigurationMigrationInput, migrateConfiguration } from '../application/migration.ts'
 import { SESSION_REPORT_SCHEMA_MARKER } from '../application/session-report-contract.ts'
 import type { ProjectConfiguration, ProjectConfigurationIntent } from '../projects/registry.ts'
 import { isRecord } from '../type-guards.ts'
+import { type ConfigurationMigrationInput, migrateConfiguration } from './migration.ts'
 
 interface ConfigurationIssue {
   path: string

@@ -1,29 +1,14 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import type { CredentialBundle } from '../github/connections.ts'
+import {
+  type CredentialBundle,
+  type CredentialVault,
+  CredentialVaultError,
+} from '../authorization/contracts.ts'
 
 const execFileAsync = promisify(execFile)
 const DEFAULT_SERVICE = 'dev.roadmap.github-connection'
 const INDEX_ACCOUNT = '__roadmap_connection_index__'
-
-export interface CredentialVault {
-  read(connectionId: string): Promise<CredentialBundle | null>
-  /** Replaces the complete access/refresh pair as one Keychain password value. */
-  write(connectionId: string, credentials: CredentialBundle): Promise<void>
-  delete(connectionId: string): Promise<void>
-  /** Removes only app-owned records whose Connection no longer exists. */
-  cleanupOrphans(connectionIds: ReadonlySet<string>): Promise<void>
-}
-
-export class CredentialVaultError extends Error {
-  readonly kind: 'invalid' | 'unavailable'
-
-  constructor(kind: 'invalid' | 'unavailable', message: string) {
-    super(message)
-    this.name = 'CredentialVaultError'
-    this.kind = kind
-  }
-}
 
 export interface KeychainPort {
   read(service: string, account: string): Promise<string | null>

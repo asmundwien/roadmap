@@ -1,3 +1,4 @@
+import type { TicketId, TicketRef } from '@roadmap/contracts/identity'
 import type {
   AutomationEvidence,
   AutomationOverrideControl,
@@ -10,8 +11,8 @@ import type {
   TicketResource,
   TicketResourceResult,
   WayfinderSession,
-} from '@roadmap/contracts'
-import { ticketTypeOf } from '@roadmap/contracts'
+} from '@roadmap/contracts/state'
+import { ticketTypeOf } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 import { Badge } from '@roadmap/ui/badge'
 import { Button } from '@roadmap/ui/button'
@@ -36,50 +37,46 @@ type TicketValue = Extract<
 >['observation']['value']
 
 function automationEvidenceFor(
-  ticket: TicketResource['key'],
+  ticket: TicketResource['ref'],
   evidence: readonly AutomationEvidence[],
 ): AutomationEvidence | undefined {
   return evidence.find(
     (candidate) =>
-      candidate.target.project.integration === ticket.map.project.integration &&
-      candidate.target.project.id === ticket.map.project.id &&
-      candidate.target.mapId === ticket.map.mapId &&
+      candidate.target.map.project.integration === ticket.map.project.integration &&
+      candidate.target.map.project.projectId === ticket.map.project.projectId &&
+      candidate.target.map.mapId === ticket.map.mapId &&
       candidate.target.ticketId === ticket.ticketId,
   )
 }
 
 export type TicketModalProps = {
-  map: MapResource
-  ticketId: string | null
+  map: MapResource | null
+  selected: TicketRef | null
   onClose: () => void
-  onOpenTicket: (id: string) => void
+  onOpenTicket: (id: TicketId) => void
   onOpenMap: () => void
 }
 
-export function TicketModal({ map, ticketId, onClose, onOpenTicket, onOpenMap }: TicketModalProps) {
+export function TicketModal({ map, selected, onClose, onOpenTicket, onOpenMap }: TicketModalProps) {
   const roadmap = useRoadmap()
-  const ticket = map.tickets.find((item) => item.key.ticketId === ticketId)
+  const ticket = map?.tickets.find((item) => item.ref.ticketId === selected?.ticketId)
   const content = ticket === undefined ? null : resourceObservation(ticket.resource)?.value
 
   return (
     <Modal
-      open={ticketId !== null}
+      open={selected !== null}
       onClose={onClose}
-      title={content?.title ?? content?.displayId ?? ticketId ?? 'Ticket'}
+      title={content?.title ?? content?.displayId ?? selected?.ticketId ?? 'Ticket'}
       className={cx('modal')}
     >
-      {ticket === undefined ? (
-        ticketId !== null && (
+      {ticket === undefined || map === null ? (
+        selected !== null && (
           <>
             <Alert variant="info">
-              Ticket {ticketId} has no known resource in this map. No other ticket has been
+              Ticket {selected.ticketId} has no known resource in this map. No other ticket has been
               selected.
             </Alert>
-            <TicketAutomation
-              roadmap={roadmap}
-              ticket={{ map: map.key, ticketId }}
-              tracker={undefined}
-            />
+            <TicketAutomation roadmap={roadmap} ticket={selected} tracker={undefined} />
           </>
         )
       ) : (
@@ -87,10 +84,10 @@ export function TicketModal({ map, ticketId, onClose, onOpenTicket, onOpenMap }:
           <Alert variant="info">Ticket source. {resourceMessage(ticket.resource)}</Alert>
           <TicketContent
             key={JSON.stringify([
-              map.key.project.integration,
-              map.key.project.id,
-              map.key.mapId,
-              ticket.key.ticketId,
+              map.ref.project.integration,
+              map.ref.project.projectId,
+              map.ref.mapId,
+              ticket.ref.ticketId,
             ])}
             map={map}
             ticketResource={ticket}
@@ -113,7 +110,7 @@ type TicketContentProps = {
   map: MapResource
   ticketResource: TicketResource
   roadmap: AutomationViewState
-  onOpenTicket: (id: string) => void
+  onOpenTicket: (id: TicketId) => void
   onOpenMap: () => void
 }
 
@@ -126,7 +123,7 @@ function TicketContent({
 }: TicketContentProps) {
   const ticket = resourceObservation(ticketResource.resource)?.value
   if (ticket === undefined) {
-    return <TicketAutomation roadmap={roadmap} ticket={ticketResource.key} tracker={undefined} />
+    return <TicketAutomation roadmap={roadmap} ticket={ticketResource.ref} tracker={undefined} />
   }
   const type = ticketTypeOf(ticket.typeEvidence)
   const stateMeta = TICKET_STATE_META[ticket.state]
@@ -143,7 +140,7 @@ function TicketContent({
   return (
     <div className={cx('content')}>
       <div className={cx('identity')}>
-        <span>{ticket.displayId ?? ticketResource.key.ticketId}</span>
+        <span>{ticket.displayId ?? ticketResource.ref.ticketId}</span>
         <Badge>{type}</Badge>
         <Badge variant={stateMeta.variant}>
           <TicketMark state={ticket.state} type={type} size="small" />
@@ -224,7 +221,7 @@ function TicketContent({
           {warning}
         </Alert>
       ))}
-      <TicketAutomation roadmap={roadmap} ticket={ticketResource.key} tracker={ticket} />
+      <TicketAutomation roadmap={roadmap} ticket={ticketResource.ref} tracker={ticket} />
     </div>
   )
 }
@@ -232,32 +229,37 @@ function TicketContent({
 type BlockerItemProps = {
   map: MapResource
   blocker: Blocker
-  onOpenTicket: (id: string) => void
+  onOpenTicket: (id: TicketId) => void
 }
 
 function BlockerItem({ map, blocker, onOpenTicket }: BlockerItemProps) {
   const { reference } = blocker
   const local =
     reference.kind === 'registered' &&
-    reference.project.integration === map.key.project.integration &&
-    reference.project.id === map.key.project.id
-      ? map.tickets.find((ticket) => ticket.key.ticketId === blocker.ticketId)
+    reference.ticket.map.project.integration === map.ref.project.integration &&
+    reference.ticket.map.project.projectId === map.ref.project.projectId &&
+    reference.ticket.map.mapId === map.ref.mapId
+      ? map.tickets.find((ticket) => ticket.ref.ticketId === reference.ticket.ticketId)
       : undefined
   const scope =
     reference.kind === 'registered'
-      ? `${reference.project.integration}:${reference.project.id}`
+      ? `${reference.ticket.map.project.integration}:${reference.ticket.map.project.projectId}`
       : reference.kind === 'external'
         ? `${reference.integration}:${reference.nameWithOwner}`
         : reference.locator
-  const identity = blocker.displayId ?? blocker.ticketId
+  const identity =
+    blocker.displayId ??
+    (blocker.reference.kind === 'registered'
+      ? blocker.reference.ticket.ticketId
+      : blocker.reference.ticketId)
   const localContent = local === undefined ? null : resourceObservation(local.resource)?.value
   const title = blocker.title ?? identity
 
   if (local !== undefined) {
     return (
       <div className={cx('blocker')}>
-        <Button size="small" onClick={() => onOpenTicket(local.key.ticketId)}>
-          {localContent?.title ?? localContent?.displayId ?? local.key.ticketId}
+        <Button size="small" onClick={() => onOpenTicket(local.ref.ticketId)}>
+          {localContent?.title ?? localContent?.displayId ?? local.ref.ticketId}
         </Button>
         {localContent && (
           <Badge variant={TICKET_STATE_META[localContent.state].variant}>
@@ -295,16 +297,16 @@ function BlockerItem({ map, blocker, onOpenTicket }: BlockerItemProps) {
 
 type TicketAutomationProps = {
   roadmap: AutomationViewState
-  ticket: TicketResource['key']
+  ticket: TicketResource['ref']
   tracker: TicketValue | undefined
 }
 
 function TicketAutomation({ roadmap, ticket, tracker }: TicketAutomationProps) {
   const control = roadmap.automation.overrides.find(
     (item) =>
-      item.target.project.integration === ticket.map.project.integration &&
-      item.target.project.id === ticket.map.project.id &&
-      item.target.mapId === ticket.map.mapId &&
+      item.target.map.project.integration === ticket.map.project.integration &&
+      item.target.map.project.projectId === ticket.map.project.projectId &&
+      item.target.map.mapId === ticket.map.mapId &&
       item.target.ticketId === ticket.ticketId,
   )
   const evidence = automationEvidenceFor(ticket, roadmap.automation.evidence)
@@ -323,7 +325,7 @@ type AutomationSectionProps = {
   roadmap: AutomationViewState
   control: AutomationOverrideControl | undefined
   evidence: AutomationEvidence | undefined
-  ticket: TicketResource['key']
+  ticket: TicketResource['ref']
   tracker: TicketValue | undefined
 }
 
@@ -346,7 +348,7 @@ function AutomationSection({
       const outcome = await roadmap.execute({
         type: 'start-automation-override',
         expectedConfigurationVersion: roadmap.configurationVersion,
-        target: { project: ticket.map.project, mapId: ticket.map.mapId, ticketId: ticket.ticketId },
+        target: ticket,
         stage,
       })
       setFeedback(

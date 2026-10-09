@@ -1,4 +1,20 @@
-import type { ApplicationState, Connection, ProjectKey } from '@roadmap/contracts'
+import type { ProjectRef } from '@roadmap/contracts/identity'
+import {
+  actionIdSchema,
+  configurationVersionSchema,
+  connectionIdSchema,
+  mapIdSchema,
+  projectIdSchema,
+  serverEpochSchema,
+  stateSequenceSchema,
+  ticketIdSchema,
+} from '@roadmap/contracts/identity'
+import {
+  type Connection,
+  connectionSchema,
+  type ReadyApplicationState,
+  readyApplicationStateSchema,
+} from '@roadmap/contracts/state'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router'
@@ -17,13 +33,14 @@ const github = {
   authorizationsUrl: 'https://github.com/settings/applications',
 } as const
 
-function renderConnections(state: ApplicationState): string {
+function renderConnections(state: ReadyApplicationState): string {
+  const validatedState = readyApplicationStateSchema.parse(state)
   const store: RoadmapStore = {
     subscribe: () => () => undefined,
     getSnapshot: () => ({
       transport: 'live',
       synchronization: 'synchronized',
-      state,
+      state: validatedState,
       command: { inFlight: false, error: null },
     }),
     start: () => () => undefined,
@@ -43,14 +60,16 @@ function renderConnections(state: ApplicationState): string {
   )
 }
 
-function state(connections: Connection[]): ApplicationState {
+function state(connections: Connection[]): ReadyApplicationState {
   return {
-    serverEpoch: 'test',
-    stateSequence: 1,
-    configurationVersion: 1,
+    phase: 'ready',
+    mode: 'mutable',
+    serverEpoch: serverEpochSchema.parse('test'),
+    stateSequence: stateSequenceSchema.parse(1),
+    configurationVersion: configurationVersionSchema.parse(1),
     supportedIntegrations: [github],
     connections,
-    registrations: [],
+
     projects: [],
     authorizationOperations: [],
     configuration: { valid: true, issues: [], notices: [] },
@@ -61,7 +80,7 @@ function state(connections: Connection[]): ApplicationState {
       evidence: [],
       overrides: [],
     },
-    roadmap: { capturedAt: 0 },
+    capturedAt: 0,
   }
 }
 
@@ -86,29 +105,56 @@ describe('ConnectionSettings', () => {
     },
   )
 
-  it.each<{ key: ProjectKey; acknowledged: boolean; needsReview: boolean }>([
-    { key: { integration: 'local', id: 'shared' }, acknowledged: false, needsReview: true },
-    { key: { integration: 'local', id: 'shared' }, acknowledged: true, needsReview: false },
-    { key: { integration: 'local', id: 'other' }, acknowledged: false, needsReview: false },
-    { key: { integration: 'github', id: 'shared' }, acknowledged: false, needsReview: false },
+  it.each<{ key: ProjectRef; acknowledged: boolean; needsReview: boolean }>([
+    {
+      key: { integration: 'local', projectId: projectIdSchema.parse('shared') },
+      acknowledged: false,
+      needsReview: true,
+    },
+    {
+      key: { integration: 'local', projectId: projectIdSchema.parse('shared') },
+      acknowledged: true,
+      needsReview: false,
+    },
+    {
+      key: { integration: 'local', projectId: projectIdSchema.parse('other') },
+      acknowledged: false,
+      needsReview: false,
+    },
+    {
+      key: { integration: 'github', projectId: projectIdSchema.parse('shared') },
+      acknowledged: false,
+      needsReview: false,
+    },
   ])(
     'requires review only for the matching unacknowledged project: $key',
     ({ key, acknowledged, needsReview }) => {
       const initial = state([
-        {
-          id: 'connection',
-          integration: key.integration,
-          name: 'Connection',
-          builtIn: key.integration === 'local',
-          availability: { status: 'available' },
-        },
+        connectionSchema.parse(
+          key.integration === 'local'
+            ? {
+                id: connectionIdSchema.parse('connection'),
+                integration: 'local',
+                name: 'Connection',
+                builtIn: true,
+                availability: { status: 'available' },
+              }
+            : {
+                id: connectionIdSchema.parse('connection'),
+                integration: 'github',
+                name: 'Connection',
+                builtIn: false,
+                githubIdentity: { id: 'fixture-account', login: 'fixture' },
+                availability: { status: 'available' },
+              },
+        ),
       ])
       const markup = renderConnections({
         ...initial,
         projects: [
           {
             ...neverReadProject(key, 'Project'),
-            connectionId: 'connection',
+            connectionId: connectionIdSchema.parse('connection'),
           },
         ],
         automation: {
@@ -118,11 +164,18 @@ describe('ConnectionSettings', () => {
           evidence: [
             {
               target: {
-                project: { integration: 'local', id: 'shared' },
-                mapId: 'map',
-                ticketId: 'ticket',
+                map: {
+                  project: { integration: 'local', projectId: projectIdSchema.parse('shared') },
+                  mapId: mapIdSchema.parse('map'),
+                },
+                ticketId: ticketIdSchema.parse('ticket'),
               },
-              classification: { status: 'running', admission: 'automatic' },
+              classification: {
+                status: 'completed',
+                admission: 'automatic',
+                processResult: { status: 'exited', code: 0 },
+                verdict: { value: 'afk', reason: 'Recorded AFK evidence.' },
+              },
               wayfinder: {
                 status: 'outcome-unknown',
                 admission: 'automatic',
@@ -147,14 +200,15 @@ describe('ConnectionSettings', () => {
     const markup = renderConnections(
       state([
         {
-          id: 'github/work',
+          id: connectionIdSchema.parse('github/work'),
           integration: 'github',
           name: 'Work',
           builtIn: false,
+          githubIdentity: { id: 'account-1', login: 'test-account' },
           availability: { status: 'available' },
         },
         {
-          id: 'local',
+          id: connectionIdSchema.parse('local'),
           integration: 'local',
           name: 'Local files',
           builtIn: true,
@@ -168,7 +222,7 @@ describe('ConnectionSettings', () => {
   it('offers separate roadmap and registration destinations for a connection project', () => {
     const initial = state([
       {
-        id: 'local',
+        id: connectionIdSchema.parse('local'),
         integration: 'local',
         name: 'Local files',
         builtIn: true,
@@ -179,11 +233,29 @@ describe('ConnectionSettings', () => {
       ...initial,
       projects: [
         {
-          ...neverReadProject({ integration: 'local', id: 'my workspace' }, 'My workspace'),
+          ...neverReadProject(
+            { integration: 'local', projectId: projectIdSchema.parse('my workspace') },
+            'My workspace',
+          ),
           actions: [
-            { id: 'open-workspace', label: 'Open in VS Code', kind: 'server-launch' },
-            { id: 'reveal-source', label: 'View source folder', kind: 'server-launch' },
-            { id: 'open-terminal', label: 'Open Terminal', kind: 'server-launch' },
+            {
+              id: actionIdSchema.parse('open-workspace'),
+              label: 'Open in VS Code',
+              kind: 'server-launch',
+              operation: 'open-workspace',
+            },
+            {
+              id: actionIdSchema.parse('reveal-source'),
+              label: 'View source folder',
+              kind: 'server-launch',
+              operation: 'reveal-source',
+            },
+            {
+              id: actionIdSchema.parse('open-terminal'),
+              label: 'Open Terminal',
+              kind: 'server-launch',
+              operation: 'open-terminal',
+            },
           ],
         },
       ],
@@ -198,10 +270,11 @@ describe('ConnectionSettings', () => {
   it('offers source folder controls on GitHub projects as well as local projects', () => {
     const initial = state([
       {
-        id: 'github',
+        id: connectionIdSchema.parse('github'),
         integration: 'github',
         name: 'GitHub',
         builtIn: false,
+        githubIdentity: { id: 'account-1', login: 'test-account' },
         availability: { status: 'available' },
       },
     ])
@@ -209,13 +282,31 @@ describe('ConnectionSettings', () => {
       ...initial,
       projects: [
         {
-          ...neverReadProject({ integration: 'github', id: 'acme/app' }, 'App'),
+          ...neverReadProject(
+            { integration: 'github', projectId: projectIdSchema.parse('acme/app') },
+            'App',
+          ),
           actions: [
-            { id: 'open-workspace', label: 'Open in VS Code', kind: 'server-launch' },
-            { id: 'reveal-source', label: 'View source folder', kind: 'server-launch' },
-            { id: 'open-terminal', label: 'Open Terminal', kind: 'server-launch' },
             {
-              id: 'open-source',
+              id: actionIdSchema.parse('open-workspace'),
+              label: 'Open in VS Code',
+              kind: 'server-launch',
+              operation: 'open-workspace',
+            },
+            {
+              id: actionIdSchema.parse('reveal-source'),
+              label: 'View source folder',
+              kind: 'server-launch',
+              operation: 'reveal-source',
+            },
+            {
+              id: actionIdSchema.parse('open-terminal'),
+              label: 'Open Terminal',
+              kind: 'server-launch',
+              operation: 'open-terminal',
+            },
+            {
+              id: actionIdSchema.parse('open-source'),
               label: 'Open on GitHub',
               kind: 'external-link',
               href: 'https://github.com/acme/app',

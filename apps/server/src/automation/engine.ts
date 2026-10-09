@@ -1,10 +1,3 @@
-import { type ChildProcess, spawn } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
-import type {
-  AutomationEvidence as PublicAutomationEvidence,
-  AutomationOverrideControl as PublicAutomationOverrideControl,
-  SafeError,
-} from '@roadmap/contracts'
 import {
   CLASSIFICATION_RESULT_SCHEMA_MARKER,
   classificationResultSchemaJson,
@@ -36,6 +29,7 @@ import {
 import type {
   AutomationAdmission,
   AutomationEvidence,
+  AutomationFailure,
   AutomationOverrideAvailability,
   AutomationOverrideControl,
   AutomationOverrideStage,
@@ -45,9 +39,7 @@ import type {
   SessionReportEvidence,
 } from './model.ts'
 
-const PROMPT_MARKER = '{{roadmap.prompt}}'
 const STDOUT_LIMIT = 16 * 1024
-const STDERR_LIMIT = 64 * 1024
 const RESTART_UNKNOWN_REASON = 'Roadmap restarted before this attempt recorded a terminal result.'
 const STOP_UNKNOWN_REASON = 'Roadmap stopped before this Session recorded a terminal result.'
 const STOP_CLASSIFICATION_REASON =
@@ -90,16 +82,16 @@ export interface AutomationLauncher {
 
 export interface AutomationEngine {
   start(): Promise<void>
-  evidence(): PublicAutomationEvidence[]
-  overrides(): PublicAutomationOverrideControl[]
+  evidence(): readonly AutomationEvidence[]
+  overrides(): AutomationOverrideControl[]
   interruptedProjects(): ProjectKey[]
   acknowledgeProjectInterruption(
     project: ProjectKey,
-  ): Promise<{ ok: true } | { ok: false; error: SafeError }>
+  ): Promise<{ ok: true } | { ok: false; error: AutomationFailure }>
   startOverride(
     target: AutomationTarget,
     stage: AutomationOverrideStage,
-  ): Promise<{ ok: true } | { ok: false; error: SafeError }>
+  ): Promise<{ ok: true } | { ok: false; error: AutomationFailure }>
   reconcile(): void
   stop(): Promise<void>
 }
@@ -244,7 +236,7 @@ export function createAutomationEngine(options: {
     const initial = prepareLaunch(target, 'classification', admission)
     if (!initial.ok) return { kind: 'rejected', reason: initial.reason }
     const { candidate, command } = initial.prepared
-    const opportunity: AutomationOpportunity = { id: randomUUID(), target }
+    const opportunity: AutomationOpportunity = { id: crypto.randomUUID(), target }
     const startedEvent = {
       ...eventIdentity(opportunity.id),
       type: 'classification-started',
@@ -713,15 +705,18 @@ export function createAutomationEngine(options: {
 
   function acknowledgeProjectInterruption(
     project: ProjectKey,
-  ): Promise<{ ok: true } | { ok: false; error: SafeError }> {
+  ): Promise<{ ok: true } | { ok: false; error: AutomationFailure }> {
     return enqueue(async () => {
       if (phase !== 'ready') {
-        return { ok: false, error: overrideError('Automation is not ready.', 'not-supported') }
+        return { ok: false, error: automationFailure('Automation is not ready.', 'not-ready') }
       }
       if (persistenceFailure) {
         return {
           ok: false,
-          error: overrideError('Automation evidence could not be persisted.', 'persistence-failed'),
+          error: automationFailure(
+            'Automation evidence could not be persisted.',
+            'persistence-failed',
+          ),
         }
       }
       const interruptions = [...records.values()].flatMap((record) => {
@@ -746,7 +741,7 @@ export function createAutomationEngine(options: {
         ? { ok: true }
         : {
             ok: false,
-            error: overrideError(
+            error: automationFailure(
               'Automation evidence could not be persisted.',
               'persistence-failed',
             ),
@@ -757,14 +752,14 @@ export function createAutomationEngine(options: {
   function startOverride(
     target: AutomationTarget,
     stage: AutomationOverrideStage,
-  ): Promise<{ ok: true } | { ok: false; error: SafeError }> {
+  ): Promise<{ ok: true } | { ok: false; error: AutomationFailure }> {
     return enqueue(() => startOverrideNow(target, stage))
   }
 
   async function startOverrideNow(
     target: AutomationTarget,
     stage: AutomationOverrideStage,
-  ): Promise<{ ok: true } | { ok: false; error: SafeError }> {
+  ): Promise<{ ok: true } | { ok: false; error: AutomationFailure }> {
     const result =
       stage === 'classification'
         ? await beginClassification(target, 'override')
@@ -777,8 +772,8 @@ export function createAutomationEngine(options: {
       ok: false,
       error:
         result.kind === 'persistence-failed'
-          ? overrideError('Automation evidence could not be persisted.', 'persistence-failed')
-          : overrideError(result.reason),
+          ? automationFailure('Automation evidence could not be persisted.', 'persistence-failed')
+          : automationFailure(result.reason),
     }
   }
 
@@ -874,8 +869,8 @@ export function createAutomationEngine(options: {
       }
       return startTask
     },
-    evidence: () => currentEvidence.map(publicEvidence),
-    overrides: () => overrideControls().map(publicOverride),
+    evidence: () => currentEvidence,
+    overrides: () => overrideControls(),
     interruptedProjects() {
       const projects = new Map<string, ProjectKey>()
       for (const record of records.values()) {
@@ -991,55 +986,6 @@ function pendingIneligibility(
     }
   }
   return null
-}
-
-function publicEvidence(evidence: AutomationEvidence): PublicAutomationEvidence {
-  const classification = evidence.classification
-  const publicClassification: PublicAutomationEvidence['classification'] =
-    classification.status === 'completed'
-      ? {
-          ...classification,
-          processResult: { ...classification.processResult },
-          verdict: { ...classification.verdict },
-        }
-      : classification.status === 'failed'
-        ? { ...classification, processResult: { ...classification.processResult } }
-        : { ...classification }
-  const wayfinder = evidence.wayfinder
-  const publicWayfinder: PublicAutomationEvidence['wayfinder'] =
-    wayfinder?.status === 'finished'
-      ? {
-          ...wayfinder,
-          processResult: { ...wayfinder.processResult },
-          report:
-            wayfinder.report.status === 'received'
-              ? { status: 'received', report: { ...wayfinder.report.report } }
-              : { ...wayfinder.report },
-        }
-      : wayfinder
-        ? { ...wayfinder }
-        : undefined
-  return {
-    target: {
-      project: { ...evidence.target.project },
-      mapId: evidence.target.mapId,
-      ticketId: evidence.target.ticketId,
-    },
-    classification: publicClassification,
-    ...(publicWayfinder ? { wayfinder: publicWayfinder } : {}),
-  }
-}
-
-function publicOverride(control: AutomationOverrideControl): PublicAutomationOverrideControl {
-  return {
-    target: {
-      project: { ...control.target.project },
-      mapId: control.target.mapId,
-      ticketId: control.target.ticketId,
-    },
-    classification: { ...control.classification },
-    wayfinder: { ...control.wayfinder },
-  }
 }
 
 function selectCandidates(source: ResourceCatalogSnapshot | null): Candidate[] {
@@ -1191,8 +1137,11 @@ function ineligible(reason: string): AutomationOverrideAvailability {
   return { status: 'ineligible', reason }
 }
 
-function overrideError(message: string, code: SafeError['code'] = 'validation'): SafeError {
-  return { code, message, field: 'target' }
+function automationFailure(
+  reason: string,
+  kind: AutomationFailure['kind'] = 'ineligible',
+): AutomationFailure {
+  return { kind, reason }
 }
 
 function isEffectivelyEnabled(
@@ -1211,7 +1160,7 @@ function launchRequest(
   kind: 'classification' | 'wayfinder',
 ): AutomationLaunch {
   const environment: Record<string, string> = {
-    ROADMAP_RUN_ID: randomUUID(),
+    ROADMAP_RUN_ID: crypto.randomUUID(),
     ROADMAP_RUN_KIND: kind,
     ROADMAP_PROJECT_KEY: projectKey(candidate.target.project),
     ROADMAP_MAP_ID: candidate.target.mapId,
@@ -1315,7 +1264,7 @@ function eventIdentity(opportunityId: string): {
   opportunityId: string
   recordedAt: string
 } {
-  return { id: randomUUID(), opportunityId, recordedAt: new Date().toISOString() }
+  return { id: crypto.randomUUID(), opportunityId, recordedAt: new Date().toISOString() }
 }
 
 function classificationEvent(
@@ -1372,165 +1321,10 @@ function recoveryEvents(records: Iterable<AutomationRecord>): AutomationEvent[] 
   return events
 }
 
-export function createAutomationLauncher(
-  options: { stopGraceMs?: number } = {},
-): AutomationLauncher {
-  const stopGraceMs = options.stopGraceMs ?? 1_000
-  return {
-    classify(request) {
-      const child = spawnCommand(request, ['pipe', 'pipe'])
-      const stdout = boundedCapture(child.stdout, STDOUT_LIMIT, false)
-      boundedCapture(child.stderr, STDERR_LIMIT, true)
-      let launchError: string | null = null
-      let closed = false
-      const { promise: completed, resolve } = Promise.withResolvers<ClassificationProcessResult>()
-      child.once('error', (error) => {
-        launchError = processError(error, 'Classification Harness Command')
-      })
-      child.once('close', (code, signal) => {
-        closed = true
-        resolve(
-          launchError
-            ? { status: 'launch-failed', reason: launchError }
-            : {
-                status: 'finished',
-                code,
-                signal,
-                stdout: stdout.text(),
-                stdoutOversized: stdout.truncated(),
-              },
-        )
-      })
-      deliverStdin(child, request)
-      return {
-        completed,
-        async stop() {
-          if (closed) return
-          signalOwnedProcess(child, 'SIGTERM')
-          await Promise.race([completed, delay(stopGraceMs)])
-          if (!closed) signalOwnedProcess(child, 'SIGKILL')
-          await completed
-        },
-      }
-    },
-    dispatch(request) {
-      const child = spawnCommand(request, ['pipe', 'pipe'])
-      const stdout = boundedCapture(child.stdout, STDOUT_LIMIT, false)
-      boundedCapture(child.stderr, STDERR_LIMIT, true)
-      const {
-        promise: launched,
-        resolve: resolveLaunched,
-        reject: rejectLaunched,
-      } = Promise.withResolvers<WayfinderProcess>()
-      const { promise: completed, resolve: resolveCompleted } =
-        Promise.withResolvers<WayfinderProcessResult>()
-      child.once('error', (error) => {
-        rejectLaunched(new Error(processError(error, 'Wayfinder Session Command')))
-      })
-      child.once('spawn', () => {
-        child.unref()
-        unrefReadable(child.stdout)
-        unrefReadable(child.stderr)
-        resolveLaunched({ completed })
-      })
-      child.once('close', (code, signal) => {
-        resolveCompleted({
-          status: 'finished',
-          code,
-          signal,
-          stdout: stdout.text(),
-          stdoutOversized: stdout.truncated(),
-        })
-      })
-      deliverStdin(child, request)
-      return launched
-    },
-  }
-}
-
-function spawnCommand(
-  request: AutomationLaunch,
-  output: ['pipe' | 'ignore', 'pipe' | 'ignore'],
-): ChildProcess {
-  const args = request.command.args.map((argument) =>
-    argument === PROMPT_MARKER ? request.prompt : argument,
-  )
-  return spawn(request.command.command, args, {
-    cwd: request.workspace,
-    detached: true,
-    env: { ...process.env, ...request.environment },
-    shell: false,
-    stdio: [request.command.promptDelivery === 'stdin' ? 'pipe' : 'ignore', ...output],
-  })
-}
-
-function deliverStdin(child: ChildProcess, request: AutomationLaunch): void {
-  if (request.command.promptDelivery !== 'stdin') return
-  child.stdin?.on('error', () => undefined)
-  child.stdin?.end(request.prompt, 'utf8')
-}
-function unrefReadable(stream: NodeJS.ReadableStream | null): void {
-  if (stream && 'unref' in stream && typeof stream.unref === 'function') stream.unref()
-}
-
-function boundedCapture(
-  stream: NodeJS.ReadableStream | null,
-  limit: number,
-  keepTail: boolean,
-): { text(): string; truncated(): boolean } {
-  let chunks: Buffer[] = []
-  let size = 0
-  let wasTruncated = false
-  stream?.on('data', (value: unknown) => {
-    const chunk = Buffer.isBuffer(value) ? value : Buffer.from(String(value))
-    if (keepTail) {
-      const combined = Buffer.concat([...chunks, chunk])
-      wasTruncated ||= combined.length > limit
-      const kept = combined.subarray(Math.max(0, combined.length - limit))
-      chunks = [kept]
-      size = kept.length
-      return
-    }
-    if (size >= limit) {
-      wasTruncated = true
-      return
-    }
-    const kept = chunk.subarray(0, limit - size)
-    chunks.push(kept)
-    size += kept.length
-    if (kept.length < chunk.length) wasTruncated = true
-  })
-  return {
-    text: () => Buffer.concat(chunks, size).toString('utf8'),
-    truncated: () => wasTruncated,
-  }
-}
-
-function signalOwnedProcess(child: ChildProcess, signal: NodeJS.Signals): void {
-  try {
-    if (child.pid !== undefined) process.kill(-child.pid, signal)
-    else child.kill(signal)
-  } catch {
-    // ESRCH means the owned process group already exited; `close` remains authoritative.
-  }
-}
-
-function processError(error: Error & { code?: string }, commandName: string): string {
-  return error.code
-    ? `The ${commandName} could not be launched (${error.code}).`
-    : `The ${commandName} could not be launched.`
-}
-
 function projectKey(project: ProjectKey): string {
   return `${project.integration}:${project.id}`
 }
 
 function sameProject(left: ProjectKey, right: ProjectKey): boolean {
   return left.integration === right.integration && left.id === right.id
-}
-
-function delay(ms: number): Promise<void> {
-  const { promise, resolve } = Promise.withResolvers<void>()
-  setTimeout(resolve, ms)
-  return promise
 }

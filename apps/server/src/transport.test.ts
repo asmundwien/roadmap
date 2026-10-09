@@ -10,17 +10,27 @@ import {
 } from 'node:http'
 import { createConnection, type Socket } from 'node:net'
 import { inspect } from 'node:util'
-import type {
-  ApplicationState,
-  Command,
-  CommandOutcome,
-  ProjectRegistration,
-  Query,
-  QueryResult,
-  RegisteredProject,
-} from '@roadmap/contracts'
-import { commandResultEnvelopeCodec, stateEnvelopeCodec } from '@roadmap/contracts/codecs'
-import { decodeCommandEnvelope, decodeQueryEnvelope } from '@roadmap/contracts/wire'
+import {
+  type Command,
+  type CommandOutcome,
+  commandOutcomeSchema,
+  commandResultSchema,
+  type Query,
+  type QueryResult,
+  queryResultSchema,
+} from '@roadmap/contracts/operations'
+import {
+  type ApplicationState,
+  projectSchema,
+  type ReadyApplicationState,
+  readyApplicationStateSchema,
+} from '@roadmap/contracts/state'
+import {
+  decodeCommandEnvelope,
+  decodeCommandResultEnvelope,
+  decodeQueryEnvelope,
+  decodeStateEnvelope,
+} from '@roadmap/contracts/wire'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WebSocket } from 'ws'
 import type { RoadmapApplication } from './application/application.ts'
@@ -45,14 +55,16 @@ const VALID_COMMAND = {
   },
 }
 
-function state(stateSequence: number, serverEpoch = 'epoch-a'): ApplicationState {
-  return {
+function state(stateSequence: number, serverEpoch = 'epoch-a'): ReadyApplicationState {
+  return readyApplicationStateSchema.parse({
+    phase: 'ready',
+    mode: 'mutable',
+    capturedAt: stateSequence * 1000,
     serverEpoch,
     stateSequence,
     configurationVersion: 1,
     supportedIntegrations: [],
     connections: [],
-    registrations: [],
     projects: [],
     authorizationOperations: [],
     configuration: { valid: true, issues: [], notices: [] },
@@ -63,20 +75,20 @@ function state(stateSequence: number, serverEpoch = 'epoch-a'): ApplicationState
       evidence: [],
       overrides: [],
     },
-    roadmap: { capturedAt: stateSequence * 1000 },
-  }
+  })
 }
 
-function resourceState(stateSequence: number): ApplicationState {
-  const registration: ProjectRegistration = {
-    key: { integration: 'local', id: 'project/%2F:opaque' },
+function resourceState(stateSequence: number): ReadyApplicationState {
+  const registration = {
+    integration: 'local',
+    ref: { integration: 'local', projectId: 'project/%2F:opaque' },
     connectionId: 'local',
-    locator: { integration: 'local', path: '/disposable-transport-fixture' },
-    workspace: { path: '/disposable-transport-fixture' },
+    source: { integration: 'local', path: '/disposable-transport-fixture' },
+    management: {},
   }
-  const mapKey = { project: registration.key, mapId: 'map/%2F:opaque' }
+  const mapKey = { project: registration.ref, mapId: 'map/%2F:opaque' }
   const ticketKey = { map: mapKey, ticketId: 'ticket/%2F:opaque' }
-  const project: RegisteredProject = {
+  const project = projectSchema.parse({
     ...registration,
     name: 'Transport fixture',
     managementWarnings: [],
@@ -84,7 +96,7 @@ function resourceState(stateSequence: number): ApplicationState {
     resource: {
       kind: 'current-readable',
       observation: {
-        scope: { kind: 'project', project: registration.key },
+        scope: { kind: 'project', project: registration.ref },
         attemptedAt: 100,
         observedAt: 100,
         provenance: {
@@ -103,7 +115,7 @@ function resourceState(stateSequence: number): ApplicationState {
     mapsMembership: {
       kind: 'current-complete',
       observation: {
-        scope: { kind: 'maps-membership', project: registration.key },
+        scope: { kind: 'maps-membership', project: registration.ref },
         attemptedAt: 100,
         observedAt: 100,
         provenance: {
@@ -117,7 +129,8 @@ function resourceState(stateSequence: number): ApplicationState {
     },
     maps: [
       {
-        key: mapKey,
+        ref: mapKey,
+        frontier: [ticketKey],
         resource: {
           kind: 'current-readable',
           observation: {
@@ -168,7 +181,7 @@ function resourceState(stateSequence: number): ApplicationState {
         },
         tickets: [
           {
-            key: ticketKey,
+            ref: ticketKey,
             resource: {
               kind: 'current-readable',
               observation: {
@@ -204,10 +217,10 @@ function resourceState(stateSequence: number): ApplicationState {
         ],
       },
     ],
-    displayOrder: { openMapIds: [mapKey.mapId], closedMapIds: [] },
-    activeMap: { kind: 'known-current', mapId: mapKey.mapId },
-  }
-  return {
+    displayOrder: { open: [mapKey], closed: [] },
+    activeMap: { kind: 'known-current', ref: mapKey },
+  })
+  return readyApplicationStateSchema.parse({
     ...state(stateSequence),
     connections: [
       {
@@ -218,38 +231,39 @@ function resourceState(stateSequence: number): ApplicationState {
         availability: { status: 'available', observedAt: 100 },
       },
     ],
-    registrations: [registration],
     projects: [project],
-  }
+  })
 }
 
 function expectResourcePayload(
-  snapshot: ApplicationState,
+  input: ApplicationState,
   stateSequence: number,
   contentSequence = stateSequence,
 ): void {
-  expect(snapshot.roadmap).toEqual({ capturedAt: stateSequence * 1000 })
+  if (input.phase !== 'ready') throw new Error('Wire resource payload requires actual ready state.')
+  const snapshot = input
+  expect(snapshot.capturedAt).toBe(stateSequence * 1000)
   const project = snapshot.projects[0]
   if (!project) throw new Error('Missing wire Project resource.')
-  expect(project.key).toEqual({ integration: 'local', id: 'project/%2F:opaque' })
+  expect(project.ref).toEqual({ integration: 'local', projectId: 'project/%2F:opaque' })
   expect(publicProjectObservation(project)?.observedAt).toBe(100)
   const map = publicMapResource(project, 'map/%2F:opaque')
   if (!map) throw new Error('Missing wire map resource.')
-  expect(map.key).toEqual({ project: project.key, mapId: 'map/%2F:opaque' })
+  expect(map.ref).toEqual({ project: project.ref, mapId: 'map/%2F:opaque' })
   expect(publicMapObservation(map)).toMatchObject({
     observedAt: 100,
     value: { title: `Map replacement ${contentSequence}`, body: { raw: '# Transport map' } },
   })
   const ticket = publicTicketResource(map, 'ticket/%2F:opaque')
   if (!ticket) throw new Error('Missing wire ticket resource.')
-  expect(ticket.key).toEqual({ map: map.key, ticketId: 'ticket/%2F:opaque' })
+  expect(ticket.ref).toEqual({ map: map.ref, ticketId: 'ticket/%2F:opaque' })
   expect(publicTicketObservation(ticket)).toMatchObject({
     observedAt: 100,
     value: { body: 'Real ticket prose', source: { kind: 'file' } },
   })
 }
 
-function unsafeResourceState(scope: string): ApplicationState {
+function unsafeResourceState(scope: string): ReadyApplicationState {
   const snapshot = resourceState(1)
   const project = snapshot.projects[0]
   const map = project?.maps[0]
@@ -264,8 +278,8 @@ function unsafeResourceState(scope: string): ApplicationState {
           ? publicTicketObservation(ticket)?.value
           : scope === 'membership'
             ? project.mapsMembership
-            : scope === 'roadmap'
-              ? snapshot.roadmap
+            : scope === 'automation'
+              ? snapshot.automation
               : snapshot
   if (!target) throw new Error('Missing successful fixture content.')
   Object.assign(target, { token: 'never-cross-the-wire' })
@@ -274,7 +288,7 @@ function unsafeResourceState(scope: string): ApplicationState {
 
 interface ApplicationHarness {
   application: RoadmapApplication
-  publish(next: ApplicationState): void
+  publish(next: ReadyApplicationState): void
   query: ReturnType<typeof vi.fn<(query: Query) => Promise<QueryResult>>>
   execute: ReturnType<typeof vi.fn<(command: Command) => Promise<CommandOutcome>>>
 }
@@ -283,24 +297,39 @@ function applicationHarness(initial = state(0)): ApplicationHarness {
   let current = initial
   const listeners = new Set<(value: ApplicationState) => void>()
   const query = vi.fn(
-    async (_request: Query): Promise<QueryResult> => ({
-      ok: true,
-      type: 'workspace-selection',
-    }),
+    async (_request: Query): Promise<QueryResult> =>
+      queryResultSchema.parse({
+        ok: true,
+        type: 'workspace-selection',
+      }),
   )
   const execute = vi.fn(async (_command: Command): Promise<CommandOutcome> => {
-    const next = {
+    const next = readyApplicationStateSchema.parse({
       ...current,
       stateSequence: current.stateSequence + 1,
-      roadmap: { capturedAt: (current.stateSequence + 1) * 1000 },
-    }
+      capturedAt: (current.stateSequence + 1) * 1000,
+    })
     current = next
     for (const listener of listeners) listener(next)
-    return {
-      ok: true,
-      result: { type: 'configuration-updated', configurationVersion: 1 },
-      state: next,
-    }
+    const result = commandResultSchema.parse(
+      _command.type === 'begin-github-authorization' ||
+        _command.type === 'retry-github-authorization'
+        ? { type: 'authorization-started', operationId: 'fixture-authorization' }
+        : _command.type === 'cancel-github-authorization'
+          ? { type: 'authorization-cancelled', operationId: _command.operationId }
+          : _command.type === 'refresh-project'
+            ? { type: 'project-refreshed', project: _command.project }
+            : _command.type === 'launch-action'
+              ? { type: 'action-launched', actionId: _command.actionId }
+              : _command.type === 'start-automation-override'
+                ? {
+                    type: 'automation-override-started',
+                    target: _command.target,
+                    stage: _command.stage,
+                  }
+                : { type: 'configuration-updated', configurationVersion: 1 },
+    )
+    return commandOutcomeSchema.parse({ ok: true, result, state: next })
   })
   return {
     application: {
@@ -390,7 +419,7 @@ async function openSocket(url: string): Promise<{ socket: WebSocket; first: Appl
   const firstMessage = once(socket, 'message')
   await once(socket, 'open')
   const [data] = await firstMessage
-  const decoded = stateEnvelopeCodec.decode(JSON.parse(String(data)) as unknown)
+  const decoded = decodeStateEnvelope(JSON.parse(String(data)) as unknown)
   if (!decoded.ok) throw new Error('invalid state envelope in test')
   return { socket, first: decoded.value.state }
 }
@@ -482,26 +511,26 @@ async function expectRecovery(harness: TransportHarness): Promise<void> {
 
 describe('transport codecs', () => {
   it('decodes the sole keyed resource payload without normalizing opaque identities', () => {
-    const decoded = stateEnvelopeCodec.decode({ type: 'state', state: resourceState(1) })
+    const decoded = decodeStateEnvelope({ type: 'state', state: resourceState(1) })
     expect(decoded.ok).toBe(true)
     if (!decoded.ok) throw new Error('Valid resource state was refused.')
     expectResourcePayload(decoded.value.state, 1)
   })
 
-  it.each(['state', 'project', 'map', 'ticket', 'membership', 'roadmap'])(
+  it.each(['state', 'project', 'map', 'ticket', 'membership', 'automation'])(
     'rejects undeclared secret fields in the %s resource payload',
     (scope) => {
-      expect(stateEnvelopeCodec.decode({ type: 'state', state: resourceState(1) }).ok).toBe(true)
-      expect(
-        stateEnvelopeCodec.decode({ type: 'state', state: unsafeResourceState(scope) }).ok,
-      ).toBe(false)
+      expect(decodeStateEnvelope({ type: 'state', state: resourceState(1) }).ok).toBe(true)
+      expect(decodeStateEnvelope({ type: 'state', state: unsafeResourceState(scope) }).ok).toBe(
+        false,
+      )
     },
   )
 
   it('strictly rejects malformed state, query, command, and result envelopes', () => {
-    expect(
-      stateEnvelopeCodec.decode({ type: 'state', state: { ...state(1), token: 'secret' } }).ok,
-    ).toBe(false)
+    expect(decodeStateEnvelope({ type: 'state', state: { ...state(1), token: 'secret' } }).ok).toBe(
+      false,
+    )
     expect(
       decodeQueryEnvelope({
         type: 'query',
@@ -514,13 +543,14 @@ describe('transport codecs', () => {
         command: {
           type: 'launch-action',
           expectedConfigurationVersion: 1,
+          project: { integration: 'local', projectId: 'fixture' },
           actionId: 'open-workspace',
           executable: '/bin/sh',
         },
       }).ok,
     ).toBe(false)
     expect(
-      commandResultEnvelopeCodec.decode({
+      decodeCommandResultEnvelope({
         type: 'command-result',
         outcome: { ok: true, result: { type: 'action-launched', actionId: 'open' } },
       }).ok,
@@ -530,8 +560,7 @@ describe('transport codecs', () => {
 describe('Automation override transport', () => {
   it('accepts strict stage commands and echoed start results', () => {
     const target = {
-      project: { integration: 'github' as const, id: 'example/project' },
-      mapId: '1',
+      map: { project: { integration: 'github', projectId: 'example/project' }, mapId: '1' },
       ticketId: '2',
     }
     expect(
@@ -546,7 +575,7 @@ describe('Automation override transport', () => {
       }),
     ).toMatchObject({ ok: true })
     expect(
-      commandResultEnvelopeCodec.decode({
+      decodeCommandResultEnvelope({
         type: 'command-result',
         outcome: {
           ok: true,
@@ -623,7 +652,7 @@ describe('createRoadmapTransport', () => {
     const firstReady = once(socket, 'message')
     application.publish(baseline)
     const [data] = await bounded(firstReady)
-    expect(stateEnvelopeCodec.decode(JSON.parse(String(data)))).toMatchObject({
+    expect(decodeStateEnvelope(JSON.parse(String(data)))).toMatchObject({
       ok: true,
       value: { state: { stateSequence: 0 } },
     })
@@ -638,7 +667,7 @@ describe('createRoadmapTransport', () => {
     const nextMessage = once(first.socket, 'message')
     harness.application.publish(resourceState(1))
     const [data] = await nextMessage
-    const decoded = stateEnvelopeCodec.decode(JSON.parse(String(data)) as unknown)
+    const decoded = decodeStateEnvelope(JSON.parse(String(data)) as unknown)
     expect(decoded.ok && decoded.value.state.stateSequence).toBe(1)
     if (!decoded.ok) throw new Error('Invalid resource replacement on the wire.')
     expectResourcePayload(decoded.value.state, 1)
@@ -718,7 +747,7 @@ describe('createRoadmapTransport', () => {
 
     await published
     const response = await responsePromise
-    const decoded = commandResultEnvelopeCodec.decode(response)
+    const decoded = decodeCommandResultEnvelope(response)
     expect(decoded.ok && decoded.value.outcome.state.stateSequence).toBe(1)
     if (!decoded.ok) throw new Error('Invalid command resource state on the wire.')
     expectResourcePayload(decoded.value.outcome.state, 1, 0)
@@ -742,7 +771,7 @@ describe('createRoadmapTransport', () => {
         connectionId: 'one',
       },
     })
-    const decoded = commandResultEnvelopeCodec.decode(await response.json())
+    const decoded = decodeCommandResultEnvelope(await response.json())
     expect(decoded.ok && decoded.value.outcome).toMatchObject({
       ok: false,
       error: { code: 'conflict' },
@@ -944,7 +973,7 @@ describe('createRoadmapTransport', () => {
         command: {
           type: 'repair-project-workspace',
           expectedConfigurationVersion: 1,
-          project: { integration: 'github', id: 'example/project' },
+          project: { integration: 'github', projectId: 'example/project' },
           workspace: { path: '/tmp/project', token: 'input-must-not-leak' },
         },
       },
@@ -1005,7 +1034,7 @@ describe('createRoadmapTransport', () => {
       null,
     )
     expect(command.status).toBe(200)
-    expect(commandResultEnvelopeCodec.decode(await command.json()).ok).toBe(true)
+    expect(decodeCommandResultEnvelope(await command.json()).ok).toBe(true)
     expect(harness.application.query).toHaveBeenCalledOnce()
     expect(harness.application.execute).toHaveBeenCalledOnce()
   })
@@ -1276,18 +1305,20 @@ describe('bounded ingress lifecycle regressions after repair', () => {
     },
   )
 
-  it.each(['state', 'project', 'map', 'ticket', 'membership', 'roadmap'])(
+  it.each(['state', 'project', 'map', 'ticket', 'membership', 'automation'])(
     'refuses unsafe %s output from an admitted command without exposing credentials',
     async (scope) => {
       const diagnostics = vi.spyOn(console, 'error').mockImplementation(() => undefined)
       const application = applicationHarness()
-      expect(stateEnvelopeCodec.decode({ type: 'state', state: resourceState(1) }).ok).toBe(true)
+      expect(decodeStateEnvelope({ type: 'state', state: resourceState(1) }).ok).toBe(true)
       const unsafe = unsafeResourceState(scope)
-      application.execute.mockResolvedValueOnce({
+      const outcome = commandOutcomeSchema.parse({
         ok: true,
         result: { type: 'configuration-updated', configurationVersion: 1 },
-        state: unsafe,
+        state: resourceState(1),
       })
+      outcome.state = unsafe
+      application.execute.mockResolvedValueOnce(outcome)
       const harness = await transportHarness(application)
       const response = await bounded(post(`${harness.httpUrl}/api/command`, VALID_COMMAND))
       const body = await response.text()
@@ -1405,11 +1436,13 @@ describe('bounded ingress lifecycle regressions after repair', () => {
     await bounded(upload.closed)
     expect(await bounded(disconnected)).toBeNull()
     if (complete === undefined) throw new Error('application was not admitted')
-    complete({
-      ok: true,
-      result: { type: 'configuration-updated', configurationVersion: 1 },
-      state: state(1),
-    })
+    complete(
+      commandOutcomeSchema.parse({
+        ok: true,
+        result: { type: 'configuration-updated', configurationVersion: 1 },
+        state: state(1),
+      }),
+    )
     await expectRecovery(harness)
     expect(application.execute).toHaveBeenCalledOnce()
     expect(application.query).toHaveBeenCalledOnce()
@@ -1441,7 +1474,7 @@ describe('bounded ingress lifecycle regressions after repair', () => {
       )
       const response = await bounded(post(`${harness.httpUrl}/api/command`, VALID_COMMAND))
       expect(response.status).toBe(200)
-      expect(commandResultEnvelopeCodec.decode(await response.json()).ok).toBe(true)
+      expect(decodeCommandResultEnvelope(await response.json()).ok).toBe(true)
       await bounded(emitted)
       expect(harness.application.execute).toHaveBeenCalledOnce()
       expect(diagnostics).toHaveBeenCalled()
@@ -1491,11 +1524,11 @@ describe('bounded ingress lifecycle regressions after repair', () => {
       const diagnostics = vi.spyOn(console, 'error').mockImplementation(() => undefined)
       const application = applicationHarness()
       const queryReply: QueryResult = { ok: true, type: 'workspace-selection' }
-      const commandReply: CommandOutcome = {
+      const commandReply = commandOutcomeSchema.parse({
         ok: true,
         result: { type: 'configuration-updated', configurationVersion: 1 },
         state: state(1),
-      }
+      })
       const reply = request === 'query' ? queryReply : commandReply
       Object.defineProperty(reply, 'toJSON', {
         value: () => {

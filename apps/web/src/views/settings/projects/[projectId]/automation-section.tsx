@@ -1,4 +1,5 @@
-import type { RegisteredProject, SafeError } from '@roadmap/contracts'
+import type { SafeError } from '@roadmap/contracts/operations'
+import type { Project } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
 import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
@@ -12,24 +13,25 @@ import { unacknowledgedInterruption } from '@/views/settings/project-automation'
 import { resourceMessage } from '@/views/shared/resource-results'
 import { ErrorText, sameProject } from '@/views/shared/settings-shared'
 
-type AutomationSectionProps = { project: RegisteredProject }
+type AutomationSectionProps = { project: Project }
 
 export function AutomationSection({ project }: AutomationSectionProps) {
   const { automation, configuration, configurationVersion, command, execute } = useRoadmap()
   const [error, setError] = useState<SafeError | string | null>(null)
   const [busy, setBusy] = useState(false)
   const blocked = busy || command.inFlight || !configuration.valid
-  const interruption = unacknowledgedInterruption(project.key, automation.evidence)
-  const preferred = automation.enabledProjects.some((key) => sameProject(key, project.key))
+  const interruption = unacknowledgedInterruption(project.ref, automation.evidence)
+  const preferred = automation.enabledProjects.some((key) => sameProject(key, project.ref))
   const toggleState = busy ? 'pending' : preferred ? 'on' : 'off'
   const affectedMap = interruption
     ? project.maps.find(
         (map) =>
-          map.key.mapId === interruption.target.mapId && sameProject(map.key.project, project.key),
+          map.ref.mapId === interruption.target.map.mapId &&
+          sameProject(map.ref.project, project.ref),
       )
     : undefined
   const affectedTicket = affectedMap?.tickets.find(
-    (ticket) => ticket.key.ticketId === interruption?.target.ticketId,
+    (ticket) => ticket.ref.ticketId === interruption?.target.ticketId,
   )
 
   const setEnabled = async (enabled: boolean) => {
@@ -40,7 +42,7 @@ export function AutomationSection({ project }: AutomationSectionProps) {
       const outcome = await execute({
         type: 'set-project-automation-enabled',
         expectedConfigurationVersion: configurationVersion,
-        project: project.key,
+        project: project.ref,
         enabled,
       })
       if (!outcome.ok) setError(outcome.error)
@@ -90,7 +92,7 @@ export function AutomationSection({ project }: AutomationSectionProps) {
               </span>
               {affectedMap && affectedTicket && (
                 <>
-                  <Link href={ticketPath(affectedTicket.key)}>Review affected ticket</Link>
+                  <Link href={ticketPath(affectedTicket.ref)}>Review affected ticket</Link>
                   <span>{resourceMessage(affectedMap.resource)}</span>
                   <span>{resourceMessage(affectedTicket.resource)}</span>
                 </>

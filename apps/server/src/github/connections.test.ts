@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createGitHubConnectionPort, type GitHubConnectionError } from './connections.ts'
+import type { GitHubConnectionError } from '../authorization/contracts.ts'
+import { createGitHubConnectionPort } from './connections.ts'
 
 function json(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {

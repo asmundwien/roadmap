@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { CredentialBundle } from '../github/connections.ts'
+import type { CredentialBundle } from '../authorization/contracts.ts'
 import { createMacOsCredentialVault, type KeychainPort } from './credential-vault.ts'
 
 const CREDENTIALS: CredentialBundle = {

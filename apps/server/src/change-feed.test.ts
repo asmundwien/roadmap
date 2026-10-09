@@ -1,6 +1,7 @@
-import type { ProjectKey, TicketState } from '@roadmap/contracts'
+import type { TicketState } from '@roadmap/contracts/state'
 import { describe, expect, it } from 'vitest'
 import { type ChangeEvent, type ChangeFeedInput, createChangeFeed } from './change-feed.ts'
+import type { SourceProjectKey as ProjectKey } from './observation/source.ts'
 import {
   createSourceFixtureOwner,
   type FixtureMap,
@@ -63,7 +64,6 @@ function wayfinderMap(id: string, tickets: FixtureTicket[]): FixtureMap {
       missingSections: [],
     },
     tickets,
-    frontier: tickets.filter((candidate) => candidate.state === 'frontier'),
     progress: { total: tickets.length, completed: 0 },
     ticketsComplete: true,
     warnings: [],

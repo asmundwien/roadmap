@@ -1,4 +1,5 @@
-import type { Connection, SafeError } from '@roadmap/contracts'
+import type { SafeError } from '@roadmap/contracts/operations'
+import type { Connection } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
 import { ControlGroup } from '@roadmap/ui/control-group'
@@ -69,7 +70,9 @@ export function DetailsSection({ connection }: DetailsSectionProps) {
           </dd>
           <dt>GitHub user</dt>
           <dd>
-            {connection.githubIdentity ? `@${connection.githubIdentity.login}` : 'Not available'}
+            {connection.integration === 'github'
+              ? `@${connection.githubIdentity.login}`
+              : 'Not available'}
           </dd>
           <dt>Observed</dt>
           <dd>{observedLabel(connection.availability.observedAt)}</dd>

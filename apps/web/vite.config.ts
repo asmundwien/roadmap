@@ -1,11 +1,13 @@
+import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vitest/config'
+import { roadmapArchitectureGraph } from '../../scripts/browser-architecture-plugin.mjs'
 
 // https://vite.dev/config/
 export default defineConfig({
   // `.env.local` lives at the repo root, shared with the server, not per-package.
   envDir: '../..',
-  plugins: [react()],
+  plugins: [react(), roadmapArchitectureGraph(fileURLToPath(new URL('../..', import.meta.url)))],
   resolve: {
     tsconfigPaths: true,
   },

@@ -1,4 +1,4 @@
-import type { TicketState, TicketType } from '@roadmap/contracts'
+import type { TicketState, TicketType } from '@roadmap/contracts/state'
 import type { MarkCornerCount, MarkFill } from '@roadmap/ui/mark'
 import type { Variant } from '@roadmap/ui/variant'
 

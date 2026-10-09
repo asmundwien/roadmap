@@ -1,15 +1,20 @@
 import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import type { ProjectKey, TicketState } from '@roadmap/contracts'
+import type { TicketState } from '@roadmap/contracts/state'
 import { describe, expect, it } from 'vitest'
 import type { ChangeEvent } from '../change-feed.ts'
 import type { ConfigurationDocument } from '../configuration/document.ts'
 import { createGitHubProjectAdmission } from '../github/admission.ts'
 import { createGitHubConnectionPort } from '../github/connections.ts'
 import { createLocalProjectAdmission } from '../local/admission.ts'
-import type { ObservationAttempt, ObservationBatch } from '../observation/source.ts'
+import type {
+  ObservationAttempt,
+  ObservationBatch,
+  SourceProjectKey as ProjectKey,
+} from '../observation/source.ts'
 import type { GitHubProviderRead, ProjectConfiguration } from '../projects/registry.ts'
+import { readApplicationState } from '../public-test-fixtures.ts'
 import {
   controlledSourceFixture,
   createSourceFixtureOwner,
@@ -66,7 +71,6 @@ function project(
         missingSections: [],
       },
       tickets: [ticket],
-      frontier: state === 'frontier' ? [ticket] : [],
       progress: { total: 1, completed: state === 'closed' ? 1 : 0 },
       ticketsComplete: true,
       warnings: [],
@@ -297,17 +301,22 @@ describe('public application notification inputs', () => {
       const mapId = integration === 'local' ? MAP : '108'
       const test = await harness([{ key, maps: [[mapId, 'frontier']] }])
       try {
-        expect(test.application.current().projects[0]?.displayOrder.openMapIds).toEqual([mapId])
+        expect(
+          readApplicationState(test.application.current()).projects[0]?.displayOrder.open.map(
+            (ref) => ref.mapId,
+          ),
+        ).toEqual([mapId])
         expect(test.events).toEqual([])
         test.push(0, mapFailure(test.batch(0, [[mapId, 'frontier']], 200), mapId, 200))
         expect(test.events).toEqual([])
         test.push(0, test.batch(0, [[mapId, 'frontier']], 300))
-        expect(test.application.current().projects[0]?.maps[0]?.tickets[0]?.resource).toMatchObject(
-          {
-            kind: 'current-readable',
-            observation: { value: { state: 'frontier' } },
-          },
-        )
+        expect(
+          readApplicationState(test.application.current()).projects[0]?.maps[0]?.tickets[0]
+            ?.resource,
+        ).toMatchObject({
+          kind: 'current-readable',
+          observation: { value: { state: 'frontier' } },
+        })
         expect(test.events).toEqual([])
       } finally {
         await test.stop()
@@ -571,7 +580,7 @@ describe('public application notification inputs', () => {
       },
     ])
     try {
-      expect(test.application.current().projects).toHaveLength(2)
+      expect(readApplicationState(test.application.current()).projects).toHaveLength(2)
       test.push(0, test.batch(0, [[MAP, 'closed']], 200))
       test.push(1, test.batch(1, [['branch:map:.wayfinder/map.md', 'claimed']], 300))
       expect(ticketEvents(test.events)).toEqual([

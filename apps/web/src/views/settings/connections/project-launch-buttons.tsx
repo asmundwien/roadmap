@@ -1,4 +1,5 @@
-import type { RegisteredProject } from '@roadmap/contracts'
+import type { ActionId } from '@roadmap/contracts/identity'
+import type { Project } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 import { Button, ButtonLink as ExternalButtonLink } from '@roadmap/ui/button'
 import { Icon, icon } from '@roadmap/ui/icon'
@@ -11,21 +12,21 @@ import styles from './project-launch-buttons.module.css'
 
 const cx = classNames.bind(styles)
 
-type ProjectLaunchButtonsProps = { project: RegisteredProject }
+type ProjectLaunchButtonsProps = { project: Project }
 
 export function ProjectLaunchButtons({ project }: ProjectLaunchButtonsProps) {
   const { configuration, configurationVersion, command, execute } = useRoadmap()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const launch = async (actionId: string) => {
+  const launch = async (actionId: ActionId) => {
     setBusy(true)
     setError(null)
     try {
       const result = await execute({
         type: 'launch-action',
         expectedConfigurationVersion: configurationVersion,
-        project: project.key,
+        project: project.ref,
         actionId,
       })
       if (!result.ok) setError(result.error.message)
@@ -41,15 +42,13 @@ export function ProjectLaunchButtons({ project }: ProjectLaunchButtonsProps) {
   return (
     <>
       <div className={cx('connection-project-actions')}>
-        <ButtonLink href={projectPath(project.key)} size="small">
+        <ButtonLink href={projectPath(project.ref)} size="small">
           <Icon icon={icon.codeBranch} />
           Go to roadmap
         </ButtonLink>
         {project.actions.map(
           (action) =>
-            action.id === 'open-source' &&
-            action.kind === 'external-link' &&
-            action.href && (
+            action.kind === 'external-link' && (
               <ExternalButtonLink
                 key={action.id}
                 href={action.href}
@@ -63,13 +62,7 @@ export function ProjectLaunchButtons({ project }: ProjectLaunchButtonsProps) {
             ),
         )}
         {project.actions
-          .filter(
-            (action) =>
-              action.kind === 'server-launch' &&
-              (action.id === 'open-workspace' ||
-                action.id === 'reveal-source' ||
-                action.id === 'open-terminal'),
-          )
+          .filter((action) => action.kind === 'server-launch')
           .map((action) => (
             <Button
               key={action.id}
@@ -77,9 +70,9 @@ export function ProjectLaunchButtons({ project }: ProjectLaunchButtonsProps) {
               disabled={busy || command.inFlight || !configuration.valid}
               onClick={() => void launch(action.id)}
             >
-              {action.id === 'open-workspace' && <Icon icon={icon.vscode} />}
-              {action.id === 'reveal-source' && <Icon icon={icon.folderOpen} />}
-              {action.id === 'open-terminal' && <Icon icon={icon.terminal} />}
+              {action.operation === 'open-workspace' && <Icon icon={icon.vscode} />}
+              {action.operation === 'reveal-source' && <Icon icon={icon.folderOpen} />}
+              {action.operation === 'open-terminal' && <Icon icon={icon.terminal} />}
               {action.label}
             </Button>
           ))}

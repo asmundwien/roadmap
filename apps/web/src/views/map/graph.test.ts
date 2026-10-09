@@ -1,4 +1,10 @@
-import type { Blocker } from '@roadmap/contracts'
+import {
+  mapIdSchema,
+  projectIdSchema,
+  ticketIdSchema,
+  ticketRefSchema,
+} from '@roadmap/contracts/identity'
+import type { Blocker } from '@roadmap/contracts/state'
 import { ReactFlow } from '@xyflow/react'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -19,9 +25,13 @@ function dependencyPairs(graph: ReturnType<typeof mapGraph>) {
       sourceReference: source?.data.kind === 'blocker' ? source.data.blocker.reference : undefined,
       sourceTicket:
         source?.data.kind === 'ticket'
-          ? source.data.ticket.key.ticketId
-          : source?.data.blocker.ticketId,
-      targetTicket: target?.data.kind === 'ticket' ? target.data.ticket.key.ticketId : undefined,
+          ? source.data.ticket.ref.ticketId
+          : source?.data.kind === 'blocker'
+            ? source.data.blocker.reference.kind === 'registered'
+              ? source.data.blocker.reference.ticket.ticketId
+              : source.data.blocker.reference.ticketId
+            : undefined,
+      targetTicket: target?.data.kind === 'ticket' ? target.data.ticket.ref.ticketId : undefined,
     }
   })
 }
@@ -32,18 +42,22 @@ describe('mapGraph', () => {
       kind: 'external',
       integration: 'github',
       nameWithOwner: 'outside/repository',
+      ticketId: ticketIdSchema.parse(String('7')),
     })
     const map = makeMap(
       [ticket('7', 'closed'), ticket('8', 'frontier', [external])],
       {},
-      { project: { integration: 'github', id: 'outside/repository' }, mapId: '1' },
+      {
+        project: { integration: 'github', projectId: projectIdSchema.parse('outside/repository') },
+        mapId: mapIdSchema.parse('1'),
+      },
     )
 
     const graph = mapGraph(map)
     const dependency = graph.edges[0]
     const source = graph.nodes.find((node) => node.id === dependency?.source)
     const internal = graph.nodes.find(
-      (node) => node.data.kind === 'ticket' && node.data.ticket.key.ticketId === '7',
+      (node) => node.data.kind === 'ticket' && node.data.ticket.ref.ticketId === '7',
     )
 
     expect(source?.data).toMatchObject({
@@ -54,8 +68,8 @@ describe('mapGraph', () => {
           kind: 'external',
           integration: 'github',
           nameWithOwner: 'outside/repository',
+          ticketId: ticketIdSchema.parse('7'),
         },
-        ticketId: '7',
         state: 'closed',
         url: 'https://example.test/outside/repository/7',
       },
@@ -70,14 +84,26 @@ describe('mapGraph', () => {
   it('keeps same-ID blockers in other projects separate from an in-map ticket', () => {
     const otherIntegration = blocker('7', true, {
       kind: 'registered',
-      project: { integration: 'local', id: 'project-home' },
+      ticket: ticketRefSchema.parse({
+        map: {
+          project: { integration: 'local', projectId: projectIdSchema.parse('project-home') },
+          mapId: mapIdSchema.parse('1'),
+        },
+        ticketId: String('7'),
+      }),
     })
     const map = makeMap([
       ticket('7', 'frontier'),
       ticket('8', 'blocked', [
         blocker('7', true, {
           kind: 'registered',
-          project: { integration: 'github', id: 'project-other' },
+          ticket: ticketRefSchema.parse({
+            map: {
+              project: { integration: 'github', projectId: projectIdSchema.parse('project-other') },
+              mapId: mapIdSchema.parse('1'),
+            },
+            ticketId: String('7'),
+          }),
         }),
         otherIntegration,
       ]),
@@ -90,7 +116,13 @@ describe('mapGraph', () => {
         sourceKind: 'blocker',
         sourceReference: {
           kind: 'registered',
-          project: { integration: 'github', id: 'project-other' },
+          ticket: ticketRefSchema.parse({
+            map: {
+              project: { integration: 'github', projectId: projectIdSchema.parse('project-other') },
+              mapId: mapIdSchema.parse('1'),
+            },
+            ticketId: ticketIdSchema.parse('7'),
+          }),
         },
         sourceTicket: '7',
         targetTicket: '8',
@@ -99,7 +131,13 @@ describe('mapGraph', () => {
         sourceKind: 'blocker',
         sourceReference: {
           kind: 'registered',
-          project: { integration: 'local', id: 'project-home' },
+          ticket: ticketRefSchema.parse({
+            map: {
+              project: { integration: 'local', projectId: projectIdSchema.parse('project-home') },
+              mapId: mapIdSchema.parse('1'),
+            },
+            ticketId: ticketIdSchema.parse('7'),
+          }),
         },
         sourceTicket: '7',
         targetTicket: '8',
@@ -115,11 +153,23 @@ describe('mapGraph', () => {
       ticket('dependent', 'blocked', [
         blocker('b:c', true, {
           kind: 'registered',
-          project: { integration: 'github', id: 'a' },
+          ticket: ticketRefSchema.parse({
+            map: {
+              project: { integration: 'github', projectId: projectIdSchema.parse('a') },
+              mapId: mapIdSchema.parse('1'),
+            },
+            ticketId: String('b:c'),
+          }),
         }),
         blocker('c', true, {
           kind: 'registered',
-          project: { integration: 'github', id: 'a:b' },
+          ticket: ticketRefSchema.parse({
+            map: {
+              project: { integration: 'github', projectId: projectIdSchema.parse('a:b') },
+              mapId: mapIdSchema.parse('1'),
+            },
+            ticketId: String('c'),
+          }),
         }),
       ]),
     ])
@@ -130,7 +180,9 @@ describe('mapGraph', () => {
     expect(new Set(sources).size).toBe(2)
     expect(
       dependencyPairs(graph).map((pair) => [
-        pair.sourceReference?.kind === 'registered' ? pair.sourceReference.project.id : undefined,
+        pair.sourceReference?.kind === 'registered'
+          ? pair.sourceReference.ticket.map.project.projectId
+          : undefined,
         pair.sourceTicket,
       ]),
     ).toEqual([
@@ -152,9 +204,14 @@ describe('mapGraph', () => {
       blocker: {
         reference: {
           kind: 'registered',
-          project: { integration: 'github', id: 'project-home' },
+          ticket: ticketRefSchema.parse({
+            map: {
+              project: { integration: 'github', projectId: projectIdSchema.parse('project-home') },
+              mapId: mapIdSchema.parse('1'),
+            },
+            ticketId: ticketIdSchema.parse('missing'),
+          }),
         },
-        ticketId: 'missing',
         state: 'unknown',
         url: 'https://example.test/me/repo/missing',
       },
@@ -164,7 +221,13 @@ describe('mapGraph', () => {
         sourceKind: 'blocker',
         sourceReference: {
           kind: 'registered',
-          project: { integration: 'github', id: 'project-home' },
+          ticket: ticketRefSchema.parse({
+            map: {
+              project: { integration: 'github', projectId: projectIdSchema.parse('project-home') },
+              mapId: mapIdSchema.parse('1'),
+            },
+            ticketId: ticketIdSchema.parse('missing'),
+          }),
         },
         sourceTicket: 'missing',
         targetTicket: 'dependent',
@@ -174,7 +237,11 @@ describe('mapGraph', () => {
 
   it('keeps unresolved locator scopes separate from external and registered ticket scopes', () => {
     const unresolved: Blocker = {
-      ...blocker('7', true, { kind: 'unresolved', locator: 'project-home' }),
+      ...blocker('7', true, {
+        kind: 'unresolved',
+        locator: 'project-home',
+        ticketId: ticketIdSchema.parse(String('7')),
+      }),
       state: 'unknown',
     }
     const map = makeMap([
@@ -185,9 +252,14 @@ describe('mapGraph', () => {
           kind: 'external',
           integration: 'github',
           nameWithOwner: 'project-home',
+          ticketId: ticketIdSchema.parse(String('7')),
         }),
         unresolved,
-        blocker('7', true, { kind: 'unresolved', locator: 'other-locator' }),
+        blocker('7', true, {
+          kind: 'unresolved',
+          locator: 'other-locator',
+          ticketId: ticketIdSchema.parse(String('7')),
+        }),
       ]),
     ])
 
@@ -205,8 +277,11 @@ describe('mapGraph', () => {
       kind: 'blocker',
       scope: 'unresolved',
       blocker: {
-        reference: { kind: 'unresolved', locator: 'project-home' },
-        ticketId: '7',
+        reference: {
+          kind: 'unresolved',
+          locator: 'project-home',
+          ticketId: ticketIdSchema.parse('7'),
+        },
         state: 'unknown',
         url: 'https://example.test/project-home/7',
       },
@@ -214,7 +289,14 @@ describe('mapGraph', () => {
     expect(sources[3]?.data).toMatchObject({
       kind: 'blocker',
       scope: 'unresolved',
-      blocker: { reference: { kind: 'unresolved', locator: 'other-locator' }, state: 'open' },
+      blocker: {
+        reference: {
+          kind: 'unresolved',
+          locator: 'other-locator',
+          ticketId: ticketIdSchema.parse('7'),
+        },
+        state: 'open',
+      },
     })
   })
 
@@ -268,11 +350,13 @@ describe('mapGraph', () => {
           kind: 'external',
           integration: 'github',
           nameWithOwner: 'other/repo',
+          ticketId: ticketIdSchema.parse(String('external')),
         }),
         blocker('external', true, {
           kind: 'external',
           integration: 'github',
           nameWithOwner: 'other/repo',
+          ticketId: ticketIdSchema.parse(String('external')),
         }),
       ]),
       ticket('b', 'blocked', [
@@ -280,6 +364,7 @@ describe('mapGraph', () => {
           kind: 'external',
           integration: 'github',
           nameWithOwner: 'other/repo',
+          ticketId: ticketIdSchema.parse(String('external')),
         }),
       ]),
     ])
@@ -288,7 +373,13 @@ describe('mapGraph', () => {
 
     expect(
       graph.nodes.flatMap((node) =>
-        node.data.kind === 'blocker' ? [node.data.blocker.ticketId] : [],
+        node.data.kind === 'blocker'
+          ? [
+              node.data.blocker.reference.kind === 'registered'
+                ? node.data.blocker.reference.ticket.ticketId
+                : node.data.blocker.reference.ticketId,
+            ]
+          : [],
       ),
     ).toEqual(['external'])
     expect(dependencyPairs(graph).map((pair) => [pair.sourceTicket, pair.targetTicket])).toEqual([
@@ -302,6 +393,7 @@ describe('mapGraph', () => {
       kind: 'external',
       integration: 'github',
       nameWithOwner: 'other/repo',
+      ticketId: ticketIdSchema.parse(String('external')),
     })
     const unknown: Blocker = { ...known, title: undefined, url: undefined, state: 'unknown' }
     const map = makeMap([ticket('a', 'blocked', [known]), ticket('b', 'blocked', [unknown])])
@@ -326,6 +418,7 @@ describe('mapGraph', () => {
           kind: 'external',
           integration: 'github',
           nameWithOwner: 'other/repo',
+          ticketId: ticketIdSchema.parse(String('external')),
         }),
       ]),
       ticket('b', 'closed'),
@@ -350,10 +443,33 @@ describe('mapGraph', () => {
 
 describe('blocker source links', () => {
   it.each<Blocker['reference']>([
-    { kind: 'external', integration: 'github', nameWithOwner: 'outside/repository' },
-    { kind: 'unresolved', locator: 'outside/repository' },
-    { kind: 'registered', project: { integration: 'github', id: 'other-project' } },
-    { kind: 'registered', project: { integration: 'local', id: 'outside/repository' } },
+    {
+      kind: 'external',
+      integration: 'github',
+      nameWithOwner: 'outside/repository',
+      ticketId: ticketIdSchema.parse('7'),
+    },
+    { kind: 'unresolved', locator: 'outside/repository', ticketId: ticketIdSchema.parse('7') },
+    {
+      kind: 'registered',
+      ticket: ticketRefSchema.parse({
+        map: {
+          project: { integration: 'github', projectId: projectIdSchema.parse('other-project') },
+          mapId: mapIdSchema.parse('1'),
+        },
+        ticketId: ticketIdSchema.parse('7'),
+      }),
+    },
+    {
+      kind: 'registered',
+      ticket: ticketRefSchema.parse({
+        map: {
+          project: { integration: 'local', projectId: projectIdSchema.parse('outside/repository') },
+          mapId: mapIdSchema.parse('1'),
+        },
+        ticketId: ticketIdSchema.parse('7'),
+      }),
+    },
   ])(
     'keeps a $kind blocker outside the current project as a source link in the Modal',
     (reference) => {
@@ -368,7 +484,13 @@ describe('blocker source links', () => {
           ticket('8', 'frontier', [source]),
         ],
         {},
-        { project: { integration: 'github', id: 'outside/repository' }, mapId: '1' },
+        {
+          project: {
+            integration: 'github',
+            projectId: projectIdSchema.parse('outside/repository'),
+          },
+          mapId: mapIdSchema.parse('1'),
+        },
       )
 
       const markup = renderToStaticMarkup(
@@ -377,7 +499,7 @@ describe('blocker source links', () => {
           { store: makeRoadmapStore() },
           createElement(TicketModal, {
             map,
-            ticketId: '8',
+            selected: { map: map.ref, ticketId: ticketIdSchema.parse('8') },
             onClose: () => undefined,
             onOpenTicket: () => {
               throw new Error('Unexpected internal navigation')
@@ -407,7 +529,7 @@ describe('blocker source links', () => {
         { store: makeRoadmapStore() },
         createElement(TicketModal, {
           map,
-          ticketId: '8',
+          selected: { map: map.ref, ticketId: ticketIdSchema.parse('8') },
           onClose: () => undefined,
           onOpenTicket: () => undefined,
           onOpenMap: () => undefined,
@@ -421,17 +543,27 @@ describe('blocker source links', () => {
 
   it.each<{ reference: Blocker['reference']; state: Blocker['state']; label: string }>([
     {
-      reference: { kind: 'external', integration: 'github', nameWithOwner: 'me/repo' },
+      reference: {
+        kind: 'external',
+        integration: 'github',
+        nameWithOwner: 'me/repo',
+        ticketId: ticketIdSchema.parse('7'),
+      },
       state: 'closed',
       label: 'Closed blocker',
     },
     {
-      reference: { kind: 'external', integration: 'github', nameWithOwner: 'me/repo' },
+      reference: {
+        kind: 'external',
+        integration: 'github',
+        nameWithOwner: 'me/repo',
+        ticketId: ticketIdSchema.parse('7'),
+      },
       state: 'open',
       label: 'Open blocker',
     },
     {
-      reference: { kind: 'unresolved', locator: 'me/repo' },
+      reference: { kind: 'unresolved', locator: 'me/repo', ticketId: ticketIdSchema.parse('7') },
       state: 'unknown',
       label: 'State unknown',
     },
@@ -439,7 +571,12 @@ describe('blocker source links', () => {
     'renders the $state $reference.kind blocker node with its source URL',
     ({ reference, state, label }) => {
       const source: Blocker = { ...blocker('7', true, reference), state }
-      const graph = mapGraph(makeMap([ticket('7', 'closed'), ticket('8', 'blocked', [source])]))
+      const graph = mapGraph(
+        makeMap([
+          ticket('7', 'closed'),
+          ticket('8', state === 'closed' ? 'frontier' : 'blocked', [source]),
+        ]),
+      )
       const node = graph.nodes.find((item) => item.data.kind === 'blocker')
       if (!node) throw new Error('Expected a source blocker node')
 
@@ -468,7 +605,11 @@ describe('blocker source links', () => {
 describe('map resource graph identities', () => {
   it('keeps equal ticket IDs under different map keys separate', () => {
     const first = makeMap([ticket('same', 'frontier')])
-    const second = makeMap([ticket('same', 'frontier')], {}, { ...first.key, mapId: 'other-map' })
+    const second = makeMap(
+      [ticket('same', 'frontier')],
+      {},
+      { ...first.ref, mapId: mapIdSchema.parse('other-map') },
+    )
 
     expect(mapGraph(first).nodes[0]?.id).not.toBe(mapGraph(second).nodes[0]?.id)
   })

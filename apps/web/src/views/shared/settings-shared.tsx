@@ -1,4 +1,6 @@
-import type { ProjectKey, RegisteredProject, SafeError } from '@roadmap/contracts'
+import type { ProjectRef } from '@roadmap/contracts/identity'
+import type { SafeError } from '@roadmap/contracts/operations'
+import type { Project } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 import { resourceObservation } from './resource-results'
 
@@ -9,27 +11,27 @@ export function ErrorText({ error }: ErrorTextProps) {
   return <Alert variant="error">{typeof error === 'string' ? error : error.message}</Alert>
 }
 
-export function sameProject(a: ProjectKey, b: ProjectKey): boolean {
-  return a.integration === b.integration && a.id === b.id
+export function sameProject(a: ProjectRef, b: ProjectRef): boolean {
+  return a.integration === b.integration && a.projectId === b.projectId
 }
 
-export function projectIdentity(project: Pick<RegisteredProject, 'key'>): string {
-  return JSON.stringify([project.key.integration, project.key.id])
+export function projectIdentity(project: Pick<Project, 'ref'>): string {
+  return JSON.stringify([project.ref.integration, project.ref.projectId])
 }
 
-export function locatorLabel(project: Pick<RegisteredProject, 'locator'>): string {
-  return project.locator.integration === 'github'
-    ? project.locator.nameWithOwner
-    : project.locator.path
+export function projectSourceLabel(project: Pick<Project, 'source'>): string {
+  return project.source.integration === 'github'
+    ? project.source.nameWithOwner
+    : project.source.path
 }
 
-export function mapState(project: RegisteredProject): string {
+export function mapState(project: Project): string {
   if (project.activeMap.kind === 'uncertain') return project.activeMap.cause
   const membership = project.mapsMembership
   if (membership.kind !== 'current-complete') return 'Current map membership is unknown.'
   if (membership.observation.value.members.length === 0) return 'No current Wayfinder maps.'
-  const open = project.displayOrder.openMapIds.length
-  const closed = project.displayOrder.closedMapIds.length
+  const open = project.displayOrder.open.length
+  const closed = project.displayOrder.closed.length
   const incomplete = project.maps.some(
     (map) =>
       map.resource.kind === 'current-readable' &&
@@ -38,7 +40,7 @@ export function mapState(project: RegisteredProject): string {
   return `${open} open · ${closed} closed${incomplete ? ' · incomplete source content' : ''}`
 }
 
-export function projectObservedAt(project: RegisteredProject): number | undefined {
+export function projectObservedAt(project: Project): number | undefined {
   return resourceObservation(project.resource)?.observedAt
 }
 

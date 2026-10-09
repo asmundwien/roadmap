@@ -1,55 +1,12 @@
-import type { GitHubConnectionIdentity, SupportedIntegration } from '@roadmap/contracts'
+import {
+  type CredentialBundle,
+  GitHubConnectionError,
+  type GitHubConnectionPort,
+} from '../authorization/contracts.ts'
 
 const GITHUB_API = 'https://api.github.com'
 const GITHUB_LOGIN = 'https://github.com/login'
 const REST_API_VERSION = '2022-11-28'
-
-export interface CredentialBundle {
-  accessToken: string
-  refreshToken: string
-  accessTokenExpiresAt: number
-  refreshTokenExpiresAt: number
-}
-
-interface DeviceAuthorization {
-  deviceCode: string
-  userCode: string
-  verificationUri: string
-  expiresAt: number
-  intervalMs: number
-}
-
-export type DeviceAuthorizationPoll =
-  | { status: 'pending' }
-  | { status: 'slow-down' }
-  | { status: 'denied' }
-  | { status: 'expired' }
-  | { status: 'granted'; credentials: CredentialBundle }
-
-export type GitHubConnectionErrorKind =
-  | 'network'
-  | 'unauthorized'
-  | 'bad-refresh-token'
-  | 'invalid-response'
-
-export class GitHubConnectionError extends Error {
-  readonly kind: GitHubConnectionErrorKind
-
-  constructor(kind: GitHubConnectionErrorKind, message: string) {
-    super(message)
-    this.name = 'GitHubConnectionError'
-    this.kind = kind
-  }
-}
-
-/** Internal GitHub seam used by RoadmapApplication and scripted in its tests. */
-export interface GitHubConnectionPort {
-  readonly integration: Extract<SupportedIntegration, { integration: 'github' }>
-  beginDeviceAuthorization(): Promise<DeviceAuthorization>
-  pollDeviceAuthorization(deviceCode: string): Promise<DeviceAuthorizationPoll>
-  identify(accessToken: string): Promise<GitHubConnectionIdentity>
-  refresh(refreshToken: string): Promise<CredentialBundle>
-}
 
 export interface GitHubConnectionPortOptions {
   clientId: string

@@ -1,6 +1,7 @@
 import { basename, join } from 'node:path'
 import { setImmediate } from 'node:timers/promises'
-import type { AutomationTarget, RegisteredProject } from '@roadmap/contracts'
+import { commandSchema } from '@roadmap/contracts/operations'
+import type { Project } from '@roadmap/contracts/state'
 import { describe, expect, it, vi } from 'vitest'
 import {
   type AutomationDatabase,
@@ -13,6 +14,7 @@ import type {
   ClassificationProcessResult,
   WayfinderProcessResult,
 } from '../automation/engine.ts'
+import type { AutomationTarget } from '../automation/model.ts'
 import type { ConfigurationDocument, ConfigurationRead } from '../configuration/document.ts'
 import type {
   ObservationAttempt,
@@ -20,6 +22,11 @@ import type {
   SourceObservationHealth,
 } from '../observation/source.ts'
 import type { ProjectConfiguration } from '../projects/registry.ts'
+import {
+  fixtureResourceRef,
+  fixtureTicketRef,
+  readApplicationState,
+} from '../public-test-fixtures.ts'
 import {
   controlledSourceFixture,
   createSourceFixtureOwner,
@@ -95,7 +102,6 @@ function map(id: string, tickets: FixtureTicket[], updatedAt: number): FixtureMa
       missingSections: [],
     },
     tickets,
-    frontier: tickets,
     progress: { total: tickets.length, completed: 0 },
     ticketsComplete: true,
     warnings: [],
@@ -332,9 +338,9 @@ async function harness(
   }
   try {
     await application.start()
-    expect(application.current().automation.overrides).toContainEqual(
+    expect(readApplicationState(application.current()).automation.overrides).toContainEqual(
       expect.objectContaining({
-        target: TARGET,
+        target: fixtureTicketRef(TARGET),
         [options.stage ?? 'classification']: { status: 'eligible' },
       }),
     )
@@ -370,16 +376,21 @@ async function harness(
       }
       for (const listener of listeners) listener({ ok: true, document: configured })
       await vi.waitFor(() =>
-        expect(application.current().configurationVersion).toBe(configured.configurationVersion),
+        expect(readApplicationState(application.current()).configurationVersion).toBe(
+          configured.configurationVersion,
+        ),
       )
     },
     override(stage: Stage, target = TARGET) {
-      return application.execute({
-        type: 'start-automation-override',
-        expectedConfigurationVersion: application.current().configurationVersion,
-        target,
-        stage,
-      })
+      return application.execute(
+        commandSchema.parse({
+          type: 'start-automation-override',
+          expectedConfigurationVersion: readApplicationState(application.current())
+            .configurationVersion,
+          target: fixtureTicketRef(target),
+          stage,
+        }),
+      )
     },
   }
 }
@@ -404,11 +415,11 @@ function changeHealth(change: SourceChange, observedAt: number): SourceObservati
   }
 }
 
-function selectedResource(project: RegisteredProject | undefined, change: SourceChange) {
-  const selectedMap = project?.maps.find((entry) => entry.key.mapId === TARGET.mapId)
+function selectedResource(project: Project | undefined, change: SourceChange) {
+  const selectedMap = project?.maps.find((entry) => entry.ref.mapId === TARGET.mapId)
   if (!selectedMap) throw new Error('The selected map must remain addressable.')
   if (change !== 'ticket absence') return selectedMap.resource
-  const selectedTicket = selectedMap.tickets.find((entry) => entry.key.ticketId === TARGET.ticketId)
+  const selectedTicket = selectedMap.tickets.find((entry) => entry.ref.ticketId === TARGET.ticketId)
   if (!selectedTicket) throw new Error('The selected ticket must remain addressable.')
   return selectedTicket.resource
 }
@@ -437,9 +448,11 @@ describe('RoadmapApplication retained resource admission', () => {
               ),
           ).toBe(false)
           if (stage === 'wayfinder')
-            expect(current.application.current().automation.evidence).toContainEqual(
+            expect(
+              readApplicationState(current.application.current()).automation.evidence,
+            ).toContainEqual(
               expect.objectContaining({
-                target: TARGET,
+                target: fixtureTicketRef(TARGET),
                 classification: expect.objectContaining({
                   status: 'completed',
                   verdict: { value: 'afk', reason: 'Agent-ready.' },
@@ -463,7 +476,9 @@ describe('RoadmapApplication retained resource admission', () => {
             ROADMAP_MAP_ID: TARGET.mapId,
             ROADMAP_TICKET_ID: TARGET.ticketId,
           })
-          expect(current.application.current().automation.evidence[0]?.target).toEqual(TARGET)
+          expect(
+            readApplicationState(current.application.current()).automation.evidence[0]?.target,
+          ).toEqual(fixtureTicketRef(TARGET))
         } finally {
           await current.stop()
         }
@@ -499,9 +514,11 @@ describe('RoadmapApplication retained resource admission', () => {
             const nonlaunch = current.events().find((event) => event.type === failureType)
             expect(reservations).toHaveLength(1)
             expect(nonlaunch?.opportunityId).toBe(reservations[0]?.opportunityId)
-            expect(current.application.current().automation.evidence).toContainEqual(
+            expect(
+              readApplicationState(current.application.current()).automation.evidence,
+            ).toContainEqual(
               expect.objectContaining({
-                target: TARGET,
+                target: fixtureTicketRef(TARGET),
                 [stage]: expect.objectContaining({ status: 'launch-failed', admission }),
               }),
             )
@@ -529,17 +546,28 @@ describe('RoadmapApplication retained resource admission', () => {
     async (change) => {
       const current = await harness({ secondaryTask: true })
       try {
-        expect(current.application.current().projects[0]).toMatchObject({
-          displayOrder: { openMapIds: [TARGET.mapId, SECONDARY.mapId] },
-          activeMap: { kind: 'known-current', mapId: TARGET.mapId },
+        expect(readApplicationState(current.application.current()).projects[0]).toMatchObject({
+          displayOrder: {
+            open: [TARGET.mapId, SECONDARY.mapId].map((mapId) =>
+              fixtureResourceRef({ project: TARGET.project, mapId }),
+            ),
+          },
+          activeMap: {
+            kind: 'known-current',
+            ref: fixtureResourceRef({ project: TARGET.project, mapId: TARGET.mapId }),
+          },
         })
         current.source.push(current.changedBatch(change, 2_000), {
           status: 'degraded',
           cause: 'The first map was not read.',
           observedAt: 2_000,
         })
-        expect(current.application.current().projects[0]).toMatchObject({
-          displayOrder: { openMapIds: [TARGET.mapId, SECONDARY.mapId] },
+        expect(readApplicationState(current.application.current()).projects[0]).toMatchObject({
+          displayOrder: {
+            open: [TARGET.mapId, SECONDARY.mapId].map((mapId) =>
+              fixtureResourceRef({ project: TARGET.project, mapId }),
+            ),
+          },
           activeMap: { kind: 'uncertain' },
         })
         expect(await current.override('classification', SECONDARY)).toMatchObject({ ok: false })
@@ -571,12 +599,16 @@ describe('RoadmapApplication retained resource admission', () => {
         ),
       }
       current.source.push(partial, { status: 'available', observedAt: 2_000 })
-      expect(current.application.current().projects[0]).toMatchObject({
+      expect(readApplicationState(current.application.current()).projects[0]).toMatchObject({
         activeMap: { kind: 'uncertain' },
-        displayOrder: { openMapIds: [TARGET.mapId, SECONDARY.mapId] },
+        displayOrder: {
+          open: [TARGET.mapId, SECONDARY.mapId].map((mapId) =>
+            fixtureResourceRef({ project: TARGET.project, mapId }),
+          ),
+        },
         maps: expect.arrayContaining([
           expect.objectContaining({
-            key: { project: PROJECT, mapId: '.wayfinder/newest.md' },
+            ref: fixtureResourceRef({ project: PROJECT, mapId: '.wayfinder/newest.md' }),
             resource: expect.objectContaining({
               kind: 'current-readable',
               observation: expect.objectContaining({
@@ -610,11 +642,17 @@ describe('RoadmapApplication retained resource admission', () => {
         status: 'available',
         observedAt: 2_000,
       })
-      expect(current.application.current().projects[0]).toMatchObject({
-        activeMap: { kind: 'known-current', mapId: SECONDARY.mapId },
+      expect(readApplicationState(current.application.current()).projects[0]).toMatchObject({
+        activeMap: {
+          kind: 'known-current',
+          ref: fixtureResourceRef({ project: TARGET.project, mapId: SECONDARY.mapId }),
+        },
       })
       expect(
-        selectedResource(current.application.current().projects[0], 'map absence'),
+        selectedResource(
+          readApplicationState(current.application.current()).projects[0],
+          'map absence',
+        ),
       ).toMatchObject({
         kind: 'proven-absent',
         trace: { kind: 'last-successful-trace' },
@@ -626,7 +664,9 @@ describe('RoadmapApplication retained resource admission', () => {
         ROADMAP_MAP_ID: SECONDARY.mapId,
         ROADMAP_TICKET_ID: SECONDARY.ticketId,
       })
-      expect(current.application.current().automation.evidence[0]?.target).toEqual(SECONDARY)
+      expect(
+        readApplicationState(current.application.current()).automation.evidence[0]?.target,
+      ).toEqual(fixtureTicketRef(SECONDARY))
     } finally {
       await current.stop()
     }
@@ -664,7 +704,9 @@ describe('RoadmapApplication retained resource admission', () => {
           ],
         }
         current.source.push(partial, { status: 'available', observedAt: 4_000 })
-        expect(selectedResource(current.application.current().projects[0], change)).toMatchObject({
+        expect(
+          selectedResource(readApplicationState(current.application.current()).projects[0], change),
+        ).toMatchObject({
           kind: 'proven-absent',
           absence: {
             observedAt: 3_000,
@@ -679,14 +721,21 @@ describe('RoadmapApplication retained resource admission', () => {
           cause: 'The map directory is unavailable.',
           observedAt: 5_000,
         })
-        expect(selectedResource(current.application.current().projects[0], change)).toMatchObject({
+        expect(
+          selectedResource(readApplicationState(current.application.current()).projects[0], change),
+        ).toMatchObject({
           kind: 'proven-absent',
         })
         await current.enable()
         await setImmediate()
         expect(current.dispatches).toEqual([])
-        expect(current.application.current().automation.evidence).toContainEqual(
-          expect.objectContaining({ target: TARGET, wayfinder: { status: 'queued' } }),
+        expect(
+          readApplicationState(current.application.current()).automation.evidence,
+        ).toContainEqual(
+          expect.objectContaining({
+            target: fixtureTicketRef(TARGET),
+            wayfinder: { status: 'queued' },
+          }),
         )
         const recovered = content()
         const first = recovered.openMaps[0]
@@ -700,10 +749,10 @@ describe('RoadmapApplication retained resource admission', () => {
           observedAt: 6_000,
         })
         await vi.waitFor(() => expect(current.dispatches).toHaveLength(1))
-        expect(current.application.current().projects[0]).toMatchObject({
+        expect(readApplicationState(current.application.current()).projects[0]).toMatchObject({
           maps: expect.arrayContaining([
             expect.objectContaining({
-              key: { project: PROJECT, mapId: TARGET.mapId },
+              ref: fixtureResourceRef({ project: PROJECT, mapId: TARGET.mapId }),
               resource: expect.objectContaining({
                 kind: 'current-readable',
                 observation: expect.objectContaining({
@@ -713,10 +762,10 @@ describe('RoadmapApplication retained resource admission', () => {
               }),
               tickets: expect.arrayContaining([
                 expect.objectContaining({
-                  key: {
+                  ref: fixtureResourceRef({
                     map: { project: PROJECT, mapId: TARGET.mapId },
                     ticketId: TARGET.ticketId,
-                  },
+                  }),
                   resource: expect.objectContaining({
                     kind: 'current-readable',
                     observation: expect.objectContaining({

@@ -4,9 +4,16 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setImmediate } from 'node:timers/promises'
 import { promisify } from 'node:util'
-import type { ApplicationState, AutomationTarget, CommandOutcome } from '@roadmap/contracts'
-import { applicationStateCodec } from '@roadmap/contracts/codecs'
+import type { CommandOutcome } from '@roadmap/contracts/operations'
+import { commandSchema } from '@roadmap/contracts/operations'
+import type { ReadyApplicationState } from '@roadmap/contracts/state'
+import { decodeApplicationState } from '@roadmap/contracts/wire'
 import { describe, expect, it, vi } from 'vitest'
+import type {
+  CredentialBundle,
+  CredentialVault,
+  GitHubConnectionPort,
+} from '../authorization/contracts.ts'
 import {
   type AutomationDatabase,
   type AutomationDatabaseDocument,
@@ -19,6 +26,7 @@ import type {
   ClassificationProcessResult,
   WayfinderProcessResult,
 } from '../automation/engine.ts'
+import type { AutomationTarget } from '../automation/model.ts'
 import {
   type ConfigurationDocument,
   type ConfigurationRead,
@@ -26,12 +34,18 @@ import {
   createConfigurationDocument,
 } from '../configuration/document.ts'
 import { createGitHubProjectAdmission } from '../github/admission.ts'
-import type { CredentialBundle, GitHubConnectionPort } from '../github/connections.ts'
 import { createGitHubObserverPool } from '../github/observer.ts'
 import { createLocalProjectAdmission } from '../local/admission.ts'
 import { inspectLocalWorkspace } from '../local/workspace.ts'
 import type { SourceObserver } from '../observation/source.ts'
 import type { HarnessCommand, ProjectConfiguration } from '../projects/registry.ts'
+import {
+  fixtureProjectRef,
+  fixtureResourceRef,
+  fixtureTicketRef,
+  fixtureWorkspacePath,
+  readApplicationState,
+} from '../public-test-fixtures.ts'
 import {
   controlledSourceFixture,
   createSourceFixtureOwner,
@@ -41,7 +55,6 @@ import {
   publicMapResource,
 } from '../source-test-fixtures.ts'
 import { createRoadmapApplication } from './application.ts'
-import type { CredentialVault } from './credential-vault.ts'
 import { createApplicationOperations } from './operations.ts'
 
 const LOCAL = {
@@ -122,7 +135,6 @@ function localContent(id: string, path: string, withTicket = false): FixtureProj
       missingSections: [],
     },
     tickets: [ticket],
-    frontier: [ticket],
     progress: { total: 1, completed: 0 },
     ticketsComplete: true,
     warnings: [],
@@ -164,11 +176,11 @@ function queuedDatabase(target: AutomationTarget): AutomationDatabase {
 interface EffectInvocation {
   stage: 'classification' | 'wayfinder'
   request: AutomationLaunch
-  state: ApplicationState
+  state: ReadyApplicationState
 }
 
 // The launcher is an external effect port. All admission, reservation and postappend checks are real.
-function recordingLauncher(current: () => ApplicationState, effects: EffectInvocation[]) {
+function recordingLauncher(current: () => ReadyApplicationState, effects: EffectInvocation[]) {
   const sessions: Array<ReturnType<typeof Promise.withResolvers<WayfinderProcessResult>>> = []
   const launcher: AutomationLauncher = {
     classify(request) {
@@ -244,18 +256,25 @@ async function hostAdmissionBoundarySchedule(
     automation: { enabled: false, enabledProjects: [] },
   }
   const configuration = memoryConfiguration(saved)
-  const effects: Array<{ executable: string; args: readonly string[]; state: ApplicationState }> =
-    []
+  const effects: Array<{
+    executable: string
+    args: readonly string[]
+    state: ReadyApplicationState
+  }> = []
   let atActivationBoundary: (() => void) | undefined
   let received = false
-  let receivedState: ApplicationState | undefined
+  let receivedState: ReadyApplicationState | undefined
   const application = createRoadmapApplication({
     configuration: configuration.document,
     admissions: { local: createLocalProjectAdmission() },
     operations: createApplicationOperations({
       async launch(executable, args) {
         if (receipt === 'host-failure') throw new Error('Private host launcher detail.')
-        effects.push({ executable, args, state: structuredClone(application.current()) })
+        effects.push({
+          executable,
+          args,
+          state: structuredClone(readApplicationState(application.current())),
+        })
       },
     }),
     observers: {
@@ -282,7 +301,7 @@ async function hostAdmissionBoundarySchedule(
     await Promise.all([workspacePath, replacementPath].map((path) => mkdir(path)))
     await symlink(workspacePath, aliasPath, 'dir')
     await application.start()
-    const initial = structuredClone(application.current())
+    const initial = structuredClone(readApplicationState(application.current()))
     atActivationBoundary = () => {
       received = true
       switch (receipt) {
@@ -341,24 +360,30 @@ async function hostAdmissionBoundarySchedule(
         case 'host-failure':
           break
       }
-      receivedState = structuredClone(application.current())
+      receivedState = structuredClone(readApplicationState(application.current()))
     }
     if (receipt === 'workspace-unavailable') await rm(workspacePath, { recursive: true })
-    const outcome = await application.execute({
-      type: 'launch-action',
-      actionId: 'open-workspace',
-      project: { integration: 'local', id: 'host-target' },
-      expectedConfigurationVersion: 1,
-    })
-    let collisionOutcome: typeof outcome | undefined
-    if (receipt === 'add-alias-project' || receipt === 'move-other-workspace-to-alias') {
-      await vi.waitFor(() => expect(application.current().configurationVersion).toBe(2))
-      collisionOutcome = await application.execute({
+    const outcome = await application.execute(
+      commandSchema.parse({
         type: 'launch-action',
         actionId: 'open-workspace',
-        project: { integration: 'local', id: 'host-target' },
-        expectedConfigurationVersion: 2,
-      })
+        project: fixtureProjectRef({ integration: 'local', id: 'host-target' }),
+        expectedConfigurationVersion: 1,
+      }),
+    )
+    let collisionOutcome: typeof outcome | undefined
+    if (receipt === 'add-alias-project' || receipt === 'move-other-workspace-to-alias') {
+      await vi.waitFor(() =>
+        expect(readApplicationState(application.current()).configurationVersion).toBe(2),
+      )
+      collisionOutcome = await application.execute(
+        commandSchema.parse({
+          type: 'launch-action',
+          actionId: 'open-workspace',
+          project: fixtureProjectRef({ integration: 'local', id: 'host-target' }),
+          expectedConfigurationVersion: 2,
+        }),
+      )
     }
     return { received, receivedState, initial, outcome, collisionOutcome, effects, workspacePath }
   } finally {
@@ -442,9 +467,9 @@ async function queuedReversionSchedule(stage: 'classification' | 'wayfinder', ho
       return { database: stored, durability: 'confirmed' }
     },
   }
-  const states: ApplicationState[] = []
+  const states: ReadyApplicationState[] = []
   const effects: EffectInvocation[] = []
-  const launches = recordingLauncher(() => application.current(), effects)
+  const launches = recordingLauncher(() => readApplicationState(application.current()), effects)
   const application = createRoadmapApplication({
     configuration: configuration.document,
     admissions: { local: createLocalProjectAdmission() },
@@ -474,22 +499,29 @@ async function queuedReversionSchedule(stage: 'classification' | 'wayfinder', ho
     now: () => 1_000,
     serverEpoch: 'queued-activation-safety',
   })
-  application.subscribe((state) => states.push(structuredClone(state)))
+  application.subscribe((state) => {
+    if (state.phase === 'ready') states.push(structuredClone(state))
+  })
   try {
     await Promise.all([targetPath, aPath, bPath].map((path) => mkdir(path)))
     await application.start()
-    expect(application.current().configurationVersion).toBe(1)
-    expect(application.current().automation.enabled).toBe(false)
+    expect(readApplicationState(application.current()).configurationVersion).toBe(1)
+    expect(readApplicationState(application.current()).automation.enabled).toBe(false)
     expect(effects).toEqual([])
-    expect(application.current().automation.overrides).toContainEqual(
-      expect.objectContaining({ target, [stage]: { status: 'eligible' } }),
+    expect(readApplicationState(application.current()).automation.overrides).toContainEqual(
+      expect.objectContaining({
+        target: fixtureTicketRef(target),
+        [stage]: { status: 'eligible' },
+      }),
     )
 
     configuration.emit(b)
     await vi.waitFor(() => expect(bRequested).toBe(true))
     if (holdAppend) {
       bGate.resolve()
-      await vi.waitFor(() => expect(application.current().configurationVersion).toBe(2))
+      await vi.waitFor(() =>
+        expect(readApplicationState(application.current()).configurationVersion).toBe(2),
+      )
       await vi.waitFor(() =>
         expect(reservationRequested, `Expected ${startType} append to be entered.`).toBe(true),
       )
@@ -500,22 +532,27 @@ async function queuedReversionSchedule(stage: 'classification' | 'wayfinder', ho
       expect(effects).toEqual([])
       configuration.emit(reverted)
       await vi.waitFor(() => expect(reversionRequested).toBe(true))
-      expect(application.current().configurationVersion).toBe(2)
-      expect(application.current().automation.availability.status).toBe('unavailable')
+      expect(readApplicationState(application.current()).configurationVersion).toBe(2)
+      expect(readApplicationState(application.current()).automation.availability.status).toBe(
+        'unavailable',
+      )
     } else {
       configuration.emit(reverted)
-      expect(application.current().configurationVersion).toBe(1)
+      expect(readApplicationState(application.current()).configurationVersion).toBe(1)
       bGate.resolve()
       await vi.waitFor(() =>
-        expect(reversionRequested || application.current().configurationVersion === 3).toBe(true),
+        expect(
+          reversionRequested ||
+            readApplicationState(application.current()).configurationVersion === 3,
+        ).toBe(true),
       )
     }
     // A different source holds v3 pending; this target's source, Workspace, pointers and commands never change.
-    const pending = structuredClone(application.current())
+    const pending = structuredClone(readApplicationState(application.current()))
     expect([2, 3]).toContain(pending.configurationVersion)
-    expect(pending.registrations.find((entry) => entry.key.id === 'target')?.workspace.path).toBe(
-      targetPath,
-    )
+    expect(
+      fixtureWorkspacePath(pending.projects.find((entry) => entry.ref.projectId === 'target')),
+    ).toBe(targetPath)
     if (holdAppend) {
       expect(writes.some((event) => event.type === startType)).toBe(false)
       durableGate.resolve()
@@ -537,30 +574,34 @@ async function queuedReversionSchedule(stage: 'classification' | 'wayfinder', ho
       expect(
         stored.opportunities.find((entry) => entry.id === reservation?.opportunityId)?.target,
       ).toEqual(target)
-      expect(application.current().configurationVersion).toBe(2)
+      expect(readApplicationState(application.current()).configurationVersion).toBe(2)
       await vi.waitFor(() =>
-        expect(application.current().automation.evidence[0]).toMatchObject({
-          target,
+        expect(readApplicationState(application.current()).automation.evidence[0]).toMatchObject({
+          target: fixtureTicketRef(target),
           [stage]: { status: 'launch-failed', admission: 'automatic' },
         }),
       )
-      expect(application.current().configurationVersion).toBe(2)
-      expect(application.current().automation.availability.status).toBe('unavailable')
+      expect(readApplicationState(application.current()).configurationVersion).toBe(2)
+      expect(readApplicationState(application.current()).automation.availability.status).toBe(
+        'unavailable',
+      )
       expect(effects).toEqual([])
     }
     await setImmediate()
-    const afterAppend = structuredClone(application.current())
+    const afterAppend = structuredClone(readApplicationState(application.current()))
     const effectsWhilePending = [...effects]
     const writesAfterAppend = [...writes]
     revertedGate.resolve()
-    await vi.waitFor(() => expect(application.current().configurationVersion).toBe(3))
+    await vi.waitFor(() =>
+      expect(readApplicationState(application.current()).configurationVersion).toBe(3),
+    )
     await setImmediate()
 
     expect(effectsWhilePending).toEqual([])
     expect(effects).toEqual([])
     if (afterAppend.configurationVersion === 2)
       expect(afterAppend.automation.availability.status).toBe('unavailable')
-    expect(application.current().automation.enabled).toBe(false)
+    expect(readApplicationState(application.current()).automation.enabled).toBe(false)
     if (!holdAppend)
       expect(
         states
@@ -578,9 +619,9 @@ async function queuedReversionSchedule(stage: 'classification' | 'wayfinder', ho
       expect(writesAfterAppend).toEqual(
         expect.arrayContaining([expect.objectContaining({ type: failureType })]),
       )
-      expect(afterAppend.automation.evidence[0]?.target).toEqual(target)
-      expect(application.current().automation.evidence[0]).toMatchObject({
-        target,
+      expect(afterAppend.automation.evidence[0]?.target).toEqual(fixtureTicketRef(target))
+      expect(readApplicationState(application.current()).automation.evidence[0]).toMatchObject({
+        target: fixtureTicketRef(target),
         [stage]: { status: 'launch-failed', admission: 'automatic' },
       })
     }
@@ -624,10 +665,12 @@ describe('RoadmapApplication queued activation safety', () => {
       })
       if (receipt === 'invalid') {
         expect(result.receivedState?.configuration.valid).toBe(false)
-        expect(result.outcome.state.projects).toEqual(result.initial.projects)
+        expect(readApplicationState(result.outcome.state).projects).toEqual(result.initial.projects)
       }
       if (receipt === 'workspace')
-        expect(result.receivedState?.registrations[0]?.workspace.path).toBe(result.workspacePath)
+        expect(
+          fixtureWorkspacePath(readApplicationState(result.receivedState ?? null)?.projects[0]),
+        ).toBe(result.workspacePath)
     },
   )
 
@@ -645,40 +688,39 @@ describe('RoadmapApplication queued activation safety', () => {
         error: { code: 'admission-failed', field: 'workspace.path' },
       })
       const initialTarget = result.initial.projects.find(
-        (project) => project.key.id === 'host-target',
+        (project) => project.ref.projectId === 'host-target',
       )
       expect(initialTarget).toMatchObject({
-        key: { integration: 'local', id: 'host-target' },
-        workspace: { path: result.workspacePath },
+        ref: { integration: 'local', projectId: 'host-target' },
+        source: { integration: 'local', path: result.workspacePath },
         resource: { kind: 'current-readable' },
       })
       expect(
-        result.outcome.state.projects.find((project) => project.key.id === 'host-target'),
+        readApplicationState(result.outcome.state).projects.find(
+          (project) => project.ref.projectId === 'host-target',
+        ),
       ).toMatchObject({
-        key: { integration: 'local', id: 'host-target' },
-        workspace: { path: result.workspacePath },
+        ref: fixtureResourceRef({ integration: 'local', id: 'host-target' }),
+        source: { integration: 'local', path: result.workspacePath },
         resource: { kind: 'current-readable' },
-      })
-      expect(
-        result.outcome.state.registrations.find((project) => project.key.id === 'host-target'),
-      ).toMatchObject({
-        key: { integration: 'local', id: 'host-target' },
-        workspace: { path: result.workspacePath },
       })
 
       // Reprove both real directories after v2 commits. The decoded alias cannot grant a
       // second Local source identity, but its canonical root still occupies A's Workspace.
-      expect(result.collisionOutcome).toMatchObject({
+      const collisionOutcome = result.collisionOutcome
+      if (!collisionOutcome)
+        throw new Error('Canonical occupancy must be reproved after v2 commits.')
+      expect(collisionOutcome).toMatchObject({
         ok: false,
         error: { code: 'admission-failed', field: 'workspace.path' },
-        state: { configurationVersion: 2 },
+        state: { phase: 'ready', configurationVersion: 2 },
       })
       expect(
-        result.collisionOutcome?.state.projects.find(
-          (project) => project.key.id === 'other-project',
+        readApplicationState(collisionOutcome.state).projects.find(
+          (project) => project.ref.projectId === 'other-project',
         ),
       ).toMatchObject({
-        key: { integration: 'local', id: 'other-project' },
+        ref: fixtureResourceRef({ integration: 'local', id: 'other-project' }),
         resource: {
           kind:
             receipt === 'move-other-workspace-to-alias' ? 'retained-unavailable' : 'never-observed',
@@ -686,10 +728,12 @@ describe('RoadmapApplication queued activation safety', () => {
         maps: [],
       })
       expect(
-        result.collisionOutcome?.state.projects.find((project) => project.key.id === 'host-target'),
+        readApplicationState(collisionOutcome.state).projects.find(
+          (project) => project.ref.projectId === 'host-target',
+        ),
       ).toMatchObject({
-        key: { integration: 'local', id: 'host-target' },
-        workspace: { path: result.workspacePath },
+        ref: fixtureResourceRef({ integration: 'local', id: 'host-target' }),
+        source: { integration: 'local', path: result.workspacePath },
         managementWarnings: expect.arrayContaining([expect.any(String)]),
       })
     },
@@ -721,11 +765,18 @@ describe('RoadmapApplication queued activation safety', () => {
       ok: false,
       error: { code: 'admission-failed', field: 'workspace.path' },
     })
-    expect(result.outcome.state.registrations).toEqual(result.initial.registrations)
-    expect(result.outcome.state.projects[0]?.key).toEqual({
-      integration: 'local',
-      id: 'host-target',
+    const project = readApplicationState(result.outcome.state).projects[0]
+    expect(project).toMatchObject({
+      ref: { integration: 'local', projectId: 'host-target' },
+      source: { integration: 'local', path: result.workspacePath },
+      management: {},
+      connectionId: 'local',
+      resource: result.initial.projects[0]?.resource,
+      mapsMembership: result.initial.projects[0]?.mapsMembership,
+      activeMap: result.initial.projects[0]?.activeMap,
     })
+    expect(project?.actions.some((action) => action.kind === 'server-launch')).toBe(false)
+    expect(project?.managementWarnings.length).toBeGreaterThan(0)
   })
 
   it('reports an honest safe host failure without a completed effect', async () => {
@@ -736,7 +787,7 @@ describe('RoadmapApplication queued activation safety', () => {
       ok: false,
       error: { code: 'launch-failed', field: 'actionId' },
     })
-    expect(result.outcome.state.registrations).toEqual(result.initial.registrations)
+    expect(readApplicationState(result.outcome.state).projects).toEqual(result.initial.projects)
     expect(JSON.stringify(result.outcome)).not.toContain('Private host launcher detail.')
   })
 
@@ -828,7 +879,7 @@ describe('RoadmapApplication queued activation safety', () => {
       reconcileMs: 1_000_000,
       logger: { warn() {} },
     })
-    const states: ApplicationState[] = []
+    const states: ReadyApplicationState[] = []
     const providerReads: Array<{ path: string; token: string }> = []
     const application = createRoadmapApplication({
       configuration: configuration.document,
@@ -915,16 +966,18 @@ describe('RoadmapApplication queued activation safety', () => {
       now: () => clock,
       serverEpoch: 'candidate-account-safety',
     })
-    application.subscribe((state) => states.push(structuredClone(state)))
+    application.subscribe((state) => {
+      if (state.phase === 'ready') states.push(structuredClone(state))
+    })
     try {
       await Promise.all([oldPath, candidatePath, githubPath].map((path) => mkdir(path)))
       await application.start()
-      const initial = structuredClone(application.current())
+      const initial = structuredClone(readApplicationState(application.current()))
       expect(initial.connections.find((entry) => entry.id === 'github')).toMatchObject({
         githubIdentity: { id: '42', login: 'old-account' },
         availability: { status: 'available' },
       })
-      expect(initial.projects.find((entry) => entry.key.id === 'remote')).toMatchObject({
+      expect(initial.projects.find((entry) => entry.ref.projectId === 'remote')).toMatchObject({
         maps: expect.arrayContaining([
           expect.objectContaining({
             resource: expect.objectContaining({
@@ -953,31 +1006,35 @@ describe('RoadmapApplication queued activation safety', () => {
         ),
       })
       await vi.waitFor(() => expect(candidateRequested).toBe(true))
-      const pending = structuredClone(application.current())
+      const pending = structuredClone(readApplicationState(application.current()))
       const beforeRefresh = providerReads.length
       clock = 2_000
       mapTitle = 'Active provider update while candidate waits'
       await observer.refresh()
-      const updatedWhilePending = structuredClone(application.current())
+      const updatedWhilePending = structuredClone(readApplicationState(application.current()))
       candidateGate.resolve()
-      await vi.waitFor(() => expect(application.current().configurationVersion).toBe(2))
-      const committed = structuredClone(application.current())
+      await vi.waitFor(() =>
+        expect(readApplicationState(application.current()).configurationVersion).toBe(2),
+      )
+      const committed = structuredClone(readApplicationState(application.current()))
 
       expect(pending.configurationVersion).toBe(1)
       expect(pending.connections.find((entry) => entry.id === 'github')).toMatchObject({
         githubIdentity: { id: '42', login: 'old-account' },
         availability: { status: 'available', observedAt: 1_000 },
       })
-      expect(pending.registrations).toEqual(initial.registrations)
-      expect(pending.projects.find((entry) => entry.key.id === 'remote')).toEqual(
-        initial.projects.find((entry) => entry.key.id === 'remote'),
+      expect(pending.projects).toEqual(initial.projects)
+      expect(pending.projects.find((entry) => entry.ref.projectId === 'remote')).toEqual(
+        initial.projects.find((entry) => entry.ref.projectId === 'remote'),
       )
       expect(updatedWhilePending.configurationVersion).toBe(1)
       expect(updatedWhilePending.connections.find((entry) => entry.id === 'github')).toMatchObject({
         githubIdentity: { id: '42' },
         availability: { status: 'available', observedAt: 2_000 },
       })
-      const updatedProject = updatedWhilePending.projects.find((entry) => entry.key.id === 'remote')
+      const updatedProject = updatedWhilePending.projects.find(
+        (entry) => entry.ref.projectId === 'remote',
+      )
       expect(updatedProject?.resource).toMatchObject({
         kind: 'current-readable',
         observation: { observedAt: 2_000 },
@@ -1005,9 +1062,9 @@ describe('RoadmapApplication queued activation safety', () => {
         githubIdentity: { id: '99', login: 'new-account' },
         availability: { status: 'authorization-required' },
       })
-      expect(committed.projects.find((entry) => entry.key.id === 'remote')?.resource.kind).toBe(
-        'retained-unavailable',
-      )
+      expect(
+        committed.projects.find((entry) => entry.ref.projectId === 'remote')?.resource.kind,
+      ).toBe('retained-unavailable')
       expect(committed.configuration.valid).toBe(true)
       const publicStates = JSON.stringify(states)
       expect(publicStates).not.toContain(credentials.accessToken)
@@ -1065,19 +1122,23 @@ describe('RoadmapApplication queued activation safety', () => {
           },
         },
       })
-      const states: ApplicationState[] = []
-      application.subscribe((state) => states.push(structuredClone(state)))
+      const states: ReadyApplicationState[] = []
+      application.subscribe((state) => {
+        if (state.phase === 'ready') states.push(structuredClone(state))
+      })
       let writing: Promise<PromiseSettledResult<CommandOutcome>[]> | undefined
       let stopping: Promise<PromiseSettledResult<void>[]> | undefined
       try {
         await application.start()
         writing = Promise.allSettled([
-          application.execute({
-            type: 'rename-connection',
-            connectionId: 'local',
-            name: 'Saved during shutdown',
-            expectedConfigurationVersion: 1,
-          }),
+          application.execute(
+            commandSchema.parse({
+              type: 'rename-connection',
+              connectionId: 'local',
+              name: 'Saved during shutdown',
+              expectedConfigurationVersion: 1,
+            }),
+          ),
         ])
         await writeEntered.promise
         let stopped = false
@@ -1100,10 +1161,14 @@ describe('RoadmapApplication queued activation safety', () => {
             : { ok: false, error: { code: 'persistence-failed' } },
         )
         expect(settled.value.state).toMatchObject({
-          configurationVersion: completion === 'failed' ? 1 : 2,
-          connections: [
-            { id: 'local', name: completion === 'failed' ? 'Local' : 'Saved during shutdown' },
-          ],
+          phase: 'stopping',
+          retained: {
+            phase: 'ready',
+            configurationVersion: completion === 'failed' ? 1 : 2,
+            connections: [
+              { id: 'local', name: completion === 'failed' ? 'Local' : 'Saved during shutdown' },
+            ],
+          },
         })
         expect(await stopping).toEqual([{ status: 'fulfilled', value: undefined }])
         expect(JSON.parse(await readFile(filename, 'utf8'))).toMatchObject({
@@ -1113,11 +1178,19 @@ describe('RoadmapApplication queued activation safety', () => {
           ],
         })
         expect(application.current()).toMatchObject({
-          configurationVersion: completion === 'failed' ? 1 : 2,
-          connections: [
-            { id: 'local', name: completion === 'failed' ? 'Local' : 'Saved during shutdown' },
-          ],
+          phase: 'stopped',
+          retained: {
+            phase: 'ready',
+            configurationVersion: completion === 'failed' ? 1 : 2,
+            connections: [
+              { id: 'local', name: completion === 'failed' ? 'Local' : 'Saved during shutdown' },
+            ],
+          },
         })
+        if (settled.value.ok && settled.value.result.type === 'configuration-updated')
+          expect(settled.value.result.configurationVersion).toBe(
+            readApplicationState(settled.value.state).configurationVersion,
+          )
         expect(writes).toHaveLength(1)
         expect(states).toHaveLength(publicationsAtStop)
       } finally {
@@ -1209,34 +1282,43 @@ describe('RoadmapApplication queued activation safety', () => {
         },
         operations: harmlessHost(),
       })
-      const publications: ApplicationState[] = []
-      application.subscribe((state) => publications.push(state))
+      const publications: ReadyApplicationState[] = []
+      application.subscribe((state) => {
+        if (state.phase === 'ready') publications.push(state)
+      })
       let command: ReturnType<typeof application.execute> | undefined
       let stopping: Promise<void> | undefined
       try {
         await application.start()
-        const observed = application.current().projects[0]?.resource
+        const observed = readApplicationState(application.current()).projects[0]?.resource
         command = application.execute(
-          type === 'rename-project'
-            ? { type, project, name: 'Saved after retirement', expectedConfigurationVersion: 1 }
-            : type === 'remove-project'
-              ? { type, project, expectedConfigurationVersion: 1 }
-              : type === 'register-project'
-                ? {
-                    type,
-                    candidate: {
-                      integration: 'local',
-                      connectionId: 'local',
+          commandSchema.parse(
+            type === 'rename-project'
+              ? {
+                  type,
+                  project: fixtureProjectRef(project),
+                  name: 'Saved after retirement',
+                  expectedConfigurationVersion: 1,
+                }
+              : type === 'remove-project'
+                ? { type, project: fixtureProjectRef(project), expectedConfigurationVersion: 1 }
+                : type === 'register-project'
+                  ? {
+                      type,
+                      candidate: {
+                        integration: 'local',
+                        connectionId: 'local',
+                        workspace: { path: additionalPath },
+                      },
+                      expectedConfigurationVersion: 1,
+                    }
+                  : {
+                      type,
+                      project: fixtureProjectRef(project),
                       workspace: { path: additionalPath },
+                      expectedConfigurationVersion: 1,
                     },
-                    expectedConfigurationVersion: 1,
-                  }
-                : {
-                    type,
-                    project,
-                    workspace: { path: additionalPath },
-                    expectedConfigurationVersion: 1,
-                  },
+          ),
         )
         await entered.promise
         stopping = application.stop()
@@ -1247,23 +1329,26 @@ describe('RoadmapApplication queued activation safety', () => {
         expect(outcome).toMatchObject({
           ok: true,
           result: { type: 'configuration-updated', configurationVersion: 2 },
-          state: { configurationVersion: 2 },
+          state: { phase: 'stopping', retained: { phase: 'ready', configurationVersion: 2 } },
         })
-        expect(applicationStateCodec.decode(outcome.state).ok).toBe(true)
+        expect(decodeApplicationState(outcome.state).ok).toBe(true)
+        if (outcome.ok && outcome.result.type === 'configuration-updated')
+          expect(outcome.result.configurationVersion).toBe(
+            readApplicationState(outcome.state).configurationVersion,
+          )
         const persisted: unknown = JSON.parse(await readFile(filename, 'utf8'))
         if (type === 'rename-project') {
           expect(persisted).toMatchObject({ projects: [{ displayName: 'Saved after retirement' }] })
-          expect(outcome.state.registrations).toMatchObject([
-            { displayName: 'Saved after retirement' },
+          expect(readApplicationState(outcome.state).projects).toMatchObject([
+            { management: { displayName: 'Saved after retirement' } },
           ])
-          expect(outcome.state.projects[0]).toMatchObject({
+          expect(readApplicationState(outcome.state).projects[0]).toMatchObject({
             name: 'Saved after retirement',
             resource: observed,
           })
         } else if (type === 'remove-project') {
           expect(persisted).toMatchObject({ projects: [] })
-          expect(outcome.state.registrations).toEqual([])
-          expect(outcome.state.projects).toEqual([])
+          expect(readApplicationState(outcome.state).projects).toEqual([])
         } else if (type === 'register-project') {
           expect(persisted).toMatchObject({
             projects: [
@@ -1271,10 +1356,10 @@ describe('RoadmapApplication queued activation safety', () => {
               { ref: { projectId: 'additional' }, workspace: { path: additionalPath } },
             ],
           })
-          expect(outcome.state.projects[0]?.resource).toEqual(observed)
-          expect(outcome.state.projects[1]).toMatchObject({
-            key: { integration: 'local', id: 'additional' },
-            workspace: { path: additionalPath },
+          expect(readApplicationState(outcome.state).projects[0]?.resource).toEqual(observed)
+          expect(readApplicationState(outcome.state).projects[1]).toMatchObject({
+            ref: fixtureResourceRef({ integration: 'local', id: 'additional' }),
+            source: { integration: 'local', path: additionalPath },
             resource: { kind: 'never-observed', current: null },
             mapsMembership: { kind: 'never-observed', current: null },
             maps: [],
@@ -1282,8 +1367,10 @@ describe('RoadmapApplication queued activation safety', () => {
           })
         } else {
           expect(persisted).toMatchObject({ projects: [{ workspace: { path: additionalPath } }] })
-          expect(outcome.state.registrations[0]?.workspace.path).toBe(additionalPath)
-          const retained = outcome.state.projects[0]
+          expect(fixtureWorkspacePath(readApplicationState(outcome.state).projects[0])).toBe(
+            additionalPath,
+          )
+          const retained = readApplicationState(outcome.state).projects[0]
           expect(retained).toMatchObject({
             resource: {
               kind: 'retained-unavailable',
@@ -1304,18 +1391,26 @@ describe('RoadmapApplication queued activation safety', () => {
           })
         }
         await stopping
-        expect(application.current().registrations).toEqual(outcome.state.registrations)
-        expect(application.current().projects).toEqual(outcome.state.projects)
-        expect(application.current().automation.availability.status).toBe('unavailable')
+        expect(application.current()).toMatchObject({
+          phase: 'stopped',
+          retained: { phase: 'ready', configurationVersion: 2 },
+        })
+        expect(readApplicationState(application.current()).projects).toEqual(
+          readApplicationState(outcome.state).projects,
+        )
+        expect(readApplicationState(application.current()).automation.availability.status).toBe(
+          'unavailable',
+        )
         expect(
-          application
-            .current()
+          readApplicationState(application.current())
             .projects.flatMap((entry) => entry.actions)
             .some((action) => action.kind === 'server-launch'),
         ).toBe(false)
         expect(application.diagnostics().lifecycle.phase).toBe('stopped')
         source.push(read([localContent('fixture', root)], 2_000))
-        expect(application.current().projects).toEqual(outcome.state.projects)
+        expect(readApplicationState(application.current()).projects).toEqual(
+          readApplicationState(outcome.state).projects,
+        )
         expect(publications).toHaveLength(publicationsAtStop)
         expect(source.stopped).toBe(true)
         expect(owners).toBe(1)
@@ -1362,20 +1457,24 @@ describe('RoadmapApplication queued activation safety', () => {
       },
     })
     await application.start()
-    const first = application.execute({
-      type: 'rename-connection',
-      connectionId: 'local',
-      name: 'Already admitted',
-      expectedConfigurationVersion: 1,
-    })
+    const first = application.execute(
+      commandSchema.parse({
+        type: 'rename-connection',
+        connectionId: 'local',
+        name: 'Already admitted',
+        expectedConfigurationVersion: 1,
+      }),
+    )
     const firstResult = Promise.allSettled([first])
     await writeEntered.promise
-    const queued = application.execute({
-      type: 'rename-connection',
-      connectionId: 'local',
-      name: 'Must not be admitted',
-      expectedConfigurationVersion: 1,
-    })
+    const queued = application.execute(
+      commandSchema.parse({
+        type: 'rename-connection',
+        connectionId: 'local',
+        name: 'Must not be admitted',
+        expectedConfigurationVersion: 1,
+      }),
+    )
     const queuedResult = Promise.allSettled([queued])
     const stopping = Promise.allSettled([application.stop()])
     try {
@@ -1449,21 +1548,25 @@ describe('RoadmapApplication queued activation safety', () => {
       try {
         await application.start()
         launched = Promise.allSettled([
-          application.execute({
-            type: 'launch-action',
-            actionId: 'open-workspace',
-            project: { integration: 'local', id: 'host' },
-            expectedConfigurationVersion: 1,
-          }),
+          application.execute(
+            commandSchema.parse({
+              type: 'launch-action',
+              actionId: 'open-workspace',
+              project: fixtureProjectRef({ integration: 'local', id: 'host' }),
+              expectedConfigurationVersion: 1,
+            }),
+          ),
         ])
         await entered.promise
         queued = Promise.allSettled([
-          application.execute({
-            type: 'launch-action',
-            actionId: 'open-terminal',
-            project: { integration: 'local', id: 'host' },
-            expectedConfigurationVersion: 1,
-          }),
+          application.execute(
+            commandSchema.parse({
+              type: 'launch-action',
+              actionId: 'open-terminal',
+              project: fixtureProjectRef({ integration: 'local', id: 'host' }),
+              expectedConfigurationVersion: 1,
+            }),
+          ),
         ])
         let stopped = false
         stopping = Promise.allSettled([

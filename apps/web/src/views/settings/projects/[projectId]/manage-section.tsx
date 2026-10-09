@@ -1,4 +1,5 @@
-import type { Command, RegisteredProject, SafeError } from '@roadmap/contracts'
+import type { Command, SafeError } from '@roadmap/contracts/operations'
+import type { Project } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
 import { ControlGroup } from '@roadmap/ui/control-group'
@@ -13,7 +14,7 @@ import { SettingsForm } from '@/views/shared/settings-form'
 import { ErrorText } from '@/views/shared/settings-shared'
 import { WorkspaceFolderSelector } from '@/views/shared/workspace-folder-selector'
 
-type ManageSectionProps = { project: RegisteredProject; connectionExists: boolean }
+type ManageSectionProps = { project: Project; connectionExists: boolean }
 
 export function ManageSection({ project, connectionExists }: ManageSectionProps) {
   const navigate = useNavigate()
@@ -60,7 +61,7 @@ export function ManageSection({ project, connectionExists }: ManageSectionProps)
       {
         type: 'repair-project-workspace',
         expectedConfigurationVersion: configurationVersion,
-        project: project.key,
+        project: project.ref,
         workspace: { path },
       },
       `${project.name} Workspace repaired.`,
@@ -72,7 +73,7 @@ export function ManageSection({ project, connectionExists }: ManageSectionProps)
       {
         type: 'remove-project',
         expectedConfigurationVersion: configurationVersion,
-        project: project.key,
+        project: project.ref,
       },
       `${project.name} removed from Roadmap.`,
     )
@@ -102,7 +103,7 @@ export function ManageSection({ project, connectionExists }: ManageSectionProps)
                   {
                     type: 'refresh-project',
                     expectedConfigurationVersion: configurationVersion,
-                    project: project.key,
+                    project: project.ref,
                   },
                   `${project.name} refreshed.`,
                 )

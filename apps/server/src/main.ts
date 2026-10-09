@@ -4,13 +4,14 @@ import { createRoadmapApplication } from './application/application.ts'
 import { createMacOsCredentialVault } from './application/credential-vault.ts'
 import { createApplicationOperations } from './application/operations.ts'
 import { createAutomationDatabaseDocument } from './automation/database.ts'
-import { createAutomationLauncher } from './automation/engine.ts'
+import { createAutomationLauncher } from './automation/launcher.ts'
 import { readServerConfig } from './config.ts'
 import { createConfigurationDocument } from './configuration/document.ts'
 import { createGitHubProjectAdmission } from './github/admission.ts'
 import { createGitHubClient } from './github/client.ts'
 import { createGitHubConnectionPort } from './github/connections.ts'
 import { createGitHubObserverPool } from './github/observer.ts'
+import { launch, selectWorkspace } from './host/darwin.ts'
 import { createLocalProjectAdmission } from './local/admission.ts'
 import { createLocalObserver } from './local/observer.ts'
 import { createNotifier } from './notify.ts'
@@ -36,7 +37,7 @@ async function main(): Promise<void> {
     : undefined
   const credentialVault = github ? createMacOsCredentialVault() : undefined
   const githubObservers = createGitHubObserverPool()
-  const operations = createApplicationOperations()
+  const operations = createApplicationOperations({ launch, selectWorkspace })
   const admissions = {
     local: createLocalProjectAdmission(),
     ...(github ? { github: createGitHubProjectAdmission() } : {}),

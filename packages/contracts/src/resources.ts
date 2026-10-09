@@ -1,38 +1,34 @@
 import { z } from 'zod'
 import { blockerSchema } from './blocker.ts'
+import {
+  connectionIdSchema,
+  githubProjectRefSchema,
+  localProjectRefSchema,
+  mapRefSchema,
+  projectRefSchema,
+  ticketRefSchema,
+} from './identity.ts'
+import { hrefSchema, projectActionSchema } from './internal/actions.ts'
 import { arrayDataSchema, requestDataSchema } from './internal/request-data.ts'
 
 const timeSchema = z.number().nonnegative().max(8_640_000_000_000_000)
-const identitySchema = z.string()
-const projectKeySchema = requestDataSchema.pipe(
-  z.strictObject({
-    integration: z.enum(['local', 'github']),
-    id: identitySchema,
-  }),
-)
-const mapKeySchema = requestDataSchema.pipe(
-  z.strictObject({ project: projectKeySchema, mapId: identitySchema }),
-)
-const ticketKeySchema = requestDataSchema.pipe(
-  z.strictObject({ map: mapKeySchema, ticketId: identitySchema }),
-)
 // Keep raw options for Zod's discriminator lookup; guard each standalone boundary.
 const projectScopeObjectSchema = z.strictObject({
   kind: z.literal('project'),
-  project: projectKeySchema,
+  project: projectRefSchema,
 })
-const mapScopeObjectSchema = z.strictObject({ kind: z.literal('map'), map: mapKeySchema })
+const mapScopeObjectSchema = z.strictObject({ kind: z.literal('map'), map: mapRefSchema })
 const ticketScopeObjectSchema = z.strictObject({
   kind: z.literal('ticket'),
-  ticket: ticketKeySchema,
+  ticket: ticketRefSchema,
 })
 const mapsScopeObjectSchema = z.strictObject({
   kind: z.literal('maps-membership'),
-  project: projectKeySchema,
+  project: projectRefSchema,
 })
 const ticketsScopeObjectSchema = z.strictObject({
   kind: z.literal('tickets-membership'),
-  map: mapKeySchema,
+  map: mapRefSchema,
 })
 const projectScopeSchema = requestDataSchema.pipe(projectScopeObjectSchema)
 const mapScopeSchema = requestDataSchema.pipe(mapScopeObjectSchema)
@@ -57,7 +53,7 @@ const provenanceSchema = requestDataSchema.pipe(
     }),
     z.strictObject({
       integration: z.literal('github'),
-      connectionId: z.string(),
+      connectionId: connectionIdSchema,
       repositoryId: z.string(),
       stage: z.enum(['credentials', 'repository', 'map-list', 'map-read']),
     }),
@@ -109,12 +105,12 @@ const failureSchema = requestDataSchema.pipe(
 
 type Scope = z.output<typeof scopeSchema>
 type Provenance = z.output<typeof provenanceSchema>
-type ProjectKey = z.output<typeof projectKeySchema>
-type MapKey = z.output<typeof mapKeySchema>
-type TicketKey = z.output<typeof ticketKeySchema>
+type ProjectKey = z.output<typeof projectRefSchema>
+type MapKey = z.output<typeof mapRefSchema>
+type TicketKey = z.output<typeof ticketRefSchema>
 
 function sameProject(a: ProjectKey, b: ProjectKey): boolean {
-  return a.integration === b.integration && a.id === b.id
+  return a.integration === b.integration && a.projectId === b.projectId
 }
 function sameMap(a: MapKey, b: MapKey): boolean {
   return sameProject(a.project, b.project) && a.mapId === b.mapId
@@ -253,24 +249,45 @@ const unavailableSchema = requestDataSchema.pipe(
   ]),
 )
 
-const ticketTypeEvidenceSchema = requestDataSchema.pipe(
-  z.discriminatedUnion('kind', [
-    z.strictObject({
-      kind: z.literal('recognized'),
-      value: z.enum(['research', 'prototype', 'grilling', 'task']),
-      labels: arrayDataSchema.pipe(z.array(z.string())),
-    }),
-    z.strictObject({ kind: z.literal('missing'), labels: arrayDataSchema.pipe(z.tuple([])) }),
-    z.strictObject({
-      kind: z.literal('unknown'),
-      labels: arrayDataSchema.pipe(z.array(z.string())),
-    }),
-    z.strictObject({
-      kind: z.literal('conflicting'),
-      labels: arrayDataSchema.pipe(z.array(z.string())),
-    }),
-  ]),
-)
+const recognizedTicketTypeSchema = z.enum(['research', 'prototype', 'grilling', 'task'])
+const recognizedTicketTypes = new Set<string>(recognizedTicketTypeSchema.options)
+export const ticketTypeEvidenceSchema = requestDataSchema
+  .pipe(
+    z.discriminatedUnion('kind', [
+      z.strictObject({
+        kind: z.literal('recognized'),
+        value: recognizedTicketTypeSchema,
+        labels: arrayDataSchema.pipe(z.tuple([z.string()])),
+      }),
+      z.strictObject({ kind: z.literal('missing'), labels: arrayDataSchema.pipe(z.tuple([])) }),
+      z.strictObject({
+        kind: z.literal('unknown'),
+        labels: arrayDataSchema.pipe(z.tuple([z.string()])),
+      }),
+      z.strictObject({
+        kind: z.literal('conflicting'),
+        labels: arrayDataSchema.pipe(z.array(z.string()).min(2)),
+      }),
+    ]),
+  )
+  .superRefine((value, ctx) => {
+    if (
+      value.labels.some(
+        (label, index) =>
+          label !== label.trimEnd().toLowerCase() ||
+          (index > 0 && label <= (value.labels[index - 1] ?? '')),
+      )
+    )
+      issue(
+        ctx,
+        ['labels'],
+        'Type labels must preserve actual lowercased suffixes without trailing whitespace in unique source order.',
+      )
+    if (value.kind === 'recognized' && value.labels[0] !== value.value)
+      issue(ctx, ['labels'], 'Recognized evidence must name its actual type label.')
+    if (value.kind === 'unknown' && recognizedTicketTypes.has(value.labels[0]))
+      issue(ctx, ['labels'], 'A recognized label cannot be unknown evidence.')
+  })
 const ticketStateSchema = z.enum(['closed', 'blocked', 'claimed', 'frontier'])
 const assigneeSchema = requestDataSchema.pipe(
   z.strictObject({
@@ -325,14 +342,14 @@ const projectSourceSchema = requestDataSchema.pipe(
       integration: z.literal('github'),
       repositoryId: z.string(),
       nameWithOwner: z.string(),
-      url: z.string(),
+      url: hrefSchema,
     }),
   ]),
 )
 const contentSourceSchema = requestDataSchema.pipe(
   z.discriminatedUnion('kind', [
     z.strictObject({ kind: z.literal('file'), path: z.string() }),
-    z.strictObject({ kind: z.literal('issue'), url: z.string() }),
+    z.strictObject({ kind: z.literal('issue'), url: hrefSchema }),
   ]),
 )
 const projectResourceValueSchema = requestDataSchema.pipe(
@@ -355,25 +372,44 @@ const mapResourceValueSchema = requestDataSchema.pipe(
     warnings: arrayDataSchema.pipe(z.array(z.string())),
   }),
 )
-const ticketResourceValueSchema = requestDataSchema.pipe(
-  z.strictObject({
-    displayId: z.string().optional(),
-    title: z.string().optional(),
-    source: contentSourceSchema,
-    status: z.enum(['open', 'closed', 'unknown']),
-    body: z.string(),
-    typeEvidence: ticketTypeEvidenceSchema,
-    state: ticketStateSchema,
-    isClaimed: z.boolean(),
-    isBlocked: z.boolean(),
-    createdAt: timeSchema.optional(),
-    closedAt: timeSchema.optional(),
-    assignees: arrayDataSchema.pipe(z.array(assigneeSchema)),
-    blockedBy: arrayDataSchema.pipe(z.array(blockerSchema)),
-    blockersComplete: z.boolean(),
-    warnings: arrayDataSchema.pipe(z.array(z.string())),
-  }),
-)
+const ticketResourceValueSchema = requestDataSchema
+  .pipe(
+    z.strictObject({
+      displayId: z.string().optional(),
+      title: z.string().optional(),
+      source: contentSourceSchema,
+      status: z.enum(['open', 'closed', 'unknown']),
+      body: z.string(),
+      typeEvidence: ticketTypeEvidenceSchema,
+      state: ticketStateSchema,
+      isClaimed: z.boolean(),
+      isBlocked: z.boolean(),
+      createdAt: timeSchema.optional(),
+      closedAt: timeSchema.optional(),
+      assignees: arrayDataSchema.pipe(z.array(assigneeSchema)),
+      blockedBy: arrayDataSchema.pipe(z.array(blockerSchema)),
+      blockersComplete: z.boolean(),
+      warnings: arrayDataSchema.pipe(z.array(z.string())),
+    }),
+  )
+  .superRefine((value, ctx) => {
+    const blocked =
+      value.status === 'unknown' ||
+      !value.blockersComplete ||
+      value.blockedBy.some((blocker) => blocker.state !== 'closed')
+    if (value.isBlocked !== blocked)
+      issue(ctx, ['isBlocked'], 'Blocked facts must match actual blocker evidence.')
+    const state =
+      value.status === 'closed'
+        ? 'closed'
+        : blocked
+          ? 'blocked'
+          : value.isClaimed
+            ? 'claimed'
+            : 'frontier'
+    if (value.state !== state)
+      issue(ctx, ['state'], 'Ticket placement must match its independent source facts.')
+  })
 
 function observationSchema<S extends z.ZodType, V extends z.ZodType, C extends z.ZodType>(
   scope: S,
@@ -617,10 +653,10 @@ export const ticketResourceSchema = resourceSchema(
 ).superRefine(refineResource)
 
 const mapsValueSchema = requestDataSchema.pipe(
-  z.strictObject({ members: arrayDataSchema.pipe(z.array(mapKeySchema)) }),
+  z.strictObject({ members: arrayDataSchema.pipe(z.array(mapRefSchema)) }),
 )
 const ticketsValueSchema = requestDataSchema.pipe(
-  z.strictObject({ members: arrayDataSchema.pipe(z.array(ticketKeySchema)) }),
+  z.strictObject({ members: arrayDataSchema.pipe(z.array(ticketRefSchema)) }),
 )
 function refineMapsObservation(
   value: {
@@ -781,7 +817,7 @@ const activeCauses = {
 }
 export const activeMapSchema = requestDataSchema.pipe(
   z.discriminatedUnion('kind', [
-    z.strictObject({ kind: z.literal('known-current'), mapId: z.string() }),
+    z.strictObject({ kind: z.literal('known-current'), ref: mapRefSchema }),
     z.strictObject({ kind: z.literal('known-empty') }),
     z
       .strictObject({
@@ -804,38 +840,39 @@ export const activeMapSchema = requestDataSchema.pipe(
   ]),
 )
 const ticketSchema = requestDataSchema
-  .pipe(z.strictObject({ key: ticketKeySchema, resource: ticketResourceSchema }))
+  .pipe(z.strictObject({ ref: ticketRefSchema, resource: ticketResourceSchema }))
   .superRefine((value, ctx) => {
-    if (!sameScope(resourceScope(value.resource), { kind: 'ticket', ticket: value.key }))
+    if (!sameScope(resourceScope(value.resource), { kind: 'ticket', ticket: value.ref }))
       issue(ctx, ['resource'], 'Ticket resource must match its enclosing identity.')
   })
 const mapSchema = requestDataSchema
   .pipe(
     z.strictObject({
-      key: mapKeySchema,
+      ref: mapRefSchema,
       resource: mapResourceSchema,
       ticketsMembership: ticketMembershipSchema,
       tickets: arrayDataSchema.pipe(z.array(ticketSchema)),
+      frontier: arrayDataSchema.pipe(z.array(ticketRefSchema)),
     }),
   )
   .superRefine((value, ctx) => {
-    if (!sameScope(resourceScope(value.resource), { kind: 'map', map: value.key }))
+    if (!sameScope(resourceScope(value.resource), { kind: 'map', map: value.ref }))
       issue(ctx, ['resource'], 'Map resource must match its enclosing identity.')
     refineMembershipScope(
       value.ticketsMembership,
-      { kind: 'tickets-membership', map: value.key },
+      { kind: 'tickets-membership', map: value.ref },
       ctx,
       ['ticketsMembership'],
     )
     const ids = new Set<string>()
     for (const [index, ticket] of value.tickets.entries()) {
-      if (!sameMap(ticket.key.map, value.key) || ids.has(ticket.key.ticketId))
+      if (!sameMap(ticket.ref.map, value.ref) || ids.has(ticket.ref.ticketId))
         issue(
           ctx,
-          ['tickets', index, 'key'],
+          ['tickets', index, 'ref'],
           'Ticket identities must be unique and belong to this map.',
         )
-      ids.add(ticket.key.ticketId)
+      ids.add(ticket.ref.ticketId)
     }
     const membership = value.ticketsMembership
     if (membership.kind === 'current-complete' || membership.kind === 'current-incomplete') {
@@ -846,6 +883,44 @@ const mapSchema = requestDataSchema
             ['ticketsMembership', 'observation', 'value', 'members', index],
             'Current member must have a canonical resource entry.',
           )
+    }
+    const expected = value.tickets.filter((ticket) => {
+      const observation = successfulObservation(ticket.resource)
+      return (
+        observation !== null &&
+        observation.completeness.kind === 'complete' &&
+        observation.value.status === 'open' &&
+        !observation.value.isClaimed &&
+        observation.value.blockersComplete &&
+        observation.value.blockedBy.every((blocker) => blocker.state === 'closed')
+      )
+    })
+    const frontier = new Set<string>()
+    for (const [index, ref] of value.frontier.entries()) {
+      if (
+        !sameMap(ref.map, value.ref) ||
+        frontier.has(ref.ticketId) ||
+        !expected.some((ticket) => sameTicket(ticket.ref, ref))
+      )
+        issue(
+          ctx,
+          ['frontier', index],
+          'Frontier must name unique canonical eligible tickets in this map.',
+        )
+      frontier.add(ref.ticketId)
+    }
+    if (expected.some((ticket) => !frontier.has(ticket.ref.ticketId)))
+      issue(ctx, ['frontier'], 'Frontier must contain every canonical eligible ticket.')
+    if (membership.kind === 'current-complete') {
+      const members = new Set(membership.observation.value.members.map((member) => member.ticketId))
+      for (const [index, ticket] of value.tickets.entries()) {
+        if (members.has(ticket.ref.ticketId) === (ticket.resource.kind === 'proven-absent'))
+          issue(
+            ctx,
+            ['tickets', index, 'resource'],
+            'Complete membership must agree with present and proven-absent placement.',
+          )
+      }
     }
   })
 export type ProjectResourceResult = z.output<typeof projectResourceSchema>
@@ -920,14 +995,14 @@ function refineMembershipScope(
     )
 }
 const resourcesBaseSchema = z.strictObject({
-  key: projectKeySchema,
+  ref: projectRefSchema,
   resource: projectResourceSchema,
   mapsMembership: mapMembershipSchema,
   maps: arrayDataSchema.pipe(z.array(mapSchema)),
   displayOrder: requestDataSchema.pipe(
     z.strictObject({
-      openMapIds: arrayDataSchema.pipe(z.array(z.string())),
-      closedMapIds: arrayDataSchema.pipe(z.array(z.string())),
+      open: arrayDataSchema.pipe(z.array(mapRefSchema)),
+      closed: arrayDataSchema.pipe(z.array(mapRefSchema)),
     }),
   ),
   activeMap: activeMapSchema,
@@ -944,7 +1019,7 @@ function currentResourceEvidence(
     case 'retained-unavailable':
       return resource.unavailable.kind !== 'no-current-evidence' ? resource.unavailable : null
     case 'proven-absent':
-      return null
+      return resource.absence
   }
 }
 function currentMembershipEvidence(membership: MapMembershipResult | TicketMembershipResult) {
@@ -973,30 +1048,30 @@ function localPathWithin(path: string, root: string): boolean {
   return path === root || path.startsWith(root.endsWith('/') ? root : `${root}/`)
 }
 function refineAggregate(project: ResourceAggregate, ctx: z.RefinementCtx): void {
-  if (!sameScope(resourceScope(project.resource), { kind: 'project', project: project.key }))
+  if (!sameScope(resourceScope(project.resource), { kind: 'project', project: project.ref }))
     issue(ctx, ['resource'], 'Project resource must match its registered identity.')
   refineMembershipScope(
     project.mapsMembership,
-    { kind: 'maps-membership', project: project.key },
+    { kind: 'maps-membership', project: project.ref },
     ctx,
     ['mapsMembership'],
   )
   const maps = new Map<string, MapResource>()
   for (const [index, map] of project.maps.entries()) {
-    if (!sameProject(map.key.project, project.key) || maps.has(map.key.mapId))
+    if (!sameProject(map.ref.project, project.ref) || maps.has(map.ref.mapId))
       issue(
         ctx,
-        ['maps', index, 'key'],
+        ['maps', index, 'ref'],
         'Map identities must be unique and belong to this Project.',
       )
-    maps.set(map.key.mapId, map)
+    maps.set(map.ref.mapId, map)
   }
-  const allOrder = [...project.displayOrder.openMapIds, ...project.displayOrder.closedMapIds]
+  const allOrder = [...project.displayOrder.open, ...project.displayOrder.closed]
   const ordered = new Set<string>()
-  for (const id of allOrder) {
-    if (!maps.has(id) || ordered.has(id))
+  for (const ref of allOrder) {
+    if (!sameProject(ref.project, project.ref) || !maps.has(ref.mapId) || ordered.has(ref.mapId))
       issue(ctx, ['displayOrder'], 'Display order must reference unique canonical map identities.')
-    ordered.add(id)
+    ordered.add(ref.mapId)
   }
   const membership = project.mapsMembership
   if (membership.kind === 'current-complete' || membership.kind === 'current-incomplete') {
@@ -1007,6 +1082,17 @@ function refineAggregate(project: ResourceAggregate, ctx: z.RefinementCtx): void
           ['mapsMembership', 'observation', 'value', 'members', index],
           'Current member must have a canonical map entry.',
         )
+  }
+  if (membership.kind === 'current-complete') {
+    const members = new Set(membership.observation.value.members.map((member) => member.mapId))
+    for (const [index, map] of project.maps.entries()) {
+      if (members.has(map.ref.mapId) === (map.resource.kind === 'proven-absent'))
+        issue(
+          ctx,
+          ['maps', index, 'resource'],
+          'Complete membership must agree with present and proven-absent placement.',
+        )
+    }
   }
   const evidence = currentEvidence(project)
   const owner = evidence.find((entry) => entry.provenance.integration === 'github')?.provenance
@@ -1065,7 +1151,7 @@ function refineAggregate(project: ResourceAggregate, ctx: z.RefinementCtx): void
       continue
     }
     for (const ticketMember of map.ticketsMembership.observation.value.members) {
-      const ticket = map.tickets.find((entry) => entry.key.ticketId === ticketMember.ticketId)
+      const ticket = map.tickets.find((entry) => entry.ref.ticketId === ticketMember.ticketId)
       if (
         !ticket ||
         ticket.resource.kind !== 'current-readable' ||
@@ -1092,18 +1178,24 @@ function refineAggregate(project: ResourceAggregate, ctx: z.RefinementCtx): void
   open.sort(
     (a, b) =>
       updated(b) - updated(a) ||
-      (a.key.mapId < b.key.mapId ? -1 : a.key.mapId > b.key.mapId ? 1 : 0),
+      (a.ref.mapId < b.ref.mapId ? -1 : a.ref.mapId > b.ref.mapId ? 1 : 0),
   )
   closed.sort(
     (a, b) =>
       closure(b) - closure(a) ||
-      (a.key.mapId < b.key.mapId ? -1 : a.key.mapId > b.key.mapId ? 1 : 0),
+      (a.ref.mapId < b.ref.mapId ? -1 : a.ref.mapId > b.ref.mapId ? 1 : 0),
   )
   if (
-    open.length !== project.displayOrder.openMapIds.length ||
-    open.some((map, index) => project.displayOrder.openMapIds[index] !== map.key.mapId) ||
-    closed.length !== project.displayOrder.closedMapIds.length ||
-    closed.some((map, index) => project.displayOrder.closedMapIds[index] !== map.key.mapId)
+    open.length !== project.displayOrder.open.length ||
+    open.some((map, index) => {
+      const ref = project.displayOrder.open[index]
+      return !ref || !sameMap(ref, map.ref)
+    }) ||
+    closed.length !== project.displayOrder.closed.length ||
+    closed.some((map, index) => {
+      const ref = project.displayOrder.closed[index]
+      return !ref || !sameMap(ref, map.ref)
+    })
   )
     issue(
       ctx,
@@ -1112,73 +1204,112 @@ function refineAggregate(project: ResourceAggregate, ctx: z.RefinementCtx): void
     )
   if (
     project.activeMap.kind === 'known-current'
-      ? project.activeMap.mapId !== open[0]?.key.mapId
+      ? !open[0] || !sameMap(project.activeMap.ref, open[0].ref)
       : open.length !== 0
   )
     issue(ctx, ['activeMap'], 'Active certainty must match the head of the current open order.')
 }
-export const registeredProjectResourcesSchema = requestDataSchema.pipe(
-  resourcesBaseSchema.superRefine(refineAggregate),
-)
-export const registeredProjectSchema = requestDataSchema.pipe(
-  resourcesBaseSchema
-    .superRefine(refineAggregate)
-    .safeExtend({
-      connectionId: z.string(),
-      locator: requestDataSchema.pipe(
-        z.discriminatedUnion('integration', [
-          z.strictObject({ integration: z.literal('local'), path: z.string() }),
-          z.strictObject({
-            integration: z.literal('github'),
-            repositoryId: z.string(),
-            nameWithOwner: z.string(),
-          }),
-        ]),
-      ),
-      workspace: requestDataSchema.pipe(
-        z.strictObject({ path: z.string(), gitIdentity: z.string().optional() }),
-      ),
-      displayName: z.string().optional(),
-      name: z.string(),
-      actions: z.array(
-        requestDataSchema.pipe(
-          z.strictObject({
-            id: z.string(),
-            label: z.string(),
-            kind: z.enum(['roadmap', 'external-link', 'server-launch']),
-            href: z.string().optional(),
-          }),
-        ),
-      ),
-      managementWarnings: z.array(z.string()),
-    })
-    .superRefine((project, ctx) => {
-      if (project.locator.integration !== project.key.integration)
-        issue(ctx, ['locator'], 'Registration locator must match the Project Integration.')
-      for (const evidence of currentEvidence(project)) {
-        const provenance = evidence.provenance
-        if (project.locator.integration === 'github') {
-          if (
-            provenance.integration !== 'github' ||
-            provenance.connectionId !== project.connectionId ||
-            provenance.repositoryId !== project.locator.repositoryId
+const projectFields = {
+  ...resourcesBaseSchema.shape,
+  connectionId: connectionIdSchema,
+  name: z.string(),
+  actions: arrayDataSchema.pipe(z.array(projectActionSchema)),
+  managementWarnings: arrayDataSchema.pipe(z.array(z.string())),
+}
+const localProjectSchema = z.strictObject({
+  ...projectFields,
+  integration: z.literal('local'),
+  ref: localProjectRefSchema,
+  source: requestDataSchema.pipe(
+    z.strictObject({ integration: z.literal('local'), path: z.string() }),
+  ),
+  management: requestDataSchema.pipe(z.strictObject({ displayName: z.string().optional() })),
+})
+const githubProjectSchema = z.strictObject({
+  ...projectFields,
+  integration: z.literal('github'),
+  ref: githubProjectRefSchema,
+  source: requestDataSchema.pipe(
+    z.strictObject({
+      integration: z.literal('github'),
+      repositoryId: z.string(),
+      nameWithOwner: z.string(),
+      url: hrefSchema,
+    }),
+  ),
+  management: requestDataSchema.pipe(
+    z.strictObject({ workspacePath: z.string(), displayName: z.string().optional() }),
+  ),
+})
+export const projectSchema = requestDataSchema
+  .pipe(z.discriminatedUnion('integration', [localProjectSchema, githubProjectSchema]))
+  .superRefine((project, ctx) => {
+    refineAggregate(project, ctx)
+    if (project.resource.kind === 'current-readable') {
+      const source = project.resource.observation.value.source
+      if (project.integration === 'github') {
+        if (
+          source.integration !== 'github' ||
+          source.repositoryId !== project.source.repositoryId ||
+          source.nameWithOwner !== project.source.nameWithOwner ||
+          source.url !== project.source.url
+        )
+          issue(
+            ctx,
+            ['resource', 'observation', 'value', 'source'],
+            'Current observed source must match the actual Project source.',
           )
-            issue(
-              ctx,
-              ['resource'],
-              'Current source evidence must match the configured Connection/repository binding.',
-            )
-        } else if (
-          provenance.integration !== 'local' ||
-          !localPathWithin(provenance.path, project.locator.path) ||
-          (evidence.scope.kind === 'project' && provenance.path !== project.locator.path)
+      } else if (source.integration !== 'local' || source.path !== project.source.path) {
+        issue(
+          ctx,
+          ['resource', 'observation', 'value', 'source'],
+          'Current observed source must match the actual Project source.',
+        )
+      }
+    }
+    const actions = new Set<string>()
+    for (const [index, action] of project.actions.entries()) {
+      if (actions.has(action.id))
+        issue(ctx, ['actions', index, 'id'], 'Action identities must be unique in their Project.')
+      actions.add(action.id)
+    }
+    for (const evidence of currentEvidence(project)) {
+      const provenance = evidence.provenance
+      if (project.integration === 'github') {
+        if (
+          provenance.integration !== 'github' ||
+          provenance.connectionId !== project.connectionId ||
+          provenance.repositoryId !== project.source.repositoryId
         )
           issue(
             ctx,
             ['resource'],
-            'Current source evidence must match the configured canonical Local binding.',
+            'Current source evidence must match the configured Connection/repository binding.',
           )
+      } else if (
+        provenance.integration !== 'local' ||
+        !localPathWithin(provenance.path, project.source.path) ||
+        (evidence.scope.kind === 'project' && provenance.path !== project.source.path)
+      ) {
+        issue(
+          ctx,
+          ['resource'],
+          'Current source evidence must match the configured canonical Local binding.',
+        )
       }
-    }),
-)
-export type RegisteredProject = z.output<typeof registeredProjectSchema>
+    }
+  })
+export type Project = z.output<typeof projectSchema>
+
+function successfulObservation(resource: TicketResourceResult) {
+  switch (resource.kind) {
+    case 'current-readable':
+      return resource.observation
+    case 'retained-unavailable':
+      return resource.lastSuccessful
+    case 'proven-absent':
+      return resource.trace.kind === 'last-successful-trace' ? resource.trace.lastSuccessful : null
+    case 'never-observed':
+      return null
+  }
+}

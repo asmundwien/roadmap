@@ -1,0 +1,35 @@
+[
+  {
+    "name": "public-browser-control",
+    "accepted": true,
+    "source": "import * as contracts from '@roadmap/contracts/wire'\nimport * as ui from '@roadmap/ui/button'\nexport const marker = 'browser-safe'\n"
+  },
+  {
+    "name": "unused-node-fs",
+    "accepted": false,
+    "source": "import * as filesystem from 'node:fs'\nexport const marker = 'unused-host-import'\n"
+  },
+  {
+    "name": "unused-node-child-process",
+    "accepted": false,
+    "source": "import * as processes from 'node:child_process'\nexport const marker = 'unused-host-import'\n"
+  },
+  {
+    "name": "unused-private-application",
+    "accepted": false,
+    "target": "apps/server/src/application/application.ts",
+    "source": "import * as application from TARGET\nexport const marker = 'unused-private-import'\n"
+  },
+  {
+    "name": "unused-private-credential",
+    "accepted": false,
+    "target": "apps/server/src/application/credential-vault.ts",
+    "source": "import * as credential from TARGET\nexport const marker = 'unused-private-import'\n"
+  },
+  {
+    "name": "unused-private-host",
+    "accepted": false,
+    "target": "apps/server/src/host/darwin.ts",
+    "source": "import * as host from TARGET\nexport const marker = 'unused-private-import'\n"
+  }
+]

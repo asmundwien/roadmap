@@ -1,4 +1,9 @@
-import type { Command, Query } from '@roadmap/contracts'
+import {
+  configurationVersionSchema,
+  projectRefSchema,
+  ticketRefSchema,
+} from '@roadmap/contracts/identity'
+import { type Command, commandSchema, type Query } from '@roadmap/contracts/operations'
 import {
   decodeCommandEnvelope,
   decodeQueryEnvelope,
@@ -9,16 +14,13 @@ import {
 } from '@roadmap/contracts/wire'
 import { describe, expect, expectTypeOf, it } from 'vitest'
 
-const localProject = { integration: 'local', id: 'local-project' } satisfies Extract<
-  Command,
-  { type: 'remove-project' }
->['project']
-const githubProject = { integration: 'github', id: 'github-project' } satisfies Extract<
-  Command,
-  { type: 'remove-project' }
->['project']
-const version = { expectedConfigurationVersion: 0 }
-const target = { project: githubProject, mapId: 'map-1', ticketId: 'ticket-1' }
+const localProject = projectRefSchema.parse({ integration: 'local', projectId: 'local-project' })
+const githubProject = projectRefSchema.parse({ integration: 'github', projectId: 'github-project' })
+const version = { expectedConfigurationVersion: configurationVersionSchema.parse(0) }
+const target = ticketRefSchema.parse({
+  map: { project: githubProject, mapId: 'map-1' },
+  ticketId: 'ticket-1',
+})
 const secret = 'private-ingress-credential-value'
 
 function inherited(prototype: object, own: object = {}): unknown {
@@ -82,7 +84,7 @@ const supportedCommands = [
     type: 'repair-project-workspace',
     ...version,
     project: githubProject,
-    workspace: { path: '/repaired', gitIdentity: 'developer@example.test' },
+    workspace: { path: '/repaired' },
   },
   { type: 'remove-project', ...version, project: githubProject },
   { type: 'set-automation-enabled', ...version, enabled: false },
@@ -92,7 +94,7 @@ const supportedCommands = [
   { type: 'refresh-project', ...version, project: githubProject },
   { type: 'launch-action', ...version, actionId: 'open-settings' },
   { type: 'launch-action', ...version, actionId: 'open-workspace', project: localProject },
-] satisfies Command[]
+].map((command) => commandSchema.parse(command))
 
 const malformedCommands: { name: string; command: unknown }[] = [
   { name: 'missing discriminator', command: { ...version, enabled: true } },
@@ -199,12 +201,12 @@ const malformedCommands: { name: string; command: unknown }[] = [
     command: { type: 'repair-project-workspace', ...version, project: localProject },
   },
   {
-    name: 'wrong repair git identity',
+    name: 'private repair proof field',
     command: {
       type: 'repair-project-workspace',
       ...version,
       project: localProject,
-      workspace: { path: '/workspace', gitIdentity: 1 },
+      workspace: { path: '/workspace', gitIdentity: 'cannot-mint-proof' },
     },
   },
   { name: 'null project', command: { type: 'remove-project', ...version, project: null } },
@@ -759,7 +761,7 @@ describe('own data request boundaries', () => {
     {
       name: 'project',
       data: { ...localProject },
-      field: 'id',
+      field: 'projectId',
       decode: decodeCommandEnvelope,
       envelope: (data: object) => ({
         type: 'command',

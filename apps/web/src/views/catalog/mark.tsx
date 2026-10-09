@@ -1,4 +1,4 @@
-import type { TicketState, TicketType } from '@roadmap/contracts'
+import type { TicketState, TicketType } from '@roadmap/contracts/state'
 import { Section, SectionDescription, SectionHeader, SectionTitle } from '@roadmap/ui/section'
 import classNames from 'classnames/bind'
 import { TicketMark } from '@/views/shared/ticket-mark'

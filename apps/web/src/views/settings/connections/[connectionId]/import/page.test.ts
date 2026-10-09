@@ -1,4 +1,10 @@
-import type { ApplicationState, Connection } from '@roadmap/contracts'
+import {
+  configurationVersionSchema,
+  connectionIdSchema,
+  serverEpochSchema,
+  stateSequenceSchema,
+} from '@roadmap/contracts/identity'
+import { type Connection, readyApplicationStateSchema } from '@roadmap/contracts/state'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router'
@@ -8,13 +14,15 @@ import type { RoadmapStore } from '@/store/roadmap-store'
 import { ProjectImportPage } from './page'
 
 function renderImport(connectionId: string, connection?: Connection, valid = true): string {
-  const state: ApplicationState = {
-    serverEpoch: 'test',
-    stateSequence: 1,
-    configurationVersion: 4,
+  const state = readyApplicationStateSchema.parse({
+    phase: 'ready',
+    mode: valid ? 'mutable' : 'read-only',
+    serverEpoch: serverEpochSchema.parse('test'),
+    stateSequence: stateSequenceSchema.parse(1),
+    configurationVersion: configurationVersionSchema.parse(4),
     supportedIntegrations: [],
     connections: connection ? [connection] : [],
-    registrations: [],
+
     projects: [],
     authorizationOperations: [],
     configuration: { valid, issues: [], notices: [] },
@@ -25,8 +33,8 @@ function renderImport(connectionId: string, connection?: Connection, valid = tru
       evidence: [],
       overrides: [],
     },
-    roadmap: { capturedAt: 1 },
-  }
+    capturedAt: 1,
+  })
   const store: RoadmapStore = {
     subscribe: () => () => undefined,
     getSnapshot: () => ({
@@ -47,13 +55,17 @@ function renderImport(connectionId: string, connection?: Connection, valid = tru
     createElement(
       MemoryRouter,
       null,
-      createElement(RoadmapProvider, { store }, createElement(ProjectImportPage, { connectionId })),
+      createElement(
+        RoadmapProvider,
+        { store },
+        createElement(ProjectImportPage, { connectionId: connectionIdSchema.parse(connectionId) }),
+      ),
     ),
   )
 }
 
 const local: Connection = {
-  id: 'local',
+  id: connectionIdSchema.parse('local'),
   integration: 'local',
   name: 'Local files',
   builtIn: true,
@@ -68,10 +80,11 @@ it('explains the selected connection without offering a different one', () => {
 
 describe('GitHub import', () => {
   const github: Connection = {
-    id: 'github/work',
+    id: connectionIdSchema.parse('github/work'),
     integration: 'github',
     name: 'Work account',
     builtIn: false,
+    githubIdentity: { id: 'account-1', login: 'test-account' },
     availability: { status: 'authorization-required', cause: 'Authorization expired.' },
   }
 

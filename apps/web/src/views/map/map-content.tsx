@@ -1,4 +1,5 @@
-import type { MapBody, MapResource } from '@roadmap/contracts'
+import type { TicketId } from '@roadmap/contracts/identity'
+import type { MapBody, MapResource } from '@roadmap/contracts/state'
 import classNames from 'classnames/bind'
 import { resourceObservation } from '@/views/shared/resource-results'
 import styles from './map-content.module.css'
@@ -8,7 +9,7 @@ const cx = classNames.bind(styles)
 
 export type MapContentProps = {
   map: MapResource
-  onOpenTicket: (id: string) => void
+  onOpenTicket: (id: TicketId) => void
   onOpenMap: () => void
 }
 

@@ -113,8 +113,8 @@ function ActiveProjectRow({ presentation }: ActiveProjectRowProps) {
   return (
     <Surface>
       <SurfaceTitle>
-        <Link href={projectPath(project.key)}>{project.name}</Link>{' '}
-        <IntegrationBadge integration={project.key.integration} />
+        <Link href={projectPath(project.ref)}>{project.name}</Link>{' '}
+        <IntegrationBadge integration={project.ref.integration} />
       </SurfaceTitle>
       {connection && <SurfaceDescription>{connection.name}</SurfaceDescription>}
       <SurfaceDescription>{presentation.sourceMessage}</SurfaceDescription>
@@ -145,8 +145,8 @@ function RestingProjectRow({ presentation }: RestingProjectRowProps) {
   return (
     <Surface>
       <SurfaceTitle>
-        <Link href={projectPath(project.key)}>{project.name}</Link>{' '}
-        <IntegrationBadge integration={project.key.integration} />
+        <Link href={projectPath(project.ref)}>{project.name}</Link>{' '}
+        <IntegrationBadge integration={project.ref.integration} />
       </SurfaceTitle>
       <SurfaceDescription>
         All {mapCount === 1 ? '1 map' : `${mapCount} maps`} closed ·{' '}
@@ -168,8 +168,8 @@ function WaitingProjectRow({ presentation }: WaitingProjectRowProps) {
   return (
     <Surface>
       <SurfaceTitle>
-        <Link href={projectPath(project.key)}>{project.name}</Link>{' '}
-        <IntegrationBadge integration={project.key.integration} />
+        <Link href={projectPath(project.ref)}>{project.name}</Link>{' '}
+        <IntegrationBadge integration={project.ref.integration} />
       </SurfaceTitle>
       <SurfaceDescription>
         {presentation.sourceMessage}
@@ -187,8 +187,8 @@ function WaitingProjectRow({ presentation }: WaitingProjectRowProps) {
           : `${presentation.decisions} decisions recorded`}
       </SurfaceDescription>
       {project.maps.map((map) => (
-        <Link key={map.key.mapId} href={mapPath(map.key)}>
-          Inspect map {map.key.mapId}
+        <Link key={map.ref.mapId} href={mapPath(map.ref)}>
+          Inspect map {map.ref.mapId}
         </Link>
       ))}
       <div>
@@ -201,7 +201,7 @@ function WaitingProjectRow({ presentation }: WaitingProjectRowProps) {
 }
 
 function projectKey(presentation: ProjectPresentation): string {
-  return JSON.stringify([presentation.project.key.integration, presentation.project.key.id])
+  return JSON.stringify([presentation.project.ref.integration, presentation.project.ref.projectId])
 }
 
 function formatClock(at: number): string {

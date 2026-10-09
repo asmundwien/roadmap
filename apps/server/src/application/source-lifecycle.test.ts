@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setImmediate } from 'node:timers/promises'
-import type { ApplicationState } from '@roadmap/contracts'
+import type { ReadyApplicationState } from '@roadmap/contracts/state'
 import { describe, expect, it, vi } from 'vitest'
 import { createConfigurationDocument } from '../configuration/document.ts'
 import { createLocalProjectAdmission } from '../local/admission.ts'
@@ -10,6 +10,7 @@ import { createLocalObserver } from '../local/observer.ts'
 import type { LocalObservationInput } from '../observation/coordinator.ts'
 import type { SourceObserver } from '../observation/source.ts'
 import type { ProjectConfiguration } from '../projects/registry.ts'
+import { readApplicationState } from '../public-test-fixtures.ts'
 import { readLocalProject } from '../wayfinder/from-local.ts'
 import { createRoadmapApplication } from './application.ts'
 import { createApplicationOperations } from './operations.ts'
@@ -142,8 +143,8 @@ describe('RoadmapApplication source lifetimes', () => {
     async (outcome) => {
       const test = await fixture()
       test.gate('first', outcome === 'failure')
-      const states: ApplicationState[] = []
-      test.application.subscribe((state) => states.push(state))
+      const states: ReadyApplicationState[] = []
+      test.application.subscribe((state) => states.push(readApplicationState(state)))
       const start = test.application.start().then(
         () => 'resolved',
         () => 'rejected',
@@ -178,8 +179,8 @@ describe('RoadmapApplication source lifetimes', () => {
 
   it('keeps committed owners authoritative while a candidate baseline remains pending', async () => {
     const test = await fixture()
-    const states: ApplicationState[] = []
-    test.application.subscribe((state) => states.push(state))
+    const states: ReadyApplicationState[] = []
+    test.application.subscribe((state) => states.push(readApplicationState(state)))
     try {
       await test.application.start()
       states.length = 0
@@ -197,20 +198,24 @@ describe('RoadmapApplication source lifetimes', () => {
         ],
       })
       await test.entered
-      expect(test.application.current().configurationVersion).toBe(1)
-      expect(test.application.current().projects.map((project) => project.key.id)).toEqual([
-        'first',
-      ])
+      expect(readApplicationState(test.application.current()).configurationVersion).toBe(1)
+      expect(
+        readApplicationState(test.application.current()).projects.map(
+          (project) => project.ref.projectId,
+        ),
+      ).toEqual(['first'])
       expect(test.inputs.map((input) => input.ref.projectId)).toEqual(['first', 'second'])
       expect(test.watchers[0]?.closed).toBe(false)
-      const beforeActiveUpdate = test.application.current().stateSequence
+      const beforeActiveUpdate = readApplicationState(test.application.current()).stateSequence
       test.watchers[0]?.dirty()
       await vi.waitFor(() =>
-        expect(test.application.current().stateSequence).toBeGreaterThan(beforeActiveUpdate),
+        expect(readApplicationState(test.application.current()).stateSequence).toBeGreaterThan(
+          beforeActiveUpdate,
+        ),
       )
       for (const state of states) {
         expect(state.configurationVersion).toBe(1)
-        expect(state.projects.map((project) => project.key.id)).toEqual(['first'])
+        expect(state.projects.map((project) => project.ref.projectId)).toEqual(['first'])
       }
       const stop = test.application.stop()
       await setImmediate()
@@ -218,7 +223,7 @@ describe('RoadmapApplication source lifetimes', () => {
       const beforeCompletion = states.length
       test.release()
       await stop
-      expect(test.application.current().configurationVersion).toBe(1)
+      expect(readApplicationState(test.application.current()).configurationVersion).toBe(1)
       expect(states).toHaveLength(beforeCompletion)
       expect(test.inputs).toHaveLength(2)
     } finally {
@@ -277,7 +282,7 @@ describe('RoadmapApplication source lifetimes', () => {
     let closed = false
     let dirty: (() => void) | undefined
     const startupFailure = new Error('Controlled durable history load failure')
-    const states: ApplicationState[] = []
+    const states: ReadyApplicationState[] = []
     const owners: SourceObserver[] = []
     const application = createRoadmapApplication({
       configuration: document,
@@ -322,7 +327,7 @@ describe('RoadmapApplication source lifetimes', () => {
         },
       },
     })
-    application.subscribe((state) => states.push(state))
+    application.subscribe((state) => states.push(readApplicationState(state)))
     try {
       await expect(application.start()).rejects.toBe(startupFailure)
       expect(closed).toBe(true)

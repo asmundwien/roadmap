@@ -1,4 +1,15 @@
-import type { ApplicationState, Connection } from '@roadmap/contracts'
+import {
+  configurationVersionSchema,
+  connectionIdSchema,
+  serverEpochSchema,
+  stateSequenceSchema,
+} from '@roadmap/contracts/identity'
+import {
+  authorizationOperationSchema,
+  type Connection,
+  type ReadyApplicationState,
+  readyApplicationStateSchema,
+} from '@roadmap/contracts/state'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router'
@@ -8,23 +19,31 @@ import type { RoadmapStore } from '@/store/roadmap-store'
 import { ConnectionPage } from './page'
 
 const connection: Connection = {
-  id: 'github/work',
+  id: connectionIdSchema.parse('github/work'),
   integration: 'github',
   name: 'Work',
   builtIn: false,
+  githubIdentity: { id: 'account-1', login: 'test-account' },
   availability: { status: 'authorization-required', cause: 'Token expired.' },
 }
 
-function renderDetail(connectionId: string, connections: Connection[], initial = true): string {
-  const state: ApplicationState = {
-    serverEpoch: 'test',
-    stateSequence: 1,
-    configurationVersion: 1,
+function renderDetail(
+  connectionId: string,
+  connections: Connection[],
+  initial = true,
+  authorizationOperations: ReadyApplicationState['authorizationOperations'] = [],
+): string {
+  const state = readyApplicationStateSchema.parse({
+    phase: 'ready',
+    mode: 'mutable',
+    serverEpoch: serverEpochSchema.parse('test'),
+    stateSequence: stateSequenceSchema.parse(1),
+    configurationVersion: configurationVersionSchema.parse(1),
     supportedIntegrations: [],
     connections,
-    registrations: [],
+
     projects: [],
-    authorizationOperations: [],
+    authorizationOperations,
     configuration: { valid: true, issues: [], notices: [] },
     automation: {
       enabled: false,
@@ -33,8 +52,8 @@ function renderDetail(connectionId: string, connections: Connection[], initial =
       evidence: [],
       overrides: [],
     },
-    roadmap: { capturedAt: 0 },
-  }
+    capturedAt: 0,
+  })
   const store: RoadmapStore = {
     subscribe: () => () => undefined,
     getSnapshot: () =>
@@ -63,7 +82,11 @@ function renderDetail(connectionId: string, connections: Connection[], initial =
     createElement(
       MemoryRouter,
       null,
-      createElement(RoadmapProvider, { store }, createElement(ConnectionPage, { connectionId })),
+      createElement(
+        RoadmapProvider,
+        { store },
+        createElement(ConnectionPage, { connectionId: connectionIdSchema.parse(connectionId) }),
+      ),
     ),
   )
 }
@@ -72,7 +95,12 @@ describe('ConnectionPage', () => {
   it('offers rename, reauthentication, and removal for the selected connection', () => {
     const markup = renderDetail('github/work', [
       connection,
-      { ...connection, id: 'other', name: 'Other' },
+      {
+        ...connection,
+        id: connectionIdSchema.parse('other'),
+        name: 'Other',
+        githubIdentity: { id: 'account-2', login: 'other-account' },
+      },
     ])
     expect(markup).toContain('value="Work"')
     expect(markup).toContain('Token expired.')
@@ -90,5 +118,37 @@ describe('ConnectionPage', () => {
     expect(markup).toContain('Connection not found')
     expect(markup).toContain('href="/connections"')
     expect(markup).not.toContain('Save name')
+  })
+
+  it('keeps a denied reauthorization visible and offers retry for its original Connection subject', () => {
+    const denied = authorizationOperationSchema.parse({
+      id: 'authorization-original',
+      status: 'terminal',
+      outcome: 'denied',
+      cause: 'GitHub denied this authorization.',
+      connectionId: connection.id,
+    })
+    const markup = renderDetail(connection.id, [connection], true, [denied])
+
+    expect(markup).toContain('GitHub denied this authorization.')
+    expect(markup).toContain('Retry authorization')
+    expect(markup).not.toContain('Authorization terminal')
+  })
+
+  it('renders the required verification destination and code from a waiting reauthorization', () => {
+    const waiting = authorizationOperationSchema.parse({
+      id: 'authorization-original',
+      status: 'waiting',
+      connectionId: connection.id,
+      verificationUri: 'https://github.com/login/device',
+      userCode: 'EXACT-CODE',
+      expiresAt: 0,
+    })
+    const markup = renderDetail(connection.id, [connection], true, [waiting])
+
+    expect(markup).toContain('href="https://github.com/login/device"')
+    expect(markup).toContain('EXACT-CODE')
+    expect(markup).toContain('Cancel authorization')
+    expect(markup).toMatch(/<button(?![^>]*disabled)[^>]*>Copy code<\/button>/)
   })
 })

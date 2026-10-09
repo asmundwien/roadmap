@@ -1,4 +1,4 @@
-import type { SafeError } from '@roadmap/contracts'
+import type { SafeError } from '@roadmap/contracts/operations'
 import { Alert } from '@roadmap/ui/alert'
 import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
 import { Surface, SurfaceDescription } from '@roadmap/ui/surface'

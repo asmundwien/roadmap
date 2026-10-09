@@ -1,4 +1,5 @@
-import type { ProjectKey } from '@roadmap/contracts'
+import { projectRefSchema } from '@roadmap/contracts/identity'
+import { commandSchema } from '@roadmap/contracts/operations'
 import { describe, expect, it, vi } from 'vitest'
 import { refineLocalWorkspaceProof, type WorkspaceAdmission } from '../projects/registry.ts'
 import {
@@ -7,7 +8,7 @@ import {
   type OperationContext,
 } from './operations.ts'
 
-const PROJECT: ProjectKey = { integration: 'local', id: 'demo' }
+const PROJECT = projectRefSchema.parse({ integration: 'local', projectId: 'demo' })
 
 function admitted(path = '/current/workspace'): WorkspaceAdmission {
   const proof = refineLocalWorkspaceProof({
@@ -22,13 +23,19 @@ function admitted(path = '/current/workspace'): WorkspaceAdmission {
   return { status: 'admitted', proof: proof.value }
 }
 
+function operationCommand(input: unknown): OperationCommand {
+  const command = commandSchema.parse(input)
+  if (command.type === 'launch-action' || command.type === 'refresh-project') return command
+  throw new Error('Expected a host action or source refresh command')
+}
+
 function context(workspace: WorkspaceAdmission | undefined = admitted()): OperationContext {
   return {
     async refresh() {
       return true
     },
     async workspace(project) {
-      return project.integration === PROJECT.integration && project.id === PROJECT.id
+      return project.integration === PROJECT.integration && project.projectId === PROJECT.projectId
         ? workspace
         : undefined
     },
@@ -88,12 +95,12 @@ describe('createApplicationOperations', () => {
       workspace = admitted(`/current/${actionId}`)
       expect(
         await operations.execute(
-          {
+          operationCommand({
             type: 'launch-action',
             expectedConfigurationVersion: 1,
             actionId,
             project: PROJECT,
-          },
+          }),
           current,
         ),
       ).toEqual({ ok: true, result: { type: 'action-launched', actionId } })
@@ -122,12 +129,12 @@ describe('createApplicationOperations', () => {
 
     expect(
       await operations.execute(
-        {
+        operationCommand({
           type: 'launch-action',
           expectedConfigurationVersion: 1,
           actionId: 'open-workspace',
           project: PROJECT,
-        },
+        }),
         context(workspace),
       ),
     ).toMatchObject({
@@ -144,11 +151,11 @@ describe('createApplicationOperations', () => {
       .mockResolvedValueOnce(false)
     const operations = createApplicationOperations()
     const current = { ...context(), refresh }
-    const command: OperationCommand = {
+    const command = operationCommand({
       type: 'refresh-project',
       expectedConfigurationVersion: 1,
       project: PROJECT,
-    }
+    })
 
     expect(await operations.execute(command, current)).toEqual({
       ok: true,
@@ -166,12 +173,12 @@ describe('createApplicationOperations', () => {
     const operations = createApplicationOperations({ launch })
 
     const result = await operations.execute(
-      {
+      operationCommand({
         type: 'launch-action',
         expectedConfigurationVersion: 1,
         actionId: '/bin/sh',
         project: PROJECT,
-      },
+      }),
       context(),
     )
 

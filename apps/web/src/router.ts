@@ -1,4 +1,13 @@
-import type { MapResource, ProjectKey, TicketResource } from '@roadmap/contracts'
+import {
+  type ConnectionId,
+  connectionIdSchema,
+  type MapRef,
+  mapRefSchema,
+  type ProjectRef,
+  projectRefSchema,
+  type TicketRef,
+  ticketRefSchema,
+} from '@roadmap/contracts/identity'
 import { generatePath, matchPath } from 'react-router'
 
 export const routePaths = {
@@ -29,29 +38,59 @@ export function pathParams(pattern: string, pathname: string): Record<string, st
   }
 }
 
-export function projectPath(project: ProjectKey): string {
+export function projectRoute(
+  pattern: string,
+  pathname: string,
+): {
+  project: ProjectRef
+  map: MapRef | null
+  ticket: TicketRef | null
+} | null {
+  const params = pathParams(pattern, pathname)
+  const project = projectRefSchema.safeParse({
+    integration: params.integration,
+    projectId: params.projectId,
+  })
+  if (!project.success) return null
+  const map =
+    params.mapId === undefined
+      ? null
+      : mapRefSchema.parse({ project: project.data, mapId: params.mapId })
+  const ticket =
+    params.ticketId === undefined || map === null
+      ? null
+      : ticketRefSchema.parse({ map, ticketId: params.ticketId })
+  return { project: project.data, map, ticket }
+}
+
+export function connectionRoute(pattern: string, pathname: string): ConnectionId | null {
+  const parsed = connectionIdSchema.safeParse(pathParams(pattern, pathname).connectionId)
+  return parsed.success ? parsed.data : null
+}
+
+export function projectPath(project: ProjectRef): string {
   return generatePath(routePaths.project, {
     integration: project.integration,
-    projectId: project.id,
+    projectId: project.projectId,
   })
 }
 
-export function projectSettingsPath(project: ProjectKey): string {
+export function projectSettingsPath(project: ProjectRef): string {
   return `${projectPath(project)}/settings`
 }
 
-export function connectionPath(connectionId: string): string {
+export function connectionPath(connectionId: ConnectionId): string {
   return generatePath(routePaths.connection, { connectionId })
 }
 
-export function projectImportPath(connectionId: string): string {
+export function projectImportPath(connectionId: ConnectionId): string {
   return `${connectionPath(connectionId)}/projects/import`
 }
 
-export function mapPath(map: MapResource['key']): string {
+export function mapPath(map: MapRef): string {
   return `${projectPath(map.project)}${generatePath('/maps/:mapId', { mapId: map.mapId })}`
 }
 
-export function ticketPath(ticket: TicketResource['key']): string {
+export function ticketPath(ticket: TicketRef): string {
   return `${mapPath(ticket.map)}${generatePath('/tickets/:ticketId', { ticketId: ticket.ticketId })}`
 }

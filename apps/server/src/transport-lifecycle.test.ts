@@ -3,12 +3,13 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { ApplicationState, Command } from '@roadmap/contracts'
+import { type Command, commandSchema } from '@roadmap/contracts/operations'
+import type { ApplicationState } from '@roadmap/contracts/state'
 import {
-  commandResultEnvelopeCodec,
-  queryResultEnvelopeCodec,
-  stateEnvelopeCodec,
-} from '@roadmap/contracts/codecs'
+  decodeCommandResultEnvelope,
+  decodeQueryResultEnvelope,
+  decodeStateEnvelope,
+} from '@roadmap/contracts/wire'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
 import { createRoadmapApplication, type RoadmapApplication } from './application/application.ts'
@@ -20,6 +21,7 @@ import {
 import { createLocalProjectAdmission } from './local/admission.ts'
 import { createLocalObserver } from './local/observer.ts'
 import type { ProjectConfiguration } from './projects/registry.ts'
+import { fixtureProjectRef, readApplicationState } from './public-test-fixtures.ts'
 import { createRoadmapTransport, type RoadmapTransport } from './transport.ts'
 import { readLocalProject } from './wayfinder/from-local.ts'
 
@@ -202,7 +204,7 @@ async function openSocket(url: string) {
   const states: ApplicationState[] = []
   socket.on('message', (data) => {
     const input: unknown = JSON.parse(String(data))
-    const decoded = stateEnvelopeCodec.decode(input)
+    const decoded = decodeStateEnvelope(input)
     if (!decoded.ok) throw new Error('Invalid lifecycle state envelope')
     states.push(decoded.value.state)
   })
@@ -228,15 +230,15 @@ function post(
   })
 }
 
-function launch(current: Fixture): { type: 'command'; command: Command } {
+function launch(): { type: 'command'; command: Command } {
   return {
     type: 'command',
-    command: {
+    command: commandSchema.parse({
       type: 'launch-action',
-      expectedConfigurationVersion: current.application.current().configurationVersion,
-      project: PROJECT,
+      expectedConfigurationVersion: 1,
+      project: fixtureProjectRef(PROJECT),
       actionId: 'open-workspace',
-    },
+    }),
   }
 }
 
@@ -309,7 +311,7 @@ describe('real application HTTP and WebSocket lifecycle', () => {
       expect(wire.states.length).toBeGreaterThan(0)
       expect(wire.states[0]).toMatchObject({
         configuration: { valid: true },
-        projects: [{ key: PROJECT, resource: { kind: 'current-readable' } }],
+        projects: [{ ref: fixtureProjectRef(PROJECT), resource: { kind: 'current-readable' } }],
       })
     } finally {
       loadGate.resolve()
@@ -324,20 +326,24 @@ describe('real application HTTP and WebSocket lifecycle', () => {
     const started = current.application.start()
     void started.catch(() => undefined)
     await bounded(current.loadEntered.promise)
+    const wire = await openSocket(current.wsUrl)
     try {
       const query = await bounded(post(current, 'query', QUERY))
       expect(query.status).toBe(200)
-      expect(queryResultEnvelopeCodec.decode(await query.json())).toMatchObject({
+      expect(decodeQueryResultEnvelope(await query.json())).toMatchObject({
         ok: true,
         value: { result: { ok: false, error: { code: 'not-supported' } } },
       })
-      const command = await bounded(post(current, 'command', launch(current)))
+      const command = await bounded(post(current, 'command', launch()))
       expect(command.status).toBe(200)
-      expect(commandResultEnvelopeCodec.decode(await command.json())).toMatchObject({
+      expect(decodeCommandResultEnvelope(await command.json())).toMatchObject({
         ok: true,
         value: { outcome: { ok: false, error: { code: 'not-supported' } } },
       })
       expect(current.effects).toEqual([])
+      await socketBarrier(wire.socket)
+      expect(wire.states).toEqual([])
+      expect(current.application.current().phase).toBe('starting')
     } finally {
       loadGate.resolve()
       await bounded(started)
@@ -359,7 +365,7 @@ describe('real application HTTP and WebSocket lifecycle', () => {
       await socketBarrier(wire.socket)
       expect(wire.states[0]).toMatchObject({
         configuration: { valid: true },
-        projects: [{ key: PROJECT, resource: { kind: 'current-readable' } }],
+        projects: [{ ref: fixtureProjectRef(PROJECT), resource: { kind: 'current-readable' } }],
       })
     } finally {
       baselineGate.resolve()
@@ -380,7 +386,7 @@ describe('real application HTTP and WebSocket lifecycle', () => {
     await socketBarrier(wire.socket)
     expect(wire.states[0]).toMatchObject({
       configuration: { valid: true },
-      projects: [{ key: PROJECT, resource: { kind: 'never-observed' } }],
+      projects: [{ ref: fixtureProjectRef(PROJECT), resource: { kind: 'never-observed' } }],
     })
   })
 
@@ -400,7 +406,9 @@ describe('real application HTTP and WebSocket lifecycle', () => {
       unavailable: 0,
       absent: 0,
     })
-    expect(current.application.current().projects[0]?.resource.kind).toBe('current-readable')
+    expect(readApplicationState(current.application.current()).projects[0]?.resource.kind).toBe(
+      'current-readable',
+    )
   })
 
   it('exposes invalid configuration as read-only ready without admitting mutation or Automation', async () => {
@@ -416,22 +424,24 @@ describe('real application HTTP and WebSocket lifecycle', () => {
     })
     const before = await readFile(join(current.root, 'roadmap.config.json'), 'utf8')
     const commands: Command[] = [
-      {
+      commandSchema.parse({
         type: 'rename-connection',
-        expectedConfigurationVersion: current.application.current().configurationVersion,
+        expectedConfigurationVersion: readApplicationState(current.application.current())
+          .configurationVersion,
         connectionId: 'local',
         name: 'Must not persist',
-      },
-      {
+      }),
+      commandSchema.parse({
         type: 'set-automation-enabled',
-        expectedConfigurationVersion: current.application.current().configurationVersion,
+        expectedConfigurationVersion: readApplicationState(current.application.current())
+          .configurationVersion,
         enabled: true,
-      },
+      }),
     ]
     for (const command of commands) {
       const response = await bounded(post(current, 'command', { type: 'command', command }))
       expect(response.status).toBe(200)
-      expect(commandResultEnvelopeCodec.decode(await response.json())).toMatchObject({
+      expect(decodeCommandResultEnvelope(await response.json())).toMatchObject({
         ok: true,
         value: { outcome: { ok: false } },
       })
@@ -439,7 +449,7 @@ describe('real application HTTP and WebSocket lifecycle', () => {
     expect(await readFile(join(current.root, 'roadmap.config.json'), 'utf8')).toBe(before)
     expect(current.effects).toEqual([])
     const query = await bounded(post(current, 'query', QUERY))
-    expect(queryResultEnvelopeCodec.decode(await query.json())).toMatchObject({
+    expect(decodeQueryResultEnvelope(await query.json())).toMatchObject({
       ok: true,
       value: { result: { ok: true, type: 'workspace-selection' } },
     })
@@ -491,7 +501,9 @@ describe('real application HTTP and WebSocket lifecycle', () => {
         unavailable: 0,
         absent: 0,
       })
-      expect(current.application.current().projects[0]?.key).toEqual(PROJECT)
+      expect(readApplicationState(current.application.current()).projects[0]?.ref).toEqual(
+        fixtureProjectRef(PROJECT),
+      )
     } finally {
       candidateGate.resolve()
     }
@@ -521,7 +533,7 @@ describe('real application HTTP and WebSocket lifecycle', () => {
       const response = post(
         current,
         kind === 'selector' ? 'query' : 'command',
-        kind === 'selector' ? QUERY : launch(current),
+        kind === 'selector' ? QUERY : launch(),
       )
       void response.catch(() => undefined)
       try {
@@ -553,8 +565,8 @@ describe('real application HTTP and WebSocket lifecycle', () => {
         expect(reply.headers.get('connection')).toBe('close')
         const decoded =
           kind === 'selector'
-            ? queryResultEnvelopeCodec.decode(await reply.json())
-            : commandResultEnvelopeCodec.decode(await reply.json())
+            ? decodeQueryResultEnvelope(await reply.json())
+            : decodeCommandResultEnvelope(await reply.json())
         expect(decoded).toMatchObject({ ok: true })
         if (kind === 'selector')
           expect(decoded).toMatchObject({
@@ -592,12 +604,12 @@ describe('real application HTTP and WebSocket lifecycle', () => {
       await health(current, 'stopping')
       await readiness(current, 503, { phase: 'stopping' })
       const rejected = await bounded(post(current, 'query', QUERY))
-      expect(queryResultEnvelopeCodec.decode(await rejected.json())).toMatchObject({
+      expect(decodeQueryResultEnvelope(await rejected.json())).toMatchObject({
         ok: true,
         value: { result: { ok: false, error: { code: 'not-supported' } } },
       })
-      const rejectedCommand = await bounded(post(current, 'command', launch(current)))
-      expect(commandResultEnvelopeCodec.decode(await rejectedCommand.json())).toMatchObject({
+      const rejectedCommand = await bounded(post(current, 'command', launch()))
+      expect(decodeCommandResultEnvelope(await rejectedCommand.json())).toMatchObject({
         ok: true,
         value: { outcome: { ok: false, error: { code: 'not-supported' } } },
       })

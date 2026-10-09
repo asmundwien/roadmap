@@ -1,4 +1,4 @@
-import type { ProjectKey } from '@roadmap/contracts'
+import type { ProjectRef } from '@roadmap/contracts/identity'
 import { Alert } from '@roadmap/ui/alert'
 import { Page, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
 import classNames from 'classnames/bind'
@@ -14,11 +14,11 @@ import pageStyles from './page.module.css'
 
 const cx = classNames.bind(pageStyles)
 
-type ProjectRegistrationPageProps = { projectKey: ProjectKey }
+type ProjectSettingsPageProps = { projectRef: ProjectRef }
 
-export function ProjectRegistrationPage({ projectKey }: ProjectRegistrationPageProps) {
+export function ProjectSettingsPage({ projectRef }: ProjectSettingsPageProps) {
   const { projects, connections, configuration } = useRoadmap()
-  const project = projects.find((candidate) => sameProject(candidate.key, projectKey))
+  const project = projects.find((candidate) => sameProject(candidate.ref, projectRef))
 
   if (!project) {
     return (
@@ -83,16 +83,16 @@ export function ProjectRegistrationPage({ projectKey }: ProjectRegistrationPageP
         )
       )}
       <DetailsSection
-        key={`details:${project.key.integration}:${project.key.id}`}
+        key={`details:${project.ref.integration}:${project.ref.projectId}`}
         project={project}
         connection={connection}
       />
       <AutomationSection
-        key={`automation:${project.key.integration}:${project.key.id}`}
+        key={`automation:${project.ref.integration}:${project.ref.projectId}`}
         project={project}
       />
       <ManageSection
-        key={`manage:${project.key.integration}:${project.key.id}`}
+        key={`manage:${project.ref.integration}:${project.ref.projectId}`}
         project={project}
         connectionExists={connection !== undefined}
       />

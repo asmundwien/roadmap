@@ -1,16 +1,11 @@
 import { dirname, join, resolve } from 'node:path'
-import type {
-  MapResource,
-  MapResourceValue,
-  ProjectKey,
-  ProjectResourceValue,
-  RegisteredProject,
-  TicketResource,
-  TicketResourceValue,
-} from '@roadmap/contracts'
+import type { MapResource, Project, TicketResource } from '@roadmap/contracts/state'
 import type {
   ObservationAttempt,
   ObservationBatch,
+  SourceProjectKey as ProjectKey,
+  SourceBlocker,
+  SourceMapContent,
   SourceObservationHealth,
   SourceObserver,
   SourceProjectContent,
@@ -26,23 +21,43 @@ import type {
   ProjectAdmission,
 } from './projects/registry.ts'
 
-export type FixtureTicket = Omit<TicketResourceValue, 'source' | 'status'> & {
+type MutableFixture<T> = { -readonly [K in keyof T]: T[K] }
+type FixtureBlockerReference =
+  | Omit<Extract<SourceBlocker['reference'], { kind: 'registered' }>, 'ticketId'>
+  | Omit<Extract<SourceBlocker['reference'], { kind: 'external' }>, 'ticketId'>
+  | Omit<Extract<SourceBlocker['reference'], { kind: 'unresolved' }>, 'ticketId'>
+type FixtureBlocker = MutableFixture<Omit<SourceBlocker, 'reference' | 'provenance'>> & {
+  reference: FixtureBlockerReference
+  ticketId: string
+}
+export type FixtureTicket = MutableFixture<
+  Omit<SourceTicketContent, 'key' | 'source' | 'status' | 'blockedBy' | 'assignees' | 'warnings'>
+> & {
   id: string
   url?: string
   sourcePath?: string
+  state: 'closed' | 'blocked' | 'claimed' | 'frontier'
+  isBlocked: boolean
+  blockedBy: FixtureBlocker[]
+  assignees: MutableFixture<SourceTicketContent['assignees'][number]>[]
+  warnings: string[]
 }
-export type FixtureMap = Omit<MapResourceValue, 'source' | 'status'> & {
+export type FixtureMap = MutableFixture<
+  Omit<SourceMapContent, 'key' | 'source' | 'status' | 'unidentifiedTickets' | 'warnings'>
+> & {
   project: ProjectKey
   id: string
   isOpen: boolean
   url?: string
   sourcePath?: string
   tickets: FixtureTicket[]
-  frontier: FixtureTicket[]
   ticketsComplete: boolean
+  warnings: string[]
 }
-export type FixtureProject = Pick<ProjectResourceValue, 'name' | 'warnings'> & {
+export type FixtureProject = {
   key: ProjectKey
+  name: string
+  warnings: string[]
   openMaps: FixtureMap[]
   closedMaps: FixtureMap[]
   sourcePath?: string
@@ -62,7 +77,7 @@ export type FixtureSnapshot = {
   }[]
 }
 
-export function publicProjectObservation(project: RegisteredProject) {
+export function publicProjectObservation(project: Project) {
   switch (project.resource.kind) {
     case 'current-readable':
       return project.resource.observation
@@ -76,11 +91,8 @@ export function publicProjectObservation(project: RegisteredProject) {
       return null
   }
 }
-export function publicMapResource(
-  project: RegisteredProject,
-  mapId: string,
-): MapResource | undefined {
-  return project.maps.find((map) => map.key.mapId === mapId)
+export function publicMapResource(project: Project, mapId: string): MapResource | undefined {
+  return project.maps.find((map) => map.ref.mapId === mapId)
 }
 export function publicMapObservation(map: MapResource) {
   switch (map.resource.kind) {
@@ -100,7 +112,7 @@ export function publicTicketResource(
   map: MapResource,
   ticketId: string,
 ): TicketResource | undefined {
-  return map.tickets.find((ticket) => ticket.key.ticketId === ticketId)
+  return map.tickets.find((ticket) => ticket.ref.ticketId === ticketId)
 }
 export function publicTicketObservation(ticket: TicketResource) {
   switch (ticket.resource.kind) {

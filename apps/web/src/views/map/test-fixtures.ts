@@ -1,15 +1,29 @@
-import type {
-  Blocker,
-  MapBody,
-  MapResource,
-  MapResourceResult,
-  ProjectKey,
-  RegisteredProject,
-  TicketResource,
-  TicketResourceResult,
-  TicketState,
-  TicketType,
-} from '@roadmap/contracts'
+import {
+  configurationVersionSchema,
+  connectionIdSchema,
+  mapRefSchema,
+  type ProjectRef,
+  projectRefSchema,
+  serverEpochSchema,
+  stateSequenceSchema,
+  ticketRefSchema,
+} from '@roadmap/contracts/identity'
+import {
+  type ApplicationState,
+  applicationStateSchema,
+  type Blocker,
+  connectionSchema,
+  type MapBody,
+  type MapResource,
+  type MapResourceResult,
+  type Project,
+  type ReadyApplicationState,
+  readyApplicationStateSchema,
+  type TicketResource,
+  type TicketResourceResult,
+  type TicketState,
+  type TicketType,
+} from '@roadmap/contracts/state'
 import type { RoadmapStore, RoadmapStoreSnapshot } from '@/store/roadmap-store'
 
 type TicketValue = Extract<
@@ -19,16 +33,16 @@ type TicketValue = Extract<
 type MapValue = Extract<MapResourceResult, { kind: 'current-readable' }>['observation']['value']
 
 const HOME = 'me/repo'
-const HOME_PROJECT: ProjectKey = { integration: 'github', id: 'project-home' }
-const HOME_MAP: MapResource['key'] = { project: HOME_PROJECT, mapId: '1' }
+const HOME_PROJECT = projectRefSchema.parse({ integration: 'github', projectId: 'project-home' })
+const HOME_MAP = mapRefSchema.parse({ project: HOME_PROJECT, mapId: '1' })
 
-function provenance(source: TicketValue['source'], project: ProjectKey) {
+function provenance(source: TicketValue['source'], project: ProjectRef) {
   return source.kind === 'file'
     ? ({ integration: 'local', path: source.path, operation: 'read' } as const)
     : ({
         integration: 'github',
-        connectionId: 'connection-home',
-        repositoryId: project.id,
+        connectionId: connectionIdSchema.parse('connection-home'),
+        repositoryId: project.projectId,
         stage: 'map-read',
       } as const)
 }
@@ -36,7 +50,10 @@ function provenance(source: TicketValue['source'], project: ProjectKey) {
 export function blocker(
   id: number | string,
   open: boolean = true,
-  reference: Blocker['reference'] = { kind: 'registered', project: HOME_PROJECT },
+  reference: Blocker['reference'] = {
+    kind: 'registered',
+    ticket: ticketRefSchema.parse({ map: HOME_MAP, ticketId: String(id) }),
+  },
 ): Blocker {
   const value = String(id)
   const locator =
@@ -47,7 +64,6 @@ export function blocker(
         : HOME
   return {
     reference,
-    ticketId: value,
     displayId: `#${value}`,
     title: `Ticket ${value}`,
     url: `https://example.test/${locator}/${value}`,
@@ -79,23 +95,27 @@ export function ticket(
     isClaimed: state === 'claimed',
     isBlocked: blockedBy.some((blocker) => blocker.state !== 'closed'),
     createdAt,
-    ...(closedAt === undefined ? {} : { closedAt }),
+    ...(state === 'closed'
+      ? { closedAt: closedAt ?? 0 }
+      : closedAt === undefined
+        ? {}
+        : { closedAt }),
     assignees: [],
     blockedBy,
     blockersComplete: true,
     warnings: [],
     ...overrides,
   }
-  const key = { map: HOME_MAP, ticketId: value }
+  const ref = ticketRefSchema.parse({ map: HOME_MAP, ticketId: value })
   return {
-    key,
+    ref,
     resource: {
       kind: 'current-readable',
       observation: {
-        scope: { kind: 'ticket', ticket: key },
+        scope: { kind: 'ticket', ticket: ref },
         attemptedAt: 0,
         observedAt: 0,
-        provenance: provenance(content.source, key.map.project),
+        provenance: provenance(content.source, ref.map.project),
         completeness: { kind: 'complete' },
         value: content,
       },
@@ -121,9 +141,10 @@ function body(overrides: Partial<MapBody> = {}): MapBody {
 export function makeMap(
   tickets: TicketResource[],
   bodyOverrides: Partial<MapBody> = {},
-  key: MapResource['key'] = HOME_MAP,
+  refInput: Parameters<typeof mapRefSchema.parse>[0] = HOME_MAP,
   overrides: Partial<MapValue> = {},
 ): MapResource {
+  const ref = mapRefSchema.parse(refInput)
   const content: MapValue = {
     displayId: '#1',
     title: 'Test map',
@@ -143,38 +164,50 @@ export function makeMap(
     ...overrides,
   }
   const scopedTickets = tickets.map((ticket): TicketResource => {
-    const scopedKey = { map: key, ticketId: ticket.key.ticketId }
+    const scopedRef = { map: ref, ticketId: ticket.ref.ticketId }
     if (ticket.resource.kind !== 'current-readable') return ticket
     return {
-      key: scopedKey,
+      ref: scopedRef,
       resource: {
         ...ticket.resource,
         observation: {
           ...ticket.resource.observation,
-          scope: { kind: 'ticket', ticket: scopedKey },
-          provenance: provenance(ticket.resource.observation.value.source, key.project),
+          scope: { kind: 'ticket', ticket: scopedRef },
+          provenance: provenance(ticket.resource.observation.value.source, ref.project),
         },
       },
     }
   })
   return {
-    key,
+    ref,
     resource: {
       kind: 'current-readable',
       observation: {
-        scope: { kind: 'map', map: key },
+        scope: { kind: 'map', map: ref },
         attemptedAt: 0,
         observedAt: 0,
-        provenance: provenance(content.source, key.project),
+        provenance: provenance(content.source, ref.project),
         completeness: { kind: 'complete' },
         value: content,
       },
     },
     tickets: scopedTickets,
+    frontier: scopedTickets
+      .filter(
+        (ticket) =>
+          ticket.resource.kind === 'current-readable' &&
+          ticket.resource.observation.value.status === 'open' &&
+          !ticket.resource.observation.value.isClaimed &&
+          ticket.resource.observation.value.blockersComplete &&
+          ticket.resource.observation.value.blockedBy.every(
+            (blocker) => blocker.state === 'closed',
+          ),
+      )
+      .map((ticket) => ticket.ref),
     ticketsMembership: {
       kind: 'current-complete',
       observation: {
-        scope: { kind: 'tickets-membership', map: key },
+        scope: { kind: 'tickets-membership', map: ref },
         attemptedAt: 0,
         observedAt: 0,
         provenance:
@@ -186,42 +219,84 @@ export function makeMap(
                   '/tickets',
                 operation: 'enumerate',
               }
-            : provenance(content.source, key.project),
+            : provenance(content.source, ref.project),
         completeness: { kind: 'complete' },
-        value: { members: scopedTickets.map((ticket) => ticket.key) },
+        value: { members: scopedTickets.map((ticket) => ticket.ref) },
       },
     },
   }
 }
 
-export function makeRoadmapStore(projects: RegisteredProject[] = []): RoadmapStore {
-  const snapshot: RoadmapStoreSnapshot = {
+export function makeApplicationState(
+  projects: Project[] = [],
+  overrides: Partial<ReadyApplicationState> = {},
+): ReadyApplicationState {
+  const connections = [
+    ...new Map(
+      projects.map((project) => [
+        project.connectionId,
+        connectionSchema.parse(
+          project.integration === 'local'
+            ? {
+                id: project.connectionId,
+                integration: 'local',
+                name: 'Local files',
+                builtIn: true,
+                availability: { status: 'available' },
+              }
+            : {
+                id: project.connectionId,
+                integration: 'github',
+                name: 'GitHub',
+                builtIn: false,
+                githubIdentity: { id: project.connectionId, login: 'fixture' },
+                availability: { status: 'available' },
+              },
+        ),
+      ]),
+    ).values(),
+  ]
+  return readyApplicationStateSchema.parse({
+    phase: 'ready',
+    mode: 'mutable',
+    capturedAt: 0,
+    serverEpoch: serverEpochSchema.parse('test'),
+    stateSequence: stateSequenceSchema.parse(1),
+    configurationVersion: configurationVersionSchema.parse(1),
+    supportedIntegrations: [],
+    connections,
+    projects,
+    authorizationOperations: [],
+    configuration: { valid: true, issues: [], notices: [] },
+    automation: {
+      enabled: false,
+      enabledProjects: [],
+      availability: { status: 'ready' },
+      evidence: [],
+      overrides: [],
+    },
+    ...overrides,
+  })
+}
+
+export function makeRoadmapSnapshot(state: ApplicationState): RoadmapStoreSnapshot {
+  return {
     transport: 'live',
     synchronization: 'synchronized',
     command: { inFlight: false, error: null },
-    state: {
-      serverEpoch: 'test',
-      stateSequence: 1,
-      configurationVersion: 1,
-      supportedIntegrations: [],
-      connections: [],
-      registrations: [],
-      projects,
-      authorizationOperations: [],
-      configuration: { valid: true, issues: [], notices: [] },
-      automation: {
-        enabled: false,
-        enabledProjects: [],
-        availability: { status: 'ready' },
-        evidence: [],
-        overrides: [],
-      },
-      roadmap: { capturedAt: 0 },
-    },
+    state: applicationStateSchema.parse(state),
   }
+}
+
+export function makeRoadmapStore(projects: Project[] = []): RoadmapStore {
+  const snapshot = makeRoadmapSnapshot(makeApplicationState(projects))
   return {
     subscribe: () => () => undefined,
-    getSnapshot: () => snapshot,
+    getSnapshot: () => {
+      if (snapshot.synchronization !== 'not-ready')
+        snapshot.state = applicationStateSchema.parse(snapshot.state)
+      return snapshot
+    },
     start: () => () => undefined,
     query: async () => {
       throw new Error('Unexpected query')

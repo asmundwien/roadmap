@@ -3,15 +3,24 @@ import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import type { ProjectKey } from '@roadmap/contracts'
+import { commandSchema } from '@roadmap/contracts/operations'
 import { describe, expect, it } from 'vitest'
+import type {
+  CredentialBundle,
+  CredentialVault,
+  GitHubConnectionPort,
+} from '../authorization/contracts.ts'
 import { createConfigurationDocument } from '../configuration/document.ts'
 import { createGitHubProjectAdmission } from '../github/admission.ts'
-import type { CredentialBundle, GitHubConnectionPort } from '../github/connections.ts'
 import { createGitHubObserverPool } from '../github/observer.ts'
+import type { SourceProjectKey as ProjectKey } from '../observation/source.ts'
 import type { ProjectConfiguration } from '../projects/registry.ts'
+import {
+  fixtureProjectRef,
+  fixtureResourceRef,
+  readApplicationState,
+} from '../public-test-fixtures.ts'
 import { createRoadmapApplication } from './application.ts'
-import type { CredentialVault } from './credential-vault.ts'
 import { createApplicationOperations } from './operations.ts'
 
 const git = promisify(execFile)
@@ -236,12 +245,15 @@ function openWorkspace(
   application: ReturnType<typeof createRoadmapApplication>,
   project: ProjectKey,
 ) {
-  return application.execute({
-    type: 'launch-action',
-    actionId: 'open-workspace',
-    project,
-    expectedConfigurationVersion: application.current().configurationVersion,
-  })
+  return application.execute(
+    commandSchema.parse({
+      type: 'launch-action',
+      actionId: 'open-workspace',
+      project: fixtureProjectRef(project),
+      expectedConfigurationVersion: readApplicationState(application.current())
+        .configurationVersion,
+    }),
+  )
 }
 
 describe('RoadmapApplication GitHub canonical Workspace occupancy', () => {
@@ -251,16 +263,18 @@ describe('RoadmapApplication GitHub canonical Workspace occupancy', () => {
       async ({ application, effects, workspace, alias }) => {
         expect(await realpath(alias)).toBe(await realpath(workspace))
         expect(alias).not.toBe(workspace)
-        expect(application.current().configuration.valid).toBe(true)
-        expect(application.current().registrations).toHaveLength(2)
+        expect(readApplicationState(application.current()).configuration.valid).toBe(true)
+        expect(readApplicationState(application.current()).projects).toHaveLength(2)
         expect(
-          application.current().projects.find((project) => project.key.id === 'a'),
+          readApplicationState(application.current()).projects.find(
+            (project) => project.ref.projectId === 'a',
+          ),
         ).toMatchObject({
-          key: A,
+          ref: fixtureResourceRef(A),
           resource: { kind: 'current-readable', observation: { observedAt: 1000 } },
           maps: [
             {
-              key: { project: A, mapId: '108' },
+              ref: fixtureResourceRef({ project: A, mapId: '108' }),
               resource: {
                 kind: 'current-readable',
                 observation: { value: { title: 'Repository A map' } },
@@ -269,13 +283,15 @@ describe('RoadmapApplication GitHub canonical Workspace occupancy', () => {
           ],
         })
         expect(
-          application.current().projects.find((project) => project.key.id === 'b'),
+          readApplicationState(application.current()).projects.find(
+            (project) => project.ref.projectId === 'b',
+          ),
         ).toMatchObject({
-          key: B,
+          ref: fixtureResourceRef(B),
           resource: { kind: 'current-readable', observation: { observedAt: 1000 } },
           maps: [
             {
-              key: { project: B, mapId: '109' },
+              ref: fixtureResourceRef({ project: B, mapId: '109' }),
               resource: {
                 kind: 'current-readable',
                 observation: {
@@ -292,7 +308,9 @@ describe('RoadmapApplication GitHub canonical Workspace occupancy', () => {
           ],
         })
         expect(
-          application.current().projects.find((project) => project.key.id === 'b')?.resource,
+          readApplicationState(application.current()).projects.find(
+            (project) => project.ref.projectId === 'b',
+          )?.resource,
         ).toMatchObject({
           kind: 'current-readable',
           observation: {
@@ -301,7 +319,9 @@ describe('RoadmapApplication GitHub canonical Workspace occupancy', () => {
             },
           },
         })
-        const b = application.current().projects.find((project) => project.key.id === 'b')
+        const b = readApplicationState(application.current()).projects.find(
+          (project) => project.ref.projectId === 'b',
+        )
         expect(b?.managementWarnings).toContainEqual(
           expect.stringMatching(/Workspace.*remotes.*repository/),
         )
@@ -314,12 +334,18 @@ describe('RoadmapApplication GitHub canonical Workspace occupancy', () => {
           }),
         )
         expect(
-          await application.execute({
-            type: 'refresh-project',
-            project: B,
-            expectedConfigurationVersion: application.current().configurationVersion,
-          }),
-        ).toMatchObject({ ok: true, result: { type: 'project-refreshed', project: B } })
+          await application.execute(
+            commandSchema.parse({
+              type: 'refresh-project',
+              project: fixtureProjectRef(B),
+              expectedConfigurationVersion: readApplicationState(application.current())
+                .configurationVersion,
+            }),
+          ),
+        ).toMatchObject({
+          ok: true,
+          result: { type: 'project-refreshed', project: { integration: 'github', projectId: 'b' } },
+        })
         expect(await openWorkspace(application, B)).toMatchObject({
           ok: false,
           error: { code: 'admission-failed', field: 'workspace.path' },
@@ -331,7 +357,9 @@ describe('RoadmapApplication GitHub canonical Workspace occupancy', () => {
         })
         expect(effects).toEqual([])
         expect(
-          application.current().projects.find((project) => project.key.id === 'b')?.resource,
+          readApplicationState(application.current()).projects.find(
+            (project) => project.ref.projectId === 'b',
+          )?.resource,
         ).toMatchObject({
           kind: 'current-readable',
           observation: { observedAt: 1000 },
@@ -346,9 +374,9 @@ describe('RoadmapApplication GitHub canonical Workspace occupancy', () => {
       async ({ application, effects, workspace, alias }) => {
         expect(await realpath(alias)).toBe(await realpath(workspace))
         expect(alias).not.toBe(workspace)
-        const state = application.current()
+        const state = readApplicationState(application.current())
         expect(state.configuration.valid).toBe(true)
-        expect(state.registrations).toHaveLength(2)
+        expect(state.projects).toHaveLength(2)
         expect(
           state.connections.find((connection) => connection.id === 'authorized'),
         ).toMatchObject({
@@ -359,13 +387,13 @@ describe('RoadmapApplication GitHub canonical Workspace occupancy', () => {
         ).toMatchObject({
           availability: { status: 'authorization-required' },
         })
-        expect(state.projects.find((project) => project.key.id === 'a')).toMatchObject({
-          key: A,
+        expect(state.projects.find((project) => project.ref.projectId === 'a')).toMatchObject({
+          ref: fixtureResourceRef(A),
           connectionId: 'authorized',
           resource: { kind: 'current-readable', observation: { observedAt: 1000 } },
           maps: [
             {
-              key: { project: A, mapId: '108' },
+              ref: fixtureResourceRef({ project: A, mapId: '108' }),
               resource: {
                 kind: 'current-readable',
                 observation: { value: { title: 'Repository A map' } },
@@ -373,21 +401,25 @@ describe('RoadmapApplication GitHub canonical Workspace occupancy', () => {
             },
           ],
         })
-        const b = state.projects.find((project) => project.key.id === 'b')
+        const b = state.projects.find((project) => project.ref.projectId === 'b')
         expect(b).toMatchObject({
-          key: B,
+          ref: { integration: 'github', projectId: 'b' },
           connectionId: 'unauthorized',
-          locator: { integration: 'github', repositoryId: '99' },
+          source: { integration: 'github', repositoryId: '99', nameWithOwner: 'Other/Repository' },
+          management: { workspacePath: alias },
           resource: { kind: 'never-observed' },
           maps: [],
         })
         expect(b?.actions.filter((action) => action.kind === 'server-launch')).toEqual([])
         expect(
-          await application.execute({
-            type: 'refresh-project',
-            project: B,
-            expectedConfigurationVersion: application.current().configurationVersion,
-          }),
+          await application.execute(
+            commandSchema.parse({
+              type: 'refresh-project',
+              project: fixtureProjectRef(B),
+              expectedConfigurationVersion: readApplicationState(application.current())
+                .configurationVersion,
+            }),
+          ),
         ).toMatchObject({ ok: false })
         expect(await openWorkspace(application, B)).toMatchObject({
           ok: false,
@@ -400,12 +432,16 @@ describe('RoadmapApplication GitHub canonical Workspace occupancy', () => {
         })
         expect(effects).toEqual([])
         expect(
-          application.current().connections.find((connection) => connection.id === 'authorized'),
+          readApplicationState(application.current()).connections.find(
+            (connection) => connection.id === 'authorized',
+          ),
         ).toMatchObject({
           availability: { status: 'available', observedAt: 1000 },
         })
         expect(
-          application.current().projects.find((project) => project.key.id === 'b')?.resource,
+          readApplicationState(application.current()).projects.find(
+            (project) => project.ref.projectId === 'b',
+          )?.resource,
         ).toMatchObject({
           kind: 'never-observed',
         })

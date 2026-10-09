@@ -1,4 +1,5 @@
-import type { Command, Connection, SafeError } from '@roadmap/contracts'
+import type { Command, SafeError } from '@roadmap/contracts/operations'
+import type { Connection } from '@roadmap/contracts/state'
 import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
 import { useState } from 'react'
 import { useRoadmap } from '@/store/roadmap-provider'
@@ -20,7 +21,12 @@ export function ManageSection({ connection }: ManageSectionProps) {
   const [busy, setBusy] = useState(false)
   const dependents = projects.filter((project) => project.connectionId === connection.id)
   const related = authorizationOperations.filter(
-    (operation) => operation.connectionId === connection.id,
+    (operation) =>
+      ((operation.status === 'waiting' || operation.status === 'terminal') &&
+        operation.connectionId === connection.id) ||
+      (operation.status === 'granted' &&
+        operation.connection.kind === 'current' &&
+        operation.connection.id === connection.id),
   )
   const authorization =
     related.findLast((operation) => operation.status === 'waiting') ?? related.at(-1)

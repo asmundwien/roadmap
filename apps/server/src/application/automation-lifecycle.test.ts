@@ -3,7 +3,8 @@ import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { setImmediate as nextTurn } from 'node:timers/promises'
-import type { ApplicationState } from '@roadmap/contracts'
+import { commandSchema } from '@roadmap/contracts/operations'
+import type { ReadyApplicationState } from '@roadmap/contracts/state'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   type AutomationAppend,
@@ -11,13 +12,13 @@ import {
   createAutomationDatabaseDocument,
   replayAutomationDatabase,
 } from '../automation/database.ts'
-import {
-  type AutomationLaunch,
-  type AutomationLauncher,
-  type ClassificationProcessResult,
-  createAutomationLauncher,
-  type WayfinderProcessResult,
+import type {
+  AutomationLaunch,
+  AutomationLauncher,
+  ClassificationProcessResult,
+  WayfinderProcessResult,
 } from '../automation/engine.ts'
+import { createAutomationLauncher } from '../automation/launcher.ts'
 import type { AutomationTarget } from '../automation/model.ts'
 import {
   type ConfigurationDocument,
@@ -25,6 +26,11 @@ import {
 } from '../configuration/document.ts'
 import { createLocalProjectAdmission } from '../local/admission.ts'
 import type { HarnessCommand, ProjectConfiguration } from '../projects/registry.ts'
+import {
+  fixtureProjectRef,
+  fixtureTicketRef,
+  readApplicationState,
+} from '../public-test-fixtures.ts'
 import {
   controlledSourceFixture,
   createSourceFixtureOwner,
@@ -206,7 +212,6 @@ async function fixture(options: {
           missingSections: [],
         },
         tickets: [ticket],
-        frontier: [ticket],
         progress: { total: 1, completed: 0 },
         ticketsComplete: true,
         warnings: [],
@@ -285,12 +290,15 @@ async function fixture(options: {
     }),
     serverEpoch: 'automation-lifecycle-test',
   })
-  const publications: ApplicationState[] = []
-  application.subscribe((state) => publications.push(state))
+  const publications: ReadyApplicationState[] = []
+  application.subscribe((state) => {
+    if (state.phase === 'ready') publications.push(state)
+  })
   return {
     application,
     target,
     workspace,
+    fixtureProject: project,
     source,
     configuration,
     configurationPath,
@@ -329,6 +337,7 @@ describe('RoadmapApplication Automation lifecycle', () => {
       const starting = outcome(current.application.start())
       try {
         await gate.waitForEntry()
+        expect(current.application.current()).toMatchObject({ phase: 'starting' })
         expect(await current.application.query({ type: 'select-workspace' })).toMatchObject({
           ok: false,
           error: { code: 'not-supported' },
@@ -359,6 +368,8 @@ describe('RoadmapApplication Automation lifecycle', () => {
         expect(launches.effects).toEqual([])
         expect(current.selections).toEqual([])
         const terminal = current.application.current()
+        expect(terminal).toMatchObject({ phase: 'stopped', retained: null })
+        expect(current.publications).toEqual([])
         const publicationCount = current.publications.length
         await current.application.stop()
         expect(await outcome(current.application.start())).toMatchObject({ status: 'rejected' })
@@ -366,6 +377,52 @@ describe('RoadmapApplication Automation lifecycle', () => {
         expect(current.application.current()).toBe(terminal)
         expect(current.publications).toHaveLength(publicationCount)
         expect(await current.readDatabase()).toEqual(stored)
+
+        const restartConfiguration = createConfigurationDocument(current.configurationPath, {
+          debounceMs: 60_000,
+        })
+        configurationDocuments.push(restartConfiguration)
+        const read = createSourceFixtureOwner()
+        const restartSource = controlledSourceFixture(
+          current.target.project,
+          read([current.fixtureProject], 100),
+        )
+        const restarted = createRoadmapApplication({
+          configuration: restartConfiguration,
+          admissions: { local: createLocalProjectAdmission() },
+          observers: {
+            local: () => restartSource.observer,
+            github() {
+              throw new Error('This recovery fixture has no GitHub source.')
+            },
+          },
+          automation: {
+            database: createAutomationDatabaseDocument(current.databasePath),
+            launcher: launches.launcher,
+          },
+        })
+        try {
+          await restarted.start()
+          expect(restarted.current()).toMatchObject({
+            phase: 'ready',
+            automation: {
+              evidence: [
+                {
+                  target: fixtureTicketRef(current.target),
+                  wayfinder: {
+                    status: 'outcome-unknown',
+                    admission: 'override',
+                    acknowledged: false,
+                  },
+                },
+              ],
+            },
+          })
+          expect(await current.readDatabase()).toEqual(stored)
+          expect(launches.effects).toEqual([])
+        } finally {
+          await restarted.stop()
+        }
       } finally {
         gate.release()
         await starting
@@ -399,12 +456,14 @@ describe('RoadmapApplication Automation lifecycle', () => {
         ok: false,
       })
       expect(
-        await current.application.execute({
-          type: 'start-automation-override',
-          expectedConfigurationVersion: 1,
-          target: current.target,
-          stage: 'wayfinder',
-        }),
+        await current.application.execute(
+          commandSchema.parse({
+            type: 'start-automation-override',
+            expectedConfigurationVersion: 1,
+            target: fixtureTicketRef(current.target),
+            stage: 'wayfinder',
+          }),
+        ),
       ).toMatchObject({ ok: false, error: { code: 'not-supported' } })
       expect(launches.effects).toEqual([])
       expect(current.selections).toEqual([])
@@ -415,8 +474,12 @@ describe('RoadmapApplication Automation lifecycle', () => {
         type: 'workspace-selection',
       })
       expect(current.selections).toEqual(['selected'])
-      expect(current.application.current().automation.enabledProjects).toEqual([])
-      expect(current.application.current().automation.evidence[0]?.wayfinder).toMatchObject({
+      expect(
+        readApplicationState(current.application.current()).automation.enabledProjects,
+      ).toEqual([])
+      expect(
+        readApplicationState(current.application.current()).automation.evidence[0]?.wayfinder,
+      ).toMatchObject({
         status: 'outcome-unknown',
         admission: 'override',
         acknowledged: false,
@@ -465,26 +528,32 @@ describe('RoadmapApplication Automation lifecycle', () => {
     })
     try {
       await current.application.start()
-      expect(current.application.current().configuration).toMatchObject({
+      expect(readApplicationState(current.application.current()).configuration).toMatchObject({
         valid: false,
         issues: [expect.objectContaining({ message: expect.any(String) })],
       })
-      expect(current.application.current().automation.availability.status).toBe('unavailable')
       expect(
-        await current.application.execute({
-          type: 'set-automation-enabled',
-          expectedConfigurationVersion: 0,
-          enabled: true,
-        }),
+        readApplicationState(current.application.current()).automation.availability.status,
+      ).toBe('unavailable')
+      expect(
+        await current.application.execute(
+          commandSchema.parse({
+            type: 'set-automation-enabled',
+            expectedConfigurationVersion: 0,
+            enabled: true,
+          }),
+        ),
       ).toMatchObject({ ok: false, error: { code: 'configuration-invalid' } })
       for (const stage of ['classification', 'wayfinder'] as const) {
         expect(
-          await current.application.execute({
-            type: 'start-automation-override',
-            expectedConfigurationVersion: 0,
-            target: current.target,
-            stage,
-          }),
+          await current.application.execute(
+            commandSchema.parse({
+              type: 'start-automation-override',
+              expectedConfigurationVersion: 0,
+              target: fixtureTicketRef(current.target),
+              stage,
+            }),
+          ),
         ).toMatchObject({ ok: false, error: { code: 'configuration-invalid' } })
       }
       expect(await current.application.query({ type: 'select-workspace' })).toMatchObject({
@@ -526,12 +595,14 @@ describe('RoadmapApplication Automation lifecycle', () => {
       try {
         await current.application.start()
         expect(
-          await current.application.execute({
-            type: 'start-automation-override',
-            expectedConfigurationVersion: 1,
-            target: current.target,
-            stage: 'classification',
-          }),
+          await current.application.execute(
+            commandSchema.parse({
+              type: 'start-automation-override',
+              expectedConfigurationVersion: 1,
+              target: fixtureTicketRef(current.target),
+              stage: 'classification',
+            }),
+          ),
         ).toMatchObject({ ok: true })
         await entered.promise
         const firstStop = current.application.stop()
@@ -554,11 +625,14 @@ describe('RoadmapApplication Automation lifecycle', () => {
           status: 'outcome-unknown',
           admission: 'override',
         })
-        expect(current.application.current().automation.evidence[0]?.classification).toMatchObject({
+        expect(
+          readApplicationState(current.application.current()).automation.evidence[0]
+            ?.classification,
+        ).toMatchObject({
           status: 'outcome-unknown',
           admission: 'override',
         })
-        const terminal = current.application.current()
+        const terminal = readApplicationState(current.application.current())
         const publicationCount = current.publications.length
         if (completion === 'success') completed.resolve(classificationResult())
         else completed.reject(new Error('Late Classification result loss.'))
@@ -568,7 +642,7 @@ describe('RoadmapApplication Automation lifecycle', () => {
         expect(stopCalls).toBe(1)
         expect(dispatches).toEqual([])
         expect(await current.readDatabase()).toEqual(stored)
-        expect(current.application.current()).toBe(terminal)
+        expect(readApplicationState(current.application.current())).toBe(terminal)
         expect(current.publications).toHaveLength(publicationCount)
         expect(stored.events.some((entry) => entry.type === 'classification-completed')).toBe(false)
       } finally {
@@ -631,12 +705,14 @@ describe('RoadmapApplication Automation lifecycle', () => {
       try {
         await current.application.start()
         expect(
-          await current.application.execute({
-            type: 'start-automation-override',
-            expectedConfigurationVersion: 1,
-            target: current.target,
-            stage: 'classification',
-          }),
+          await current.application.execute(
+            commandSchema.parse({
+              type: 'start-automation-override',
+              expectedConfigurationVersion: 1,
+              target: fixtureTicketRef(current.target),
+              stage: 'classification',
+            }),
+          ),
         ).toMatchObject({ ok: true })
         await current.application.stop()
         const stored = await current.readDatabase()
@@ -674,12 +750,14 @@ describe('RoadmapApplication Automation lifecycle', () => {
     try {
       await current.application.start()
       expect(
-        await current.application.execute({
-          type: 'start-automation-override',
-          expectedConfigurationVersion: 1,
-          target: current.target,
-          stage: 'classification',
-        }),
+        await current.application.execute(
+          commandSchema.parse({
+            type: 'start-automation-override',
+            expectedConfigurationVersion: 1,
+            target: fixtureTicketRef(current.target),
+            stage: 'classification',
+          }),
+        ),
       ).toMatchObject({ ok: true })
       await vi.waitFor(async () =>
         expect(await readFile(join(current.workspace, 'classification.started'), 'utf8')).toBe(
@@ -732,12 +810,14 @@ describe('RoadmapApplication Automation lifecycle', () => {
     const finishedPath = join(current.workspace, 'session.finished')
     try {
       await current.application.start()
-      const admission = await current.application.execute({
-        type: 'start-automation-override',
-        expectedConfigurationVersion: 1,
-        target: current.target,
-        stage: 'wayfinder',
-      })
+      const admission = await current.application.execute(
+        commandSchema.parse({
+          type: 'start-automation-override',
+          expectedConfigurationVersion: 1,
+          target: fixtureTicketRef(current.target),
+          stage: 'wayfinder',
+        }),
+      )
       admitted = admission.ok
       expect(admission).toMatchObject({ ok: true })
       await vi.waitFor(async () =>
@@ -751,14 +831,14 @@ describe('RoadmapApplication Automation lifecycle', () => {
         admission: 'override',
         acknowledged: false,
       })
-      const terminal = current.application.current()
+      const terminal = readApplicationState(current.application.current())
       const publicationCount = current.publications.length
       await writeFile(releasePath, 'release', 'utf8')
       await vi.waitFor(async () => expect(await readFile(finishedPath, 'utf8')).toBe('finished'))
       await nextTurn()
       await nextTurn()
       expect(await current.readDatabase()).toEqual(stored)
-      expect(current.application.current()).toBe(terminal)
+      expect(readApplicationState(current.application.current())).toBe(terminal)
       expect(current.publications).toHaveLength(publicationCount)
     } finally {
       await writeFile(releasePath, 'release', 'utf8')
@@ -792,12 +872,14 @@ describe('RoadmapApplication Automation lifecycle', () => {
     try {
       await current.application.start()
       expect(
-        await current.application.execute({
-          type: 'start-automation-override',
-          expectedConfigurationVersion: 1,
-          target: current.target,
-          stage: 'classification',
-        }),
+        await current.application.execute(
+          commandSchema.parse({
+            type: 'start-automation-override',
+            expectedConfigurationVersion: 1,
+            target: fixtureTicketRef(current.target),
+            stage: 'classification',
+          }),
+        ),
       ).toMatchObject({ ok: true })
       const firstStop = outcome(current.application.stop())
       await cleanup.waitForEntry()
@@ -838,17 +920,20 @@ describe('RoadmapApplication Automation lifecycle', () => {
     try {
       await current.application.start()
       expect(
-        await current.application.execute({
-          type: 'start-automation-override',
-          expectedConfigurationVersion: 1,
-          target: current.target,
-          stage: 'wayfinder',
-        }),
+        await current.application.execute(
+          commandSchema.parse({
+            type: 'start-automation-override',
+            expectedConfigurationVersion: 1,
+            target: fixtureTicketRef(current.target),
+            stage: 'wayfinder',
+          }),
+        ),
       ).toMatchObject({ ok: true })
       await vi.waitFor(() =>
-        expect(current.application.current().automation.evidence[0]?.wayfinder?.status).toBe(
-          'running',
-        ),
+        expect(
+          readApplicationState(current.application.current()).automation.evidence[0]?.wayfinder
+            ?.status,
+        ).toBe('running'),
       )
       const firstStop = outcome(current.application.stop())
       await persistence.waitForEntry()
@@ -870,13 +955,13 @@ describe('RoadmapApplication Automation lifecycle', () => {
         'wayfinder-launching',
         'wayfinder-running',
       ])
-      const terminal = current.application.current()
+      const terminal = readApplicationState(current.application.current())
       const publicationCount = current.publications.length
       completed.resolve(sessionResult())
       await nextTurn()
       await nextTurn()
       expect(await current.readDatabase()).toEqual(stored)
-      expect(current.application.current()).toBe(terminal)
+      expect(readApplicationState(current.application.current())).toBe(terminal)
       expect(current.publications).toHaveLength(publicationCount)
       expect(current.source.stopped).toBe(true)
     } finally {
@@ -934,17 +1019,20 @@ describe('RoadmapApplication Automation lifecycle', () => {
       try {
         await current.application.start()
         expect(
-          await current.application.execute({
-            type: 'start-automation-override',
-            expectedConfigurationVersion: 1,
-            target: current.target,
-            stage: 'wayfinder',
-          }),
+          await current.application.execute(
+            commandSchema.parse({
+              type: 'start-automation-override',
+              expectedConfigurationVersion: 1,
+              target: fixtureTicketRef(current.target),
+              stage: 'wayfinder',
+            }),
+          ),
         ).toMatchObject({ ok: true })
         await vi.waitFor(() =>
-          expect(current.application.current().automation.evidence[0]?.wayfinder?.status).toBe(
-            'running',
-          ),
+          expect(
+            readApplicationState(current.application.current()).automation.evidence[0]?.wayfinder
+              ?.status,
+          ).toBe('running'),
         )
         const stops = await Promise.all([
           outcome(current.application.stop()),
@@ -966,18 +1054,20 @@ describe('RoadmapApplication Automation lifecycle', () => {
           status: expectedPhase,
           admission: 'override',
         })
-        expect(current.application.current().automation.evidence[0]?.wayfinder).toMatchObject({
+        expect(
+          readApplicationState(current.application.current()).automation.evidence[0]?.wayfinder,
+        ).toMatchObject({
           status: expectedPhase,
           admission: 'override',
         })
         expect(current.source.stopped).toBe(true)
-        const terminal = current.application.current()
+        const terminal = readApplicationState(current.application.current())
         const publicationCount = current.publications.length
         completed.reject(new Error('Late external Session result loss.'))
         await nextTurn()
         await nextTurn()
         expect(await current.readDatabase()).toEqual(stored)
-        expect(current.application.current()).toBe(terminal)
+        expect(readApplicationState(current.application.current())).toBe(terminal)
         expect(current.publications).toHaveLength(publicationCount)
       } finally {
         completed.resolve(sessionResult())
@@ -1005,17 +1095,20 @@ describe('RoadmapApplication Automation lifecycle', () => {
       try {
         await current.application.start()
         expect(
-          await current.application.execute({
-            type: 'start-automation-override',
-            expectedConfigurationVersion: 1,
-            target: current.target,
-            stage: 'wayfinder',
-          }),
+          await current.application.execute(
+            commandSchema.parse({
+              type: 'start-automation-override',
+              expectedConfigurationVersion: 1,
+              target: fixtureTicketRef(current.target),
+              stage: 'wayfinder',
+            }),
+          ),
         ).toMatchObject({ ok: true })
         await vi.waitFor(() =>
-          expect(current.application.current().automation.evidence[0]?.wayfinder?.status).toBe(
-            'running',
-          ),
+          expect(
+            readApplicationState(current.application.current()).automation.evidence[0]?.wayfinder
+              ?.status,
+          ).toBe('running'),
         )
         if (failure === 'conflict') {
           await writeFile(
@@ -1063,27 +1156,31 @@ describe('RoadmapApplication Automation lifecycle', () => {
           admission: 'override',
           acknowledged: false,
         })
-        expect(current.application.current()).toMatchObject({
+        expect(readApplicationState(current.application.current())).toMatchObject({
           configurationVersion: disabled ? 2 : 1,
           automation: {
-            enabledProjects: disabled ? [] : [current.target.project],
+            enabledProjects: disabled ? [] : [fixtureProjectRef(current.target.project)],
             evidence: [{ wayfinder: { status: 'outcome-unknown', acknowledged: false } }],
           },
         })
-        expect(current.application.current().configuration.notices.length).toBeGreaterThan(0)
+        expect(
+          readApplicationState(current.application.current()).configuration.notices.length,
+        ).toBeGreaterThan(0)
         if (disabled)
-          expect(current.application.current().automation.availability).toMatchObject({
+          expect(
+            readApplicationState(current.application.current()).automation.availability,
+          ).toMatchObject({
             status: 'unavailable',
           })
         expect(current.application.diagnostics().lifecycle).toEqual({ phase: 'stopped' })
         expect(current.source.stopped).toBe(true)
         expect(current.publications).toHaveLength(publicationCount)
-        const terminal = current.application.current()
+        const terminal = readApplicationState(current.application.current())
         completed.resolve(sessionResult())
         await nextTurn()
         await nextTurn()
         expect(await current.readDatabase()).toEqual(stored)
-        expect(current.application.current()).toBe(terminal)
+        expect(readApplicationState(current.application.current())).toBe(terminal)
         expect(current.publications).toHaveLength(publicationCount)
       } finally {
         completed.resolve(sessionResult())
@@ -1109,29 +1206,34 @@ describe('RoadmapApplication Automation lifecycle', () => {
         },
       },
     })
-    let command: Promise<unknown> | undefined
+    let command: ReturnType<typeof current.application.execute> | undefined
     let stopping: Promise<unknown> | undefined
     try {
       await current.application.start()
       expect(
-        await current.application.execute({
-          type: 'start-automation-override',
-          expectedConfigurationVersion: 1,
-          target: current.target,
-          stage: 'wayfinder',
-        }),
+        await current.application.execute(
+          commandSchema.parse({
+            type: 'start-automation-override',
+            expectedConfigurationVersion: 1,
+            target: fixtureTicketRef(current.target),
+            stage: 'wayfinder',
+          }),
+        ),
       ).toMatchObject({ ok: true })
       await vi.waitFor(() =>
-        expect(current.application.current().automation.evidence[0]?.wayfinder?.status).toBe(
-          'running',
-        ),
+        expect(
+          readApplicationState(current.application.current()).automation.evidence[0]?.wayfinder
+            ?.status,
+        ).toBe('running'),
       )
-      command = current.application.execute({
-        type: 'rename-project',
-        project: current.target.project,
-        name: 'Renamed before shutdown',
-        expectedConfigurationVersion: 1,
-      })
+      command = current.application.execute(
+        commandSchema.parse({
+          type: 'rename-project',
+          project: fixtureProjectRef(current.target.project),
+          name: 'Renamed before shutdown',
+          expectedConfigurationVersion: 1,
+        }),
+      )
       await writing.waitForEntry()
       const publicationCount = current.publications.length
       let settled = false
@@ -1142,18 +1244,28 @@ describe('RoadmapApplication Automation lifecycle', () => {
       await nextTurn()
       expect(settled).toBe(false)
       writing.release()
-      expect(await command).toMatchObject({
+      const commandOutcome = await command
+      expect(commandOutcome).toMatchObject({
         ok: true,
         result: { type: 'configuration-updated', configurationVersion: 2 },
+        state: { phase: 'stopping', retained: { phase: 'ready', configurationVersion: 2 } },
       })
+      if (commandOutcome.ok && commandOutcome.result.type === 'configuration-updated')
+        expect(commandOutcome.result.configurationVersion).toBe(
+          readApplicationState(commandOutcome.state).configurationVersion,
+        )
       expect(await stopping).toMatchObject({ status: 'fulfilled' })
+      expect(current.application.current()).toMatchObject({
+        phase: 'stopped',
+        retained: { phase: 'ready', configurationVersion: 3 },
+      })
       const saved: unknown = JSON.parse(await readFile(current.configurationPath, 'utf8'))
       expect(saved).toMatchObject({
         configurationVersion: 3,
         projects: [{ displayName: 'Renamed before shutdown' }],
         automation: { enabledProjects: [] },
       })
-      expect(current.application.current()).toMatchObject({
+      expect(readApplicationState(current.application.current())).toMatchObject({
         configurationVersion: 3,
         automation: {
           enabledProjects: [],
@@ -1241,23 +1353,29 @@ describe('RoadmapApplication Automation lifecycle', () => {
       try {
         await current.application.start()
         expect(
-          await current.application.execute({
-            type: 'start-automation-override',
-            expectedConfigurationVersion: 1,
-            target: current.target,
-            stage: 'wayfinder',
-          }),
+          await current.application.execute(
+            commandSchema.parse({
+              type: 'start-automation-override',
+              expectedConfigurationVersion: 1,
+              target: fixtureTicketRef(current.target),
+              stage: 'wayfinder',
+            }),
+          ),
         ).toMatchObject({ ok: true })
         await entered.promise
         if (phase === 'running') {
           launch.resolve({ completed: completed.promise })
           await vi.waitFor(() =>
-            expect(current.application.current().automation.evidence[0]?.wayfinder?.status).toBe(
-              'running',
-            ),
+            expect(
+              readApplicationState(current.application.current()).automation.evidence[0]?.wayfinder
+                ?.status,
+            ).toBe('running'),
           )
         }
-        expect(current.application.current().automation.evidence[0]?.wayfinder?.status).toBe(phase)
+        expect(
+          readApplicationState(current.application.current()).automation.evidence[0]?.wayfinder
+            ?.status,
+        ).toBe(phase)
         const firstStop = current.application.stop()
         const secondStop = current.application.stop()
         const stops = [outcome(firstStop), outcome(secondStop)]
@@ -1278,15 +1396,32 @@ describe('RoadmapApplication Automation lifecycle', () => {
         expect(externalSettled).toBe(false)
         const stored = await current.readDatabase()
         expect(stored.events.map((entry) => entry.type)).toEqual(expectedEvents)
-        expect(replayAutomationDatabase(stored).evidence[0]?.wayfinder).toEqual({
+        expect(replayAutomationDatabase(stored).evidence[0]?.wayfinder).toMatchObject({
           status: 'outcome-unknown',
           admission: 'override',
-          reason: expect.stringContaining('stopped'),
           acknowledged: false,
+        })
+        expect(current.application.current()).toMatchObject({
+          phase: 'stopped',
+          retained: {
+            phase: 'ready',
+            automation: {
+              evidence: [
+                {
+                  target: fixtureTicketRef(current.target),
+                  wayfinder: {
+                    status: 'outcome-unknown',
+                    admission: 'override',
+                    acknowledged: false,
+                  },
+                },
+              ],
+            },
+          },
         })
         const saved: unknown = JSON.parse(await readFile(current.configurationPath, 'utf8'))
         expect(saved).toMatchObject({ automation: { enabledProjects: [] } })
-        const terminal = current.application.current()
+        const terminal = readApplicationState(current.application.current())
         const publicationCount = current.publications.length
         if (completion === 'success') completed.resolve(sessionResult())
         else completed.reject(new Error('Late Session result loss.'))
@@ -1294,15 +1429,18 @@ describe('RoadmapApplication Automation lifecycle', () => {
         await nextTurn()
         await current.application.stop()
         expect(await current.readDatabase()).toEqual(stored)
-        expect(current.application.current()).toBe(terminal)
+        expect(readApplicationState(current.application.current())).toBe(terminal)
         expect(current.publications).toHaveLength(publicationCount)
         expect(
-          await current.application.execute({
-            type: 'start-automation-override',
-            expectedConfigurationVersion: current.application.current().configurationVersion,
-            target: current.target,
-            stage: 'wayfinder',
-          }),
+          await current.application.execute(
+            commandSchema.parse({
+              type: 'start-automation-override',
+              expectedConfigurationVersion: readApplicationState(current.application.current())
+                .configurationVersion,
+              target: fixtureTicketRef(current.target),
+              stage: 'wayfinder',
+            }),
+          ),
         ).toMatchObject({ ok: false, error: { code: 'not-supported' } })
       } finally {
         launch.resolve({ completed: completed.promise })

@@ -1,23 +1,39 @@
-import { randomUUID } from 'node:crypto'
+import {
+  authorizationOperationIdSchema,
+  configurationVersionSchema,
+  type ProjectRef as PublicProjectRef,
+  projectRefSchema,
+  stateSequenceSchema,
+} from '@roadmap/contracts/identity'
 import type {
-  ApplicationState,
-  AuthorizationOperation,
   Command,
   CommandOutcome,
   CommandResult,
-  GitHubConnectionIdentity,
-  ProjectKey,
   Query,
   QueryResult,
   SafeError,
-  SupportedIntegration,
-} from '@roadmap/contracts'
+} from '@roadmap/contracts/operations'
+import {
+  type ApplicationState,
+  applicationStateSchema,
+  type ReadyApplicationState,
+  type SupportedIntegration,
+} from '@roadmap/contracts/state'
+import type { AuthorizationFact, GitHubConnectionIdentity } from '../authorization/contracts.ts'
+import {
+  type CredentialBundle,
+  type CredentialVault,
+  CredentialVaultError,
+  GitHubConnectionError,
+  type GitHubConnectionPort,
+} from '../authorization/contracts.ts'
 import type { AutomationDatabaseDocument } from '../automation/database.ts'
 import {
   type AutomationEngine,
   type AutomationLauncher,
   createAutomationEngine,
 } from '../automation/engine.ts'
+import type { AutomationFailure } from '../automation/model.ts'
 import { type ChangeEvent, type ChangeFeedInput, createChangeFeed } from '../change-feed.ts'
 import {
   type ConfigurationDocument,
@@ -26,16 +42,12 @@ import {
   decodeConfigurationDocument,
 } from '../configuration/document.ts'
 import {
-  type CredentialBundle,
-  GitHubConnectionError,
-  type GitHubConnectionPort,
-} from '../github/connections.ts'
-import {
   type AuthorizationUsability,
   type CommittedObservation,
   createObservationCoordinator,
   type SourceObserverFactories,
 } from '../observation/coordinator.ts'
+import type { SourceProjectKey as ProjectKey } from '../observation/source.ts'
 import {
   type AdmissionFailure,
   type ConfiguredConnection,
@@ -51,9 +63,8 @@ import {
   type RegistryMutation,
 } from '../projects/registry.ts'
 import { ResourceCatalog } from '../resources/catalog.ts'
-import { type CredentialVault, CredentialVaultError } from './credential-vault.ts'
 import type { ApplicationOperations } from './operations.ts'
-import { projectApplicationState, projectResourceCounts, projectResources } from './projection.ts'
+import { projectApplicationState, projectResourceCounts } from './projection.ts'
 
 type ApplicationLifecycle =
   | { readonly phase: 'idle' | 'starting' | 'stopping' | 'stopped' }
@@ -102,7 +113,9 @@ const LOCAL_INTEGRATION: SupportedIntegration = {
   connectionKind: 'built-in',
 }
 interface ActiveAuthorization {
-  public: AuthorizationOperation
+  fact: AuthorizationFact
+  attempt: symbol | null
+  requestedAccountId: string | null
   name: string
   deviceCode: string
   intervalMs: number
@@ -111,7 +124,7 @@ interface ActiveAuthorization {
 
 export function createRoadmapApplication(options: RoadmapApplicationOptions): RoadmapApplication {
   const now = options.now ?? Date.now
-  const serverEpoch = options.serverEpoch ?? randomUUID()
+  const serverEpoch = options.serverEpoch ?? crypto.randomUUID()
   const supportedIntegrations = [
     ...(options.supportedIntegrations ?? [LOCAL_INTEGRATION]),
     ...(options.supportedIntegrations || !options.github ? [] : [options.github.integration]),
@@ -152,7 +165,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     authorizationUsability: new Map(),
     classification: { baselineProjects: [] },
   }
-  let configurationStatus: ApplicationState['configuration'] = {
+  let configurationStatus: ReadyApplicationState['configuration'] = {
     valid: true,
     issues: [],
     notices: [],
@@ -197,7 +210,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
         },
       })
     : null
-  let retainedState: ApplicationState | null = null
+  let retainedState: ReadyApplicationState | null = null
   let state = buildState()
   let stateFingerprint = semanticFingerprint(state)
   const unsubscribeObservation = coordinator.subscribe((committed) => {
@@ -211,25 +224,34 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     return coordinator.current()?.registry ?? emptyCommitted.registry
   }
   function buildState(intent: ProjectConfiguration = currentConfiguration()): ApplicationState {
+    const marker = { serverEpoch, stateSequence, capturedAt: now() }
+    if (lifecycle.phase === 'idle' || lifecycle.phase === 'starting')
+      return applicationStateSchema.parse({ ...marker, phase: lifecycle.phase })
     const resources = catalog.current() ?? { committed: emptyCommitted, projects: [] }
-    return projectApplicationState({
-      committed: resources.committed,
-      intent,
-      retainedConnections: retainedState?.connections ?? null,
-      source: projectResources(resources, intent, ownsEffects()),
-      serverEpoch,
-      stateSequence,
-      supportedIntegrations,
-      authorizationOperations: ownsEffects()
-        ? [...authorizationOperations.values()].map((operation) => ({ ...operation.public }))
-        : (retainedState?.authorizationOperations ?? []),
-      configuration: configurationStatus,
-      automation: automationState(intent),
+    const projection = () =>
+      projectApplicationState({
+        resources,
+        intent,
+        retainedConnections: retainedState?.connections ?? null,
+        sourceLifetimeOwned: ownsEffects(),
+        ...marker,
+        mode: lifecycle.phase === 'ready' ? lifecycle.mode : (retainedState?.mode ?? 'read-only'),
+        supportedIntegrations,
+        authorizationOperations: ownsEffects()
+          ? [...authorizationOperations.values()].map((operation) => ({ ...operation.fact }))
+          : (retainedState?.authorizationOperations ?? []),
+        configuration: configurationStatus,
+        automation: automationState(intent),
+      })
+    if (lifecycle.phase === 'ready') return projection()
+    return applicationStateSchema.parse({
+      ...marker,
+      phase: lifecycle.phase,
+      ...(lifecycle.phase === 'failed' ? { cause: lifecycle.cause } : {}),
+      retained: retainedState === null ? null : projection(),
     })
   }
-  function automationState(
-    configuration: ProjectConfiguration = currentConfiguration(),
-  ): ApplicationState['automation'] {
+  function automationState(configuration: ProjectConfiguration = currentConfiguration()) {
     return {
       enabled: configuration.automation.enabled,
       enabledProjects: [...configuration.automation.enabledProjects],
@@ -240,7 +262,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
   }
   function automationAvailability(
     configuration: ProjectConfiguration,
-  ): ApplicationState['automation']['availability'] {
+  ): ReadyApplicationState['automation']['availability'] {
     if (!ownsEffects()) return { status: 'unavailable', cause: 'Roadmap is not running.' }
     if (
       !configurationStatus.valid ||
@@ -268,8 +290,9 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       : { status: 'ready' }
   }
   function publish(): void {
-    if (!ownsEffects()) return
+    if (lifecycle.phase !== 'ready') return
     const candidate = buildState()
+    if (candidate.phase !== 'ready') return
     const committed = coordinator.current()
     const baselineProjects =
       committed && lastBaselineRegistry !== committed.registry
@@ -279,7 +302,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     const fingerprint = semanticFingerprint(candidate)
     if (fingerprint !== stateFingerprint) {
       stateSequence += 1
-      state = { ...candidate, stateSequence }
+      state = { ...candidate, stateSequence: stateSequenceSchema.parse(stateSequence) }
       stateFingerprint = fingerprint
       for (const listener of listeners) {
         if (lifecycle.phase !== 'ready') break
@@ -289,17 +312,26 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     if (committed && lifecycle.phase === 'ready')
       observeNotifications({
         attempts: committed.observation.attempts,
-        projects: candidate.projects.map((project) => ({ key: project.key, name: project.name })),
+        projects: candidate.projects.map((project) => ({
+          key: { integration: project.ref.integration, id: project.ref.projectId },
+          name: project.name,
+        })),
         baselineProjects,
         order: candidate.projects.flatMap((project) =>
-          [...project.displayOrder.openMapIds, ...project.displayOrder.closedMapIds].flatMap(
-            (mapId) => {
-              const map = project.maps.find((resource) => resource.key.mapId === mapId)
-              return map
-                ? [{ map: map.key, tickets: map.tickets.map((ticket) => ticket.key.ticketId) }]
-                : []
-            },
-          ),
+          [...project.displayOrder.open, ...project.displayOrder.closed].flatMap((mapId) => {
+            const map = project.maps.find((resource) => resource.ref.mapId === mapId.mapId)
+            return map
+              ? [
+                  {
+                    map: {
+                      project: { integration: project.ref.integration, id: project.ref.projectId },
+                      mapId: map.ref.mapId,
+                    },
+                    tickets: map.tickets.map((ticket) => ticket.ref.ticketId),
+                  },
+                ]
+              : []
+          }),
         ),
       })
   }
@@ -651,32 +683,42 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       if (
         [...authorizationOperations.values()].some(
           (operation) =>
-            operation.public.status === 'waiting' &&
-            operation.public.connectionId === command.connectionId,
+            operation.fact.status === 'waiting' &&
+            operation.fact.connectionId === command.connectionId,
         )
       ) {
         return invalid('connectionId', 'Authorization is already in progress for this Connection.')
       }
     }
 
+    const requestedConnection = currentConfiguration().connections.find(
+      (connection) => connection.id === command.connectionId,
+    )
     const operation: ActiveAuthorization = {
-      public: {
-        id: randomUUID(),
+      requestedAccountId:
+        requestedConnection?.integration === 'github'
+          ? requestedConnection.githubIdentity.id
+          : null,
+      attempt: null,
+      fact: {
+        id: crypto.randomUUID(),
         ...(command.connectionId ? { connectionId: command.connectionId } : {}),
-        status: 'failed',
-        cause: 'Authorization has not started.',
+        status: 'starting',
       },
       name,
       deviceCode: '',
       intervalMs: 0,
       timer: null,
     }
-    authorizationOperations.set(operation.public.id, operation)
+    authorizationOperations.set(operation.fact.id, operation)
     await restartAuthorization(operation)
     if (!ownsEffects()) return unsupported('Roadmap is not running.')
     return {
       ok: true,
-      result: { type: 'authorization-started', operationId: operation.public.id },
+      result: {
+        type: 'authorization-started',
+        operationId: authorizationOperationIdSchema.parse(operation.fact.id),
+      },
     }
   }
 
@@ -685,14 +727,25 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
   ): Promise<CommandResolution> {
     const operation = authorizationOperations.get(command.operationId)
     if (!operation) return invalid('operationId', 'Authorization operation does not exist.')
-    if (operation.public.status === 'waiting') {
+    if (operation.fact.status === 'waiting') {
       return invalid('operationId', 'Authorization is already in progress.')
+    }
+    if (operation.fact.connectionId !== undefined) {
+      const connection = currentConfiguration().connections.find(
+        (candidate) => candidate.id === operation.fact.connectionId,
+      )
+      if (connection?.integration !== 'github')
+        return invalid('connectionId', 'The authorization Connection no longer exists.')
+      operation.requestedAccountId = connection.githubIdentity.id
     }
     await restartAuthorization(operation)
     if (!ownsEffects()) return unsupported('Roadmap is not running.')
     return {
       ok: true,
-      result: { type: 'authorization-started', operationId: operation.public.id },
+      result: {
+        type: 'authorization-started',
+        operationId: authorizationOperationIdSchema.parse(operation.fact.id),
+      },
     }
   }
 
@@ -700,14 +753,32 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     if (!options.github) return
     clearTimeout(operation.timer ?? undefined)
     operation.timer = null
+    const attempt = Symbol('GitHubAuthorizationAttempt')
+    operation.attempt = attempt
     try {
       const device = await options.github.beginDeviceAuthorization()
-      if (!ownsEffects()) return
+      if (!ownsEffects() || operation.attempt !== attempt) return
+      if (operation.fact.connectionId !== undefined) {
+        const connection = currentConfiguration().connections.find(
+          (candidate) => candidate.id === operation.fact.connectionId,
+        )
+        if (
+          connection?.integration !== 'github' ||
+          connection.githubIdentity.id !== operation.requestedAccountId
+        ) {
+          finishAuthorization(
+            operation,
+            'cancelled',
+            'GitHub authorization was cancelled because its configured Connection changed.',
+          )
+          return
+        }
+      }
       operation.deviceCode = device.deviceCode
       operation.intervalMs = device.intervalMs
-      operation.public = {
-        id: operation.public.id,
-        ...(operation.public.connectionId ? { connectionId: operation.public.connectionId } : {}),
+      operation.fact = {
+        id: operation.fact.id,
+        ...(operation.fact.connectionId ? { connectionId: operation.fact.connectionId } : {}),
         status: 'waiting',
         verificationUri: device.verificationUri,
         userCode: device.userCode,
@@ -716,30 +787,47 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       publish()
       scheduleAuthorizationPoll(operation)
     } catch (error) {
-      finishAuthorization(operation, 'failed', safeAuthorizationMessage(error))
+      if (operation.attempt === attempt)
+        finishAuthorization(operation, 'failed', safeAuthorizationMessage(error))
     }
   }
 
   function scheduleAuthorizationPoll(operation: ActiveAuthorization): void {
-    if (lifecycle.phase !== 'ready' || operation.public.status !== 'waiting') return
+    if (
+      lifecycle.phase !== 'ready' ||
+      operation.fact.status !== 'waiting' ||
+      operation.attempt === null
+    )
+      return
+    const attempt = operation.attempt
     operation.timer = setTimeout(() => {
       operation.timer = null
-      void ownTask(() => pollAuthorization(operation.public.id)).catch(() => undefined)
+      void ownTask(() => pollAuthorization(operation.fact.id, attempt)).catch(() => undefined)
     }, operation.intervalMs)
   }
 
-  async function pollAuthorization(operationId: string): Promise<void> {
+  function ownsAuthorizationAttempt(operation: ActiveAuthorization, attempt: symbol): boolean {
+    return ownsEffects() && operation.attempt === attempt && operation.fact.status === 'waiting'
+  }
+
+  async function pollAuthorization(operationId: string, attempt: symbol): Promise<void> {
     const operation = authorizationOperations.get(operationId)
-    if (!ownsEffects() || operation?.public.status !== 'waiting' || !options.github) return
-    if ((operation.public.expiresAt ?? 0) <= now()) {
+    if (
+      !ownsEffects() ||
+      operation?.fact.status !== 'waiting' ||
+      operation.attempt !== attempt ||
+      !options.github
+    )
+      return
+    if ((operation.fact.expiresAt ?? 0) <= now()) {
       finishAuthorization(operation, 'expired', 'GitHub authorization expired.')
       return
     }
     try {
       const result = await options.github.pollDeviceAuthorization(operation.deviceCode)
-      if (!ownsEffects()) return
+      if (!ownsAuthorizationAttempt(operation, attempt)) return
       await enqueue(async () => {
-        if (!ownsEffects() || operation.public.status !== 'waiting') return
+        if (!ownsAuthorizationAttempt(operation, attempt)) return
         switch (result.status) {
           case 'pending':
             scheduleAuthorizationPoll(operation)
@@ -755,12 +843,12 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
             finishAuthorization(operation, 'expired', 'GitHub authorization expired.')
             return
           case 'granted':
-            await completeAuthorization(operation, result.credentials)
+            await completeAuthorization(operation, result.credentials, attempt)
         }
       })
     } catch (error) {
       await enqueue(async () => {
-        if (ownsEffects() && operation.public.status === 'waiting') {
+        if (ownsAuthorizationAttempt(operation, attempt)) {
           finishAuthorization(operation, 'failed', safeAuthorizationMessage(error))
         }
       })
@@ -770,17 +858,22 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
   async function completeAuthorization(
     operation: ActiveAuthorization,
     credentials: CredentialBundle,
+    attempt: symbol,
   ): Promise<void> {
-    const identity = await identifyAuthorization(operation, credentials)
-    if (!ownsEffects() || !identity || !options.credentialVault) return
+    const identity = await identifyAuthorization(operation, credentials, attempt)
+    if (!ownsAuthorizationAttempt(operation, attempt) || !identity || !options.credentialVault)
+      return
     if (!authorizationIdentityIsValid(operation, identity)) return
 
     const update = configurationWithAuthorizedConnection(operation, identity)
-    if (!(await stageCredentials(operation, update.connectionId, credentials, identity.id))) return
-    if (!ownsEffects()) return
+    if (
+      !(await stageCredentials(operation, update.connectionId, credentials, identity.id, attempt))
+    )
+      return
+    if (!ownsAuthorizationAttempt(operation, attempt)) return
 
     const outcome = await persistConfiguration(update.configuration, [update.connectionId])
-    if (!ownsEffects()) return
+    if (!ownsAuthorizationAttempt(operation, attempt)) return
     if (!outcome.ok) {
       if (
         !update.reauthorizing &&
@@ -792,9 +885,12 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       finishAuthorization(operation, 'failed', outcome.error.message)
       return
     }
-    operation.public = {
-      id: operation.public.id,
+    operation.attempt = null
+    operation.requestedAccountId = identity.id
+    operation.fact = {
+      id: operation.fact.id,
       connectionId: update.connectionId,
+      accountId: identity.id,
       status: 'granted',
     }
     publish()
@@ -808,11 +904,11 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     connectionId: string
     reauthorizing: boolean
   } {
-    const existingId = operation.public.connectionId
+    const existingId = operation.fact.connectionId
     const existing = existingId
       ? currentConfiguration().connections.find((connection) => connection.id === existingId)
       : undefined
-    const connectionId = existingId ?? randomUUID()
+    const connectionId = existingId ?? crypto.randomUUID()
     const nextConnection: GitHubConnection = {
       id: connectionId,
       integration: 'github',
@@ -837,12 +933,14 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
   async function identifyAuthorization(
     operation: ActiveAuthorization,
     credentials: CredentialBundle,
+    attempt: symbol,
   ): Promise<GitHubConnectionIdentity | null> {
     if (!options.github) return null
     try {
       return await options.github.identify(credentials.accessToken)
     } catch (error) {
-      finishAuthorization(operation, 'failed', safeAuthorizationMessage(error))
+      if (ownsAuthorizationAttempt(operation, attempt))
+        finishAuthorization(operation, 'failed', safeAuthorizationMessage(error))
       return null
     }
   }
@@ -851,7 +949,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     operation: ActiveAuthorization,
     identity: GitHubConnectionIdentity,
   ): boolean {
-    const existingId = operation.public.connectionId
+    const existingId = operation.fact.connectionId
     const existing = existingId
       ? currentConfiguration().connections.find((connection) => connection.id === existingId)
       : undefined
@@ -887,28 +985,29 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     connectionId: string,
     credentials: CredentialBundle,
     accountId: string,
+    attempt: symbol,
   ): Promise<boolean> {
     const credentialVault = options.credentialVault
     if (!credentialVault) return false
     try {
-      await mutateCredentials(async () => {
-        requireOwnership()
+      return await mutateCredentials(async () => {
+        if (!ownsAuthorizationAttempt(operation, attempt)) return false
         await credentialVault.write(connectionId, credentials)
-        requireOwnership()
+        if (!ownsAuthorizationAttempt(operation, attempt)) return false
         const scope = githubAuthorizationScopeKey(connectionId, accountId)
         authorizationOwners.set(scope, connectionId)
         credentialBundles.set(scope, credentials)
         validatedAccounts.set(scope, accountId)
         rejectedAuthorizations.delete(scope)
         setUsability(scope, { status: 'usable' })
+        return true
       })
     } catch {
-      finishAuthorization(operation, 'failed', 'GitHub authorization could not be saved.')
+      if (ownsAuthorizationAttempt(operation, attempt))
+        finishAuthorization(operation, 'failed', 'GitHub authorization could not be saved.')
       return false
     }
-    return ownsEffects()
   }
-
   async function discardStagedCredentials(connectionId: string): Promise<void> {
     for (const [scope, ownerId] of authorizationOwners) {
       if (ownerId !== connectionId) continue
@@ -932,33 +1031,85 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
   ): CommandResolution {
     const operation = authorizationOperations.get(command.operationId)
     if (!operation) return invalid('operationId', 'Authorization operation does not exist.')
-    if (operation.public.status !== 'waiting') {
+    if (operation.fact.status !== 'waiting') {
       return invalid('operationId', 'Authorization operation is not waiting.')
     }
     finishAuthorization(operation, 'cancelled', 'GitHub authorization was cancelled.')
     return {
       ok: true,
-      result: { type: 'authorization-cancelled', operationId: operation.public.id },
+      result: {
+        type: 'authorization-cancelled',
+        operationId: authorizationOperationIdSchema.parse(operation.fact.id),
+      },
     }
   }
 
   function finishAuthorization(
     operation: ActiveAuthorization,
-    status: Exclude<AuthorizationOperation['status'], 'waiting' | 'granted'>,
+    status: 'denied' | 'expired' | 'cancelled' | 'failed',
     cause: string,
   ): void {
     if (!ownsEffects()) return
     clearTimeout(operation.timer ?? undefined)
     operation.timer = null
     operation.deviceCode = ''
-    operation.public = {
-      id: operation.public.id,
-      ...(operation.public.connectionId ? { connectionId: operation.public.connectionId } : {}),
+    operation.attempt = null
+    operation.fact = {
+      id: operation.fact.id,
+      ...(operation.fact.connectionId ? { connectionId: operation.fact.connectionId } : {}),
       status,
       cause,
     }
     publish()
   }
+  function cancelUnboundAuthorizations(configuration: ProjectConfiguration): void {
+    const cancelled = new Set<string>()
+    for (const operation of authorizationOperations.values()) {
+      const fact = operation.fact
+      if (
+        fact.connectionId === undefined ||
+        (fact.status !== 'waiting' && operation.attempt === null)
+      )
+        continue
+      const connection = configuration.connections.find(
+        (candidate) => candidate.id === fact.connectionId,
+      )
+      if (
+        connection?.integration === 'github' &&
+        connection.githubIdentity.id === operation.requestedAccountId
+      )
+        continue
+      clearTimeout(operation.timer ?? undefined)
+      operation.timer = null
+      operation.deviceCode = ''
+      operation.attempt = null
+      operation.fact = {
+        id: fact.id,
+        connectionId: fact.connectionId,
+        status: 'cancelled',
+        cause: 'GitHub authorization was cancelled because its configured Connection changed.',
+      }
+      cancelled.add(fact.id)
+    }
+    if (retainedState && cancelled.size > 0)
+      retainedState = {
+        ...retainedState,
+        authorizationOperations: retainedState.authorizationOperations.map(
+          (operation): ReadyApplicationState['authorizationOperations'][number] =>
+            operation.status === 'waiting' && cancelled.has(operation.id)
+              ? {
+                  id: operation.id,
+                  status: 'terminal',
+                  outcome: 'cancelled',
+                  ...(operation.connectionId === undefined
+                    ? {}
+                    : { connectionId: operation.connectionId }),
+                }
+              : operation,
+        ),
+      }
+  }
+
   function receiveConfiguration(result: ConfigurationRead): void {
     if (!ownsEffects()) return
     if (
@@ -981,6 +1132,12 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
         (configuration) =>
           admissionConfigurationKey(configuration) !== admissionConfigurationKey(result.document),
       )
+    if (
+      result.ok &&
+      !stale &&
+      result.document.configurationVersion > currentConfiguration().configurationVersion
+    )
+      cancelUnboundAuthorizations(result.document)
     receivedConfigurationValid = result.ok && !stale
     if (!result.ok) configurationStatus = { valid: false, issues: result.issues, notices: [] }
     else if (stale) rejectStaleConfiguration()
@@ -1073,6 +1230,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
         )
       case 'idle':
         lifecycle = { phase: 'starting' }
+        state = buildState()
         startPromise = Promise.resolve().then(initialize)
         return startPromise
     }
@@ -1116,7 +1274,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       requireOwnership()
       if (stateSequence === before) {
         stateSequence += 1
-        state = { ...state, stateSequence }
+        state = { ...state, stateSequence: stateSequenceSchema.parse(stateSequence) }
         for (const listener of listeners) {
           if (lifecycle.phase !== 'ready') break
           listener(state)
@@ -1126,6 +1284,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     } catch (error) {
       if (lifecycle.phase === 'starting') {
         lifecycle = { phase: 'failed', cause: 'RoadmapApplication startup failed.' }
+        state = buildState()
         try {
           await cleanup(null)
         } catch (cleanupError) {
@@ -1225,6 +1384,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
           persisted.message,
         )
       }
+      cancelUnboundAuthorizations(decoded.value)
       if (!ownsEffects()) return persistedConfigurationOutcome(persisted, decoded.value)
       configurationDurabilityConfirmed = persisted.durability === 'confirmed'
       if (receivedConfigurationValid)
@@ -1266,7 +1426,9 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
         ok: true,
         result: {
           type: 'configuration-updated',
-          configurationVersion: decoded.value.configurationVersion,
+          configurationVersion: configurationVersionSchema.parse(
+            decoded.value.configurationVersion,
+          ),
         },
         state,
       }
@@ -1287,7 +1449,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
           ok: true,
           result: {
             type: 'configuration-updated',
-            configurationVersion: document.configurationVersion,
+            configurationVersion: configurationVersionSchema.parse(document.configurationVersion),
           },
           state,
         }
@@ -1364,7 +1526,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       case 'launch-action': {
         if (!options.operations) return unsupported('This operation is not available yet.')
         let workspaceProofDependency: { ref: ProjectRef; value: string } | null = null
-        function workspaceAdmissionError(project: ProjectKey): AdmissionFailure | null {
+        function workspaceAdmissionError(project: PublicProjectRef): AdmissionFailure | null {
           const ref = projectRef(project)
           const expected = workspaceProofDependency
           if (
@@ -1388,7 +1550,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
           workspaceAdmissionError,
           async refresh(project) {
             try {
-              await coordinator.refresh(project)
+              await coordinator.refresh(sourceProject(project))
               return true
             } catch {
               return false
@@ -1425,7 +1587,14 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     command: Extract<Command, { type: 'start-automation-override' }>,
   ): Promise<CommandResolution> {
     if (!automationEngine) return unsupported('Automation is not available.')
-    const outcome = await automationEngine.startOverride(command.target, command.stage)
+    const outcome = await automationEngine.startOverride(
+      {
+        project: sourceProject(command.target.map.project),
+        mapId: command.target.map.mapId,
+        ticketId: command.target.ticketId,
+      },
+      command.stage,
+    )
     return outcome.ok
       ? {
           ok: true,
@@ -1435,7 +1604,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
             stage: command.stage,
           },
         }
-      : outcome
+      : { ok: false, error: automationError(outcome.error) }
   }
   function renameConnection(
     command: Extract<Command, { type: 'rename-connection' }>,
@@ -1474,10 +1643,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
         error: {
           code: 'dependency',
           message: 'Remove every dependent Project before removing this Connection.',
-          dependentProjects: dependents.map((project) => ({
-            integration: project.ref.integration,
-            id: project.ref.projectId,
-          })),
+          dependentProjects: dependents.map((project) => projectRefSchema.parse(project.ref)),
         },
       }
     return {
@@ -1515,12 +1681,14 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     )
       return invalid('project', 'Project does not exist.')
     if (command.enabled && automationEngine) {
-      const acknowledged = await automationEngine.acknowledgeProjectInterruption(command.project)
-      if (!acknowledged.ok) return acknowledged
+      const acknowledged = await automationEngine.acknowledgeProjectInterruption(
+        sourceProject(command.project),
+      )
+      if (!acknowledged.ok) return { ok: false, error: automationError(acknowledged.error) }
     }
     const configuration = currentConfiguration()
     const retained = configuration.automation.enabledProjects.filter(
-      (project) => !sameProject(project, command.project),
+      (project) => !sameProject(project, sourceProject(command.project)),
     )
     return {
       ok: true,
@@ -1528,7 +1696,9 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
         ...configuration,
         automation: {
           ...configuration.automation,
-          enabledProjects: command.enabled ? [...retained, command.project] : retained,
+          enabledProjects: command.enabled
+            ? [...retained, sourceProject(command.project)]
+            : retained,
         },
       },
     }
@@ -1541,7 +1711,8 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
   }
   function cleanup(startup: Promise<void> | null): Promise<void> {
     if (cleanupPromise) return cleanupPromise
-    retainedState = state
+    retainedState = state.phase === 'ready' ? state : retainedState
+    state = buildState()
     const completion = Promise.withResolvers<void>()
     cleanupPromise = completion.promise
     const errors: unknown[] = []
@@ -1564,6 +1735,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
         if (persisted.kind === 'conflict') shutdownWriteSafe = false
         retainNotice(persisted.message)
       } else {
+        cancelUnboundAuthorizations(document)
         shutdownConfiguration = document
         configurationDurabilityConfirmed = persisted.durability === 'confirmed'
         if (!configurationDurabilityConfirmed) {
@@ -1576,6 +1748,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       state = buildState(shutdownConfiguration)
     }
     for (const operation of authorizationOperations.values()) {
+      operation.attempt = null
       clearTimeout(operation.timer ?? undefined)
       operation.timer = null
     }
@@ -1644,6 +1817,22 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       .then(completion.resolve, completion.reject)
     return cleanupPromise
   }
+  function recordStoppedState(): void {
+    lifecycle = { phase: 'stopped' }
+    const retained =
+      state.phase === 'ready'
+        ? state
+        : state.phase === 'idle' || state.phase === 'starting'
+          ? null
+          : state.retained
+    state = applicationStateSchema.parse({
+      phase: 'stopped',
+      serverEpoch: state.serverEpoch,
+      stateSequence: state.stateSequence,
+      capturedAt: state.capturedAt,
+      retained,
+    })
+  }
   return {
     start,
     current: () => state,
@@ -1664,11 +1853,13 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
       updateAdmissionValidity()
       void cleanup(startPromise).then(
         () => {
-          lifecycle = { phase: 'stopped' }
+          recordStoppedState()
+
           completion.resolve()
         },
         (error: unknown) => {
-          lifecycle = { phase: 'stopped' }
+          recordStoppedState()
+
           completion.reject(error)
         },
       )
@@ -1678,16 +1869,8 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
 }
 
 function semanticFingerprint(state: ApplicationState): string {
-  return JSON.stringify({
-    configurationVersion: state.configurationVersion,
-    supportedIntegrations: state.supportedIntegrations,
-    connections: state.connections,
-    registrations: state.registrations,
-    projects: state.projects,
-    authorizationOperations: state.authorizationOperations,
-    configuration: state.configuration,
-    automation: state.automation,
-  })
+  const { serverEpoch: _epoch, stateSequence: _sequence, capturedAt: _capturedAt, ...facts } = state
+  return JSON.stringify(facts)
 }
 function compareConfigurations(
   current: ProjectConfiguration,
@@ -1741,8 +1924,11 @@ function workspaceDependency(configuration: ProjectConfiguration, ref: ProjectRe
     })),
   })
 }
-function projectRef(project: ProjectKey): ProjectRef {
-  return { integration: project.integration, projectId: project.id }
+function projectRef(project: PublicProjectRef): ProjectRef {
+  return { integration: project.integration, projectId: project.projectId }
+}
+function sourceProject(project: PublicProjectRef): ProjectKey {
+  return { integration: project.integration, id: project.projectId }
 }
 function sameRef(a: ProjectRef, b: ProjectRef): boolean {
   return a.integration === b.integration && a.projectId === b.projectId
@@ -1768,6 +1954,18 @@ function classifyGitHubAccessFailure(error: unknown): GitHubAccessFailure {
   return 'unavailable'
 }
 
+function automationError(error: AutomationFailure): SafeError {
+  return {
+    code:
+      error.kind === 'not-ready'
+        ? 'not-supported'
+        : error.kind === 'ineligible'
+          ? 'validation'
+          : 'persistence-failed',
+    field: 'target',
+    message: error.reason,
+  }
+}
 function admissionError(error: AdmissionFailure): SafeError {
   return {
     code: error.code,

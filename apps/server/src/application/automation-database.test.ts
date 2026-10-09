@@ -2,6 +2,7 @@ import * as filesystem from 'node:fs/promises'
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { commandSchema } from '@roadmap/contracts/operations'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   type AutomationDatabase,
@@ -15,6 +16,7 @@ import { createConfigurationDocument } from '../configuration/document.ts'
 import { createLocalProjectAdmission } from '../local/admission.ts'
 import type { SourceContribution } from '../observation/source.ts'
 import type { ProjectConfiguration } from '../projects/registry.ts'
+import { fixtureTicketRef, readApplicationState } from '../public-test-fixtures.ts'
 import {
   createSourceFixtureOwner,
   type FixtureProject,
@@ -321,7 +323,6 @@ describe('Automation event database', () => {
             missingSections: [],
           },
           tickets: [candidate],
-          frontier: [candidate],
           progress: { total: 1, completed: 0 },
           ticketsComplete: true,
           warnings: [],
@@ -401,8 +402,11 @@ describe('Automation event database', () => {
     })
     try {
       await application.start()
-      expect(application.current().automation.overrides).toContainEqual(
-        expect.objectContaining({ target: sourceTarget, classification: { status: 'eligible' } }),
+      expect(readApplicationState(application.current()).automation.overrides).toContainEqual(
+        expect.objectContaining({
+          target: fixtureTicketRef(sourceTarget),
+          classification: { status: 'eligible' },
+        }),
       )
       const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
       vi.mocked(filesystem.open).mockImplementation(async (file, flags, mode) => {
@@ -414,12 +418,14 @@ describe('Automation event database', () => {
         return handle
       })
 
-      const outcome = await application.execute({
-        type: 'start-automation-override',
-        expectedConfigurationVersion: 1,
-        target: sourceTarget,
-        stage: 'classification',
-      })
+      const outcome = await application.execute(
+        commandSchema.parse({
+          type: 'start-automation-override',
+          expectedConfigurationVersion: 1,
+          target: fixtureTicketRef(sourceTarget),
+          stage: 'classification',
+        }),
+      )
 
       expect(outcome).toMatchObject({ ok: false, error: { code: 'persistence-failed' } })
       expect(effects).toEqual([])
@@ -429,19 +435,21 @@ describe('Automation event database', () => {
         target: sourceTarget,
         classification: { status: 'running', admission: 'override' },
       })
-      expect(application.current().automation.evidence[0]).toMatchObject({
-        target: sourceTarget,
+      expect(readApplicationState(application.current()).automation.evidence[0]).toMatchObject({
+        target: fixtureTicketRef(sourceTarget),
         classification: { status: 'running', admission: 'override' },
       })
-      expect(application.current().automation.overrides[0]?.classification.status).toBe(
-        'ineligible',
+      expect(
+        readApplicationState(application.current()).automation.overrides[0]?.classification.status,
+      ).toBe('ineligible')
+      const repeated = await application.execute(
+        commandSchema.parse({
+          type: 'start-automation-override',
+          expectedConfigurationVersion: 1,
+          target: fixtureTicketRef(sourceTarget),
+          stage: 'classification',
+        }),
       )
-      const repeated = await application.execute({
-        type: 'start-automation-override',
-        expectedConfigurationVersion: 1,
-        target: sourceTarget,
-        stage: 'classification',
-      })
       expect(repeated.ok).toBe(false)
       expect(effects).toEqual([])
       expect(await createAutomationDatabaseDocument(databasePath).load()).toEqual(stored)
@@ -519,17 +527,20 @@ describe('Automation event database', () => {
       )
       try {
         expect(await starting).toMatchObject({ status: 'rejected' })
+        expect(application.current()).toMatchObject({ phase: 'failed', retained: null })
         expect(await application.query({ type: 'select-workspace' })).toMatchObject({
           ok: false,
           error: { code: 'not-supported' },
         })
         expect(
-          await application.execute({
-            type: 'start-automation-override',
-            expectedConfigurationVersion: 1,
-            target,
-            stage: 'wayfinder',
-          }),
+          await application.execute(
+            commandSchema.parse({
+              type: 'start-automation-override',
+              expectedConfigurationVersion: 1,
+              target: fixtureTicketRef(target),
+              stage: 'wayfinder',
+            }),
+          ),
         ).toMatchObject({ ok: false, error: { code: 'not-supported' } })
         expect(effects).toEqual([])
         const stored = await createAutomationDatabaseDocument(databasePath).load()

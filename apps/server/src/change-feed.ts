@@ -1,6 +1,6 @@
-import type { ProjectKey } from '@roadmap/contracts'
 import type {
   ObservationAttempt,
+  SourceProjectKey as ProjectKey,
   SourceMapKey,
   SourceScope,
   SourceTicketContent,

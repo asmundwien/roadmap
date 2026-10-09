@@ -1,11 +1,11 @@
 import {
   activeMapSchema,
-  applicationStateCodec,
   mapResourceSchema,
   projectResourceSchema,
-  registeredProjectResourcesSchema,
+  projectSchema,
   ticketResourceSchema,
-} from '@roadmap/contracts/codecs'
+} from '@roadmap/contracts/state'
+import { decodeApplicationState } from '@roadmap/contracts/wire'
 import { describe, expect, test } from 'vitest'
 
 function applicationWithProgress(progress: unknown, ticketsComplete = false) {
@@ -15,6 +15,7 @@ function applicationWithProgress(progress: unknown, ticketsComplete = false) {
   if (!original || !originalTicket) throw new Error('Expected scoped map and ticket fixtures')
   const map = {
     ...original,
+    frontier: [],
     resource: {
       kind: 'current-readable',
       observation: {
@@ -50,18 +51,29 @@ function applicationWithProgress(progress: unknown, ticketsComplete = false) {
     ],
   }
   return {
+    phase: 'ready',
+    mode: 'mutable',
+    capturedAt: 1,
     serverEpoch: 'test',
     stateSequence: 0,
     configurationVersion: 0,
     supportedIntegrations: [],
-    connections: [],
-    registrations: [],
+    connections: [
+      {
+        id: 'local',
+        integration: 'local',
+        name: 'Local',
+        builtIn: true,
+        availability: { status: 'available' },
+      },
+    ],
     projects: [
       {
         ...fixture.aggregate,
         connectionId: 'local',
-        locator: { integration: 'local', path: '/fixture' },
-        workspace: { path: '/fixture' },
+        integration: 'local',
+        source: { integration: 'local', path: '/fixture' },
+        management: {},
         name: 'Configured Project',
         actions: [],
         managementWarnings: [],
@@ -84,27 +96,27 @@ function applicationWithProgress(progress: unknown, ticketsComplete = false) {
       evidence: [],
       overrides: [],
     },
-    roadmap: { capturedAt: 1 },
   }
 }
 
 describe('source progress public boundary', () => {
   test('round-trips unknown upstream totals as null on a readable incomplete map', () => {
     const input = applicationWithProgress(null)
-    const decoded = applicationStateCodec.decode(JSON.parse(JSON.stringify(input)))
+    const decoded = decodeApplicationState(JSON.parse(JSON.stringify(input)))
     expect(decoded).toEqual({ ok: true, value: input })
     if (!decoded.ok) throw new Error('Expected unknown progress to decode')
+    if (decoded.value.phase !== 'ready') throw new Error('Expected a complete ready fixture.')
     const map = decoded.value.projects[0]?.maps[0]
     if (!map || map.resource.kind !== 'current-readable') throw new Error('Expected readable map')
     expect(map.resource.observation.value.progress).toBeNull()
     expect(map.ticketsMembership.kind).toBe('current-incomplete')
     expect(map.resource.observation.value.body.raw).toBe('Readable source map')
-    expect(applicationStateCodec.decode(JSON.parse(JSON.stringify(decoded.value)))).toEqual(decoded)
+    expect(decodeApplicationState(JSON.parse(JSON.stringify(decoded.value)))).toEqual(decoded)
   })
 
   test('preserves numeric progress for a complete fetched ticket collection', () => {
     const input = applicationWithProgress({ total: 1, completed: 1 }, true)
-    expect(applicationStateCodec.decode(JSON.parse(JSON.stringify(input)))).toEqual({
+    expect(decodeApplicationState(JSON.parse(JSON.stringify(input)))).toEqual({
       ok: true,
       value: input,
     })
@@ -112,9 +124,10 @@ describe('source progress public boundary', () => {
 
   test('accepts known upstream totals beyond an incomplete fetched subset', () => {
     const input = applicationWithProgress({ total: 40, completed: 17 })
-    const decoded = applicationStateCodec.decode(JSON.parse(JSON.stringify(input)))
+    const decoded = decodeApplicationState(JSON.parse(JSON.stringify(input)))
     expect(decoded).toEqual({ ok: true, value: input })
     if (!decoded.ok) throw new Error('Expected known upstream progress to decode')
+    if (decoded.value.phase !== 'ready') throw new Error('Expected a complete ready fixture.')
     const map = decoded.value.projects[0]?.maps[0]
     if (!map || map.resource.kind !== 'current-readable') throw new Error('Expected readable map')
     expect(map.tickets).toHaveLength(1)
@@ -123,9 +136,9 @@ describe('source progress public boundary', () => {
   })
 
   test('refuses malformed counts without inventing an aggregate', () => {
-    expect(
-      applicationStateCodec.decode(applicationWithProgress({ total: -1, completed: 0 })).ok,
-    ).toBe(false)
+    expect(decodeApplicationState(applicationWithProgress({ total: -1, completed: 0 })).ok).toBe(
+      false,
+    )
   })
 
   test('requires the progress field even when totals are unknown', () => {
@@ -139,7 +152,7 @@ describe('source progress public boundary', () => {
       resource: { ...original.resource, observation: { ...original.resource.observation, value } },
     }
     const withoutProgress = { ...input, projects: [{ ...project, maps: [map] }] }
-    expect(applicationStateCodec.decode(withoutProgress).ok).toBe(false)
+    expect(decodeApplicationState(withoutProgress).ok).toBe(false)
   })
 })
 
@@ -154,9 +167,9 @@ describe('resource own-data boundary', () => {
     const input = applicationWithProgress(null)
     const project = input.projects[0]
     if (!project) throw new Error('Expected a Project fixture')
-    expect(
-      applicationStateCodec.decode({ ...input, projects: [{ ...project, resource }] }).ok,
-    ).toBe(false)
+    expect(decodeApplicationState({ ...input, projects: [{ ...project, resource }] }).ok).toBe(
+      false,
+    )
   })
 
   test('rejects inherited required nested payload fields', () => {
@@ -171,9 +184,9 @@ describe('resource own-data boundary', () => {
     const input = applicationWithProgress(null)
     const project = input.projects[0]
     if (!project) throw new Error('Expected a Project fixture')
-    expect(
-      applicationStateCodec.decode({ ...input, projects: [{ ...project, resource }] }).ok,
-    ).toBe(false)
+    expect(decodeApplicationState({ ...input, projects: [{ ...project, resource }] }).ok).toBe(
+      false,
+    )
   })
 
   test('rejects resource and nested accessors without invoking getters', () => {
@@ -209,8 +222,7 @@ describe('resource own-data boundary', () => {
       const project = input.projects[0]
       if (!project) throw new Error('Expected a Project fixture')
       expect(
-        applicationStateCodec.decode({ ...input, projects: [{ ...project, resource: candidate }] })
-          .ok,
+        decodeApplicationState({ ...input, projects: [{ ...project, resource: candidate }] }).ok,
       ).toBe(false)
     }
     expect(getterEffects).toBe(0)
@@ -219,21 +231,32 @@ describe('resource own-data boundary', () => {
   test('rejects inherited and accessor blocker references without getter effects', () => {
     const fixture = scopedResourceFixture()
     let getterEffects = 0
+    const blockerTicket = {
+      map: fixture.ticketObservation.scope.ticket.map,
+      ticketId: 'external/blocker',
+    }
     const inherited = Object.assign(Object.create({ kind: 'registered' }), {
-      project: fixture.projectObservation.scope.project,
+      ticket: blockerTicket,
     })
-    const accessor = Object.defineProperty({ kind: 'registered' }, 'project', {
+    const accessor = Object.defineProperty({ kind: 'registered' }, 'ticket', {
       enumerable: true,
       get: () => {
         getterEffects++
-        return fixture.projectObservation.scope.project
+        return blockerTicket
       },
     })
     const inheritedProject = {
       kind: 'registered',
-      project: Object.assign(Object.create({ id: fixture.projectObservation.scope.project.id }), {
-        integration: 'local',
-      }),
+      ticket: {
+        ...blockerTicket,
+        map: {
+          ...blockerTicket.map,
+          project: Object.assign(
+            Object.create({ projectId: fixture.projectObservation.scope.project.projectId }),
+            { integration: 'local' },
+          ),
+        },
+      },
     }
     for (const reference of [inherited, accessor, inheritedProject]) {
       const resource = {
@@ -242,7 +265,7 @@ describe('resource own-data boundary', () => {
           ...fixture.ticketObservation,
           value: {
             ...fixture.ticketObservation.value,
-            blockedBy: [{ reference, ticketId: 'external/blocker', state: 'open' }],
+            blockedBy: [{ reference, state: 'open' }],
           },
         },
       }
@@ -258,7 +281,7 @@ describe('resource own-data boundary', () => {
           maps: [{ ...map, tickets: [{ ...ticket, resource }] }],
         },
       ]
-      expect(applicationStateCodec.decode({ ...input, projects }).ok).toBe(false)
+      expect(decodeApplicationState({ ...input, projects }).ok).toBe(false)
     }
     expect(getterEffects).toBe(0)
   })
@@ -306,9 +329,8 @@ describe('resource array own-data boundary', () => {
         accepted =
           boundary === 'schema'
             ? projectResourceSchema.safeParse(resource).success
-            : applicationStateCodec.decode(
-                applicationWithResources({ ...fixture.aggregate, resource }),
-              ).ok
+            : decodeApplicationState(applicationWithResources({ ...fixture.aggregate, resource }))
+                .ok
       } catch (error) {
         thrown = error
       }
@@ -339,7 +361,7 @@ describe('resource array own-data boundary', () => {
       const parsed = projectResourceSchema.safeParse(resource)
       expect(parsed).toMatchObject({ success: true, data: resource })
       const input = applicationWithResources({ ...fixture.aggregate, resource })
-      expect(applicationStateCodec.decode(input)).toEqual({ ok: true, value: input })
+      expect(decodeApplicationState(input)).toEqual({ ok: true, value: input })
     },
   )
 
@@ -374,8 +396,13 @@ describe('resource array own-data boundary', () => {
         name: 'ticket blocker collection',
         entries: [
           {
-            reference: { kind: 'registered', project: fixture.aggregate.key },
-            ticketId: 'external/blocker',
+            reference: {
+              kind: 'registered',
+              ticket: {
+                map: fixture.ticketObservation.scope.ticket.map,
+                ticketId: 'external/blocker',
+              },
+            },
             state: 'closed',
           },
         ],
@@ -397,7 +424,7 @@ describe('resource array own-data boundary', () => {
       },
       {
         name: 'map membership',
-        entries: [map.key],
+        entries: [map.ref],
         withArray: (members: unknown[]) => ({
           ...fixture.aggregate,
           mapsMembership: {
@@ -408,7 +435,7 @@ describe('resource array own-data boundary', () => {
       },
       {
         name: 'ticket membership',
-        entries: [ticket.key],
+        entries: [ticket.ref],
         withArray: (members: unknown[]) =>
           withMap({
             ticketsMembership: {
@@ -429,20 +456,17 @@ describe('resource array own-data boundary', () => {
       },
       {
         name: 'open map display order',
-        entries: [map.key.mapId],
-        withArray: (openMapIds: unknown[]) => ({
+        entries: [map.ref],
+        withArray: (open: unknown[]) => ({
           ...fixture.aggregate,
-          displayOrder: { ...fixture.aggregate.displayOrder, openMapIds },
+          displayOrder: { ...fixture.aggregate.displayOrder, open },
         }),
       },
     ]
     for (const collection of collections) {
       const valid = collection.withArray(collection.entries)
-      expect(registeredProjectResourcesSchema.safeParse(valid).success, collection.name).toBe(true)
-      expect(
-        applicationStateCodec.decode(applicationWithResources(valid)).ok,
-        collection.name,
-      ).toBe(true)
+      expect(projectSchema.safeParse(valid).success, collection.name).toBe(true)
+      expect(decodeApplicationState(applicationWithResources(valid)).ok, collection.name).toBe(true)
       for (const throws of [false, true]) {
         let getterEffects = 0
         const entries = Object.defineProperty([], '0', {
@@ -460,8 +484,8 @@ describe('resource array own-data boundary', () => {
           try {
             accepted =
               boundary === 'schema'
-                ? registeredProjectResourcesSchema.safeParse(candidate).success
-                : applicationStateCodec.decode(applicationWithResources(candidate)).ok
+                ? projectSchema.safeParse(candidate).success
+                : decodeApplicationState(applicationWithResources(candidate)).ok
           } catch (error) {
             thrown = error
           }
@@ -483,7 +507,7 @@ function applicationWithResources(resources: object) {
   const input = applicationWithProgress({ total: 1, completed: 0 }, true)
   const project = input.projects[0]
   if (!project) throw new Error('Expected a registered Project fixture')
-  return { ...input, projects: [{ ...project, ...resources }], roadmap: { capturedAt: 400 } }
+  return { ...input, projects: [{ ...project, ...resources }], capturedAt: 400 }
 }
 
 describe('resource timestamp consumer boundary', () => {
@@ -500,7 +524,7 @@ describe('resource timestamp consumer boundary', () => {
         data: resource,
       })
       const input = applicationWithResources({ ...fixture.aggregate, resource })
-      expect(applicationStateCodec.decode(input)).toEqual({ ok: true, value: input })
+      expect(decodeApplicationState(input)).toEqual({ ok: true, value: input })
     },
   )
 
@@ -518,7 +542,7 @@ describe('resource timestamp consumer boundary', () => {
       expect(
         parsed.error.issues.some((issue) => issue.path.join('.') === 'observation.observedAt'),
       ).toBe(true)
-      const decoded = applicationStateCodec.decode(
+      const decoded = decodeApplicationState(
         applicationWithResources({ ...fixture.aggregate, resource }),
       )
       expect(decoded.ok).toBe(false)
@@ -619,8 +643,13 @@ function aggregateWithBlocker(
         isBlocked,
         blockedBy: [
           {
-            reference: { kind: 'registered', project: fixture.aggregate.key },
-            ticketId: 'external/blocker',
+            reference: {
+              kind: 'registered',
+              ticket: {
+                map: fixture.ticketObservation.scope.ticket.map,
+                ticketId: 'external/blocker',
+              },
+            },
             state,
           },
         ],
@@ -628,7 +657,16 @@ function aggregateWithBlocker(
       },
     },
   }
-  return { ...fixture.aggregate, maps: [{ ...map, tickets: [{ ...ticket, resource }] }] }
+  return {
+    ...fixture.aggregate,
+    maps: [
+      {
+        ...map,
+        frontier: state === 'closed' && !isClaimed && blockersComplete ? [ticket.ref] : [],
+        tickets: [{ ...ticket, resource }],
+      },
+    ],
+  }
 }
 
 describe('active-map blocker certainty boundary', () => {
@@ -637,11 +675,11 @@ describe('active-map blocker certainty boundary', () => {
     const ticket = aggregate.maps[0]?.tickets[0]
     if (!ticket) throw new Error('Expected a Ticket fixture')
     expect(ticketResourceSchema.safeParse(ticket.resource).success).toBe(true)
-    const parsed = registeredProjectResourcesSchema.safeParse(aggregate)
+    const parsed = projectSchema.safeParse(aggregate)
     expect(parsed.success).toBe(false)
     if (parsed.success) throw new Error('Expected unknown blocker to reject known active certainty')
     expect(parsed.error.issues.some((issue) => issue.path.join('.') === 'activeMap')).toBe(true)
-    expect(applicationStateCodec.decode(applicationWithResources(aggregate)).ok).toBe(false)
+    expect(decodeApplicationState(applicationWithResources(aggregate)).ok).toBe(false)
   })
 
   test.each([
@@ -653,12 +691,12 @@ describe('active-map blocker certainty boundary', () => {
     'preserves known %s blockers with independent claimed=%s evidence',
     (state, isClaimed) => {
       const aggregate = aggregateWithBlocker(state, isClaimed)
-      expect(registeredProjectResourcesSchema.safeParse(aggregate)).toMatchObject({
+      expect(projectSchema.safeParse(aggregate)).toMatchObject({
         success: true,
         data: aggregate,
       })
       const input = applicationWithResources(aggregate)
-      expect(applicationStateCodec.decode(input)).toEqual({ ok: true, value: input })
+      expect(decodeApplicationState(input)).toEqual({ ok: true, value: input })
     },
   )
 
@@ -689,18 +727,18 @@ describe('active-map blocker certainty boundary', () => {
           },
         },
       })
-      expect(registeredProjectResourcesSchema.safeParse(aggregate)).toMatchObject({
+      expect(projectSchema.safeParse(aggregate)).toMatchObject({
         success: true,
         data: aggregate,
       })
       const input = applicationWithResources(aggregate)
-      expect(applicationStateCodec.decode(input)).toEqual({ ok: true, value: input })
+      expect(decodeApplicationState(input)).toEqual({ ok: true, value: input })
     },
   )
 })
 
 function scopedResourceFixture() {
-  const project = { integration: 'local', id: 'opaque/Project:%2F' }
+  const project = { integration: 'local', projectId: 'opaque/Project:%2F' }
   const map = { project, mapId: 'same/map' }
   const ticket = { map, ticketId: 'same/ticket' }
   const projectScope = { kind: 'project', project }
@@ -785,7 +823,14 @@ function scopedResourceFixture() {
     proof: { kind: 'complete-membership', parent: mapsScope },
   }
   const aggregate = {
-    key: project,
+    ref: project,
+    integration: 'local',
+    connectionId: 'local',
+    source: { integration: 'local', path: '/fixture' },
+    management: {},
+    name: 'Configured Project',
+    actions: [],
+    managementWarnings: [],
     resource: { kind: 'current-readable', observation: projectObservation },
     mapsMembership: {
       kind: 'current-complete',
@@ -800,7 +845,8 @@ function scopedResourceFixture() {
     },
     maps: [
       {
-        key: map,
+        ref: map,
+        frontier: [ticket],
         resource: { kind: 'current-readable', observation: mapObservation },
         ticketsMembership: {
           kind: 'current-complete',
@@ -814,12 +860,12 @@ function scopedResourceFixture() {
           },
         },
         tickets: [
-          { key: ticket, resource: { kind: 'current-readable', observation: ticketObservation } },
+          { ref: ticket, resource: { kind: 'current-readable', observation: ticketObservation } },
         ],
       },
     ],
-    displayOrder: { openMapIds: [map.mapId], closedMapIds: [] },
-    activeMap: { kind: 'known-current', mapId: map.mapId },
+    displayOrder: { open: [map], closed: [] },
+    activeMap: { kind: 'known-current', ref: map },
   }
   return {
     projectScope,
@@ -836,7 +882,7 @@ function scopedResourceFixture() {
 
 function reboundResourceFixture() {
   const fixture = scopedResourceFixture()
-  const project = { integration: 'github', id: 'opaque-rebound-project' }
+  const project = { integration: 'github', projectId: 'opaque-rebound-project' }
   const map = { project, mapId: 'same/map' }
   const ticket = { map, ticketId: 'same/ticket' }
   const projectScope = { kind: 'project', project }
@@ -906,17 +952,30 @@ function reboundResourceFixture() {
     cause: 'GitHub source is inaccessible; absence is not proven.',
   }
   const aggregate = {
-    key: project,
+    ref: project,
+    integration: 'github',
+    connectionId: newOwner.connectionId,
+    source: {
+      integration: 'github',
+      repositoryId: newOwner.repositoryId,
+      nameWithOwner: 'current/repo',
+      url: 'https://github.com/current/repo',
+    },
+    management: { workspacePath: '/fixture' },
+    name: 'Configured Project',
+    actions: [],
+    managementWarnings: [],
     resource: { kind: 'retained-unavailable', lastSuccessful: projectObservation, unavailable },
     mapsMembership: { kind: 'unavailable', unavailable, lastComplete: mapsObservation },
     maps: [
       {
-        key: map,
+        ref: map,
+        frontier: [ticket],
         resource: { kind: 'retained-unavailable', lastSuccessful: mapObservation, unavailable },
         ticketsMembership: { kind: 'unavailable', unavailable, lastComplete: ticketsObservation },
         tickets: [
           {
-            key: ticket,
+            ref: ticket,
             resource: {
               kind: 'retained-unavailable',
               lastSuccessful: ticketObservation,
@@ -926,7 +985,7 @@ function reboundResourceFixture() {
         ],
       },
     ],
-    displayOrder: fixture.aggregate.displayOrder,
+    displayOrder: { open: [map], closed: [] },
     activeMap: {
       kind: 'uncertain',
       reason: 'project-unavailable',
@@ -962,12 +1021,14 @@ function reboundResourceFixture() {
   const registered = {
     ...aggregate,
     connectionId: newOwner.connectionId,
-    locator: {
+    integration: 'github',
+    source: {
       integration: 'github',
       repositoryId: newOwner.repositoryId,
       nameWithOwner: 'current/repo',
+      url: 'https://github.com/current/repo',
     },
-    workspace: { path: '/fixture' },
+    management: { workspacePath: '/fixture' },
     name: 'Configured Project',
     actions: [],
     managementWarnings: [],
@@ -980,11 +1041,12 @@ function reboundResourceFixture() {
         integration: 'github',
         name: 'Current owner',
         builtIn: false,
+        githubIdentity: { id: 'current-account', login: 'current-user' },
         availability: { status: 'available' },
       },
     ],
     projects: [registered],
-    roadmap: { capturedAt: 400 },
+    capturedAt: 400,
   }
   return {
     aggregate,
@@ -1136,30 +1198,33 @@ describe('retained resource public format', () => {
 
   test('outer scope and canonical membership reject cross-parent resource payloads', () => {
     const fixture = scopedResourceFixture()
-    expect(registeredProjectResourcesSchema.safeParse(fixture.aggregate).success).toBe(true)
+    expect(projectSchema.safeParse(fixture.aggregate).success).toBe(true)
     const original = fixture.aggregate.maps[0]
     if (!original) throw new Error('Expected a real map resource fixture')
     expect(
-      registeredProjectResourcesSchema.safeParse({
+      projectSchema.safeParse({
         ...fixture.aggregate,
         maps: [original, original],
       }).success,
     ).toBe(false)
     expect(
-      registeredProjectResourcesSchema.safeParse({
+      projectSchema.safeParse({
         ...fixture.aggregate,
         maps: [
           {
             ...original,
-            key: { ...original.key, project: { integration: 'local', id: 'wrong-parent' } },
+            ref: { ...original.ref, project: { integration: 'local', projectId: 'wrong-parent' } },
           },
         ],
       }).success,
     ).toBe(false)
     expect(
-      registeredProjectResourcesSchema.safeParse({
+      projectSchema.safeParse({
         ...fixture.aggregate,
-        displayOrder: { openMapIds: ['unobserved-map'], closedMapIds: [] },
+        displayOrder: {
+          open: [{ project: fixture.aggregate.ref, mapId: 'unobserved-map' }],
+          closed: [],
+        },
       }).success,
     ).toBe(false)
   })
@@ -1184,37 +1249,34 @@ describe('retained resource public format', () => {
         },
       })),
     }
-    expect(
-      registeredProjectResourcesSchema.safeParse({ ...fixture.aggregate, maps: [retained] })
-        .success,
-    ).toBe(false)
+    expect(projectSchema.safeParse({ ...fixture.aggregate, maps: [retained] }).success).toBe(false)
     const activeMap = {
       kind: 'uncertain',
       reason: 'map-unavailable',
       cause: 'A map required for ordering is currently unavailable.',
     }
     expect(
-      registeredProjectResourcesSchema.safeParse({
+      projectSchema.safeParse({
         ...fixture.aggregate,
         maps: [retained],
         activeMap,
       }).success,
     ).toBe(true)
-    expect(activeMapSchema.safeParse({ ...activeMap, mapId: original.key.mapId }).success).toBe(
+    expect(activeMapSchema.safeParse({ ...activeMap, mapId: original.ref.mapId }).success).toBe(
       false,
     )
     expect(
-      activeMapSchema.safeParse({ kind: 'known-empty', mapId: original.key.mapId }).success,
+      activeMapSchema.safeParse({ kind: 'known-empty', mapId: original.ref.mapId }).success,
     ).toBe(false)
   })
 
   test('new-owner failed baseline preserves old-owner successes and complete membership history', () => {
     const fixture = reboundResourceFixture()
-    expect(registeredProjectResourcesSchema.safeParse(fixture.aggregate)).toMatchObject({
+    expect(projectSchema.safeParse(fixture.aggregate)).toMatchObject({
       success: true,
       data: fixture.aggregate,
     })
-    const decoded = applicationStateCodec.decode(JSON.parse(JSON.stringify(fixture.state)))
+    const decoded = decodeApplicationState(JSON.parse(JSON.stringify(fixture.state)))
     expect(decoded).toEqual({ ok: true, value: fixture.state })
     expect(
       projectResourceSchema.safeParse({
@@ -1236,11 +1298,11 @@ describe('retained resource public format', () => {
   test('current Project recovery can coexist with historical old-owner maps and tickets', () => {
     const fixture = reboundResourceFixture()
     const state = { ...fixture.state, projects: [{ ...fixture.registered, ...fixture.recovered }] }
-    expect(registeredProjectResourcesSchema.safeParse(fixture.recovered)).toMatchObject({
+    expect(projectSchema.safeParse(fixture.recovered)).toMatchObject({
       success: true,
       data: fixture.recovered,
     })
-    expect(applicationStateCodec.decode(JSON.parse(JSON.stringify(state)))).toEqual({
+    expect(decodeApplicationState(JSON.parse(JSON.stringify(state)))).toEqual({
       ok: true,
       value: state,
     })
@@ -1250,7 +1312,7 @@ describe('retained resource public format', () => {
     const fixture = reboundResourceFixture()
     const oldCurrentProject = { kind: 'current-readable', observation: fixture.projectObservation }
     expect(
-      applicationStateCodec.decode({
+      decodeApplicationState({
         ...fixture.state,
         projects: [{ ...fixture.registered, resource: oldCurrentProject }],
       }).ok,
@@ -1261,12 +1323,11 @@ describe('retained resource public format', () => {
       ...original,
       resource: { kind: 'current-readable', observation: fixture.mapObservation },
     }
+    expect(projectSchema.safeParse({ ...fixture.recovered, maps: [oldCurrentMap] }).success).toBe(
+      false,
+    )
     expect(
-      registeredProjectResourcesSchema.safeParse({ ...fixture.recovered, maps: [oldCurrentMap] })
-        .success,
-    ).toBe(false)
-    expect(
-      applicationStateCodec.decode({
+      decodeApplicationState({
         ...fixture.state,
         projects: [{ ...fixture.registered, ...fixture.recovered, maps: [oldCurrentMap] }],
       }).ok,
@@ -1280,7 +1341,7 @@ describe('retained resource public format', () => {
       },
     }
     expect(
-      applicationStateCodec.decode({
+      decodeApplicationState({
         ...fixture.state,
         projects: [
           {
@@ -1293,7 +1354,7 @@ describe('retained resource public format', () => {
     ).toBe(false)
   })
 
-  test('historical old-owner absence proof and successful trace survive new-owner failure', () => {
+  test('old-owner absence remains historical and cannot prove current absence after source rebind', () => {
     const fixture = reboundResourceFixture()
     const original = fixture.aggregate.maps[0]
     if (!original) throw new Error('Expected a historical map after owner rebind')
@@ -1311,13 +1372,51 @@ describe('retained resource public format', () => {
     }
     const aggregate = { ...fixture.aggregate, maps: [{ ...original, resource }] }
     const state = { ...fixture.state, projects: [{ ...fixture.registered, ...aggregate }] }
-    expect(registeredProjectResourcesSchema.safeParse(aggregate)).toMatchObject({
+    expect(mapResourceSchema.safeParse(resource)).toMatchObject({ success: true, data: resource })
+    expect(projectSchema.safeParse(aggregate).success).toBe(false)
+    expect(decodeApplicationState(JSON.parse(JSON.stringify(state))).ok).toBe(false)
+    const currentAbsence = {
+      ...resource,
+      absence: { ...absence, provenance: { ...fixture.newOwner, stage: 'map-list' } },
+    }
+    const currentProject = {
+      ...fixture.aggregate,
+      maps: [{ ...original, resource: currentAbsence }],
+      displayOrder: { open: [], closed: [] },
+    }
+    expect(projectSchema.safeParse(currentProject)).toMatchObject({
       success: true,
-      data: aggregate,
+      data: {
+        maps: [
+          {
+            resource: {
+              kind: 'proven-absent',
+              absence: currentAbsence.absence,
+              trace: { lastSuccessful: fixture.mapObservation },
+            },
+            tickets: [{ resource: { lastSuccessful: fixture.ticketObservation } }],
+          },
+        ],
+      },
     })
-    expect(applicationStateCodec.decode(JSON.parse(JSON.stringify(state)))).toEqual({
+    const currentState = { ...fixture.state, projects: [currentProject] }
+    expect(decodeApplicationState(JSON.parse(JSON.stringify(currentState)))).toEqual({
       ok: true,
-      value: state,
+      value: currentState,
+    })
+    expect(projectSchema.safeParse(fixture.aggregate)).toMatchObject({
+      success: true,
+      data: {
+        resource: { lastSuccessful: fixture.projectObservation },
+        mapsMembership: { lastComplete: fixture.aggregate.mapsMembership.lastComplete },
+        maps: [
+          {
+            resource: { kind: 'retained-unavailable', lastSuccessful: fixture.mapObservation },
+            ticketsMembership: { lastComplete: original.ticketsMembership.lastComplete },
+            tickets: [{ resource: { lastSuccessful: fixture.ticketObservation } }],
+          },
+        ],
+      },
     })
     expect(
       mapResourceSchema.safeParse({
@@ -1328,7 +1427,7 @@ describe('retained resource public format', () => {
             kind: 'complete-membership',
             parent: {
               ...fixture.mapsScope,
-              project: { ...fixture.aggregate.key, id: 'wrong-parent' },
+              project: { ...fixture.aggregate.ref, projectId: 'wrong-parent' },
             },
           },
         },
@@ -1403,7 +1502,7 @@ describe('retained resource public format', () => {
             lastSuccessful: fixture.mapObservation,
             unavailable: mapFailure,
           },
-          tickets: [{ key: originalTicket.key, resource: child }],
+          tickets: [{ ref: originalTicket.ref, resource: child }],
         },
       ],
       activeMap: {
@@ -1412,12 +1511,12 @@ describe('retained resource public format', () => {
         cause: 'A map required for ordering is currently unavailable.',
       },
     }
-    expect(registeredProjectResourcesSchema.safeParse(aggregate)).toMatchObject({
+    expect(projectSchema.safeParse(aggregate)).toMatchObject({
       success: true,
       data: aggregate,
     })
     expect(
-      registeredProjectResourcesSchema.safeParse({
+      projectSchema.safeParse({
         ...aggregate,
         activeMap: fixture.aggregate.activeMap,
       }).success,
@@ -1431,7 +1530,7 @@ describe('retained resource public format', () => {
           ...retainedMap,
           tickets: [
             {
-              key: originalTicket.key,
+              ref: originalTicket.ref,
               resource: {
                 kind: 'retained-unavailable',
                 lastSuccessful: fixture.ticketObservation,
@@ -1442,7 +1541,7 @@ describe('retained resource public format', () => {
         },
       ],
     }
-    expect(registeredProjectResourcesSchema.safeParse(historical)).toMatchObject({
+    expect(projectSchema.safeParse(historical)).toMatchObject({
       success: true,
       data: historical,
     })
@@ -1462,6 +1561,7 @@ describe('retained resource public format', () => {
     }
     const aggregate = {
       ...fixture.aggregate,
+      source: { integration: 'local', path: '/rebound' },
       resource: {
         kind: 'retained-unavailable',
         lastSuccessful: fixture.projectObservation,
@@ -1504,8 +1604,9 @@ describe('retained resource public format', () => {
     const registered = {
       ...aggregate,
       connectionId: 'local',
-      locator: { integration: 'local', path: '/rebound' },
-      workspace: { path: '/rebound' },
+      source: { integration: 'local', path: '/rebound' },
+      integration: 'local',
+      management: {},
       name: 'Configured Project',
       actions: [],
       managementWarnings: [],
@@ -1522,18 +1623,18 @@ describe('retained resource public format', () => {
         },
       ],
       projects: [registered],
-      roadmap: { capturedAt: 400 },
+      capturedAt: 400,
     }
-    expect(registeredProjectResourcesSchema.safeParse(aggregate)).toMatchObject({
+    expect(projectSchema.safeParse(aggregate)).toMatchObject({
       success: true,
       data: aggregate,
     })
-    expect(applicationStateCodec.decode(JSON.parse(JSON.stringify(input)))).toEqual({
+    expect(decodeApplicationState(JSON.parse(JSON.stringify(input)))).toEqual({
       ok: true,
       value: input,
     })
     expect(
-      applicationStateCodec.decode({
+      decodeApplicationState({
         ...input,
         projects: [
           {
@@ -1562,24 +1663,25 @@ describe('retained resource public format', () => {
         {
           ...fixture.aggregate,
           connectionId: 'local',
-          locator: { integration: 'local', path: '/fixture' },
-          workspace: { path: '/fixture' },
+          source: { integration: 'local', path: '/fixture' },
+          integration: 'local',
+          management: {},
           name: 'Configured Project',
           actions: [],
           managementWarnings: [],
         },
       ],
-      roadmap: { capturedAt: 400 },
+      capturedAt: 400,
     }
-    const decoded = applicationStateCodec.decode(JSON.parse(JSON.stringify(input)))
+    const decoded = decodeApplicationState(JSON.parse(JSON.stringify(input)))
     expect(decoded).toEqual({ ok: true, value: input })
     expect(
-      applicationStateCodec.decode({ ...input, roadmap: { capturedAt: 400, projects: [] } }).ok,
+      decodeApplicationState({ ...input, roadmap: { capturedAt: 400, projects: [] } }).ok,
     ).toBe(false)
     const registered = input.projects[0]
     if (!registered) throw new Error('Expected a registered Project resource fixture')
     expect(
-      applicationStateCodec.decode({
+      decodeApplicationState({
         ...input,
         projects: [{ ...registered, accessToken: 'throwaway-not-a-credential' }],
       }).ok,

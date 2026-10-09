@@ -1,4 +1,5 @@
-import type { Connection, RegisteredProject, SafeError } from '@roadmap/contracts'
+import type { SafeError } from '@roadmap/contracts/operations'
+import type { Connection, Project } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
 import { ControlGroup } from '@roadmap/ui/control-group'
@@ -14,15 +15,15 @@ import { SettingsFacts } from '@/views/shared/settings-facts'
 import { SettingsForm } from '@/views/shared/settings-form'
 import {
   ErrorText,
-  locatorLabel,
   mapState,
   observedLabel,
   projectIdentity,
   projectObservedAt,
+  projectSourceLabel,
 } from '@/views/shared/settings-shared'
 
 type DetailsSectionProps = {
-  project: RegisteredProject
+  project: Project
   connection: Connection | undefined
 }
 
@@ -47,7 +48,7 @@ export function DetailsSection({ project, connection }: DetailsSectionProps) {
       const outcome = await execute({
         type: 'rename-project',
         expectedConfigurationVersion: configurationVersion,
-        project: project.key,
+        project: project.ref,
         name,
       })
       if (!outcome.ok) setError(outcome.error)
@@ -70,7 +71,7 @@ export function DetailsSection({ project, connection }: DetailsSectionProps) {
         <SettingsFacts>
           <dt>Integration</dt>
           <dd>
-            <IntegrationBadge integration={project.key.integration} />
+            <IntegrationBadge integration={project.ref.integration} />
           </dd>
           <dt>Connection</dt>
           <dd>
@@ -81,9 +82,13 @@ export function DetailsSection({ project, connection }: DetailsSectionProps) {
             )}
           </dd>
           <dt>Locator</dt>
-          <dd>{locatorLabel(project)}</dd>
+          <dd>{projectSourceLabel(project)}</dd>
           <dt>Workspace</dt>
-          <dd>{project.workspace.path}</dd>
+          <dd>
+            {project.integration === 'local'
+              ? project.source.path
+              : project.management.workspacePath}
+          </dd>
           <dt>Route identity</dt>
           <dd>{projectIdentity(project)}</dd>
           <dt>Last successful source read</dt>

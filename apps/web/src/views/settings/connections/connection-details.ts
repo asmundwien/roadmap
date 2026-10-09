@@ -1,7 +1,7 @@
-import type { AuthorizationOperation, Connection } from '@roadmap/contracts'
-import type { RoadmapStore } from '../../../store/roadmap-store'
+import type { AuthorizationOperation, Connection } from '@roadmap/contracts/state'
+import type { RoadmapViewState } from '@/store/roadmap-provider'
 
-export type ConnectionOperation = Pick<RoadmapStore, 'execute'>
+export type ConnectionOperation = Pick<RoadmapViewState, 'execute'>
 
 export function connectionAvailability(connection: Connection): string {
   switch (connection.availability.status) {
@@ -22,13 +22,24 @@ export function authorizationStatus(authorization: AuthorizationOperation): stri
       return 'Waiting for GitHub'
     case 'granted':
       return 'Authorized'
-    case 'denied':
-      return 'Authorization denied'
-    case 'expired':
-      return 'Authorization expired'
-    case 'cancelled':
-      return 'Authorization cancelled'
-    case 'failed':
-      return 'Authorization failed'
+    case 'terminal':
+      switch (authorization.outcome) {
+        case 'denied':
+          return 'Authorization denied'
+        case 'expired':
+          return 'Authorization expired'
+        case 'cancelled':
+          return 'Authorization cancelled'
+        case 'failed':
+          return 'Authorization failed'
+        default: {
+          const exhaustive: never = authorization
+          return exhaustive
+        }
+      }
+    default: {
+      const exhaustive: never = authorization
+      return exhaustive
+    }
   }
 }
