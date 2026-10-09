@@ -1,34 +1,39 @@
 import type { Blocker } from './blocker.ts'
+import type { RegisteredProject, TicketTypeEvidence } from './resources.ts'
 
 export type { Blocker } from './blocker.ts'
-
 export type { Command, Query } from './operations.ts'
+export type {
+  ActiveMapResult,
+  Assignee,
+  Decision,
+  MapBody,
+  MapMembershipResult,
+  MapProgress,
+  MapResource,
+  MapResourceResult,
+  MapResourceValue,
+  MapSection,
+  ProjectResourceResult,
+  ProjectResourceValue,
+  RegisteredProject,
+  TicketMembershipResult,
+  TicketResource,
+  TicketResourceResult,
+  TicketResourceValue,
+  TicketState,
+  TicketTypeEvidence,
+  UnavailableEvidence,
+} from './resources.ts'
 
 export type RecognizedTicketType = 'research' | 'prototype' | 'grilling' | 'task'
 
 /** The displayable ticket type; `untyped` represents every malformed evidence variant. */
 export type TicketType = RecognizedTicketType | 'untyped'
 
-/** Normalized evidence retained from every `wayfinder:*` label on the ticket. */
-export type TicketTypeEvidence =
-  | { kind: 'recognized'; value: RecognizedTicketType; labels: string[] }
-  | { kind: 'missing'; labels: [] }
-  | { kind: 'unknown'; labels: string[] }
-  | { kind: 'conflicting'; labels: string[] }
-
 export function ticketTypeOf(evidence: TicketTypeEvidence): TicketType {
   return evidence.kind === 'recognized' ? evidence.value : 'untyped'
 }
-
-/**
- * A ticket's position relative to the frontier.
- *
- * - `closed` — resolved; its answer is on the map.
- * - `blocked` — open, but at least one blocker is still open or unknown.
- * - `claimed` — open and unblocked, but a session has assigned it to itself.
- * - `frontier` — open, unblocked, unclaimed: the edge of the known, and the only takeable state.
- */
-export type TicketState = 'closed' | 'blocked' | 'claimed' | 'frontier'
 
 /** The integration a project reaches roadmap through. */
 export type Integration = 'github' | 'local'
@@ -39,145 +44,7 @@ export interface ProjectKey {
   id: string
 }
 
-export interface Assignee {
-  name: string
-  url?: string
-  avatarUrl?: string
-}
-
 export type BlockerState = Blocker['state']
-
-export interface Ticket {
-  id: string
-  displayId?: string
-  title?: string
-  url?: string
-  /** The ticket body as written — markdown, unrendered; empty when the source has none. */
-  body: string
-  typeEvidence: TicketTypeEvidence
-  state: TicketState
-  /** Independent of `state`, which collapses them: a ticket can be blocked *and* claimed. */
-  isClaimed: boolean
-  isBlocked: boolean
-  /** When the ticket was created, ms since epoch — absent when the source records no chronology. */
-  createdAt?: number
-  /** When the ticket closed, ms since epoch — absent when the source records no closure time. */
-  closedAt?: number
-  assignees: Assignee[]
-  blockedBy: Blocker[]
-  /** False when some blocker targets are missing or drifted out of parseable shape. */
-  blockersComplete: boolean
-  /** Human drift signals for the ticket itself. */
-  warnings: string[]
-  /** Source file or issue context for later link handling. */
-  sourcePath?: string
-}
-
-/** One entry in the map's Decisions-so-far index: a gist plus a pointer to the ticket holding it. */
-export interface Decision {
-  title: string
-  url: string | null
-  gist: string
-  /** The bullet as written, so a line that defies parsing is still rendered faithfully. */
-  raw: string
-}
-
-/** A `##` block of the map body, kept verbatim alongside the parse so drift stays inspectable. */
-export interface MapSection {
-  heading: string
-  text: string
-  items: string[]
-}
-
-/**
- * The map body parsed against the wayfinder template — tolerantly. Every field degrades to empty
- * rather than throwing, unrecognised headings survive in `sections`, and the raw body is kept.
- */
-export interface MapBody {
-  raw: string
-  destination: string
-  notes: string[]
-  decisions: Decision[]
-  /** Fog patches — bullets only. Prose in this section is commentary, not a patch. */
-  notYetSpecified: string[]
-  /** Prose in Not-yet-specified when it carries no bullets — usually "no fog remains". */
-  notYetSpecifiedNote: string
-  outOfScope: string[]
-  /** Every `##` section in document order, recognised or not. */
-  sections: MapSection[]
-  /** Template sections that were absent — the drift signal a view may want to surface. */
-  missingSections: string[]
-}
-
-export interface MapProgress {
-  total: number
-  completed: number
-}
-
-export interface WayfinderMap {
-  project: ProjectKey
-  id: string
-  displayId?: string
-  title?: string
-  url?: string
-  isOpen: boolean
-  /** Latest relevant source activity, ms since epoch — recency picks a project's active map. */
-  updatedAt: number
-  /** When the map closed, ms since epoch — absent when the source keeps it open or records none. */
-  closedAt?: number
-  body: MapBody
-  tickets: Ticket[]
-  /** Open, unblocked, unclaimed tickets in map order — what a session can take right now. */
-  frontier: Ticket[]
-  /** Null when source evidence cannot establish aggregate ticket counts. */
-  progress: MapProgress | null
-  /** False when some ticket records were omitted or a ticket directory drifted out of shape. */
-  ticketsComplete: boolean
-  /** Human drift signals for the map itself. */
-  warnings: string[]
-  /** Source file or issue context for later link handling. */
-  sourcePath?: string
-}
-
-/**
- * One project and its maps. A project can hold several: open ones live, closed ones as history.
- * `openMaps` is ordered most recently updated first — the head is the **active map**, any others
- * are live but secondary. `closedMaps` is ordered most recently closed first.
- */
-export interface Project {
-  key: ProjectKey
-  name: string
-  openMaps: WayfinderMap[]
-  closedMaps: WayfinderMap[]
-  /** Human drift signals for the project itself. */
-  warnings: string[]
-  /** The source location the adapter read this project from, when that is a real fact. */
-  sourcePath?: string
-  /** Current external source URL when the Integration can name one. */
-  sourceUrl?: string
-}
-
-/** A source entry the adapter could name but not currently materialize into a live map. */
-export interface Unreachable {
-  integration: Integration
-  project: ProjectKey
-  projectName?: string
-  mapId?: string
-  mapDisplayId?: string
-  mapTitle?: string
-  reason: string
-}
-
-/**
- * The whole roadmap state at an instant — what the server owns and broadcasts. Full-snapshot
- * replace: the wire never carries patches; diffing is the server's internal concern.
- */
-export interface Snapshot {
-  /** When the server assembled this snapshot, ms since epoch. */
-  capturedAt: number
-  projects: Project[]
-  unreachable: Unreachable[]
-}
 
 export type ConnectionId = string
 
@@ -229,25 +96,11 @@ export interface ProjectRegistration {
   displayName?: string
 }
 
-export type ProjectAvailability =
-  | { status: 'available'; observedAt: number }
-  | { status: 'unavailable'; cause: string; observedAt?: number }
-
 export interface ProjectAction {
   id: string
   label: string
   kind: 'roadmap' | 'external-link' | 'server-launch'
   href?: string
-}
-
-/** A committed registration projected with its current or last-known roadmap state. */
-export interface RegisteredProject extends ProjectRegistration {
-  name: string
-  availability: ProjectAvailability
-  openMaps: WayfinderMap[]
-  closedMaps: WayfinderMap[]
-  warnings: string[]
-  actions: ProjectAction[]
 }
 
 export type SupportedIntegration =
@@ -388,7 +241,7 @@ export interface ApplicationState {
   authorizationOperations: AuthorizationOperation[]
   configuration: ConfigurationStatus
   automation: AutomationState
-  roadmap: Snapshot
+  roadmap: { capturedAt: number }
 }
 
 export interface SafeError {

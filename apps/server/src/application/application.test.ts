@@ -1,4 +1,4 @@
-import type { ApplicationState, Project, Snapshot, Ticket, WayfinderMap } from '@roadmap/contracts'
+import type { ApplicationState } from '@roadmap/contracts'
 import { describe, expect, it, vi } from 'vitest'
 import type { ChangeEvent } from '../change-feed.ts'
 import type {
@@ -11,8 +11,13 @@ import type { ObservationBatch, SourceObservationHealth } from '../observation/s
 import type { ProjectConfiguration } from '../projects/registry.ts'
 import {
   controlledSourceFixture,
+  createSourceFixtureOwner,
+  type FixtureMap,
+  type FixtureProject,
+  type FixtureTicket,
   fixtureAdmissions,
-  sourceFixture,
+  publicProjectObservation,
+  publicTicketObservation,
 } from '../source-test-fixtures.ts'
 import { createRoadmapApplication } from './application.ts'
 import { createApplicationOperations } from './operations.ts'
@@ -109,9 +114,9 @@ function controlledObserver(
   return controlledSourceFixture(first.scope.project, baseline, options)
 }
 
-function notificationProject(claimed = false, closed = false): Project {
+function notificationProject(claimed = false, closed = false): FixtureProject {
   const key = { integration: 'local', id: 'notifications' } as const
-  const ticket: Ticket = {
+  const ticket: FixtureTicket = {
     id: '1',
     sourcePath: '/tmp/notifications/.wayfinder/tickets/01-notification.md',
     body: 'Keep notification comparison across policy and presentation edits.',
@@ -124,7 +129,7 @@ function notificationProject(claimed = false, closed = false): Project {
     blockersComplete: true,
     warnings: [],
   }
-  const map: WayfinderMap = {
+  const map: FixtureMap = {
     project: key,
     id: '.wayfinder/map.md',
     sourcePath: '/tmp/notifications/.wayfinder/map.md',
@@ -150,7 +155,7 @@ function notificationProject(claimed = false, closed = false): Project {
   return { key, name: 'Notifications', openMaps: [map], closedMaps: [], warnings: [] }
 }
 
-function localProject(id: string): Project {
+function localProject(id: string): FixtureProject {
   return {
     key: { integration: 'local', id },
     name: id,
@@ -161,11 +166,12 @@ function localProject(id: string): Project {
   }
 }
 
-function unavailable(id: string): ObservationBatch {
+function unavailable(id: string, readSequence: number): ObservationBatch {
   return {
     attempts: [
       {
         kind: 'failed',
+        readSequence,
         scope: { kind: 'project', project: { integration: 'local', id } },
         attemptedAt: 50,
         provenance: { integration: 'local', path: `/tmp/${id}`, operation: 'inspect-root' },
@@ -175,7 +181,7 @@ function unavailable(id: string): ObservationBatch {
   }
 }
 
-function configuredProjects(projects: readonly Project[]): ProjectConfiguration {
+function configuredProjects(projects: readonly FixtureProject[]): ProjectConfiguration {
   return {
     ...BASE_CONFIGURATION,
     connections: [
@@ -205,8 +211,10 @@ function configuredProjects(projects: readonly Project[]): ProjectConfiguration 
   }
 }
 
-function snapshotProjectIds(snapshot: Snapshot): string[] {
-  return snapshot.projects.map((project) => project.key.id)
+function observedProjectIds(state: ApplicationState): string[] {
+  return state.projects
+    .filter((project) => publicProjectObservation(project) !== null)
+    .map((project) => project.key.id)
 }
 
 describe('RoadmapApplication', () => {
@@ -216,6 +224,7 @@ describe('RoadmapApplication', () => {
     'set-automation-enabled',
     'set-project-automation-enabled',
   ] as const)('preserves observer ownership and notification comparison after %s', async (type) => {
+    const read = createSourceFixtureOwner()
     const project = notificationProject()
     const registered: ProjectConfiguration = {
       ...BASE_CONFIGURATION,
@@ -234,10 +243,10 @@ describe('RoadmapApplication', () => {
       },
     }
     const configuration = memoryConfiguration({ ok: true, document: registered })
-    const original = controlledObserver('local', sourceFixture([project], 1_000))
+    const original = controlledObserver('local', read([project], 1_000))
     const reconstruction = controlledObserver(
       'local',
-      sourceFixture([notificationProject(true)], 2_000),
+      createSourceFixtureOwner()([notificationProject(true)], 2_000),
     )
     let created = false
     const events: ChangeEvent[] = []
@@ -288,13 +297,18 @@ describe('RoadmapApplication', () => {
         ])
       }
       for (const state of states) {
-        expect(state.projects[0]?.availability.observedAt).toBe(1_000)
-        expect(state.projects[0]?.openMaps[0]?.tickets[0]?.isClaimed).toBe(false)
+        expect(state.projects[0] && publicProjectObservation(state.projects[0])?.observedAt).toBe(
+          1_000,
+        )
+        const ticket = state.projects[0]?.maps[0]?.tickets[0]
+        expect(ticket && publicTicketObservation(ticket)?.value.isClaimed).toBe(false)
       }
       expect(events).toEqual([])
-      original.push(sourceFixture([notificationProject(true)], 3_000))
-      expect(application.current().projects[0]?.openMaps[0]?.tickets[0]?.isClaimed).toBe(true)
-      expect(application.current().projects[0]?.availability.observedAt).toBe(3_000)
+      original.push(read([notificationProject(true)], 3_000))
+      const claimedTicket = application.current().projects[0]?.maps[0]?.tickets[0]
+      expect(claimedTicket && publicTicketObservation(claimedTicket)?.value.isClaimed).toBe(true)
+      const claimedProject = application.current().projects[0]
+      expect(claimedProject && publicProjectObservation(claimedProject)?.observedAt).toBe(3_000)
       expect(events.filter((event) => event.type === 'ticket-claimed')).toEqual([
         {
           type: 'ticket-claimed',
@@ -305,8 +319,9 @@ describe('RoadmapApplication', () => {
           }),
         },
       ])
-      original.push(sourceFixture([notificationProject(true)], 4_000))
-      expect(application.current().projects[0]?.availability.observedAt).toBe(4_000)
+      original.push(read([notificationProject(true)], 4_000))
+      const repeatedProject = application.current().projects[0]
+      expect(repeatedProject && publicProjectObservation(repeatedProject)?.observedAt).toBe(4_000)
       expect(events.filter((event) => event.type === 'ticket-claimed')).toHaveLength(1)
     } finally {
       await application.stop()
@@ -314,7 +329,7 @@ describe('RoadmapApplication', () => {
   })
 
   it('publishes coherent replacement status while unrelated Integration observations continue', async () => {
-    const github: Project = {
+    const github: FixtureProject = {
       ...localProject('remote'),
       key: { integration: 'github', id: 'remote' },
       name: 'acme/original',
@@ -347,15 +362,18 @@ describe('RoadmapApplication', () => {
       ],
     }
     const configuration = memoryConfiguration({ ok: true, document: registered })
-    const local = controlledObserver('local', sourceFixture([notificationProject()], 1_000))
+    const localRead = createSourceFixtureOwner()
+    const read = createSourceFixtureOwner()
+    const replacementRead = createSourceFixtureOwner()
+    const local = controlledObserver('local', localRead([notificationProject()], 1_000))
     const gate = Promise.withResolvers<void>()
     let createdRemote = false
-    const original = controlledObserver('github', sourceFixture([github], 1_000, registered), {
+    const original = controlledObserver('github', read([github], 1_000, registered), {
       health: { status: 'available', observedAt: 1_000 },
     })
     const replacement = controlledObserver(
       'github',
-      sourceFixture(
+      replacementRead(
         [{ ...github, name: 'acme/renamed', sourceUrl: 'https://github.com/acme/renamed' }],
         3_000,
         registered,
@@ -456,13 +474,11 @@ describe('RoadmapApplication', () => {
         },
       })
       await replacement.started
-      local.push(sourceFixture([notificationProject(true)], 2_000))
-      expect(
-        application
-          .current()
-          .roadmap.projects.find((project) => project.key.integration === 'local')?.openMaps[0]
-          ?.tickets[0]?.isClaimed,
-      ).toBe(true)
+      local.push(localRead([notificationProject(true)], 2_000))
+      const localClaimed = application
+        .current()
+        .projects.find((project) => project.key.integration === 'local')?.maps[0]?.tickets[0]
+      expect(localClaimed && publicTicketObservation(localClaimed)?.value.isClaimed).toBe(true)
       expect(events.filter((event) => event.type === 'ticket-claimed')).toHaveLength(1)
       for (const state of states) {
         expect(state.configurationVersion).toBe(1)
@@ -471,13 +487,13 @@ describe('RoadmapApplication', () => {
         ).toMatchObject({ nameWithOwner: 'acme/original' })
         expect(state.projects.find((row) => row.key.integration === 'github')).toMatchObject({
           name: 'acme/original',
-          availability: { status: 'available', observedAt: 1_000 },
+          resource: { kind: 'current-readable', observation: { observedAt: 1_000 } },
         })
         expect(
           state.connections.find((connection) => connection.id === 'github')?.availability,
         ).toEqual({ status: 'available', observedAt: 1_000 })
       }
-      original.push(sourceFixture([github], 1_500, registered))
+      original.push(read([github], 1_500, registered))
       expect(application.current().configurationVersion).toBe(1)
       expect(
         application
@@ -487,7 +503,7 @@ describe('RoadmapApplication', () => {
           ),
       ).toMatchObject({
         name: 'acme/original',
-        availability: { status: 'available', observedAt: 1_500 },
+        resource: { kind: 'current-readable', observation: { observedAt: 1_500 } },
       })
       gate.resolve()
       await vi.waitFor(() => expect(application.current().configurationVersion).toBe(2))
@@ -497,25 +513,23 @@ describe('RoadmapApplication', () => {
         ).toMatchObject({ nameWithOwner: 'acme/renamed' })
         expect(state.projects.find((row) => row.key.integration === 'github')).toMatchObject({
           name: 'acme/renamed',
-          availability: { observedAt: 3_000 },
+          resource: { kind: 'current-readable', observation: { observedAt: 3_000 } },
         })
         expect(
           state.connections.find((connection) => connection.id === 'github')?.availability.status,
         ).toBe('unavailable')
       }
       const committedSequence = application.current().stateSequence
-      original.push(sourceFixture([{ ...github, name: 'retired-callback' }], 4_000, registered))
+      original.push(read([{ ...github, name: 'retired-callback' }], 4_000, registered))
       expect(application.current().stateSequence).toBe(committedSequence)
       expect(states.at(-1)?.projects.find((row) => row.key.integration === 'github')?.name).toBe(
         'acme/renamed',
       )
-      local.push(sourceFixture([notificationProject(true, true)], 5_000))
-      expect(
-        application
-          .current()
-          .roadmap.projects.find((project) => project.key.integration === 'local')?.openMaps[0]
-          ?.tickets[0]?.state,
-      ).toBe('closed')
+      local.push(localRead([notificationProject(true, true)], 5_000))
+      const localClosed = application
+        .current()
+        .projects.find((project) => project.key.integration === 'local')?.maps[0]?.tickets[0]
+      expect(localClosed && publicTicketObservation(localClosed)?.value.state).toBe('closed')
       expect(events.filter((event) => event.type === 'ticket-claimed')).toHaveLength(1)
       expect(events.filter((event) => event.type === 'ticket-closed')).toEqual([
         {
@@ -526,35 +540,34 @@ describe('RoadmapApplication', () => {
           }),
         },
       ])
-      expect(
-        application
-          .current()
-          .projects.find(
-            (project) => project.key.integration === 'github' && project.key.id === github.key.id,
-          )?.availability.observedAt,
-      ).toBe(3_000)
-      expect(
-        application
-          .current()
-          .projects.find(
-            (project) => project.key.integration === 'local' && project.key.id === 'notifications',
-          )?.availability.observedAt,
-      ).toBe(5_000)
+      const remoteLatest = application
+        .current()
+        .projects.find(
+          (project) => project.key.integration === 'github' && project.key.id === github.key.id,
+        )
+      const localLatest = application
+        .current()
+        .projects.find(
+          (project) => project.key.integration === 'local' && project.key.id === 'notifications',
+        )
+      expect(remoteLatest && publicProjectObservation(remoteLatest)?.observedAt).toBe(3_000)
+      expect(localLatest && publicProjectObservation(localLatest)?.observedAt).toBe(5_000)
     } finally {
       gate.resolve()
       await application.stop()
     }
   })
 
-  it('adds an empty-map warning across integrations without mutating source diagnostics', async () => {
+  it('reports known empty ordering without mutating source diagnostics', async () => {
     const local = localProject('empty')
-    const github: Project = {
+    const github: FixtureProject = {
       ...localProject('owner/repo'),
       key: { integration: 'github', id: 'owner/repo' },
       warnings: ['Source diagnostic'],
     }
     const registered = configuredProjects([local, github])
-    const adapter = immediateObserver(sourceFixture([local], 1_000))
+    const read = createSourceFixtureOwner()
+    const adapter = immediateObserver(read([local], 1_000))
     const application = createRoadmapApplication({
       configuration: memoryConfiguration({
         ok: true,
@@ -564,36 +577,38 @@ describe('RoadmapApplication', () => {
       observers: {
         local: () => adapter.observer,
         github: () =>
-          controlledSourceFixture(github.key, sourceFixture([github], 1_000, registered)).observer,
+          controlledSourceFixture(
+            github.key,
+            createSourceFixtureOwner()([github], 1_000, registered),
+          ).observer,
       },
       serverEpoch: 'test',
     })
     try {
       await application.start()
-      const projects = application.current().roadmap.projects
-      expect(
-        projects.find((project) => project.key.integration === 'local')?.warnings,
-      ).toHaveLength(1)
-      expect(
-        projects.find((project) => project.key.integration === 'github')?.warnings,
-      ).toHaveLength(2)
-      expect(projects.find((project) => project.key.integration === 'github')?.warnings).toContain(
+      const projects = application.current().projects
+      expect(projects.map((project) => project.activeMap)).toEqual([
+        { kind: 'known-empty' },
+        { kind: 'known-empty' },
+      ])
+      const remote = projects.find((project) => project.key.integration === 'github')
+      expect(remote && publicProjectObservation(remote)?.value.warnings).toEqual([
         'Source diagnostic',
-      )
+      ])
       expect(local.warnings).toEqual([])
       expect(github.warnings).toEqual(['Source diagnostic'])
-      adapter.push(sourceFixture([local], 1_000))
+      adapter.push(read([local], 1_000))
       expect(
-        application
-          .current()
-          .roadmap.projects.find((project) => project.key.integration === 'local')?.warnings,
-      ).toHaveLength(1)
+        application.current().projects.find((project) => project.key.integration === 'local')
+          ?.activeMap,
+      ).toEqual({ kind: 'known-empty' })
     } finally {
       await application.stop()
     }
   })
 
   it('publishes only after the complete source baseline is ready', async () => {
+    const read = createSourceFixtureOwner()
     const configuration = memoryConfiguration({
       ok: true,
       document: configuredProjects([localProject('demo'), localProject('ready')]),
@@ -601,7 +616,7 @@ describe('RoadmapApplication', () => {
     const adapter = deferredObserver()
     const ready = controlledSourceFixture(
       { integration: 'local', id: 'ready' },
-      sourceFixture([localProject('ready')], 10),
+      read([localProject('ready')], 10),
     )
     const application = createRoadmapApplication({
       configuration: configuration.document,
@@ -626,7 +641,7 @@ describe('RoadmapApplication', () => {
     await starting
     expect(states).toHaveBeenCalledOnce()
     expect(application.current().roadmap.capturedAt).toBeGreaterThan(0)
-    expect(snapshotProjectIds(application.current().roadmap)).toEqual(['ready'])
+    expect(observedProjectIds(application.current())).toEqual(['ready'])
     await application.stop()
   })
 
@@ -666,7 +681,8 @@ describe('RoadmapApplication', () => {
       ],
     }
     const configuration = memoryConfiguration({ ok: true, document: registered })
-    const adapter = immediateObserver(sourceFixture([localProject('demo')], 25))
+    const read = createSourceFixtureOwner()
+    const adapter = immediateObserver(read([localProject('demo')], 25))
     const application = createRoadmapApplication({
       configuration: configuration.document,
       admissions: fixtureAdmissions,
@@ -681,28 +697,28 @@ describe('RoadmapApplication', () => {
     })
     await application.start()
 
-    adapter.push(unavailable('demo'))
+    adapter.push(unavailable('demo', read.nextReadSequence()))
 
-    expect(application.current().projects).toEqual([
-      expect.objectContaining({
+    expect(application.current().projects).toMatchObject([
+      {
         name: 'demo',
-        availability: {
-          status: 'unavailable',
-          cause: 'Workspace cannot be read.',
-          observedAt: 25,
+        resource: {
+          kind: 'retained-unavailable',
+          lastSuccessful: { observedAt: 25, value: { name: 'demo' } },
+          unavailable: { cause: 'Workspace cannot be read.' },
         },
         actions: expect.arrayContaining([
           { id: 'open-workspace', label: 'Open in VS Code', kind: 'server-launch' },
           { id: 'reveal-source', label: 'View source folder', kind: 'server-launch' },
         ]),
-      }),
+      },
     ])
     await application.stop()
   })
 
   it('does not advance a failed GitHub scope when an unrelated Local source changes', async () => {
     let clock = 1_000
-    const githubProject: Project = {
+    const githubProject: FixtureProject = {
       key: { integration: 'github', id: 'opaque/github-key' },
       name: 'acme/remote',
       sourceUrl: 'https://github.com/acme/remote',
@@ -742,10 +758,12 @@ describe('RoadmapApplication', () => {
         ],
       },
     })
-    const local = immediateObserver(sourceFixture([localProject('local-source')], clock))
+    const read = createSourceFixtureOwner()
+    const remoteRead = createSourceFixtureOwner()
+    const local = immediateObserver(read([localProject('local-source')], clock))
     const remote = controlledSourceFixture(
       githubProject.key,
-      sourceFixture([githubProject], clock, {
+      remoteRead([githubProject], clock, {
         projects: [
           {
             ref: { integration: 'github', projectId: githubProject.key.id },
@@ -764,13 +782,17 @@ describe('RoadmapApplication', () => {
     })
     try {
       await application.start()
-      expect(application.current().projects[0]?.availability.observedAt).toBe(1_000)
+      expect(application.current().projects[0]?.resource).toMatchObject({
+        kind: 'current-readable',
+        observation: { observedAt: 1_000 },
+      })
 
       clock = 2_000
       remote.push({
         attempts: [
           {
             kind: 'failed',
+            readSequence: remoteRead.nextReadSequence(),
             scope: { kind: 'project', project: githubProject.key },
             attemptedAt: clock,
             provenance: {
@@ -785,17 +807,17 @@ describe('RoadmapApplication', () => {
       })
       clock = 3_000
       local.push(
-        sourceFixture(
-          [{ ...localProject('local-source'), warnings: ['A Local file changed.'] }],
-          clock,
-        ),
+        read([{ ...localProject('local-source'), warnings: ['A Local file changed.'] }], clock),
       )
 
       const retained = application
         .current()
         .projects.find((project) => project.key.integration === 'github')
       expect(retained?.key).toEqual({ integration: 'github', id: 'opaque/github-key' })
-      expect(retained?.availability.observedAt).toBe(1_000)
+      expect(retained?.resource).toMatchObject({
+        kind: 'retained-unavailable',
+        lastSuccessful: { observedAt: 1_000 },
+      })
       expect(
         application.current().connections.find((connection) => connection.id === 'github'),
       ).toMatchObject({ availability: { observedAt: 1_000 } })
@@ -805,7 +827,7 @@ describe('RoadmapApplication', () => {
   })
 
   it('projects the current GitHub source URL without changing the stable route key', async () => {
-    const githubProject: Project = {
+    const githubProject: FixtureProject = {
       key: { integration: 'github', id: 'stable/route' },
       name: 'acme/renamed',
       sourceUrl: 'https://github.com/acme/renamed',
@@ -837,9 +859,10 @@ describe('RoadmapApplication', () => {
         },
       ],
     }
+    const read = createSourceFixtureOwner()
     const adapter = controlledSourceFixture(
       githubProject.key,
-      sourceFixture([githubProject], 1_000, registered),
+      read([githubProject], 1_000, registered),
     )
     const application = createRoadmapApplication({
       configuration: memoryConfiguration({ ok: true, document: registered }).document,
@@ -1249,6 +1272,7 @@ describe('RoadmapApplication', () => {
   })
 
   it('keeps the active source live until a replacement baseline and ignores retired updates', async () => {
+    const read = createSourceFixtureOwner()
     const configuration = memoryConfiguration({ ok: true, document: BASE_CONFIGURATION })
     const first = immediateObserver()
     const second = deferredObserver('replacement')
@@ -1284,16 +1308,14 @@ describe('RoadmapApplication', () => {
         ],
       },
     })
-    first.push(sourceFixture([{ ...localProject('demo'), warnings: ['Still live'] }], 1_000))
-    await vi.waitFor(() =>
-      expect(snapshotProjectIds(application.current().roadmap)).toEqual(['demo']),
-    )
+    first.push(read([{ ...localProject('demo'), warnings: ['Still live'] }], 1_000))
+    await vi.waitFor(() => expect(observedProjectIds(application.current())).toEqual(['demo']))
 
     second.release()
     await vi.waitFor(() => expect(application.current().configurationVersion).toBe(2))
     expect(first.stopped).toBe(true)
-    first.push(sourceFixture([{ ...localProject('demo'), warnings: ['Late callback'] }], 2_000))
-    expect(snapshotProjectIds(application.current().roadmap)).toEqual([])
+    first.push(read([{ ...localProject('demo'), warnings: ['Late callback'] }], 2_000))
+    expect(observedProjectIds(application.current())).toEqual([])
     await application.stop()
   })
 
@@ -1303,12 +1325,14 @@ describe('RoadmapApplication', () => {
       configuration: configuration.document,
       admissions: fixtureAdmissions,
       observers: {
-        local: (input) =>
-          controlledSourceFixture(
+        local: (input) => {
+          const read = createSourceFixtureOwner()
+          return controlledSourceFixture(
             { integration: 'local', id: input.ref.projectId },
-            unavailable(input.ref.projectId),
+            unavailable(input.ref.projectId, read.nextReadSequence()),
             { health: { status: 'unavailable', cause: 'Workspace cannot be read.' } },
-          ).observer,
+          ).observer
+        },
         github() {
           throw new Error('Unused source')
         },
@@ -1329,9 +1353,11 @@ describe('RoadmapApplication', () => {
 
     expect(outcome.ok).toBe(true)
     expect(outcome.state.configurationVersion).toBe(2)
-    expect(outcome.state.roadmap.projects).toEqual([])
-    expect(outcome.state.roadmap.unreachable).toContainEqual(
-      expect.objectContaining({ project: { integration: 'local', id: 'microsoft-risiko' } }),
+    expect(outcome.state.projects).toContainEqual(
+      expect.objectContaining({
+        key: { integration: 'local', id: 'microsoft-risiko' },
+        resource: expect.objectContaining({ kind: 'never-observed' }),
+      }),
     )
     expect(configuration.writes[0]?.configurationVersion).toBe(2)
     await application.stop()
@@ -1510,8 +1536,9 @@ describe('RoadmapApplication', () => {
   })
 
   it('projects ticket state precedence and keeps complete frontier order including closed external blockers', async () => {
+    const read = createSourceFixtureOwner()
     const key = { integration: 'local', id: 'ticket-policy' } as const
-    const ticket = (id: string, extra: Partial<Ticket> = {}): Ticket => ({
+    const ticket = (id: string, extra: Partial<FixtureTicket> = {}): FixtureTicket => ({
       id,
       body: `Ticket ${id}`,
       sourcePath: `/tmp/ticket-policy/.wayfinder/tickets/${id}.md`,
@@ -1525,12 +1552,12 @@ describe('RoadmapApplication', () => {
       warnings: [],
       ...extra,
     })
-    const openBlocker: Ticket['blockedBy'][number] = {
+    const openBlocker: FixtureTicket['blockedBy'][number] = {
       reference: { kind: 'registered', project: key },
       ticketId: 'outside',
       state: 'open',
     }
-    const map: WayfinderMap = {
+    const map: FixtureMap = {
       project: key,
       id: '.wayfinder/map.md',
       sourcePath: '/tmp/ticket-policy/.wayfinder/map.md',
@@ -1575,10 +1602,7 @@ describe('RoadmapApplication', () => {
       warnings: [],
     }
     const adapter = immediateObserver(
-      sourceFixture(
-        [{ key, name: 'Ticket policy', openMaps: [map], closedMaps: [], warnings: [] }],
-        10,
-      ),
+      read([{ key, name: 'Ticket policy', openMaps: [map], closedMaps: [], warnings: [] }], 10),
     )
     const application = createRoadmapApplication({
       configuration: memoryConfiguration({
@@ -1597,8 +1621,13 @@ describe('RoadmapApplication', () => {
     })
     try {
       await application.start()
-      const projected = application.current().roadmap.projects[0]?.openMaps[0]
-      expect(projected?.tickets.map((entry) => [entry.id, entry.state])).toEqual([
+      const projected = application.current().projects[0]?.maps[0]
+      expect(
+        projected?.tickets.map((entry) => [
+          entry.key.ticketId,
+          publicTicketObservation(entry)?.value.state,
+        ]),
+      ).toEqual([
         ['first', 'frontier'],
         ['claimed', 'claimed'],
         ['blocked', 'blocked'],
@@ -1607,17 +1636,32 @@ describe('RoadmapApplication', () => {
         ['external-closed', 'frontier'],
         ['unknown-blocker', 'blocked'],
       ])
-      expect(projected?.frontier.map((entry) => entry.id)).toEqual(['first', 'external-closed'])
       expect(
-        projected?.tickets.find((entry) => entry.id === 'external-closed')?.blockedBy[0],
-      ).toEqual({
-        reference: { kind: 'external', integration: 'github', nameWithOwner: 'outside/repository' },
-        ticketId: '7',
-        state: 'closed',
-        url: 'https://github.com/outside/repository/issues/7',
-      })
+        projected?.tickets
+          .filter(
+            (entry) =>
+              entry.resource.kind === 'current-readable' &&
+              entry.resource.observation.value.state === 'frontier',
+          )
+          .map((entry) => entry.key.ticketId),
+      ).toEqual(['first', 'external-closed'])
+      const externalClosed = projected?.tickets.find(
+        (entry) => entry.key.ticketId === 'external-closed',
+      )
+      expect(externalClosed && publicTicketObservation(externalClosed)?.value.blockedBy[0]).toEqual(
+        {
+          reference: {
+            kind: 'external',
+            integration: 'github',
+            nameWithOwner: 'outside/repository',
+          },
+          ticketId: '7',
+          state: 'closed',
+          url: 'https://github.com/outside/repository/issues/7',
+        },
+      )
       adapter.push(
-        sourceFixture(
+        read(
           [
             {
               key,
@@ -1630,11 +1674,15 @@ describe('RoadmapApplication', () => {
           20,
         ),
       )
-      expect(application.current().roadmap.projects[0]?.openMaps[0]?.tickets[0]?.state).toBe(
-        'blocked',
-      )
-      expect(application.current().roadmap.projects[0]?.openMaps[0]?.frontier).toEqual([])
-      const unknown = sourceFixture(
+      const incomplete = application
+        .current()
+        .projects[0]?.maps[0]?.tickets.find((entry) => entry.key.ticketId === 'incomplete')
+      expect(incomplete?.resource).toMatchObject({
+        kind: 'current-readable',
+        observation: { value: { state: 'blocked', blockersComplete: false } },
+      })
+      expect(application.current().projects[0]?.activeMap.kind).toBe('uncertain')
+      const unknown = read(
         [
           {
             key,
@@ -1662,17 +1710,25 @@ describe('RoadmapApplication', () => {
           }
         }),
       })
-      expect(application.current().roadmap.projects[0]?.openMaps[0]?.tickets[0]?.state).toBe(
-        'blocked',
-      )
-      expect(application.current().roadmap.projects[0]?.openMaps[0]?.frontier).toEqual([])
+      const unknownTicket = application
+        .current()
+        .projects[0]?.maps[0]?.tickets.find((entry) => entry.key.ticketId === 'unknown-status')
+      expect(unknownTicket?.resource).toMatchObject({
+        kind: 'current-readable',
+        observation: {
+          completeness: { kind: 'incomplete' },
+          value: { state: 'blocked', status: 'unknown' },
+        },
+      })
+      expect(application.current().projects[0]?.activeMap.kind).toBe('uncertain')
     } finally {
       await application.stop()
     }
   })
 
   it('rejects contributions outside the configured source scope without publishing them', async () => {
-    const control = immediateObserver(sourceFixture([localProject('demo')], 100))
+    const read = createSourceFixtureOwner()
+    const control = immediateObserver(read([localProject('demo')], 100))
     const application = createRoadmapApplication({
       configuration: memoryConfiguration({ ok: true, document: BASE_CONFIGURATION }).document,
       admissions: fixtureAdmissions,
@@ -1686,28 +1742,29 @@ describe('RoadmapApplication', () => {
     await application.start()
     try {
       const before = application.current()
-      control.push(sourceFixture([localProject('unknown')], 200))
+      control.push(read([localProject('unknown')], 200))
       expect(application.current().stateSequence).toBe(before.stateSequence)
-      expect(snapshotProjectIds(application.current().roadmap)).toEqual(['demo'])
+      expect(observedProjectIds(application.current())).toEqual(['demo'])
       expect(application.current().projects.some((project) => project.key.id === 'unknown')).toBe(
         false,
       )
       control.push(
-        sourceFixture(
-          [{ ...localProject('demo'), sourcePath: '/tmp/not-the-configured-source' }],
-          300,
-        ),
+        read([{ ...localProject('demo'), sourcePath: '/tmp/not-the-configured-source' }], 300),
       )
       expect(application.current().stateSequence).toBe(before.stateSequence)
-      expect(application.current().roadmap).toEqual(before.roadmap)
-      expect(application.current().projects[0]?.availability.observedAt).toBe(100)
+      expect(application.current().projects).toEqual(before.projects)
+      expect(application.current().projects[0]?.resource).toMatchObject({
+        kind: 'current-readable',
+        observation: { observedAt: 100 },
+      })
     } finally {
       await application.stop()
     }
   })
 
   it('does not publish callbacks after the application stops', async () => {
-    const control = immediateObserver(sourceFixture([localProject('demo')], 100))
+    const read = createSourceFixtureOwner()
+    const control = immediateObserver(read([localProject('demo')], 100))
     const application = createRoadmapApplication({
       configuration: memoryConfiguration({ ok: true, document: BASE_CONFIGURATION }).document,
       admissions: fixtureAdmissions,
@@ -1723,7 +1780,7 @@ describe('RoadmapApplication', () => {
     application.subscribe(states)
     await application.stop()
     states.mockClear()
-    control.push(sourceFixture([{ ...localProject('demo'), warnings: ['Stopped callback'] }], 200))
+    control.push(read([{ ...localProject('demo'), warnings: ['Stopped callback'] }], 200))
     expect(states).not.toHaveBeenCalled()
   })
 })

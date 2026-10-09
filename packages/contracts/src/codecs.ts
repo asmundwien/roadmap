@@ -1,4 +1,15 @@
-import { blockerSchema } from './blocker.ts'
+import type { z } from 'zod'
+import { registeredProjectSchema } from './resources.ts'
+
+export {
+  activeMapSchema,
+  mapMembershipSchema,
+  mapResourceSchema,
+  projectResourceSchema,
+  registeredProjectResourcesSchema,
+  ticketMembershipSchema,
+  ticketResourceSchema,
+} from './resources.ts'
 
 import type {
   ApplicationState,
@@ -44,8 +55,6 @@ const nonnegativeInteger: Check = (input, path, issues) =>
 const nonnegativeNumber: Check = (input, path, issues) =>
   (typeof input === 'number' && Number.isFinite(input) && input >= 0) ||
   problem(issues, path, 'must be a non-negative finite number')
-const nullableString: Check = (input, path, issues) =>
-  input === null || stringValue(input, path, issues)
 
 function literal(...values: readonly (string | boolean)[]): Check {
   return (input, path, issues) =>
@@ -141,116 +150,17 @@ function codec<T>(check: Check): RuntimeCodec<T> {
 
 const integration = literal('github', 'local')
 const projectKey = object({ integration: required(integration), id: required(stringValue) })
-const assignee = object({
-  name: required(stringValue),
-  url: optional(stringValue),
-  avatarUrl: optional(stringValue),
-})
-const blocker: Check = (input, path, issues) => {
-  const result = blockerSchema.safeParse(input)
-  if (result.success) return true
-  for (const issue of result.error.issues) {
-    problem(issues, path + issue.path.map((key) => `.${String(key)}`).join(''), issue.code)
+function schemaCheck(schema: z.ZodType): Check {
+  return (input, path, issues) => {
+    const result = schema.safeParse(input)
+    if (result.success) return true
+    for (const issue of result.error.issues) {
+      problem(issues, path + issue.path.map((key) => `.${String(key)}`).join(''), issue.message)
+    }
+    return false
   }
-  return false
 }
-const ticketTypeEvidence = discriminated('ticket type evidence', 'kind', {
-  recognized: object({
-    kind: required(literal('recognized')),
-    value: required(literal('research', 'prototype', 'grilling', 'task')),
-    labels: required(arrayOf(stringValue)),
-  }),
-  missing: object({ kind: required(literal('missing')), labels: required(arrayOf(stringValue)) }),
-  unknown: object({ kind: required(literal('unknown')), labels: required(arrayOf(stringValue)) }),
-  conflicting: object({
-    kind: required(literal('conflicting')),
-    labels: required(arrayOf(stringValue)),
-  }),
-})
-const ticket = object({
-  id: required(stringValue),
-  displayId: optional(stringValue),
-  title: optional(stringValue),
-  url: optional(stringValue),
-  body: required(stringValue),
-  typeEvidence: required(ticketTypeEvidence),
-  state: required(literal('closed', 'blocked', 'claimed', 'frontier')),
-  isClaimed: required(booleanValue),
-  isBlocked: required(booleanValue),
-  createdAt: optional(nonnegativeNumber),
-  closedAt: optional(nonnegativeNumber),
-  assignees: required(arrayOf(assignee)),
-  blockedBy: required(arrayOf(blocker)),
-  blockersComplete: required(booleanValue),
-  warnings: required(arrayOf(stringValue)),
-  sourcePath: optional(stringValue),
-})
-const decision = object({
-  title: required(stringValue),
-  url: required(nullableString),
-  gist: required(stringValue),
-  raw: required(stringValue),
-})
-const mapSection = object({
-  heading: required(stringValue),
-  text: required(stringValue),
-  items: required(arrayOf(stringValue)),
-})
-const mapBody = object({
-  raw: required(stringValue),
-  destination: required(stringValue),
-  notes: required(arrayOf(stringValue)),
-  decisions: required(arrayOf(decision)),
-  notYetSpecified: required(arrayOf(stringValue)),
-  notYetSpecifiedNote: required(stringValue),
-  outOfScope: required(arrayOf(stringValue)),
-  sections: required(arrayOf(mapSection)),
-  missingSections: required(arrayOf(stringValue)),
-})
-const mapProgress = object({
-  total: required(nonnegativeInteger),
-  completed: required(nonnegativeInteger),
-})
-const wayfinderMap = object({
-  project: required(projectKey),
-  id: required(stringValue),
-  displayId: optional(stringValue),
-  title: optional(stringValue),
-  url: optional(stringValue),
-  isOpen: required(booleanValue),
-  updatedAt: required(nonnegativeNumber),
-  closedAt: optional(nonnegativeNumber),
-  body: required(mapBody),
-  tickets: required(arrayOf(ticket)),
-  frontier: required(arrayOf(ticket)),
-  progress: required((input, path, issues) => input === null || mapProgress(input, path, issues)),
-  ticketsComplete: required(booleanValue),
-  warnings: required(arrayOf(stringValue)),
-  sourcePath: optional(stringValue),
-})
-const project = object({
-  key: required(projectKey),
-  name: required(stringValue),
-  openMaps: required(arrayOf(wayfinderMap)),
-  closedMaps: required(arrayOf(wayfinderMap)),
-  warnings: required(arrayOf(stringValue)),
-  sourcePath: optional(stringValue),
-  sourceUrl: optional(stringValue),
-})
-const unreachable = object({
-  integration: required(integration),
-  project: required(projectKey),
-  projectName: optional(stringValue),
-  mapId: optional(stringValue),
-  mapDisplayId: optional(stringValue),
-  mapTitle: optional(stringValue),
-  reason: required(stringValue),
-})
-const snapshot = object({
-  capturedAt: required(nonnegativeNumber),
-  projects: required(arrayOf(project)),
-  unreachable: required(arrayOf(unreachable)),
-})
+const publication = object({ capturedAt: required(nonnegativeNumber) })
 const connectionAvailability = discriminated('Connection availability', 'status', {
   available: object({
     status: required(literal('available')),
@@ -297,36 +207,7 @@ const registration = object({
   workspace: required(workspace),
   displayName: optional(stringValue),
 })
-const projectAvailability = discriminated('Project availability', 'status', {
-  available: object({
-    status: required(literal('available')),
-    observedAt: required(nonnegativeNumber),
-  }),
-  unavailable: object({
-    status: required(literal('unavailable')),
-    cause: required(stringValue),
-    observedAt: optional(nonnegativeNumber),
-  }),
-})
-const projectAction = object({
-  id: required(stringValue),
-  label: required(stringValue),
-  kind: required(literal('roadmap', 'external-link', 'server-launch')),
-  href: optional(stringValue),
-})
-const registeredProject = object({
-  key: required(projectKey),
-  connectionId: required(stringValue),
-  locator: required(projectLocator),
-  workspace: required(workspace),
-  displayName: optional(stringValue),
-  name: required(stringValue),
-  availability: required(projectAvailability),
-  openMaps: required(arrayOf(wayfinderMap)),
-  closedMaps: required(arrayOf(wayfinderMap)),
-  warnings: required(arrayOf(stringValue)),
-  actions: required(arrayOf(projectAction)),
-})
+const registeredProject = schemaCheck(registeredProjectSchema)
 const supportedIntegration = discriminated('supported Integration', 'integration', {
   local: object({
     integration: required(literal('local')),
@@ -518,7 +399,7 @@ const applicationState = object({
   authorizationOperations: required(arrayOf(authorizationOperation)),
   configuration: required(configurationStatus),
   automation: required(automationState),
-  roadmap: required(snapshot),
+  roadmap: required(publication),
 })
 const queryResult = oneOf(
   'query result',

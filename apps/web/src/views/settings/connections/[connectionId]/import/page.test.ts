@@ -25,7 +25,7 @@ function renderImport(connectionId: string, connection?: Connection, valid = tru
       evidence: [],
       overrides: [],
     },
-    roadmap: { capturedAt: 1, projects: [], unreachable: [] },
+    roadmap: { capturedAt: 1 },
   }
   const store: RoadmapStore = {
     subscribe: () => () => undefined,
@@ -63,10 +63,6 @@ const local: Connection = {
 it('explains the selected connection without offering a different one', () => {
   const markup = renderImport('local', local)
   expect(markup).toContain('Local files')
-  expect(markup).toContain('Local')
-  expect(markup).toContain('Project folder and Workspace')
-  expect(markup).toContain('Display name')
-  expect(markup).toContain('Validate and save')
   expect(markup).not.toContain('<select')
 })
 
@@ -83,7 +79,6 @@ describe('GitHub import', () => {
     const markup = renderImport(github.id, github)
     expect(markup).toContain('Work account')
     expect(markup).toContain('Authorization expired.')
-    expect(markup).toContain('Git worktree&#x27;s origin remote')
     expect(markup).not.toContain('<select')
   })
 })

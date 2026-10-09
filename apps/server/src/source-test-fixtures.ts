@@ -1,5 +1,13 @@
 import { dirname, join, resolve } from 'node:path'
-import type { Project, Ticket, WayfinderMap } from '@roadmap/contracts'
+import type {
+  MapResource,
+  MapResourceValue,
+  ProjectKey,
+  ProjectResourceValue,
+  RegisteredProject,
+  TicketResource,
+  TicketResourceValue,
+} from '@roadmap/contracts'
 import type {
   ObservationAttempt,
   ObservationBatch,
@@ -10,6 +18,7 @@ import type {
   SourceProvenance,
   SourceTicketContent,
 } from './observation/source.ts'
+import { createReadSequenceAllocator } from './observation/source.ts'
 import type {
   GitHubProjectIntent,
   GitHubProviderRead,
@@ -17,17 +26,128 @@ import type {
   ProjectAdmission,
 } from './projects/registry.ts'
 
-// Public DTOs are controlled test input, never production source authority.
-export function sourceFixture(
-  projects: readonly Project[],
+export type FixtureTicket = Omit<TicketResourceValue, 'source' | 'status'> & {
+  id: string
+  url?: string
+  sourcePath?: string
+}
+export type FixtureMap = Omit<MapResourceValue, 'source' | 'status'> & {
+  project: ProjectKey
+  id: string
+  isOpen: boolean
+  url?: string
+  sourcePath?: string
+  tickets: FixtureTicket[]
+  frontier: FixtureTicket[]
+  ticketsComplete: boolean
+}
+export type FixtureProject = Pick<ProjectResourceValue, 'name' | 'warnings'> & {
+  key: ProjectKey
+  openMaps: FixtureMap[]
+  closedMaps: FixtureMap[]
+  sourcePath?: string
+  sourceUrl?: string
+}
+export type FixtureSnapshot = {
+  capturedAt: number
+  projects: FixtureProject[]
+  unreachable: {
+    integration: ProjectKey['integration']
+    project: ProjectKey
+    projectName?: string
+    mapId?: string
+    mapDisplayId?: string
+    mapTitle?: string
+    reason: string
+  }[]
+}
+
+export function publicProjectObservation(project: RegisteredProject) {
+  switch (project.resource.kind) {
+    case 'current-readable':
+      return project.resource.observation
+    case 'retained-unavailable':
+      return project.resource.lastSuccessful
+    case 'proven-absent':
+      return project.resource.trace.kind === 'last-successful-trace'
+        ? project.resource.trace.lastSuccessful
+        : null
+    case 'never-observed':
+      return null
+  }
+}
+export function publicMapResource(
+  project: RegisteredProject,
+  mapId: string,
+): MapResource | undefined {
+  return project.maps.find((map) => map.key.mapId === mapId)
+}
+export function publicMapObservation(map: MapResource) {
+  switch (map.resource.kind) {
+    case 'current-readable':
+      return map.resource.observation
+    case 'retained-unavailable':
+      return map.resource.lastSuccessful
+    case 'proven-absent':
+      return map.resource.trace.kind === 'last-successful-trace'
+        ? map.resource.trace.lastSuccessful
+        : null
+    case 'never-observed':
+      return null
+  }
+}
+export function publicTicketResource(
+  map: MapResource,
+  ticketId: string,
+): TicketResource | undefined {
+  return map.tickets.find((ticket) => ticket.key.ticketId === ticketId)
+}
+export function publicTicketObservation(ticket: TicketResource) {
+  switch (ticket.resource.kind) {
+    case 'current-readable':
+      return ticket.resource.observation
+    case 'retained-unavailable':
+      return ticket.resource.lastSuccessful
+    case 'proven-absent':
+      return ticket.resource.trace.kind === 'last-successful-trace'
+        ? ticket.resource.trace.lastSuccessful
+        : null
+    case 'never-observed':
+      return null
+  }
+}
+
+type FixtureConfiguration = {
+  readonly projects: readonly (
+    | LocalProjectIntent
+    | Pick<GitHubProjectIntent, 'ref' | 'connectionId' | 'locator'>
+  )[]
+}
+
+// These counters model one test source owner's reads, never production resource authority.
+export function createFixtureReadSequence(): () => number {
+  return createReadSequenceAllocator()
+}
+
+export function createSourceFixtureOwner() {
+  const nextReadSequence = createFixtureReadSequence()
+  return Object.assign(
+    (
+      projects: readonly FixtureProject[],
+      observedAt: number,
+      configuration?: FixtureConfiguration,
+    ) => sourceFixture(projects, observedAt, { nextReadSequence, configuration }),
+    { nextReadSequence },
+  )
+}
+
+// Construct fresh simulated reads with the caller's explicit owner-local allocator.
+function sourceFixture(
+  projects: readonly FixtureProject[],
   observedAt: number,
-  configuration?: {
-    readonly projects: readonly (
-      | LocalProjectIntent
-      | Pick<GitHubProjectIntent, 'ref' | 'connectionId' | 'locator'>
-    )[]
-  },
+  options: { nextReadSequence: () => number; configuration?: FixtureConfiguration },
 ): ObservationBatch {
+  const { nextReadSequence, configuration } = options
   const attempts: ObservationAttempt[] = []
   for (const project of projects) {
     const registration = configuration?.projects.find(
@@ -87,12 +207,14 @@ export function sourceFixture(
     } as const
     attempts.push({
       ...common,
+      readSequence: nextReadSequence(),
       scope: { kind: 'project', project: project.key },
       value: { key: project.key, name: project.name, source, warnings: project.warnings },
     })
     const maps = [...project.openMaps, ...project.closedMaps]
     attempts.push({
       ...common,
+      readSequence: nextReadSequence(),
       provenance: provenance(
         source.integration === 'local' ? join(source.path, '.wayfinder') : undefined,
         'enumerate',
@@ -107,6 +229,7 @@ export function sourceFixture(
       attempts.push(
         {
           ...common,
+          readSequence: nextReadSequence(),
           provenance: provenance(
             destination.kind === 'file' ? destination.path : undefined,
             'read',
@@ -129,6 +252,7 @@ export function sourceFixture(
         },
         {
           ...common,
+          readSequence: nextReadSequence(),
           provenance: provenance(
             source.integration === 'local'
               ? join(dirname(resolve(source.path, map.id)), 'tickets')
@@ -153,6 +277,7 @@ export function sourceFixture(
         )
         attempts.push({
           ...common,
+          readSequence: nextReadSequence(),
           provenance: ticketProvenance,
           scope: { kind: 'ticket', ticket: ticketKey },
           value: {
@@ -186,14 +311,14 @@ export function sourceFixture(
 }
 
 function mapSource(
-  map: WayfinderMap,
+  map: FixtureMap,
 ): { kind: 'file'; path: string } | { kind: 'issue'; url: string } {
   if (map.sourcePath) return { kind: 'file', path: map.sourcePath }
   if (map.url) return { kind: 'issue', url: map.url }
   throw new Error('Test map requires an explicit source destination.')
 }
 
-function ticketSource(ticket: Ticket): SourceTicketContent['source'] {
+function ticketSource(ticket: FixtureTicket): SourceTicketContent['source'] {
   if (ticket.sourcePath) return { kind: 'file', path: ticket.sourcePath }
   if (ticket.url) return { kind: 'issue', url: ticket.url }
   throw new Error('Test ticket requires an explicit source destination.')
@@ -331,6 +456,7 @@ export function controlledSourceFixture(
     observer,
     started: starting.promise,
     push(batch: ObservationBatch, health: SourceObservationHealth = current.health) {
+      // Supplied operation identities also cover intentional replay; never renumber them.
       current = { project, attempts: batch.attempts, health }
       for (const listener of listeners) listener(current)
     },

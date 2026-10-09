@@ -1,4 +1,4 @@
-import type { ApplicationState, Project, ProjectKey } from '@roadmap/contracts'
+import type { ApplicationState, ProjectKey } from '@roadmap/contracts'
 import { stateEnvelopeCodec } from '@roadmap/contracts/codecs'
 import { describe, expect, it } from 'vitest'
 import type { ConfigurationDocument, ConfigurationRead } from '../configuration/document.ts'
@@ -10,8 +10,11 @@ import { refineSourceContribution, type SourceContribution } from '../observatio
 import type { ProjectConfiguration } from '../projects/registry.ts'
 import {
   controlledSourceFixture,
+  createSourceFixtureOwner,
+  type FixtureProject,
   fixtureAdmissions,
-  sourceFixture,
+  publicMapObservation,
+  publicProjectObservation,
 } from '../source-test-fixtures.ts'
 import { createRoadmapApplication } from './application.ts'
 import { createApplicationOperations } from './operations.ts'
@@ -43,7 +46,7 @@ const FAILURES: ReadonlyArray<{
   { mode: 'mismatch', initialHealth: 'available' },
 ]
 
-function localContent(name: string): Project {
+function localContent(name: string): FixtureProject {
   return {
     key: LOCAL,
     name,
@@ -60,10 +63,8 @@ function fixture(initialMode: ProviderMode) {
   let savedCredentials = INITIAL_CREDENTIALS
   const providerReads: Array<{ path: string; token: string; at: number }> = []
   const states: ApplicationState[] = []
-  const local = controlledSourceFixture(
-    LOCAL,
-    sourceFixture([localContent('Local baseline')], 1000),
-  )
+  const readLocal = createSourceFixtureOwner()
+  const local = controlledSourceFixture(LOCAL, readLocal([localContent('Local baseline')], 1000))
   let configuration: ProjectConfiguration = {
     schemaVersion: 6,
     configurationVersion: 1,
@@ -245,7 +246,7 @@ function fixture(initialMode: ProviderMode) {
       mode = nextMode
     },
     updateLocal() {
-      local.push(sourceFixture([localContent('Local changed independently')], 5000), {
+      local.push(readLocal([localContent('Local changed independently')], 5000), {
         status: 'available',
         observedAt: 5000,
       })
@@ -295,10 +296,9 @@ describe('public successful source observation time', () => {
         const { connection, project } = remoteState(state)
         expect(connection.availability.status).toBe(initialHealth)
         expect(connection.availability.observedAt).toBeUndefined()
-        expect(project.availability.status).toBe('unavailable')
-        expect(project.availability.observedAt).toBeUndefined()
-        expect(project.openMaps).toEqual([])
-        expect(state.roadmap.unreachable.some((value) => value.project.id === REMOTE.id)).toBe(true)
+        expect(project.resource.kind).toBe('never-observed')
+        expect(publicProjectObservation(project)).toBeNull()
+        expect(project.maps).toEqual([])
         expectConfiguredFacts(state)
         expect(test.providerReads).toEqual([
           { path: '/repositories/42', token: INITIAL_CREDENTIALS.accessToken, at: 1000 },
@@ -326,9 +326,9 @@ describe('public successful source observation time', () => {
         const { connection, project } = remoteState(state)
         expect(connection.availability).toMatchObject({ status: 'unavailable' })
         expect(connection.availability).not.toHaveProperty('observedAt')
-        expect(project.availability).toMatchObject({ status: 'unavailable' })
-        expect(project.availability).not.toHaveProperty('observedAt')
-        expect(project.openMaps).toEqual([])
+        expect(project.resource.kind).toBe('never-observed')
+        expect(publicProjectObservation(project)).toBeNull()
+        expect(project.maps).toEqual([])
         expectConfiguredFacts(state)
       }
       expect(test.credentials()).toEqual(REFRESHED_CREDENTIALS)
@@ -337,7 +337,10 @@ describe('public successful source observation time', () => {
       expect((await test.refresh()).ok).toBe(true)
       const recovered = remoteState(test.application.current())
       expect(recovered.connection.availability).toEqual({ status: 'available', observedAt: 5000 })
-      expect(recovered.project.availability).toEqual({ status: 'available', observedAt: 5000 })
+      expect(recovered.project.resource).toMatchObject({
+        kind: 'current-readable',
+        observation: { observedAt: 5000 },
+      })
 
       for (const time of [6000, 7000]) {
         test.at(time, 'transient')
@@ -348,11 +351,13 @@ describe('public successful source observation time', () => {
         status: 'degraded',
         observedAt: 5000,
       })
-      expect(retained.project.availability).toMatchObject({
-        status: 'unavailable',
-        observedAt: 5000,
+      expect(retained.project.resource).toMatchObject({
+        kind: 'retained-unavailable',
+        lastSuccessful: { observedAt: 5000 },
       })
-      expect(retained.project.openMaps).toEqual(recovered.project.openMaps)
+      expect(retained.project.maps.map((map) => publicMapObservation(map)?.value)).toEqual(
+        recovered.project.maps.map((map) => publicMapObservation(map)?.value),
+      )
 
       for (const published of test.states) {
         const envelope: unknown = JSON.parse(JSON.stringify({ type: 'state', state: published }))
@@ -374,21 +379,26 @@ describe('public successful source observation time', () => {
         await test.application.start()
         const baseline = remoteState(test.application.current())
         expect(baseline.connection.availability).toEqual({ status: 'available', observedAt: 1000 })
-        expect(baseline.project.availability).toEqual({ status: 'available', observedAt: 1000 })
-        expect(baseline.project.openMaps).toHaveLength(1)
-        expect(baseline.project.openMaps[0]?.ticketsComplete).toBe(true)
-        const successfulMaps = baseline.project.openMaps
+        expect(baseline.project.resource).toMatchObject({
+          kind: 'current-readable',
+          observation: { observedAt: 1000 },
+        })
+        expect(baseline.project.maps).toHaveLength(1)
+        expect(baseline.project.maps[0]?.ticketsMembership.kind).toBe('current-complete')
+        const successfulMaps = baseline.project.maps.map((map) => publicMapObservation(map)?.value)
         const afterSuccess = test.states.length
 
         test.at(2000, mode)
         expect((await test.refresh()).ok).toBe(true)
         const failed = remoteState(test.application.current())
         expect(failed.connection.availability.observedAt).toBe(1000)
-        expect(failed.project.availability).toMatchObject({
-          status: 'unavailable',
-          observedAt: 1000,
+        expect(failed.project.resource).toMatchObject({
+          kind: 'retained-unavailable',
+          lastSuccessful: { observedAt: 1000 },
         })
-        expect(failed.project.openMaps).toEqual(successfulMaps)
+        expect(failed.project.maps.map((map) => publicMapObservation(map)?.value)).toEqual(
+          successfulMaps,
+        )
         expectConfiguredFacts(test.application.current())
 
         test.at(3000, mode)
@@ -401,20 +411,25 @@ describe('public successful source observation time', () => {
         })
         const credentialUpdated = remoteState(test.application.current())
         expect(credentialUpdated.connection.availability.observedAt).toBe(1000)
-        expect(credentialUpdated.project.availability.observedAt).toBe(1000)
+        expect(publicProjectObservation(credentialUpdated.project)?.observedAt).toBe(1000)
         expectConfiguredFacts(test.application.current())
         for (const published of test.states.slice(afterSuccess)) {
           const remote = remoteState(published)
           expect(remote.connection.availability.observedAt).toBe(1000)
-          expect(remote.project.availability.observedAt).toBe(1000)
+          expect(publicProjectObservation(remote.project)?.observedAt).toBe(1000)
         }
 
         test.at(4000, 'complete')
         expect((await test.refresh()).ok).toBe(true)
         const recovered = remoteState(test.application.current())
         expect(recovered.connection.availability).toEqual({ status: 'available', observedAt: 4000 })
-        expect(recovered.project.availability).toEqual({ status: 'available', observedAt: 4000 })
-        expect(recovered.project.openMaps).toEqual(successfulMaps)
+        expect(recovered.project.resource).toMatchObject({
+          kind: 'current-readable',
+          observation: { observedAt: 4000 },
+        })
+        expect(recovered.project.maps.map((map) => publicMapObservation(map)?.value)).toEqual(
+          successfulMaps,
+        )
         const afterRecovery = test.states.length
         const remoteReadCount = test.providerReads.length
 
@@ -422,18 +437,19 @@ describe('public successful source observation time', () => {
         test.updateLocal()
         const unrelated = test.application.current()
         expect(unrelated.projects.find((value) => value.key.id === LOCAL.id)).toMatchObject({
-          availability: { status: 'available', observedAt: 5000 },
+          resource: { kind: 'current-readable', observation: { observedAt: 5000 } },
         })
-        expect(unrelated.roadmap.projects.find((value) => value.key.id === LOCAL.id)?.name).toBe(
+        const localProject = unrelated.projects.find((value) => value.key.id === LOCAL.id)
+        expect(localProject && publicProjectObservation(localProject)?.value.name).toBe(
           'Local changed independently',
         )
         expect(unrelated.roadmap.capturedAt).toBe(5000)
         expect(test.providerReads).toHaveLength(remoteReadCount)
         expect(remoteState(unrelated).connection.availability.observedAt).toBe(4000)
-        expect(remoteState(unrelated).project.availability.observedAt).toBe(4000)
+        expect(publicProjectObservation(remoteState(unrelated).project)?.observedAt).toBe(4000)
         for (const published of test.states.slice(afterRecovery)) {
           expect(remoteState(published).connection.availability.observedAt).toBe(4000)
-          expect(remoteState(published).project.availability.observedAt).toBe(4000)
+          expect(publicProjectObservation(remoteState(published).project)?.observedAt).toBe(4000)
         }
       } finally {
         await test.application.stop()
@@ -448,15 +464,156 @@ describe('public successful source observation time', () => {
       const state = test.application.current()
       const { connection, project } = remoteState(state)
       expect(connection.availability).toEqual({ status: 'available', observedAt: 1000 })
-      expect(project.availability.status).toBe('unavailable')
-      expect(project.availability.observedAt).toBeUndefined()
-      expect(project.openMaps[0]).toMatchObject({ id: '108', ticketsComplete: false })
-      expect(
-        state.roadmap.unreachable.some(
-          (value) => value.project.id === REMOTE.id && value.mapId === '108',
-        ),
-      ).toBe(true)
+      expect(project.resource).toMatchObject({
+        kind: 'current-readable',
+        observation: { observedAt: 1000 },
+      })
+      expect(project.maps[0]).toMatchObject({
+        key: { project: REMOTE, mapId: '108' },
+        resource: { kind: 'current-readable' },
+        ticketsMembership: { kind: 'current-incomplete' },
+      })
+      expect(project.activeMap).toMatchObject({ kind: 'uncertain', reason: 'map-incomplete' })
       expectConfiguredFacts(state)
+    } finally {
+      await test.application.stop()
+    }
+  })
+
+  // Catches content deduplication hiding a real read and later publication/failure inventing freshness.
+  it('advances every identical successful resource read and retains only the actual last-success time', async () => {
+    const test = fixture('complete')
+    try {
+      await test.application.start()
+      for (const time of [2000, 3000, 4000]) {
+        test.at(time, 'complete')
+        expect((await test.refresh()).ok).toBe(true)
+        expect(remoteState(test.application.current()).project).toMatchObject({
+          resource: {
+            kind: 'current-readable',
+            observation: {
+              attemptedAt: time,
+              observedAt: time,
+              provenance: {
+                integration: 'github',
+                connectionId: 'work',
+                repositoryId: '42',
+                stage: 'repository',
+              },
+              value: {
+                source: {
+                  integration: 'github',
+                  repositoryId: '42',
+                  nameWithOwner: 'Acme/Roadmap',
+                  url: 'https://github.com/Acme/Roadmap',
+                },
+              },
+            },
+          },
+          maps: [
+            {
+              key: { project: REMOTE, mapId: '108' },
+              resource: {
+                kind: 'current-readable',
+                observation: {
+                  attemptedAt: time,
+                  observedAt: time,
+                  provenance: {
+                    integration: 'github',
+                    connectionId: 'work',
+                    repositoryId: '42',
+                    stage: 'map-read',
+                  },
+                  value: {
+                    body: { raw: '## Destination\n\nKeep truthful source observation time.\n' },
+                  },
+                },
+              },
+            },
+          ],
+        })
+      }
+      test.at(5000, 'transient')
+      expect((await test.refresh()).ok).toBe(true)
+      expect(remoteState(test.application.current()).project).toMatchObject({
+        resource: {
+          kind: 'retained-unavailable',
+          lastSuccessful: { observedAt: 4000 },
+          unavailable: {
+            scope: { kind: 'project', project: REMOTE },
+            attemptedAt: 5000,
+            failure: { kind: 'transient', cause: 'network' },
+          },
+        },
+        maps: [
+          {
+            resource: {
+              kind: 'retained-unavailable',
+              lastSuccessful: { observedAt: 4000 },
+              unavailable: { scope: { kind: 'project', project: REMOTE }, attemptedAt: 5000 },
+            },
+          },
+        ],
+      })
+      test.at(6000, 'transient')
+      test.updateLocal()
+      expect(test.application.current().roadmap.capturedAt).toBe(6000)
+      expect(remoteState(test.application.current()).project).toMatchObject({
+        resource: {
+          kind: 'retained-unavailable',
+          lastSuccessful: { observedAt: 4000 },
+          unavailable: { attemptedAt: 5000 },
+        },
+        maps: [
+          {
+            resource: {
+              kind: 'retained-unavailable',
+              lastSuccessful: { observedAt: 4000 },
+              unavailable: { attemptedAt: 5000 },
+            },
+          },
+        ],
+      })
+    } finally {
+      await test.application.stop()
+    }
+  })
+
+  // Catches a readable incomplete child changing the Project metadata's own read phase or time.
+  it('keeps parent metadata and incomplete map membership freshness independently scoped', async () => {
+    const test = fixture('incomplete')
+    try {
+      await test.application.start()
+      expect(remoteState(test.application.current()).project).toMatchObject({
+        resource: {
+          kind: 'current-readable',
+          observation: { observedAt: 1000, completeness: { kind: 'complete' } },
+        },
+        activeMap: { kind: 'uncertain' },
+        maps: [
+          {
+            resource: {
+              kind: 'current-readable',
+              observation: {
+                observedAt: 1000,
+                value: {
+                  body: { raw: '## Destination\n\nKeep truthful source observation time.\n' },
+                  progress: { total: 0, completed: 0 },
+                },
+              },
+            },
+            ticketsMembership: {
+              kind: 'current-incomplete',
+              observation: {
+                observedAt: 1000,
+                completeness: { kind: 'incomplete', reason: 'pagination' },
+              },
+              lastComplete: null,
+            },
+            tickets: [],
+          },
+        ],
+      })
     } finally {
       await test.application.stop()
     }
@@ -464,9 +621,10 @@ describe('public successful source observation time', () => {
 })
 
 describe('successful source health refinement', () => {
+  const read = createSourceFixtureOwner()
   const baseline: SourceContribution = {
     project: LOCAL,
-    attempts: sourceFixture([localContent('Known source')], 1000).attempts,
+    attempts: read([localContent('Known source')], 1000).attempts,
     health: { status: 'available', observedAt: 1000 },
   }
   const failure: SourceContribution = {
@@ -474,6 +632,7 @@ describe('successful source health refinement', () => {
     attempts: [
       {
         kind: 'failed',
+        readSequence: read.nextReadSequence(),
         scope: { kind: 'project', project: LOCAL },
         attemptedAt: 2000,
         provenance: { integration: 'local', path: '/source-time/local', operation: 'inspect-root' },
@@ -531,7 +690,12 @@ describe('successful source health refinement', () => {
       health: { status: 'available', observedAt: 1000 },
       attempts: baseline.attempts.map((attempt) =>
         attempt.kind === 'observed' && attempt.scope.kind === 'project'
-          ? { ...attempt, attemptedAt: 2000, observedAt: 2000 }
+          ? {
+              ...attempt,
+              readSequence: read.nextReadSequence(),
+              attemptedAt: 2000,
+              observedAt: 2000,
+            }
           : attempt,
       ),
     }
@@ -553,6 +717,7 @@ describe('successful source health refinement', () => {
   it('accepts genuine success with incomplete membership without asserting resource completeness', () => {
     const unknownMap = {
       kind: 'observed',
+      readSequence: read.nextReadSequence(),
       scope: { kind: 'map', map: { project: LOCAL, mapId: 'unknown-map' } },
       attemptedAt: 1000,
       observedAt: 1000,
@@ -586,6 +751,7 @@ describe('successful source health refinement', () => {
           attempt.kind === 'observed' && attempt.scope.kind === 'maps-membership'
             ? {
                 ...attempt,
+                readSequence: read.nextReadSequence(),
                 completeness: { kind: 'incomplete', reason: 'unreadable' },
                 value: { members: [{ project: LOCAL, mapId: 'unknown-map' }] },
               }

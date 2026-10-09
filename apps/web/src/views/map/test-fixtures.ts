@@ -1,18 +1,38 @@
 import type {
   Blocker,
   MapBody,
+  MapResource,
+  MapResourceResult,
   ProjectKey,
-  Ticket,
+  RegisteredProject,
+  TicketResource,
+  TicketResourceResult,
   TicketState,
   TicketType,
-  WayfinderMap,
 } from '@roadmap/contracts'
 import type { RoadmapStore, RoadmapStoreSnapshot } from '@/store/roadmap-store'
 
-/** Map-view fixtures build snapshot-shaped maps from shorthand. */
+type TicketValue = Extract<
+  TicketResourceResult,
+  { kind: 'current-readable' }
+>['observation']['value']
+type MapValue = Extract<MapResourceResult, { kind: 'current-readable' }>['observation']['value']
 
 const HOME = 'me/repo'
 const HOME_PROJECT: ProjectKey = { integration: 'github', id: 'project-home' }
+const HOME_MAP: MapResource['key'] = { project: HOME_PROJECT, mapId: '1' }
+
+function provenance(source: TicketValue['source'], project: ProjectKey) {
+  return source.kind === 'file'
+    ? ({ integration: 'local', path: source.path, operation: 'read' } as const)
+    : ({
+        integration: 'github',
+        connectionId: 'connection-home',
+        repositoryId: project.id,
+        stage: 'map-read',
+      } as const)
+}
+
 export function blocker(
   id: number | string,
   open: boolean = true,
@@ -42,13 +62,14 @@ export function ticket(
   closedAt?: number,
   createdAt = 0,
   type: TicketType = 'task',
-): Ticket {
+  overrides: Partial<TicketValue> = {},
+): TicketResource {
   const value = String(id)
-  return {
-    id: value,
+  const content: TicketValue = {
     displayId: `#${value}`,
     title: `Ticket ${value}`,
-    url: `https://example.test/${HOME}/${value}`,
+    source: { kind: 'issue', url: `https://example.test/${HOME}/${value}` },
+    status: state === 'closed' ? 'closed' : 'open',
     body: '',
     typeEvidence:
       type === 'untyped'
@@ -56,13 +77,29 @@ export function ticket(
         : { kind: 'recognized', value: type, labels: [type] },
     state,
     isClaimed: state === 'claimed',
-    isBlocked: blockedBy.some((b) => b.state !== 'closed'),
+    isBlocked: blockedBy.some((blocker) => blocker.state !== 'closed'),
     createdAt,
-    closedAt,
+    ...(closedAt === undefined ? {} : { closedAt }),
     assignees: [],
     blockedBy,
     blockersComplete: true,
     warnings: [],
+    ...overrides,
+  }
+  const key = { map: HOME_MAP, ticketId: value }
+  return {
+    key,
+    resource: {
+      kind: 'current-readable',
+      observation: {
+        scope: { kind: 'ticket', ticket: key },
+        attemptedAt: 0,
+        observedAt: 0,
+        provenance: provenance(content.source, key.map.project),
+        completeness: { kind: 'complete' },
+        value: content,
+      },
+    },
   }
 }
 
@@ -81,28 +118,83 @@ function body(overrides: Partial<MapBody> = {}): MapBody {
   }
 }
 
-export function makeMap(tickets: Ticket[], bodyOverrides: Partial<MapBody> = {}): WayfinderMap {
-  return {
-    project: HOME_PROJECT,
-    id: '1',
+export function makeMap(
+  tickets: TicketResource[],
+  bodyOverrides: Partial<MapBody> = {},
+  key: MapResource['key'] = HOME_MAP,
+  overrides: Partial<MapValue> = {},
+): MapResource {
+  const content: MapValue = {
     displayId: '#1',
     title: 'Test map',
-    url: `https://example.test/${HOME}/1`,
-    isOpen: true,
+    source: { kind: 'issue', url: `https://example.test/${HOME}/1` },
+    status: 'open',
     updatedAt: 0,
     body: body(bodyOverrides),
-    tickets,
-    frontier: tickets.filter((t) => t.state === 'frontier'),
     progress: {
       total: tickets.length,
-      completed: tickets.filter((t) => t.state === 'closed').length,
+      completed: tickets.filter(
+        (ticket) =>
+          ticket.resource.kind === 'current-readable' &&
+          ticket.resource.observation.value.state === 'closed',
+      ).length,
     },
-    ticketsComplete: true,
     warnings: [],
+    ...overrides,
+  }
+  const scopedTickets = tickets.map((ticket): TicketResource => {
+    const scopedKey = { map: key, ticketId: ticket.key.ticketId }
+    if (ticket.resource.kind !== 'current-readable') return ticket
+    return {
+      key: scopedKey,
+      resource: {
+        ...ticket.resource,
+        observation: {
+          ...ticket.resource.observation,
+          scope: { kind: 'ticket', ticket: scopedKey },
+          provenance: provenance(ticket.resource.observation.value.source, key.project),
+        },
+      },
+    }
+  })
+  return {
+    key,
+    resource: {
+      kind: 'current-readable',
+      observation: {
+        scope: { kind: 'map', map: key },
+        attemptedAt: 0,
+        observedAt: 0,
+        provenance: provenance(content.source, key.project),
+        completeness: { kind: 'complete' },
+        value: content,
+      },
+    },
+    tickets: scopedTickets,
+    ticketsMembership: {
+      kind: 'current-complete',
+      observation: {
+        scope: { kind: 'tickets-membership', map: key },
+        attemptedAt: 0,
+        observedAt: 0,
+        provenance:
+          content.source.kind === 'file'
+            ? {
+                integration: 'local',
+                path:
+                  content.source.path.substring(0, content.source.path.lastIndexOf('/')) +
+                  '/tickets',
+                operation: 'enumerate',
+              }
+            : provenance(content.source, key.project),
+        completeness: { kind: 'complete' },
+        value: { members: scopedTickets.map((ticket) => ticket.key) },
+      },
+    },
   }
 }
 
-export function makeRoadmapStore(): RoadmapStore {
+export function makeRoadmapStore(projects: RegisteredProject[] = []): RoadmapStore {
   const snapshot: RoadmapStoreSnapshot = {
     transport: 'live',
     synchronization: 'synchronized',
@@ -114,7 +206,7 @@ export function makeRoadmapStore(): RoadmapStore {
       supportedIntegrations: [],
       connections: [],
       registrations: [],
-      projects: [],
+      projects,
       authorizationOperations: [],
       configuration: { valid: true, issues: [], notices: [] },
       automation: {
@@ -124,7 +216,7 @@ export function makeRoadmapStore(): RoadmapStore {
         evidence: [],
         overrides: [],
       },
-      roadmap: { capturedAt: 0, projects: [], unreachable: [] },
+      roadmap: { capturedAt: 0 },
     },
   }
   return {

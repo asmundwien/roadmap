@@ -112,8 +112,7 @@ export function ManageSection({ project, connectionExists }: ManageSectionProps)
             </Button>
           </ControlGroup>
         </Surface>
-        {(project.availability.status === 'unavailable' ||
-          !project.actions.some((action) => action.id === 'open-workspace')) && (
+        {!project.actions.some((action) => action.id === 'open-workspace') && (
           <Surface>
             <SurfaceTitle>Moved Workspace</SurfaceTitle>
             <p>

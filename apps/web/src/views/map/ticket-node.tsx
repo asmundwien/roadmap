@@ -1,4 +1,4 @@
-import { type Ticket, ticketTypeOf } from '@roadmap/contracts'
+import { ticketTypeOf } from '@roadmap/contracts'
 import { Badge } from '@roadmap/ui/badge'
 import { Button } from '@roadmap/ui/button'
 import { Link } from '@roadmap/ui/link'
@@ -7,6 +7,7 @@ import { Handle, type NodeProps, Position } from '@xyflow/react'
 import classNames from 'classnames/bind'
 import { createContext, memo, useContext } from 'react'
 import { stripInlineMarkdown } from '@/views/shared/gist'
+import { resourceMessage } from '@/views/shared/resource-results'
 import { TicketMark } from '@/views/shared/ticket-mark'
 import { TICKET_STATE_META, TICKET_TYPE_META } from '@/views/shared/ticket-presentation'
 import type { MapNode } from './graph'
@@ -126,12 +127,13 @@ function BlockerCard({ data }: BlockerCardProps) {
 }
 
 type TicketCardProps = {
-  ticket: Ticket
+  data: Extract<MapNode['data'], { kind: 'ticket' }>
 }
 
-function TicketCard({ ticket }: TicketCardProps) {
+function TicketCard({ data }: TicketCardProps) {
   const onOpenTicket = useContext(TicketOpenContext)
-  const identity = ticket.displayId ?? ticket.id
+  const ticket = data.observation.value
+  const identity = ticket.displayId ?? data.ticket.key.ticketId
   const title = stripInlineMarkdown(ticket.title ?? '').trim() || 'Untitled ticket'
   const type = ticketTypeOf(ticket.typeEvidence)
   const stateMeta = TICKET_STATE_META[ticket.state]
@@ -170,10 +172,17 @@ function TicketCard({ ticket }: TicketCardProps) {
           </span>
         )}
       </p>
+      <p className={cx('metadata')} title={resourceMessage(data.ticket.resource)}>
+        {data.ticket.resource.kind === 'proven-absent'
+          ? 'Historical, proven absent'
+          : data.ticket.resource.kind === 'retained-unavailable'
+            ? 'Unavailable, retained content'
+            : 'Current readable content'}
+      </p>
       <div className={cx('actions', 'nodrag', 'nopan')}>
         <Button
           size="small"
-          onClick={() => onOpenTicket?.(ticket.id)}
+          onClick={() => onOpenTicket?.(data.ticket.key.ticketId)}
           disabled={!onOpenTicket}
           aria-label={`Open ${identity}: ${title}`}
         >
@@ -185,5 +194,5 @@ function TicketCard({ ticket }: TicketCardProps) {
 }
 
 export const TicketNode = memo(function TicketNode({ data }: TicketNodeProps) {
-  return data.kind === 'blocker' ? <BlockerCard data={data} /> : <TicketCard ticket={data.ticket} />
+  return data.kind === 'blocker' ? <BlockerCard data={data} /> : <TicketCard data={data} />
 })

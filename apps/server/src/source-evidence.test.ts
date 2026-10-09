@@ -1,21 +1,28 @@
 import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { ApplicationState, Project } from '@roadmap/contracts'
+import type { ApplicationState } from '@roadmap/contracts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRoadmapApplication, type RoadmapApplication } from './application/application.ts'
+import { createApplicationOperations } from './application/operations.ts'
 import type { ConfigurationDocument } from './configuration/document.ts'
 import { createLocalObserver } from './local/observer.ts'
 import {
+  absentAttempt,
+  failedAttempt,
   type ObservationBatch,
+  observedAttempt,
   refineObservationAttempt,
   type SourceObservationHealth,
 } from './observation/source.ts'
 import type { ProjectConfiguration } from './projects/registry.ts'
 import {
   controlledSourceFixture,
+  createFixtureReadSequence,
+  createSourceFixtureOwner,
+  type FixtureProject,
   fixtureAdmissions,
-  sourceFixture,
+  publicProjectObservation,
 } from './source-test-fixtures.ts'
 
 const roots: string[] = []
@@ -137,7 +144,7 @@ async function reconcile(application: RoadmapApplication, time = 2_000): Promise
 }
 
 async function controlledEvidenceApplication() {
-  const local: Project = {
+  const local: FixtureProject = {
     key: { integration: 'local', id: 'local-evidence' },
     name: 'Local evidence',
     sourcePath: '/tmp/local-evidence',
@@ -145,7 +152,7 @@ async function controlledEvidenceApplication() {
     closedMaps: [],
     warnings: [],
   }
-  const github: Project = {
+  const github: FixtureProject = {
     key: { integration: 'github', id: 'remote-evidence' },
     name: 'acme/remote',
     sourceUrl: 'https://github.com/acme/remote',
@@ -182,8 +189,10 @@ async function controlledEvidenceApplication() {
     ],
     automation: { enabled: false, enabledProjects: [] },
   }
-  const localControl = controlledSourceFixture(local.key, sourceFixture([local], 800, document))
-  const remoteControl = controlledSourceFixture(github.key, sourceFixture([github], 900, document))
+  const readLocal = createSourceFixtureOwner()
+  const readGitHub = createSourceFixtureOwner()
+  const localControl = controlledSourceFixture(local.key, readLocal([local], 800, document))
+  const remoteControl = controlledSourceFixture(github.key, readGitHub([github], 900, document))
   const states: ApplicationState[] = []
   const application = createRoadmapApplication({
     configuration: {
@@ -199,6 +208,7 @@ async function controlledEvidenceApplication() {
       async stop() {},
     },
     admissions: fixtureAdmissions,
+    operations: createApplicationOperations(),
     observers: { local: () => localControl.observer, github: () => remoteControl.observer },
     serverEpoch: 'controlled-source-evidence',
   })
@@ -211,6 +221,9 @@ async function controlledEvidenceApplication() {
     local,
     github,
     configuration: document,
+    readLocal,
+    readGitHub,
+    localControl,
     push(integration: 'local' | 'github', batch: ObservationBatch) {
       if (integration === 'local') localControl.push(batch)
       else remoteControl.push(batch, remoteHealth)
@@ -220,6 +233,10 @@ async function controlledEvidenceApplication() {
     },
   }
 }
+function sourceTime(state: ApplicationState, integration: 'local' | 'github') {
+  const project = state.projects.find((project) => project.key.integration === integration)
+  return project ? publicProjectObservation(project)?.observedAt : undefined
+}
 
 describe('source evidence through RoadmapApplication', () => {
   it('advances only the successfully observed source when unchanged content is read again', async () => {
@@ -228,28 +245,16 @@ describe('source evidence through RoadmapApplication', () => {
     vi.setSystemTime(2_000)
     controlled.push(
       'local',
-      sourceFixture([{ ...local, warnings: ['Local-only content change.'] }], 1_800),
+      controlled.readLocal([{ ...local, warnings: ['Local-only content change.'] }], 1_800),
     )
-    expect(
-      application.current().projects.find((project) => project.key.integration === 'local')
-        ?.availability.observedAt,
-    ).toBe(1_800)
-    expect(
-      application.current().projects.find((project) => project.key.integration === 'github')
-        ?.availability.observedAt,
-    ).toBe(900)
+    expect(sourceTime(application.current(), 'local')).toBe(1_800)
+    expect(sourceTime(application.current(), 'github')).toBe(900)
     expect(application.current().roadmap.capturedAt).toBe(2_000)
 
     vi.setSystemTime(3_000)
-    controlled.push('github', sourceFixture([github], 2_500, configuration))
-    expect(
-      application.current().projects.find((project) => project.key.integration === 'github')
-        ?.availability.observedAt,
-    ).toBe(2_500)
-    expect(
-      application.current().projects.find((project) => project.key.integration === 'local')
-        ?.availability.observedAt,
-    ).toBe(1_800)
+    controlled.push('github', controlled.readGitHub([github], 2_500, configuration))
+    expect(sourceTime(application.current(), 'github')).toBe(2_500)
+    expect(sourceTime(application.current(), 'local')).toBe(1_800)
     expect(
       application.current().connections.find((connection) => connection.id === 'github')
         ?.availability.observedAt,
@@ -258,10 +263,8 @@ describe('source evidence through RoadmapApplication', () => {
     expect(
       states.map((state) => ({
         publication: state.roadmap.capturedAt,
-        local: state.projects.find((project) => project.key.integration === 'local')?.availability
-          .observedAt,
-        github: state.projects.find((project) => project.key.integration === 'github')?.availability
-          .observedAt,
+        local: sourceTime(state, 'local'),
+        github: sourceTime(state, 'github'),
       })),
     ).toEqual([
       { publication: 1_000, local: 800, github: 900 },
@@ -289,6 +292,7 @@ describe('source evidence through RoadmapApplication', () => {
       attempts: [
         {
           kind: 'failed',
+          readSequence: controlled.readGitHub.nextReadSequence(),
           scope: { kind: 'project', project: github.key },
           attemptedAt: 1_900,
           provenance: {
@@ -305,7 +309,7 @@ describe('source evidence through RoadmapApplication', () => {
     controlled.setGitHubAvailability({ status: 'available', observedAt: 2_900 })
     controlled.push(
       'local',
-      sourceFixture(
+      controlled.readLocal(
         [{ ...local, warnings: ['Independent Local observation during recovery.'] }],
         2_800,
       ),
@@ -316,24 +320,29 @@ describe('source evidence through RoadmapApplication', () => {
       .projects.find((project) => project.key.integration === 'github')
     expect(beforeRecovery).toMatchObject({
       name: 'acme/remote',
-      availability: { status: 'unavailable', observedAt: 900 },
+      resource: {
+        kind: 'retained-unavailable',
+        lastSuccessful: { observedAt: 900 },
+        unavailable: { attemptedAt: 1_900, failure: { kind: 'read', cause: 'response-read' } },
+      },
+      activeMap: { kind: 'uncertain' },
     })
     expect(
-      application.current().roadmap.projects.map((project) => project.key.integration),
-    ).toEqual(['local'])
+      application.current().projects.find((project) => project.key.integration === 'local')
+        ?.resource.kind,
+    ).toBe('current-readable')
     for (const state of states.slice(1)) {
       expect(state.projects.find((project) => project.key.integration === 'github')).toMatchObject({
         name: 'acme/remote',
-        availability: { status: 'unavailable', observedAt: 900 },
+        resource: { kind: 'retained-unavailable', lastSuccessful: { observedAt: 900 } },
+        activeMap: { kind: 'uncertain' },
       })
-      expect(state.roadmap.projects.some((project) => project.key.integration === 'github')).toBe(
-        false,
-      )
+      expect(sourceTime(state, 'github')).toBe(900)
     }
 
     const recoveryBoundary = states.length
     vi.setSystemTime(4_000)
-    const recovery = sourceFixture([github], 3_800, configuration)
+    const recovery = controlled.readGitHub([github], 3_800, configuration)
     controlled.push('github', {
       attempts: recovery.attempts.map((attempt) =>
         attempt.kind === 'observed' && attempt.scope.kind === 'maps-membership'
@@ -346,16 +355,15 @@ describe('source evidence through RoadmapApplication', () => {
       expect(state.projects.find((project) => project.key.integration === 'github')).toMatchObject({
         key: { integration: 'github', id: 'remote-evidence' },
         name: 'acme/remote',
-        availability: { status: 'available', observedAt: 3_800 },
+        resource: {
+          kind: 'current-readable',
+          observation: { observedAt: 3_800, value: { name: 'acme/remote' } },
+        },
+        mapsMembership: { kind: 'current-complete', observation: { observedAt: 2_900 } },
+        activeMap: { kind: 'known-empty' },
       })
-      expect(
-        state.roadmap.projects.find((project) => project.key.integration === 'github')?.name,
-      ).toBe('acme/remote')
       expect(state.roadmap.capturedAt).toBe(4_000)
-      expect(
-        state.projects.find((project) => project.key.integration === 'local')?.availability
-          .observedAt,
-      ).toBe(2_800)
+      expect(sourceTime(state, 'local')).toBe(2_800)
       expect(
         state.connections.find((connection) => connection.id === 'github')?.availability.observedAt,
       ).toBe(2_900)
@@ -367,7 +375,7 @@ describe('source evidence through RoadmapApplication', () => {
     await writeMap(root, 'primary', 'Original primary prose.', 200)
     await writeMap(root, 'secondary', 'Original secondary prose.', 100)
     const application = await startApplication(root)
-    expect(application.current().projects[0]?.openMaps.map((map) => map.id)).toEqual([
+    expect(application.current().projects[0]?.displayOrder.openMapIds).toEqual([
       PRIMARY_MAP_ID,
       SECONDARY_MAP_ID,
     ])
@@ -378,35 +386,58 @@ describe('source evidence through RoadmapApplication', () => {
     await reconcile(application)
 
     const project = application.current().projects[0]
-    expect(project?.availability).toMatchObject({ status: 'unavailable', observedAt: 1_000 })
-    expect(project?.openMaps.map((map) => map.id)).toEqual([PRIMARY_MAP_ID, SECONDARY_MAP_ID])
-    expect(project?.openMaps.find((map) => map.id === PRIMARY_MAP_ID)).toMatchObject({
-      body: { destination: 'Original primary prose.' },
+    expect(project).toMatchObject({
+      resource: { kind: 'current-readable', observation: { observedAt: 2_100 } },
+      activeMap: { kind: 'uncertain' },
+      displayOrder: { openMapIds: [PRIMARY_MAP_ID, SECONDARY_MAP_ID] },
+    })
+    expect(project?.maps.find((map) => map.key.mapId === PRIMARY_MAP_ID)).toMatchObject({
+      resource: {
+        kind: 'retained-unavailable',
+        lastSuccessful: {
+          observedAt: 1_000,
+          value: {
+            body: { destination: 'Original primary prose.' },
+            source: { kind: 'file', path: join(root, '.wayfinder', 'primary', 'map.md') },
+          },
+        },
+        unavailable: {
+          kind: 'source-failure',
+          scope: { kind: 'map' },
+          attemptedAt: 2_100,
+          failure: { kind: 'filesystem', operation: 'read' },
+        },
+      },
       tickets: [
         expect.objectContaining({
-          id: '1',
-          body: expect.stringContaining('Ticket prose for primary.'),
+          key: {
+            map: {
+              project: { integration: 'local', id: 'opaque/local-project' },
+              mapId: PRIMARY_MAP_ID,
+            },
+            ticketId: '1',
+          },
+          resource: {
+            kind: 'current-readable',
+            observation: expect.objectContaining({
+              observedAt: 2_100,
+              value: expect.objectContaining({
+                body: expect.stringContaining('Ticket prose for primary.'),
+              }),
+            }),
+          },
         }),
       ],
-      sourcePath: join(root, '.wayfinder', 'primary', 'map.md'),
     })
-    expect(project?.openMaps.find((map) => map.id === SECONDARY_MAP_ID)?.body.destination).toBe(
-      'Updated secondary prose.',
+    expect(project?.maps.find((map) => map.key.mapId === SECONDARY_MAP_ID)?.resource).toMatchObject(
+      {
+        kind: 'current-readable',
+        observation: {
+          observedAt: 2_100,
+          value: { body: { destination: 'Updated secondary prose.' } },
+        },
+      },
     )
-    expect(application.current().roadmap.unreachable).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          project: { integration: 'local', id: 'opaque/local-project' },
-          mapId: PRIMARY_MAP_ID,
-        }),
-      ]),
-    )
-    expect(
-      application
-        .current()
-        .roadmap.projects.flatMap((entry) => entry.openMaps)
-        .map((map) => map.id),
-    ).not.toContain(PRIMARY_MAP_ID)
   })
 
   it('distinguishes never-read map membership from a readable complete empty directory', async () => {
@@ -418,20 +449,22 @@ describe('source evidence through RoadmapApplication', () => {
     const unreadable = await startApplication(unreadableRoot, 'never-read')
     const empty = await startApplication(emptyRoot, 'readable-empty')
 
-    expect(unreadable.current().projects[0]?.availability.status).toBe('unavailable')
-    expect(unreadable.current().projects[0]?.availability.observedAt).toBeUndefined()
-    expect(unreadable.current().projects[0]?.openMaps).toEqual([])
-    expect(unreadable.current().roadmap.unreachable).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ project: { integration: 'local', id: 'never-read' } }),
-      ]),
-    )
-    expect(empty.current().projects[0]?.availability).toEqual({
-      status: 'available',
-      observedAt: 1_000,
+    expect(unreadable.current().projects[0]).toMatchObject({
+      resource: { kind: 'current-readable', observation: { observedAt: 1_000 } },
+      mapsMembership: {
+        kind: 'unavailable',
+        lastComplete: null,
+        unavailable: { kind: 'source-failure', scope: { kind: 'maps-membership' } },
+      },
+      maps: [],
+      activeMap: { kind: 'uncertain' },
     })
-    expect(empty.current().projects[0]?.openMaps).toEqual([])
-    expect(empty.current().roadmap.unreachable).toEqual([])
+    expect(empty.current().projects[0]).toMatchObject({
+      resource: { kind: 'current-readable', observation: { observedAt: 1_000 } },
+      mapsMembership: { kind: 'current-complete', observation: { value: { members: [] } } },
+      maps: [],
+      activeMap: { kind: 'known-empty' },
+    })
   })
 
   it('does not turn failed map-directory enumeration into a fresh empty Project', async () => {
@@ -444,11 +477,20 @@ describe('source evidence through RoadmapApplication', () => {
     await reconcile(application)
 
     const project = application.current().projects[0]
-    expect(project?.availability).toMatchObject({ status: 'unavailable', observedAt: 1_000 })
-    expect(project?.openMaps.find((map) => map.id === PRIMARY_MAP_ID)?.body.destination).toBe(
-      'Retain directory failure prose.',
-    )
-    expect(application.current().roadmap.projects).toEqual([])
+    expect(project).toMatchObject({
+      resource: { kind: 'current-readable', observation: { observedAt: 2_100 } },
+      mapsMembership: { kind: 'unavailable', lastComplete: { observedAt: 1_000 } },
+      activeMap: { kind: 'uncertain' },
+      displayOrder: { openMapIds: [PRIMARY_MAP_ID] },
+    })
+    expect(project?.maps.find((map) => map.key.mapId === PRIMARY_MAP_ID)?.resource).toMatchObject({
+      kind: 'retained-unavailable',
+      lastSuccessful: {
+        observedAt: 1_000,
+        value: { body: { destination: 'Retain directory failure prose.' } },
+      },
+      unavailable: { kind: 'source-failure', scope: { kind: 'maps-membership' } },
+    })
   })
 
   it('preserves historical map and ticket trace after complete scoped membership proves absence', async () => {
@@ -459,26 +501,50 @@ describe('source evidence through RoadmapApplication', () => {
     await rm(join(root, '.wayfinder', 'primary'), { recursive: true })
     await reconcile(application)
 
-    const retained = application
-      .current()
-      .projects[0]?.openMaps.find((map) => map.id === PRIMARY_MAP_ID)
+    const project = application.current().projects[0]
+    const retained = project?.maps.find((map) => map.key.mapId === PRIMARY_MAP_ID)
+    expect(project).toMatchObject({
+      activeMap: { kind: 'known-empty' },
+      displayOrder: { openMapIds: [] },
+      mapsMembership: { kind: 'current-complete', observation: { value: { members: [] } } },
+    })
     expect(retained).toMatchObject({
-      id: PRIMARY_MAP_ID,
-      body: { destination: 'Historical map prose.' },
+      key: { mapId: PRIMARY_MAP_ID },
+      resource: {
+        kind: 'proven-absent',
+        absence: { observedAt: 2_100, proof: { kind: 'complete-membership' } },
+        trace: {
+          kind: 'last-successful-trace',
+          lastSuccessful: {
+            observedAt: 1_000,
+            value: {
+              body: { destination: 'Historical map prose.' },
+              source: { kind: 'file', path: join(root, '.wayfinder', 'primary', 'map.md') },
+            },
+          },
+        },
+      },
       tickets: [
         expect.objectContaining({
-          id: '1',
-          body: expect.stringContaining('Ticket prose for primary.'),
+          key: {
+            ticketId: '1',
+            map: {
+              project: { integration: 'local', id: 'opaque/local-project' },
+              mapId: PRIMARY_MAP_ID,
+            },
+          },
+          resource: expect.objectContaining({
+            kind: 'retained-unavailable',
+            lastSuccessful: expect.objectContaining({
+              observedAt: 1_000,
+              value: expect.objectContaining({
+                body: expect.stringContaining('Ticket prose for primary.'),
+              }),
+            }),
+          }),
         }),
       ],
-      sourcePath: join(root, '.wayfinder', 'primary', 'map.md'),
     })
-    expect(application.current().roadmap.projects.flatMap((project) => project.openMaps)).toEqual(
-      [],
-    )
-    expect(application.current().roadmap.unreachable).toEqual(
-      expect.arrayContaining([expect.objectContaining({ mapId: PRIMARY_MAP_ID })]),
-    )
   })
 
   it('revalidates the same opaque identity after unreadable map content recovers', async () => {
@@ -489,9 +555,16 @@ describe('source evidence through RoadmapApplication', () => {
     await rm(join(root, '.wayfinder', 'primary', 'map.md'))
     await mkdir(join(root, '.wayfinder', 'primary', 'map.md'))
     await reconcile(application)
-    expect(application.current().projects[0]?.availability).toMatchObject({
-      status: 'unavailable',
-      observedAt: 1_000,
+    expect(application.current().projects[0]).toMatchObject({
+      activeMap: { kind: 'uncertain' },
+      maps: [
+        expect.objectContaining({
+          resource: expect.objectContaining({
+            kind: 'retained-unavailable',
+            lastSuccessful: expect.objectContaining({ observedAt: 1_000 }),
+          }),
+        }),
+      ],
     })
 
     await rm(join(root, '.wayfinder', 'primary', 'map.md'), { recursive: true })
@@ -501,12 +574,18 @@ describe('source evidence through RoadmapApplication', () => {
     const recovered = application.current().projects[0]
     expect(recovered).toMatchObject({
       key: { integration: 'local', id: 'opaque/local-project' },
-      availability: { status: 'available', observedAt: 3_100 },
+      resource: { kind: 'current-readable', observation: { observedAt: 3_100 } },
+      activeMap: { kind: 'known-current', mapId: PRIMARY_MAP_ID },
     })
-    expect(recovered?.openMaps.find((map) => map.id === PRIMARY_MAP_ID)?.body.destination).toBe(
-      'Recovered map prose.',
+    expect(recovered?.maps.find((map) => map.key.mapId === PRIMARY_MAP_ID)?.resource).toMatchObject(
+      {
+        kind: 'current-readable',
+        observation: {
+          observedAt: 3_100,
+          value: { body: { destination: 'Recovered map prose.' } },
+        },
+      },
     )
-    expect(application.current().roadmap.unreachable).toEqual([])
   })
 })
 
@@ -514,8 +593,10 @@ describe('source attempt refinement', () => {
   const project = { integration: 'local', id: 'opaque' } as const
   const other = { integration: 'local', id: 'other' } as const
   const provenance = { integration: 'local', path: '/tmp/opaque', operation: 'enumerate' } as const
+  const nextReadSequence = createFixtureReadSequence()
   const membership = {
     kind: 'observed',
+    readSequence: nextReadSequence(),
     scope: { kind: 'maps-membership', project },
     attemptedAt: 10,
     observedAt: 20,
@@ -523,6 +604,65 @@ describe('source attempt refinement', () => {
     completeness: { kind: 'complete' },
     value: { members: [{ project, mapId: '.wayfinder/map/map.md' }] },
   } as const
+  const failure = {
+    kind: 'failed',
+    scope: { kind: 'maps-membership', project },
+    readSequence: nextReadSequence(),
+    attemptedAt: 10,
+    provenance,
+    failure: { kind: 'filesystem', operation: 'enumerate', code: 'EACCES' },
+  } as const
+  const absence = {
+    kind: 'proven-absent',
+    scope: { kind: 'map', map: membership.value.members[0] },
+    readSequence: membership.readSequence,
+    attemptedAt: membership.attemptedAt,
+    observedAt: membership.observedAt,
+    provenance,
+    proof: { kind: 'complete-membership', parent: membership.scope },
+  } as const
+
+  it.each([
+    { kind: 'observed', attempt: membership },
+    { kind: 'failed', attempt: failure },
+    { kind: 'proven-absent', attempt: absence },
+  ])('requires explicit positive safe-integer read identity for $kind evidence', ({ attempt }) => {
+    expect(refineObservationAttempt(attempt)).toEqual(attempt)
+    const { readSequence: _readSequence, ...missingSequence } = attempt
+    expect(refineObservationAttempt(missingSequence)).toBeNull()
+    for (const readSequence of [
+      undefined,
+      0,
+      -1,
+      1.5,
+      Number.MAX_SAFE_INTEGER + 1,
+      Number.NaN,
+      Infinity,
+      '1',
+      null,
+    ]) {
+      expect(refineObservationAttempt({ ...attempt, readSequence })).toBeNull()
+    }
+  })
+
+  it('constructors preserve supplied read identity instead of allocating another operation', () => {
+    const observed = { ...membership, readSequence: Number.MAX_SAFE_INTEGER }
+    const failed = { ...failure, readSequence: 42 }
+    const absent = { ...absence, readSequence: membership.readSequence }
+    expect(observedAttempt(observed)).toBe(observed)
+    expect(observedAttempt(observed)).toBe(observed)
+    expect(failedAttempt(failed)).toBe(failed)
+    expect(absentAttempt(absent)).toBe(absent)
+  })
+
+  it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, Number.NaN, Infinity])(
+    'constructors reject invalid read identity %s',
+    (readSequence) => {
+      expect(() => observedAttempt({ ...membership, readSequence })).toThrow()
+      expect(() => failedAttempt({ ...failure, readSequence })).toThrow()
+      expect(() => absentAttempt({ ...absence, readSequence })).toThrow()
+    },
+  )
 
   it('refuses malformed scope identities rather than creating named failures', () => {
     expect(
@@ -562,6 +702,7 @@ describe('source attempt refinement', () => {
     expect(
       refineObservationAttempt({
         kind: 'proven-absent',
+        readSequence: membership.readSequence,
         scope: { kind: 'map', map: membership.value.members[0] },
         attemptedAt: 10,
         observedAt: 20,
@@ -577,6 +718,7 @@ describe('source attempt refinement', () => {
     expect(
       refineObservationAttempt({
         kind: 'failed',
+        readSequence: nextReadSequence(),
         scope: { kind: 'project', project: { integration: 'github', id: 'opaque' } },
         attemptedAt: 10,
         provenance: {

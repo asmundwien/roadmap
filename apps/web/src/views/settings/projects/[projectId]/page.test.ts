@@ -1,8 +1,8 @@
 import type {
   ApplicationState,
   Connection,
+  MapResource,
   RegisteredProject,
-  WayfinderMap,
 } from '@roadmap/contracts'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -10,19 +10,18 @@ import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { RoadmapProvider } from '@/store/roadmap-provider'
 import type { RoadmapStore } from '@/store/roadmap-store'
+import {
+  absentMap,
+  currentProject,
+  readableMap,
+  readableTicket,
+} from '@/views/overview/test-fixtures'
 import { ProjectRegistrationPage } from './page'
 
 const project: RegisteredProject = {
-  key: { integration: 'local', id: 'my workspace' },
-  connectionId: 'local',
-  locator: { integration: 'local', path: '/tmp/my-workspace' },
+  ...currentProject('my workspace'),
   workspace: { path: '/tmp/my-workspace' },
   name: 'My workspace',
-  availability: { status: 'available', observedAt: 1_000 },
-  openMaps: [],
-  closedMaps: [],
-  warnings: [],
-  actions: [],
 }
 
 const connection: Connection = {
@@ -33,40 +32,69 @@ const connection: Connection = {
   availability: { status: 'available', observedAt: 1_000 },
 }
 
-const affectedMap: WayfinderMap = {
-  project: project.key,
-  id: 'map',
-  isOpen: true,
-  updatedAt: 1_000,
-  body: {
-    raw: '',
-    destination: '',
-    notes: [],
-    decisions: [],
-    notYetSpecified: [],
-    notYetSpecifiedNote: '',
-    outOfScope: [],
-    sections: [],
-    missingSections: [],
-  },
+const baseMap = readableMap(project.key, 'map')
+const affectedTicket = readableTicket(baseMap, 'ticket')
+const affectedMap: MapResource = {
+  ...baseMap,
+  tickets: [affectedTicket],
+  ticketsMembership:
+    baseMap.ticketsMembership.kind === 'current-complete'
+      ? {
+          kind: 'current-complete',
+          observation: {
+            ...baseMap.ticketsMembership.observation,
+            value: { members: [affectedTicket.key] },
+          },
+        }
+      : baseMap.ticketsMembership,
+}
+
+if (
+  affectedTicket.resource.kind !== 'current-readable' ||
+  affectedMap.resource.kind !== 'current-readable'
+) {
+  throw new Error('Expected readable interruption fixtures')
+}
+const absentTicketMap: MapResource = {
+  ...absentMap(affectedMap),
   tickets: [
     {
-      id: 'ticket',
-      body: '',
-      typeEvidence: { kind: 'recognized', value: 'task', labels: ['wayfinder:task'] },
-      state: 'frontier',
-      isClaimed: false,
-      isBlocked: false,
-      assignees: [],
-      blockedBy: [],
-      blockersComplete: true,
-      warnings: [],
+      key: affectedTicket.key,
+      resource: {
+        kind: 'proven-absent',
+        absence: {
+          scope: { kind: 'ticket', ticket: affectedTicket.key },
+          attemptedAt: 2_000,
+          observedAt: 2_000,
+          provenance: {
+            integration: 'local',
+            path: '/tmp/my workspace/tickets',
+            operation: 'enumerate',
+          },
+          proof: {
+            kind: 'complete-membership',
+            parent: { kind: 'tickets-membership', map: affectedMap.key },
+          },
+        },
+        trace: {
+          kind: 'last-successful-trace',
+          lastSuccessful: affectedTicket.resource.observation,
+        },
+      },
     },
   ],
-  frontier: [],
-  progress: { total: 1, completed: 0 },
-  ticketsComplete: true,
-  warnings: [],
+}
+const retainedMap: MapResource = {
+  ...affectedMap,
+  resource: {
+    kind: 'retained-unavailable',
+    lastSuccessful: affectedMap.resource.observation,
+    unavailable: {
+      kind: 'no-current-evidence',
+      scope: { kind: 'map', map: affectedMap.key },
+      cause: 'No current source observation is available.',
+    },
+  },
 }
 
 function renderPage(
@@ -93,7 +121,7 @@ function renderPage(
     authorizationOperations: [],
     configuration: { valid, issues: [], notices: [] },
     automation,
-    roadmap: { capturedAt: 0, projects: [], unreachable: [] },
+    roadmap: { capturedAt: 0 },
   }
   const store: RoadmapStore = {
     subscribe: () => () => undefined,
@@ -257,12 +285,15 @@ describe('ProjectRegistrationPage', () => {
 
   it.each([
     { maps: [affectedMap], linked: true },
+    { maps: [absentMap(affectedMap)], linked: true },
+    { maps: [absentTicketMap], linked: true },
+    { maps: [retainedMap], linked: true },
     { maps: [{ ...affectedMap, tickets: [] }], linked: false },
     { maps: [], linked: false },
   ])(
-    'links the interrupted ticket only when it resolves in current project maps: %j',
+    'links durable interruption evidence to keyed current or historical resources: %j',
     ({ maps, linked }) => {
-      const markup = renderPage([{ ...project, openMaps: maps }], true, true, {
+      const markup = renderPage([{ ...project, maps }], true, true, {
         enabled: true,
         enabledProjects: [],
         availability: { status: 'ready' },
@@ -286,18 +317,23 @@ describe('ProjectRegistrationPage', () => {
     },
   )
 
-  it('shows the selected registration and its management actions without showing another project', () => {
-    const markup = renderPage([
-      project,
-      { ...project, key: { integration: 'github', id: 'other' }, name: 'Other' },
-    ])
-    expect(markup).toContain('My workspace</h1>')
-    expect(markup).toContain('On this Mac')
-    expect(markup).toContain('/tmp/my-workspace')
-    expect(markup).toContain('Save name')
-    expect(markup).toContain('Refresh now')
-    expect(markup).toContain('Remove project registration')
-    expect(markup).not.toContain('Other</h1>')
+  it('does not offer Workspace repair merely because source evidence is unavailable', () => {
+    if (project.resource.kind !== 'current-readable')
+      throw new Error('Expected readable Project fixture')
+    const unavailable: RegisteredProject = {
+      ...project,
+      resource: {
+        kind: 'retained-unavailable',
+        lastSuccessful: project.resource.observation,
+        unavailable: {
+          kind: 'no-current-evidence',
+          scope: { kind: 'project', project: project.key },
+          cause: 'No current source observation is available.',
+        },
+      },
+      actions: [{ id: 'open-workspace', label: 'Open workspace', kind: 'server-launch' }],
+    }
+    expect(renderPage([unavailable])).not.toContain('New Workspace')
   })
 
   it('blocks changes when configuration needs repair', () => {

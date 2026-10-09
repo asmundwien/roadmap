@@ -1,5 +1,6 @@
 import { createServer } from 'node:http'
 import { fileURLToPath } from 'node:url'
+import type { ApplicationState } from '@roadmap/contracts'
 import { createRoadmapApplication } from './application/application.ts'
 import { createMacOsCredentialVault } from './application/credential-vault.ts'
 import { createApplicationOperations } from './application/operations.ts'
@@ -15,6 +16,23 @@ import { createLocalProjectAdmission } from './local/admission.ts'
 import { createLocalObserver } from './local/observer.ts'
 import { createNotifier } from './notify.ts'
 import { createRoadmapTransport, type RoadmapTransport } from './transport.ts'
+
+function resourceCounts(state: ApplicationState) {
+  let maps: number | null = 0
+  let unavailable = 0
+  let absent = 0
+  for (const project of state.projects) {
+    if (project.mapsMembership.kind !== 'current-complete') maps = null
+    else if (maps !== null) maps += project.mapsMembership.observation.value.members.length
+    if (
+      project.resource.kind === 'never-observed' ||
+      project.resource.kind === 'retained-unavailable'
+    )
+      unavailable += 1
+    else if (project.resource.kind === 'proven-absent') absent += 1
+  }
+  return { projects: state.projects.length, maps, unavailable, absent }
+}
 
 async function main(): Promise<void> {
   loadRootEnv()
@@ -79,14 +97,7 @@ async function main(): Promise<void> {
       response.end(
         JSON.stringify({
           capturedAt: state.roadmap.capturedAt,
-          projects: state.projects.length,
-          maps: state.projects.reduce(
-            (count, project) => count + project.openMaps.length + project.closedMaps.length,
-            0,
-          ),
-          unavailable: state.projects.filter(
-            (project) => project.availability.status === 'unavailable',
-          ).length,
+          ...resourceCounts(state),
           rateLimit: diagnostics.rateLimit,
           githubConnections: state.connections.filter(
             (connection) => connection.integration === 'github',
@@ -107,10 +118,11 @@ async function main(): Promise<void> {
   })
 
   application.subscribe((state) => {
-    const snapshot = state.roadmap
+    const counts = resourceCounts(state)
     console.info(
-      `state ${state.stateSequence}: ${snapshot.projects.length} projects, ` +
-        `${snapshot.unreachable.length} unreachable → ${transport?.clientCount() ?? 0} clients`,
+      `state ${state.stateSequence}: ${counts.projects} registered projects, ` +
+        `${counts.maps ?? 'unknown'} current maps, ${counts.unavailable} unavailable projects, ` +
+        `${counts.absent} absent projects, ${transport?.clientCount() ?? 0} clients`,
     )
   })
 

@@ -37,7 +37,7 @@ export type ChangeEvent =
   | { type: 'ticket-closed'; ticket: EventTicket }
   | { type: 'frontier-changed'; map: EventMap; entered: EventTicket[]; left: EventTicket[] }
 
-/** Committed source evidence and presentation only, never public Snapshot authority. */
+/** Committed source evidence and presentation only, never public read authority. */
 export interface ChangeFeedInput {
   readonly attempts: readonly ObservationAttempt[]
   readonly projects: readonly { readonly key: ProjectKey; readonly name: string }[]

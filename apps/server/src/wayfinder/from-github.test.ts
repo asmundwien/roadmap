@@ -5,17 +5,22 @@ import type {
   SourceMapContent,
   SourceTicketContent,
 } from '../observation/source.ts'
+import { createFixtureReadSequence } from '../source-test-fixtures.ts'
 import { observeGitHubMap } from './from-github.ts'
 
 const project = {
   integration: 'github',
   id: 'admitted opaque/%2F',
 } satisfies SourceMapContent['key']['project']
-const context = {
-  project,
-  repositoryId: '1',
-  connectionId: 'one',
-  resolveProject: (nameWithOwner: string) => (nameWithOwner === 'a/r' ? project : undefined),
+const nextReadSequence = createFixtureReadSequence()
+function context() {
+  return {
+    project,
+    repositoryId: '1',
+    connectionId: 'one',
+    readSequence: nextReadSequence(),
+    resolveProject: (nameWithOwner: string) => (nameWithOwner === 'a/r' ? project : undefined),
+  }
 }
 
 function subIssue(overrides: Partial<RawSubIssue> & { number: number }): RawSubIssue {
@@ -83,6 +88,33 @@ function blocker(state: 'OPEN' | 'CLOSED' = 'OPEN', nameWithOwner = 'a/r') {
 }
 
 describe('observeGitHubMap', () => {
+  it('preserves one provider operation identity across all derived scopes and cached reinterpretation', () => {
+    const fetched = fetchedMap([
+      subIssue({
+        number: 5,
+        blockedBy: { totalCount: 1, pageInfo: { hasNextPage: false }, nodes: [blocker()] },
+      }),
+    ])
+    const readContext = context()
+    const original = observeGitHubMap(fetched, readContext)
+    const reinterpreted = observeGitHubMap(fetched, {
+      ...readContext,
+      resolveProject: () => undefined,
+    })
+    expect(original.attempts.map((attempt) => attempt.readSequence)).toEqual([
+      readContext.readSequence,
+      readContext.readSequence,
+      readContext.readSequence,
+    ])
+    expect(reinterpreted.attempts.map((attempt) => attempt.readSequence)).toEqual(
+      original.attempts.map((attempt) => attempt.readSequence),
+    )
+    expect(ticketContents(original)[0]?.blockedBy[0]?.reference.kind).toBe('registered')
+    expect(ticketContents(reinterpreted)[0]?.blockedBy[0]?.reference.kind).toBe('external')
+    const freshRead = observeGitHubMap(fetched, context())
+    expect(freshRead.attempts[0]?.readSequence).toBeGreaterThan(readContext.readSequence)
+  })
+
   it('preserves admitted identities, source status and claimed evidence without deriving public ticket state', () => {
     const slice = observeGitHubMap(
       fetchedMap([
@@ -107,7 +139,7 @@ describe('observeGitHubMap', () => {
           blockedBy: { totalCount: 1, pageInfo: { hasNextPage: false }, nodes: [blocker()] },
         }),
       ]),
-      context,
+      context(),
     )
     expect(mapContent(slice).key).toEqual({ project, mapId: '1' })
     const tickets = ticketContents(slice)
@@ -140,7 +172,7 @@ describe('observeGitHubMap', () => {
             },
           }),
         ]),
-        context,
+        context(),
       ),
     )
     expect(tickets[0]?.blockedBy).toEqual([
@@ -184,7 +216,7 @@ describe('observeGitHubMap', () => {
             blockedBy: { totalCount: 1, pageInfo: { hasNextPage: false }, nodes: [blocker()] },
           }),
         ]),
-        context,
+        context(),
       ),
     )[0]
     expect(ticket).toMatchObject({
@@ -215,7 +247,7 @@ describe('observeGitHubMap', () => {
           },
         },
       },
-      context,
+      context(),
     )
     expect(slice.attempts).toEqual(
       expect.arrayContaining([
@@ -234,7 +266,7 @@ describe('observeGitHubMap', () => {
 
   it('does not certify null nested evidence as complete empty membership', () => {
     const base = fetchedMap([subIssue({ number: 2, blockedBy: null })])
-    const ticket = ticketContents(observeGitHubMap(base, context))[0]
+    const ticket = ticketContents(observeGitHubMap(base, context()))[0]
     expect(ticket?.blockersComplete).toBe(false)
     const slice = observeGitHubMap(
       {
@@ -242,7 +274,7 @@ describe('observeGitHubMap', () => {
         ticketsCompleteness: { kind: 'incomplete', reason: 'unreadable' },
         issue: { ...base.issue, subIssues: null, subIssuesSummary: null },
       },
-      context,
+      context(),
     )
     expect(slice.attempts).toEqual(
       expect.arrayContaining([
@@ -271,7 +303,7 @@ describe('observeGitHubMap', () => {
           },
         },
       },
-      context,
+      context(),
     )
     expect(mapContent(slice)).toMatchObject({
       progress: null,
@@ -289,7 +321,7 @@ describe('observeGitHubMap', () => {
   })
 
   it('observes a complete empty ticket list and preserves map template drift', () => {
-    const slice = observeGitHubMap(fetchedMap([]), context)
+    const slice = observeGitHubMap(fetchedMap([]), context())
     expect(ticketContents(slice)).toEqual([])
     expect(mapContent(slice)).toMatchObject({
       progress: { total: 0, completed: 0 },

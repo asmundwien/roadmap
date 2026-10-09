@@ -668,9 +668,9 @@ describe('RoadmapApplication GitHub Connections', () => {
     })
     expect(providerTokens.length).toBeGreaterThan(0)
     expect(providerTokens.every((token) => token === 'access-renewed')).toBe(true)
-    expect(application.current().projects[0]?.availability).toEqual({
-      status: 'available',
-      observedAt: 0,
+    expect(application.current().projects[0]).toMatchObject({
+      resource: { kind: 'current-readable', observation: { observedAt: 0 } },
+      mapsMembership: { kind: 'current-complete' },
     })
     await application.stop()
   })
@@ -859,9 +859,9 @@ describe('RoadmapApplication GitHub Connections', () => {
     const unsubscribe = application.subscribe((state) => states.push(state))
     try {
       await application.start()
-      expect(application.current().projects[0]?.availability).toEqual({
-        status: 'available',
-        observedAt: 0,
+      expect(application.current().projects[0]).toMatchObject({
+        resource: { kind: 'current-readable', observation: { observedAt: 0 } },
+        mapsMembership: { kind: 'current-complete' },
       })
       providerTokens.length = 0
       const baselineContributions = contributions.length
@@ -889,7 +889,10 @@ describe('RoadmapApplication GitHub Connections', () => {
         expect(configuration.writes).toEqual([])
         expect(application.current().configurationVersion).toBe(1)
         expect(application.current().authorizationOperations[0]?.status).toBe('waiting')
-        expect(application.current().projects[0]?.availability.observedAt).toBe(0)
+        expect(application.current().projects[0]?.resource).toMatchObject({
+          kind: 'current-readable',
+          observation: { observedAt: 0 },
+        })
         expect(application.current().connections[1]?.availability.observedAt).toBe(0)
         expect(keychainRecords.get('harmless-refresh-order:github-connection')).toBe(
           JSON.stringify(expiring),
@@ -914,7 +917,10 @@ describe('RoadmapApplication GitHub Connections', () => {
         expect(await credentialVault.read('github-connection')).toEqual(replacement)
       expect(application.current().configurationVersion).toBe(2)
       if (!holdReplacementWrite) {
-        expect(application.current().projects[0]?.availability.observedAt).toBe(0)
+        expect(application.current().projects[0]?.resource).toMatchObject({
+          kind: 'current-readable',
+          observation: { observedAt: 0 },
+        })
         expect(application.current().connections[1]?.availability.observedAt).toBe(0)
         expect(contributions).toHaveLength(baselineContributions)
         clock = 600_003
@@ -952,7 +958,8 @@ describe('RoadmapApplication GitHub Connections', () => {
       expect(recovered.projects[0]).toMatchObject({
         key: GITHUB_REGISTRATION.key,
         connectionId: 'github-connection',
-        availability: { status: 'available', observedAt: 600_004 },
+        resource: { kind: 'current-readable', observation: { observedAt: 600_004 } },
+        mapsMembership: { kind: 'current-complete' },
       })
       expect(recovered.registrations).toEqual([GITHUB_REGISTRATION])
       expect(recovered.authorizationOperations).toEqual([

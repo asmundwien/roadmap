@@ -1,9 +1,18 @@
 import { type EdgeLabel, Graph, type GraphLabel, layout, type NodeLabel } from '@dagrejs/dagre'
-import type { Blocker, ProjectKey, Ticket, WayfinderMap } from '@roadmap/contracts'
+import type {
+  Blocker,
+  MapResource,
+  ProjectKey,
+  TicketResource,
+  TicketResourceResult,
+} from '@roadmap/contracts'
 import { type Edge, MarkerType, type Node, Position } from '@xyflow/react'
+import { resourceObservation } from '@/views/shared/resource-results'
+
+type TicketObservation = Extract<TicketResourceResult, { kind: 'current-readable' }>['observation']
 
 type MapNodeData =
-  | { kind: 'ticket'; ticket: Ticket }
+  | { kind: 'ticket'; ticket: TicketResource; observation: TicketObservation }
   | { kind: 'blocker'; blocker: Blocker; scope: 'external' | 'missing' | 'unresolved' }
 
 export type MapNode = Node<MapNodeData, 'ticket'>
@@ -16,15 +25,20 @@ export type MapGraph = {
 const TICKET_NODE_WIDTH = 340
 const TICKET_NODE_HEIGHT = 324
 
-function scopedTicketId(project: ProjectKey, ticketId: string): string {
-  return JSON.stringify(['registered', project.integration, project.id, ticketId])
+function scopedTicketId(map: MapResource['key'], ticketId: string): string {
+  return JSON.stringify(['ticket', map.project.integration, map.project.id, map.mapId, ticketId])
 }
 
 export function blockerNodeId(blocker: Blocker): string {
   const { reference, ticketId } = blocker
   switch (reference.kind) {
     case 'registered':
-      return scopedTicketId(reference.project, ticketId)
+      return JSON.stringify([
+        'registered',
+        reference.project.integration,
+        reference.project.id,
+        ticketId,
+      ])
     case 'external':
       return JSON.stringify(['external', reference.integration, reference.nameWithOwner, ticketId])
     case 'unresolved':
@@ -59,10 +73,13 @@ function ticketNode(id: string, data: MapNodeData): MapNode {
 
 function addBlockerNode(
   nodes: Map<string, MapNode>,
-  project: ProjectKey,
+  map: MapResource['key'],
   blocker: Blocker,
 ): string {
-  const source = blockerNodeId(blocker)
+  const source =
+    blocker.reference.kind === 'registered' && sameProject(map.project, blocker.reference.project)
+      ? scopedTicketId(map, blocker.ticketId)
+      : blockerNodeId(blocker)
   const existing = nodes.get(source)
   if (!existing) {
     nodes.set(
@@ -74,7 +91,7 @@ function addBlockerNode(
           blocker.reference.kind === 'unresolved'
             ? 'unresolved'
             : blocker.reference.kind === 'registered' &&
-                sameProject(project, blocker.reference.project)
+                sameProject(map.project, blocker.reference.project)
               ? 'missing'
               : 'external',
       }),
@@ -101,7 +118,7 @@ function addBlockerEdge(
   source: string,
   target: string,
   blocker: Blocker,
-  ticket: Ticket,
+  ticket: TicketResource,
 ): void {
   const edgeId = JSON.stringify([source, target])
   if (edges.has(edgeId)) return
@@ -118,7 +135,7 @@ function addBlockerEdge(
     target,
     type: 'default',
     markerEnd: { type: MarkerType.ArrowClosed },
-    ariaLabel: `${blocker.displayId ?? blocker.ticketId} blocks ${ticket.displayId ?? ticket.id}`,
+    ariaLabel: `${blocker.displayId ?? blocker.ticketId} blocks ${resourceObservation(ticket.resource)?.value.displayId ?? ticket.key.ticketId}`,
     selectable: false,
     reconnectable: false,
   })
@@ -138,27 +155,31 @@ function hasSameTopology(
 }
 
 function populateDependencies(
-  map: WayfinderMap,
+  map: MapResource,
   nodes: Map<string, MapNode>,
   edges: Map<string, Edge>,
 ): void {
   for (const ticket of map.tickets) {
-    const target = scopedTicketId(map.project, ticket.id)
-    for (const blocker of ticket.blockedBy) {
-      const source = addBlockerNode(nodes, map.project, blocker)
+    const observation = resourceObservation(ticket.resource)
+    if (observation === null) continue
+    const target = scopedTicketId(map.key, ticket.key.ticketId)
+    for (const blocker of observation.value.blockedBy) {
+      const source = addBlockerNode(nodes, map.key, blocker)
       addBlockerEdge(edges, source, target, blocker, ticket)
     }
   }
 }
 
 /** Project only real blocked-by relationships; never infer a target from an unscoped ticket ID. */
-export function mapGraph(map: WayfinderMap, previous?: MapGraph): MapGraph {
+export function mapGraph(map: MapResource, previous?: MapGraph): MapGraph {
   const nodes = new Map<string, MapNode>()
   const edges = new Map<string, Edge>()
 
   for (const ticket of map.tickets) {
-    const id = scopedTicketId(map.project, ticket.id)
-    nodes.set(id, ticketNode(id, { kind: 'ticket', ticket }))
+    const observation = resourceObservation(ticket.resource)
+    if (observation === null) continue
+    const id = scopedTicketId(map.key, ticket.key.ticketId)
+    nodes.set(id, ticketNode(id, { kind: 'ticket', ticket, observation }))
   }
   populateDependencies(map, nodes, edges)
 

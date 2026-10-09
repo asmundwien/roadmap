@@ -2,13 +2,7 @@ import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setImmediate } from 'node:timers/promises'
-import type {
-  ApplicationState,
-  AutomationTarget,
-  Project,
-  Ticket,
-  WayfinderMap,
-} from '@roadmap/contracts'
+import type { ApplicationState, AutomationTarget } from '@roadmap/contracts'
 import { describe, expect, it, vi } from 'vitest'
 import {
   type AutomationDatabase,
@@ -29,7 +23,14 @@ import { createGitHubObserverPool } from '../github/observer.ts'
 import { createLocalProjectAdmission } from '../local/admission.ts'
 import type { SourceObserver } from '../observation/source.ts'
 import type { HarnessCommand, ProjectConfiguration } from '../projects/registry.ts'
-import { controlledSourceFixture, sourceFixture } from '../source-test-fixtures.ts'
+import {
+  controlledSourceFixture,
+  createSourceFixtureOwner,
+  type FixtureMap,
+  type FixtureProject,
+  type FixtureTicket,
+  publicMapResource,
+} from '../source-test-fixtures.ts'
 import { createRoadmapApplication } from './application.ts'
 import type { CredentialVault } from './credential-vault.ts'
 import { createApplicationOperations } from './operations.ts'
@@ -77,9 +78,9 @@ function memoryConfiguration(initial: ProjectConfiguration) {
   }
 }
 
-function localContent(id: string, path: string, withTicket = false): Project {
-  const key = { integration: 'local', id } satisfies Project['key']
-  const ticket: Ticket = {
+function localContent(id: string, path: string, withTicket = false): FixtureProject {
+  const key = { integration: 'local', id } satisfies FixtureProject['key']
+  const ticket: FixtureTicket = {
     id: '1',
     displayId: '1',
     title: 'Retain the current policy',
@@ -94,7 +95,7 @@ function localContent(id: string, path: string, withTicket = false): Project {
     warnings: [],
     sourcePath: join(path, '.wayfinder/tickets/1.md'),
   }
-  const map: WayfinderMap = {
+  const map: FixtureMap = {
     project: key,
     id: '.wayfinder/map.md',
     title: 'Activation safety',
@@ -158,11 +159,9 @@ interface EffectInvocation {
 }
 
 // The launcher is an external effect port. All admission, reservation and postappend checks are real.
-function recordingLauncher(
-  current: () => ApplicationState,
-  effects: EffectInvocation[],
-): AutomationLauncher {
-  return {
+function recordingLauncher(current: () => ApplicationState, effects: EffectInvocation[]) {
+  const sessions: Array<ReturnType<typeof Promise.withResolvers<WayfinderProcessResult>>> = []
+  const launcher: AutomationLauncher = {
     classify(request) {
       effects.push({ stage: 'classification', request, state: structuredClone(current()) })
       const completion = Promise.withResolvers<ClassificationProcessResult>()
@@ -175,7 +174,22 @@ function recordingLauncher(
     },
     async dispatch(request) {
       effects.push({ stage: 'wayfinder', request, state: structuredClone(current()) })
-      return { completed: Promise.withResolvers<WayfinderProcessResult>().promise }
+      const completion = Promise.withResolvers<WayfinderProcessResult>()
+      sessions.push(completion)
+      return { completed: completion.promise }
+    },
+  }
+  return {
+    launcher,
+    settleSessions() {
+      for (const session of sessions)
+        session.resolve({
+          status: 'finished',
+          code: null,
+          signal: 'SIGTERM',
+          stdout: '',
+          stdoutOversized: false,
+        })
     },
   }
 }
@@ -238,7 +252,8 @@ async function hostAdmissionBoundarySchedule(
     observers: {
       local(input) {
         const content = localContent(input.ref.projectId, input.workspace.path)
-        return controlledSourceFixture(content.key, sourceFixture([content], 1_000)).observer
+        const read = createSourceFixtureOwner()
+        return controlledSourceFixture(content.key, read([content], 1_000)).observer
       },
       github() {
         throw new Error('No GitHub source belongs to this schedule.')
@@ -420,6 +435,7 @@ async function queuedReversionSchedule(stage: 'classification' | 'wayfinder', ho
   }
   const states: ApplicationState[] = []
   const effects: EffectInvocation[] = []
+  const launches = recordingLauncher(() => application.current(), effects)
   const application = createRoadmapApplication({
     configuration: configuration.document,
     admissions: { local: createLocalProjectAdmission() },
@@ -438,14 +454,14 @@ async function queuedReversionSchedule(stage: 'classification' | 'wayfinder', ho
           input.ref.projectId === 'target'
             ? targetProject
             : localContent(input.ref.projectId, input.workspace.path)
-        return controlledSourceFixture(content.key, sourceFixture([content], 1_000), { gate })
-          .observer
+        const read = createSourceFixtureOwner()
+        return controlledSourceFixture(content.key, read([content], 1_000), { gate }).observer
       },
       github() {
         throw new Error('No GitHub source belongs to this schedule.')
       },
     },
-    automation: { database, launcher: recordingLauncher(() => application.current(), effects) },
+    automation: { database, launcher: launches.launcher },
     now: () => 1_000,
     serverEpoch: 'queued-activation-safety',
   })
@@ -456,12 +472,18 @@ async function queuedReversionSchedule(stage: 'classification' | 'wayfinder', ho
     expect(application.current().configurationVersion).toBe(1)
     expect(application.current().automation.enabled).toBe(false)
     expect(effects).toEqual([])
+    expect(application.current().automation.overrides).toContainEqual(
+      expect.objectContaining({ target, [stage]: { status: 'eligible' } }),
+    )
 
     configuration.emit(b)
     await vi.waitFor(() => expect(bRequested).toBe(true))
     if (holdAppend) {
       bGate.resolve()
       await vi.waitFor(() => expect(application.current().configurationVersion).toBe(2))
+      await vi.waitFor(() =>
+        expect(reservationRequested, `Expected ${startType} append to be entered.`).toBe(true),
+      )
       await appendEntered.promise
       expect(reservationRequested).toBe(true)
       expect(writes.some((event) => event.type === startType)).toBe(false)
@@ -498,6 +520,14 @@ async function queuedReversionSchedule(stage: 'classification' | 'wayfinder', ho
       )
       expect(stored.events.filter((event) => event.type === startType)).toHaveLength(1)
       expect(writes.filter((event) => event.type === startType)).toHaveLength(1)
+      const reservation = stored.events.find((event) => event.type === startType)
+      const nonlaunch = stored.events.filter((event) => event.type === failureType)
+      expect(reservation).toBeDefined()
+      expect(nonlaunch).toHaveLength(1)
+      expect(nonlaunch[0]?.opportunityId).toBe(reservation?.opportunityId)
+      expect(
+        stored.opportunities.find((entry) => entry.id === reservation?.opportunityId)?.target,
+      ).toEqual(target)
       expect(application.current().configurationVersion).toBe(2)
       await vi.waitFor(() =>
         expect(application.current().automation.evidence[0]).toMatchObject({
@@ -549,7 +579,9 @@ async function queuedReversionSchedule(stage: 'classification' | 'wayfinder', ho
     bGate.resolve()
     revertedGate.resolve()
     durableGate.resolve()
-    await application.stop()
+    const stopping = application.stop()
+    launches.settleSessions()
+    await stopping
     await rm(root, { recursive: true, force: true })
   }
 }
@@ -609,14 +641,14 @@ describe('RoadmapApplication queued activation safety', () => {
       expect(initialTarget).toMatchObject({
         key: { integration: 'local', id: 'host-target' },
         workspace: { path: result.workspacePath },
-        availability: { status: 'available' },
+        resource: { kind: 'current-readable' },
       })
       expect(
         result.outcome.state.projects.find((project) => project.key.id === 'host-target'),
       ).toMatchObject({
         key: { integration: 'local', id: 'host-target' },
         workspace: { path: result.workspacePath },
-        availability: { status: 'available' },
+        resource: { kind: 'current-readable' },
       })
       expect(
         result.outcome.state.registrations.find((project) => project.key.id === 'host-target'),
@@ -638,16 +670,18 @@ describe('RoadmapApplication queued activation safety', () => {
         ),
       ).toMatchObject({
         key: { integration: 'local', id: 'other-project' },
-        availability: { status: 'unavailable' },
-        openMaps: [],
-        closedMaps: [],
+        resource: {
+          kind:
+            receipt === 'move-other-workspace-to-alias' ? 'retained-unavailable' : 'never-observed',
+        },
+        maps: [],
       })
       expect(
         result.collisionOutcome?.state.projects.find((project) => project.key.id === 'host-target'),
       ).toMatchObject({
         key: { integration: 'local', id: 'host-target' },
         workspace: { path: result.workspacePath },
-        availability: { status: 'unavailable' },
+        managementWarnings: expect.arrayContaining([expect.any(String)]),
       })
     },
   )
@@ -856,7 +890,8 @@ describe('RoadmapApplication queued activation safety', () => {
         local(input) {
           if (input.workspace.path === candidatePath) candidateRequested = true
           const content = localContent(input.ref.projectId, input.workspace.path)
-          return controlledSourceFixture(content.key, sourceFixture([content], clock), {
+          const read = createSourceFixtureOwner()
+          return controlledSourceFixture(content.key, read([content], clock), {
             gate: input.workspace.path === candidatePath ? candidateGate.promise : undefined,
           }).observer
         },
@@ -880,9 +915,18 @@ describe('RoadmapApplication queued activation safety', () => {
         githubIdentity: { id: '42', login: 'old-account' },
         availability: { status: 'available' },
       })
-      expect(initial.projects.find((entry) => entry.key.id === 'remote')?.openMaps[0]?.title).toBe(
-        'Old-account map content',
-      )
+      expect(initial.projects.find((entry) => entry.key.id === 'remote')).toMatchObject({
+        maps: expect.arrayContaining([
+          expect.objectContaining({
+            resource: expect.objectContaining({
+              kind: 'current-readable',
+              observation: expect.objectContaining({
+                value: expect.objectContaining({ title: 'Old-account map content' }),
+              }),
+            }),
+          }),
+        ]),
+      })
       const observer = githubObservers[0]
       if (!observer) throw new Error('The initial valid GitHub source must own a real observer.')
       configuration.emit({
@@ -924,14 +968,19 @@ describe('RoadmapApplication queued activation safety', () => {
         githubIdentity: { id: '42' },
         availability: { status: 'available', observedAt: 2_000 },
       })
-      expect(updatedWhilePending.projects.find((entry) => entry.key.id === 'remote')).toMatchObject(
-        {
-          availability: { status: 'available', observedAt: 2_000 },
-          openMaps: [
-            expect.objectContaining({ title: 'Active provider update while candidate waits' }),
-          ],
+      const updatedProject = updatedWhilePending.projects.find((entry) => entry.key.id === 'remote')
+      expect(updatedProject?.resource).toMatchObject({
+        kind: 'current-readable',
+        observation: { observedAt: 2_000 },
+      })
+      if (!updatedProject) throw new Error('The active old-account Project must remain published.')
+      expect(publicMapResource(updatedProject, '108')?.resource).toMatchObject({
+        kind: 'current-readable',
+        observation: {
+          observedAt: 2_000,
+          value: { title: 'Active provider update while candidate waits' },
         },
-      )
+      })
       expect(providerReads.slice(beforeRefresh).map((entry) => entry.path)).toContain('map-read')
       expect(await vault.read('github')).toEqual(credentials)
       expect(
@@ -947,9 +996,9 @@ describe('RoadmapApplication queued activation safety', () => {
         githubIdentity: { id: '99', login: 'new-account' },
         availability: { status: 'authorization-required' },
       })
-      expect(
-        committed.projects.find((entry) => entry.key.id === 'remote')?.availability.status,
-      ).toBe('unavailable')
+      expect(committed.projects.find((entry) => entry.key.id === 'remote')?.resource.kind).toBe(
+        'retained-unavailable',
+      )
       expect(committed.configuration.valid).toBe(true)
       const publicStates = JSON.stringify(states)
       expect(publicStates).not.toContain(credentials.accessToken)

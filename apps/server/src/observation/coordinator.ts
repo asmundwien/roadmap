@@ -9,8 +9,10 @@ import type {
   ProjectConfigurationIntent,
 } from '../projects/registry.ts'
 import {
+  createReadSequenceAllocator,
   failedAttempt,
   type ObservationAttempt,
+  type ReadSequenceAllocator,
   refineSourceContribution,
   type SourceContribution,
   type SourceFailure,
@@ -44,6 +46,13 @@ export type AuthorizationUsability =
   | { readonly status: 'usable' }
   | { readonly status: 'authorization-required' | 'unavailable'; readonly cause: string }
 
+const sourceBindingBrand: unique symbol = Symbol('SourceBinding')
+
+/** Private lifetime identity. Sequences from different bindings are not comparable. */
+export interface SourceBinding {
+  readonly [sourceBindingBrand]: true
+}
+
 export interface CommittedObservation {
   readonly registry: CommittedConfiguration
   readonly observation: {
@@ -51,6 +60,7 @@ export interface CommittedObservation {
     readonly attempts: readonly ObservationAttempt[]
   }
   readonly contributions: readonly SourceContribution[]
+  readonly sourceBindings: ReadonlyMap<string, SourceBinding>
   readonly configurationValid: boolean
   readonly pendingAdmission: boolean
   readonly pendingConfigurations: readonly ProjectConfiguration[]
@@ -90,6 +100,8 @@ export interface ObservationCoordinatorOptions {
 interface SourceOwner {
   readonly key: string
   readonly project: SourceProjectKey
+  readonly binding: SourceBinding
+  readonly nextReadSequence: ReadSequenceAllocator
   readonly input: ObservationInput | null
   readonly dependency: string
   observer: SourceObserver | null
@@ -224,11 +236,13 @@ export function createObservationCoordinator(
     baselineProjects: readonly SourceProjectKey[],
   ): CommittedObservation {
     const contributions: SourceContribution[] = []
+    const sourceBindings = new Map<string, SourceBinding>()
     for (const intent of registry.projects) {
       const owner = owners.get(JSON.stringify([intent.ref.integration, intent.ref.projectId]))
       if (!owner?.contribution)
         throw new Error('A committed source requires scoped baseline evidence.')
       contributions.push(owner.contribution)
+      sourceBindings.set(owner.key, owner.binding)
     }
     return {
       registry,
@@ -237,6 +251,7 @@ export function createObservationCoordinator(
         attempts: contributions.flatMap((value) => value.attempts),
       },
       contributions,
+      sourceBindings,
       configurationValid,
       pendingAdmission,
       pendingConfigurations,
@@ -260,6 +275,7 @@ export function createObservationCoordinator(
       return false
     const contribution = refineSourceContribution(value, owner.contribution)
     if (!contribution || !matchesOwner(owner, contribution)) return false
+    // Required read sequences participate in equality, including unchanged same-clock reads.
     const fingerprint = JSON.stringify(contribution)
     if (fingerprint === owner.fingerprint) return true
     owner.contribution = contribution
@@ -284,8 +300,9 @@ export function createObservationCoordinator(
   }
 
   async function start(owner: SourceOwner, admission: ProjectAdmissionRecord): Promise<void> {
+    const startupReadSequence = owner.nextReadSequence()
     if (!owner.input) {
-      owner.contribution = failedContribution(admission, now())
+      owner.contribution = failedContribution(admission, now(), startupReadSequence)
       owner.fingerprint = JSON.stringify(owner.contribution)
       return
     }
@@ -309,7 +326,9 @@ export function createObservationCoordinator(
       if (!owner.contribution) accept(owner, baseline)
     } catch {
       if (owner.retired || stopped) return
-      owner.contribution = failedContribution(admission, now(), true)
+      // A callback may already have established an honest baseline before observe rejected.
+      if (owner.contribution) return
+      owner.contribution = failedContribution(admission, now(), startupReadSequence, true)
       owner.fingerprint = JSON.stringify(owner.contribution)
     }
   }
@@ -352,6 +371,8 @@ export function createObservationCoordinator(
       const owner: SourceOwner = {
         key,
         project,
+        binding: Object.freeze<SourceBinding>({ [sourceBindingBrand]: true }),
+        nextReadSequence: createReadSequenceAllocator(),
         input,
         dependency,
         observer: null,
@@ -626,6 +647,7 @@ function matchesOwner(owner: SourceOwner, contribution: SourceContribution): boo
 function failedContribution(
   admission: ProjectAdmissionRecord,
   attemptedAt: number,
+  readSequence: number,
   startup = false,
 ): SourceContribution {
   const intent = admission.intent
@@ -643,6 +665,7 @@ function failedContribution(
       ? failedAttempt({
           kind: 'failed',
           scope: { kind: 'project', project },
+          readSequence,
           attemptedAt,
           provenance: {
             integration: 'github',
@@ -655,6 +678,7 @@ function failedContribution(
       : failedAttempt({
           kind: 'failed',
           scope: { kind: 'project', project },
+          readSequence,
           attemptedAt,
           provenance: {
             integration: 'local',

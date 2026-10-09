@@ -5,6 +5,7 @@ import type {
   Completeness,
   ObservationAttempt,
   ObservationBatch,
+  ReadSequenceAllocator,
   SourceFailure,
   SourceMapContent,
   SourceMapKey,
@@ -19,6 +20,7 @@ import { parseMapBody } from './map-body.ts'
 import { ticketTypeEvidenceFromLabels } from './tickets.ts'
 
 export interface LocalProjectReadOptions {
+  readonly nextReadSequence: ReadSequenceAllocator
   readonly knownTickets?: readonly { readonly key: SourceTicketKey; readonly path: string }[]
   readonly now?: () => number
 }
@@ -43,6 +45,7 @@ interface ParsedLocalTicket {
   raw: string
   body: string
   mtimeMs: number
+  readSequence: number
   attemptedAt: number
   observedAt: number
   id: string | null
@@ -61,27 +64,30 @@ type TicketRead = { kind: 'readable'; ticket: ParsedLocalTicket } | FailedAttemp
 /** Reads admitted local source scopes without turning failed reads into empty content. */
 export async function readLocalProject(
   input: LocalObservationInput,
-  options: LocalProjectReadOptions = {},
+  options: LocalProjectReadOptions,
 ): Promise<ObservationBatch> {
   const context: LocalReadContext = {
+    nextReadSequence: options.nextReadSequence,
     knownTickets: options.knownTickets ?? [],
     now: options.now ?? Date.now,
     project: { integration: input.ref.integration, id: input.ref.projectId },
   }
   const attempts: ObservationAttempt[] = []
   const attemptedAt = context.now()
+  const readSequence = context.nextReadSequence()
   const projectScope = { kind: 'project', project: context.project } satisfies SourceScope
   const rootProvenance = provenance(input.workspace.path, 'inspect-root')
   try {
     // Enumeration proves directory readability. A successful stat does not.
     await readdir(input.workspace.path, { withFileTypes: true })
   } catch (error) {
-    return { attempts: [failed(projectScope, attemptedAt, rootProvenance, error)] }
+    return { attempts: [failed(projectScope, attemptedAt, readSequence, rootProvenance, error)] }
   }
   attempts.push(
     observedAttempt({
       kind: 'observed',
       scope: projectScope,
+      readSequence,
       attemptedAt,
       observedAt: context.now(),
       provenance: rootProvenance,
@@ -101,6 +107,7 @@ export async function readLocalProject(
     project: context.project,
   } satisfies SourceScope
   const enumerationAt = context.now()
+  const enumerationReadSequence = context.nextReadSequence()
   let mapPaths: string[]
   try {
     const entries = await readdir(wayfinderPath, { withFileTypes: true })
@@ -110,7 +117,13 @@ export async function readLocalProject(
       .sort((a, b) => a.localeCompare(b))
   } catch (error) {
     attempts.push(
-      failed(membershipScope, enumerationAt, provenance(wayfinderPath, 'enumerate'), error),
+      failed(
+        membershipScope,
+        enumerationAt,
+        enumerationReadSequence,
+        provenance(wayfinderPath, 'enumerate'),
+        error,
+      ),
     )
     return { attempts }
   }
@@ -118,6 +131,7 @@ export async function readLocalProject(
     observedAttempt({
       kind: 'observed',
       scope: membershipScope,
+      readSequence: enumerationReadSequence,
       attemptedAt: enumerationAt,
       observedAt: context.now(),
       provenance: provenance(wayfinderPath, 'enumerate'),
@@ -144,11 +158,12 @@ async function readLocalMap(
     project: context.project,
     mapId: displayPath(input.workspace.path, mapPath),
   }
-  const mapRead = await readLocalMapContent(mapKey, mapPath, context.now)
+  const mapRead = await readLocalMapContent(mapKey, mapPath, context)
   const mapWarnings = mapRead.kind === 'observed' ? [...mapRead.value.warnings] : []
   const ticketsPath = join(dirname(mapPath), 'tickets')
   const membershipScope = { kind: 'tickets-membership', map: mapKey } satisfies SourceScope
   const enumerationAt = context.now()
+  const enumerationReadSequence = context.nextReadSequence()
   const attempts: ObservationAttempt[] = []
   let ticketPaths: string[] = []
   let membershipFailure: FailedAttempt | undefined
@@ -162,6 +177,7 @@ async function readLocalMap(
     membershipFailure = failed(
       membershipScope,
       enumerationAt,
+      enumerationReadSequence,
       provenance(ticketsPath, 'enumerate'),
       error,
     )
@@ -224,6 +240,7 @@ async function readLocalMap(
       observedAttempt({
         kind: 'observed',
         scope: membershipScope,
+        readSequence: enumerationReadSequence,
         attemptedAt: enumerationAt,
         observedAt: context.now(),
         provenance: provenance(ticketsPath, 'enumerate'),
@@ -267,9 +284,10 @@ async function readLocalMap(
 async function readLocalMapContent(
   key: SourceMapKey,
   path: string,
-  now: () => number,
+  context: LocalReadContext,
 ): Promise<MapAttempt | FailedAttempt> {
-  const attemptedAt = now()
+  const attemptedAt = context.now()
+  const readSequence = context.nextReadSequence()
   let raw: string
   let mtimeMs: number
   try {
@@ -277,7 +295,13 @@ async function readLocalMapContent(
     raw = text
     mtimeMs = fileStat.mtimeMs
   } catch (error) {
-    return failed({ kind: 'map', map: key }, attemptedAt, provenance(path, 'read'), error)
+    return failed(
+      { kind: 'map', map: key },
+      attemptedAt,
+      readSequence,
+      provenance(path, 'read'),
+      error,
+    )
   }
   const parsed = parseMarkdownFile(raw)
   const warnings = [...parsed.warnings]
@@ -296,8 +320,9 @@ async function readLocalMapContent(
   return {
     kind: 'observed',
     scope: { kind: 'map', map: key },
+    readSequence,
     attemptedAt,
-    observedAt: now(),
+    observedAt: context.now(),
     provenance: provenance(path, 'read'),
     completeness:
       warnings.length > 0 || body.missingSections.length > 0
@@ -347,6 +372,7 @@ function materializeTickets(
     return {
       kind: 'observed',
       scope: { kind: 'ticket', ticket: key },
+      readSequence: parsed.readSequence,
       attemptedAt: parsed.attemptedAt,
       observedAt: parsed.observedAt,
       provenance: provenance(parsed.path, 'read'),
@@ -378,6 +404,7 @@ async function readLocalTicket(
   context: LocalReadContext,
 ): Promise<TicketRead> {
   const attemptedAt = context.now()
+  const readSequence = context.nextReadSequence()
   let raw: string
   let mtimeMs: number
   try {
@@ -395,7 +422,7 @@ async function readLocalTicket(
     const scope: SourceScope = known
       ? { kind: 'ticket', ticket: known.key }
       : { kind: 'tickets-membership', map }
-    return failed(scope, attemptedAt, provenance(path, 'read'), error)
+    return failed(scope, attemptedAt, readSequence, provenance(path, 'read'), error)
   }
   const parsed = parseMarkdownFile(raw)
   const warnings = [...parsed.warnings]
@@ -427,6 +454,7 @@ async function readLocalTicket(
       raw,
       body: parsed.body,
       mtimeMs,
+      readSequence,
       attemptedAt,
       observedAt: context.now(),
       id: readId(parsed.frontmatter.id),
@@ -445,6 +473,7 @@ async function readLocalTicket(
 function failed(
   scope: SourceScope,
   attemptedAt: number,
+  readSequence: number,
   source: SourceProvenance,
   error: unknown,
 ): FailedAttempt {
@@ -455,7 +484,14 @@ function failed(
     operation: source.integration === 'local' ? source.operation : 'read',
     code: code === 'ENOENT' || code === 'EACCES' ? code : 'other',
   }
-  return failedAttempt({ kind: 'failed', scope, attemptedAt, provenance: source, failure })
+  return failedAttempt({
+    kind: 'failed',
+    scope,
+    attemptedAt,
+    readSequence,
+    provenance: source,
+    failure,
+  })
 }
 
 function provenance(

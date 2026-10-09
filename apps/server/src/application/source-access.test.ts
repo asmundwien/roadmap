@@ -7,6 +7,7 @@ import { type CredentialBundle, createGitHubConnectionPort } from '../github/con
 import { createGitHubObserverPool } from '../github/observer.ts'
 import type { SourceContribution } from '../observation/source.ts'
 import type { ProjectConfiguration } from '../projects/registry.ts'
+import { publicProjectObservation } from '../source-test-fixtures.ts'
 import { createRoadmapApplication } from './application.ts'
 import { type CredentialVault, CredentialVaultError } from './credential-vault.ts'
 import { createApplicationOperations } from './operations.ts'
@@ -223,9 +224,16 @@ function expectRecovered(test: ReturnType<typeof fixture>, observedAt: number) {
   expectSavedManagement(state)
   expect(state.projects[0]).toMatchObject({
     name: 'octocat/provider-name',
-    availability: { status: 'available', observedAt },
-    openMaps: [],
-    closedMaps: [],
+    resource: {
+      kind: 'current-readable',
+      observation: { observedAt, value: { name: 'octocat/provider-name' } },
+    },
+    mapsMembership: {
+      kind: 'current-complete',
+      observation: { observedAt, value: { members: [] } },
+    },
+    maps: [],
+    activeMap: { kind: 'known-empty' },
   })
   expect(
     state.connections.find((connection) => connection.id === 'saved-github')?.availability,
@@ -264,8 +272,8 @@ describe('RoadmapApplication saved GitHub access recovery', () => {
         for (const state of states) {
           if (state.configurationVersion !== 7) continue
           expectSavedManagement(state)
-          expect(state.projects[0]?.availability.status).toBe('unavailable')
-          expect(state.projects[0]?.availability.observedAt).toBeUndefined()
+          expect(state.projects[0]?.resource.kind).toBe('never-observed')
+          expect(state.projects[0] && publicProjectObservation(state.projects[0])).toBeNull()
           expect(
             state.connections.find((connection) => connection.id === 'saved-github')?.availability,
           ).toMatchObject({ status: 'unavailable' })
@@ -344,7 +352,7 @@ describe('RoadmapApplication saved GitHub access recovery', () => {
             .current()
             .connections.find((connection) => connection.id === 'saved-github')?.availability,
         ).toMatchObject({ status: 'authorization-required' })
-        expect(test.application.current().projects[0]?.availability.observedAt).toBeUndefined()
+        expect(test.application.current().projects[0]?.resource.kind).toBe('never-observed')
         test.recover()
         await vi.advanceTimersByTimeAsync(30_000)
         await test.application.execute({
@@ -406,9 +414,9 @@ describe('RoadmapApplication provider credential resolution', () => {
       const unsubscribe = test.application.subscribe((state) => states.push(state))
       try {
         await test.application.start()
-        expect(test.application.current().projects[0]?.availability).toEqual({
-          status: 'available',
-          observedAt: 1_000,
+        expect(test.application.current().projects[0]?.resource).toMatchObject({
+          kind: 'current-readable',
+          observation: { observedAt: 1_000 },
         })
         const providerRequests = [...test.requests]
         if (failure !== 'authorization-required') test.failRefresh(failure)
@@ -423,11 +431,17 @@ describe('RoadmapApplication provider credential resolution', () => {
         expectSavedManagement(state)
         expect(state.projects[0]).toMatchObject({
           name: 'octocat/provider-name',
-          availability: { status: 'unavailable', observedAt: 1_000 },
+          resource: {
+            kind: 'retained-unavailable',
+            lastSuccessful: { observedAt: 1_000, value: { name: 'octocat/provider-name' } },
+            unavailable: {
+              kind: 'source-failure',
+              scope: { kind: 'project', project: PROJECT },
+              provenance: { stage: 'credentials' },
+            },
+          },
+          activeMap: { kind: 'uncertain' },
         })
-        expect(state.roadmap.unreachable).toContainEqual(
-          expect.objectContaining({ integration: 'github', project: PROJECT }),
-        )
         expect(
           state.connections.find((connection) => connection.id === 'saved-github')?.availability,
         ).toMatchObject({
@@ -458,12 +472,15 @@ describe('RoadmapApplication provider credential resolution', () => {
         expect(failedSource).not.toHaveProperty('observedAt')
         for (const published of states) {
           const serialized = JSON.stringify(published)
+          expect(serialized).not.toContain('readSequence')
+          expect(serialized).not.toContain('sourceBindings')
           expect(serialized).not.toContain('harmless-saved-token')
           expect(serialized).not.toContain('harmless-saved-refresh')
           expect(serialized).not.toContain('harmless-rotated-token')
           expect(serialized).not.toContain('harmless-secret')
           expect(serialized).not.toContain('private refresh detail')
-          const observedAt = published.projects[0]?.availability.observedAt
+          const project = published.projects[0]
+          const observedAt = project ? publicProjectObservation(project)?.observedAt : undefined
           if (observedAt !== undefined) expect(observedAt).toBe(1_000)
         }
       } finally {
@@ -486,9 +503,9 @@ describe('RoadmapApplication provider credential resolution', () => {
         expectedConfigurationVersion: 7,
       })
 
-      expect(test.application.current().projects[0]?.availability).toEqual({
-        status: 'available',
-        observedAt: 1_000_000,
+      expect(test.application.current().projects[0]?.resource).toMatchObject({
+        kind: 'current-readable',
+        observation: { observedAt: 1_000_000 },
       })
       expect(test.providerTokens).toEqual([
         'harmless-saved-token',

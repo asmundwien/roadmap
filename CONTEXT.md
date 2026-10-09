@@ -34,9 +34,9 @@ status to compute.
 _Avoid_: goal state, 100%
 
 **Active map**:
-The map a project is currently travelling, its most recently updated open map. A project aspires
-to one open map at a time; when several are open, one is active and the others are live but
-secondary. A project's future past its active map is unimagined, not fog, and nothing is drawn there.
+The most recently updated open map a Project can establish from complete current source evidence.
+When the required evidence is unavailable or incomplete, the active map is uncertain and the last
+trustworthy map order remains visible without promoting a secondary map.
 _Avoid_: current map, default map, main map
 
 **Change feed**:
@@ -59,9 +59,10 @@ Eligibility, verdict, and per-opportunity attempt limits remain unchanged.
 _Avoid_: manual flow, forced run
 
 **Automation admission**:
-The reason a Classification Run or Wayfinder Session was allowed: either effective global and
-Project enablement (`automatic`) or a human's one-stage Automation override (`override`). Each
-stage records its own admission; a Classification override does not admit its later handoff.
+The permission for one Classification Run or Wayfinder Session, based on current eligible source
+evidence and independent configuration, authorization, Workspace, command, and opportunity limits.
+Each stage records either automatic enablement or a one-stage Automation override as its reason;
+retained display content never grants admission.
 _Avoid_: trigger source, execution mode
 
 **Automation opportunity**:
@@ -170,8 +171,9 @@ not unregister the Project.
 _Avoid_: discovered project, bookmark
 
 **Source observation**:
-Evidence about a named Project, map, ticket, or their membership at the source. A readable but
-incomplete observation, a failed read, and proven absence have different meanings.
+Evidence about a named Project, map, ticket, or their membership at the source. An actual new
+own-scope read can establish readable content despite an unavailable parent, but cannot establish
+the missing parent evidence needed for active order or Automation admission.
 _Avoid_: fresh snapshot, successful empty result
 
 **Observation provenance**:
@@ -179,6 +181,50 @@ The source identity and read context that establish which Project, map, or ticke
 describes. Retained observations preserve their original successful-read time rather than acquiring
 the time of a later failure or display update.
 _Avoid_: publication time, freshness guess
+
+**Source read identity**:
+The identity and order of an actual named source read within one source binding, independent of its
+clock time or payload. Replayed evidence and cached reinterpretation preserve that identity rather
+than establish another read.
+_Avoid_: publication sequence, freshness timestamp, public receipt
+
+**Source binding**:
+The source authority lifetime for a Project's admitted Connection and repository or canonical Local
+source. Replacement begins independent read authority while earlier evidence remains historical trace.
+_Avoid_: display name, public resource owner, cache generation
+
+**Never observed**:
+A registered or known resource identity for which Roadmap has no actual successful content read.
+It has no invented graph, prose, source destination, or successful-read time.
+_Avoid_: empty resource, unavailable trace
+
+**Current readable**:
+A resource with an actual current own-scope successful read. Readable incomplete content keeps
+its raw prose, warnings, and unknown facts rather than becoming unreadable or empty.
+_Avoid_: complete resource, eligible resource
+
+**Retained unavailable**:
+A previously read resource whose current read evidence is unavailable. Its last successful content,
+source destination, provenance, and successful-read time remain inspectable without becoming fresh.
+_Avoid_: fresh resource, discarded resource
+
+**Proven absent**:
+A resource whose absence follows an actual trustworthy source proof, with any previously read trace
+preserved. New readable content or new current membership explicitly naming that identity establishes
+reappearance; failed or partial listing omissions and replayed older evidence cannot erase the proof.
+_Avoid_: inaccessible, unreadable, missing alias
+
+**Membership evidence**:
+A source observation of which maps belong to a Project or which tickets belong to a map. Complete
+membership can prove an omitted known identity absent; a new current complete or partial membership
+can prove an explicitly included identity has reappeared, without proving its content readable.
+_Avoid_: content collection, known identity list
+
+**Last trustworthy map order**:
+The open and closed map ordering established by complete current required source evidence.
+Uncertainty preserves that order; newly readable content remains addressable without acquiring a position.
+_Avoid_: guessed order, filtered active map
+
 
 **Capability**:
 An optional source affordance, such as a link to the original ticket. Its absence is not an error.
@@ -202,10 +248,10 @@ usability and Project reachability are separate facts; Degraded does not prove a
 _Avoid_: unavailable Project, disconnected
 
 **Unreachable**:
-The state of a registered Project or known map that cannot currently be read. It remains visible
-with a plain cause and any last-known roadmap trace rather than disappearing; recovery updates the
-same identity. A never-read Project can be Unreachable with no maps.
-_Avoid_: missing, deleted (the cause may be unknown)
+A registered Project or known resource whose current source read is unavailable. Any actual
+last-known trace remains visible at the same selected identity; never-read resources have no trace,
+and inaccessible source evidence does not prove absence.
+_Avoid_: missing, deleted
 
 **Badge**:
 A short inline label whose text carries its meaning. It may label a ticket state, project

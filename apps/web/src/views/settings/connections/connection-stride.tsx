@@ -10,7 +10,13 @@ import { connectionPath, projectImportPath, projectSettingsPath } from '@/router
 import { useRoadmap } from '@/store/roadmap-provider'
 import { unacknowledgedInterruption } from '@/views/settings/project-automation'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
-import { locatorLabel, projectIdentity, sameProject } from '@/views/shared/settings-shared'
+import { resourceMessage } from '@/views/shared/resource-results'
+import {
+  locatorLabel,
+  mapState,
+  projectIdentity,
+  sameProject,
+} from '@/views/shared/settings-shared'
 import { connectionAvailability } from './connection-details'
 import styles from './connection-stride.module.css'
 import { ProjectLaunchButtons } from './project-launch-buttons'
@@ -70,6 +76,11 @@ export function ConnectionStride({ connection, dependents }: ConnectionStridePro
                 ) : null}
               </div>
               <SurfaceDescription>{locatorLabel(project)}</SurfaceDescription>
+              <SurfaceDescription>{resourceMessage(project.resource)}</SurfaceDescription>
+              <SurfaceDescription>{mapState(project)}</SurfaceDescription>
+              {project.managementWarnings.map((warning) => (
+                <Alert key={warning}>{warning}</Alert>
+              ))}
               <div className={cx('connection-project-links')}>
                 <Link href={projectSettingsPath(project.key)}>Project settings</Link>
               </div>

@@ -33,7 +33,7 @@ function renderDetail(connectionId: string, connections: Connection[], initial =
       evidence: [],
       overrides: [],
     },
-    roadmap: { capturedAt: 0, projects: [], unreachable: [] },
+    roadmap: { capturedAt: 0 },
   }
   const store: RoadmapStore = {
     subscribe: () => () => undefined,

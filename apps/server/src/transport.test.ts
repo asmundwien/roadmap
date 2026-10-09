@@ -14,14 +14,23 @@ import type {
   ApplicationState,
   Command,
   CommandOutcome,
+  ProjectRegistration,
   Query,
   QueryResult,
+  RegisteredProject,
 } from '@roadmap/contracts'
 import { commandResultEnvelopeCodec, stateEnvelopeCodec } from '@roadmap/contracts/codecs'
 import { decodeCommandEnvelope, decodeQueryEnvelope } from '@roadmap/contracts/wire'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WebSocket } from 'ws'
 import type { RoadmapApplication } from './application/application.ts'
+import {
+  publicMapObservation,
+  publicMapResource,
+  publicProjectObservation,
+  publicTicketObservation,
+  publicTicketResource,
+} from './source-test-fixtures.ts'
 import { createRoadmapTransport, type RoadmapTransport } from './transport.ts'
 
 const ALLOWED_ORIGIN = 'http://localhost:5173'
@@ -54,8 +63,213 @@ function state(stateSequence: number, serverEpoch = 'epoch-a'): ApplicationState
       evidence: [],
       overrides: [],
     },
-    roadmap: { capturedAt: stateSequence * 1000, projects: [], unreachable: [] },
+    roadmap: { capturedAt: stateSequence * 1000 },
   }
+}
+
+function resourceState(stateSequence: number): ApplicationState {
+  const registration: ProjectRegistration = {
+    key: { integration: 'local', id: 'project/%2F:opaque' },
+    connectionId: 'local',
+    locator: { integration: 'local', path: '/disposable-transport-fixture' },
+    workspace: { path: '/disposable-transport-fixture' },
+  }
+  const mapKey = { project: registration.key, mapId: 'map/%2F:opaque' }
+  const ticketKey = { map: mapKey, ticketId: 'ticket/%2F:opaque' }
+  const project: RegisteredProject = {
+    ...registration,
+    name: 'Transport fixture',
+    managementWarnings: [],
+    actions: [],
+    resource: {
+      kind: 'current-readable',
+      observation: {
+        scope: { kind: 'project', project: registration.key },
+        attemptedAt: 100,
+        observedAt: 100,
+        provenance: {
+          integration: 'local',
+          path: '/disposable-transport-fixture',
+          operation: 'inspect-root',
+        },
+        completeness: { kind: 'complete' },
+        value: {
+          name: 'Transport fixture',
+          source: { integration: 'local', path: '/disposable-transport-fixture' },
+          warnings: [],
+        },
+      },
+    },
+    mapsMembership: {
+      kind: 'current-complete',
+      observation: {
+        scope: { kind: 'maps-membership', project: registration.key },
+        attemptedAt: 100,
+        observedAt: 100,
+        provenance: {
+          integration: 'local',
+          path: '/disposable-transport-fixture/.wayfinder',
+          operation: 'enumerate',
+        },
+        completeness: { kind: 'complete' },
+        value: { members: [mapKey] },
+      },
+    },
+    maps: [
+      {
+        key: mapKey,
+        resource: {
+          kind: 'current-readable',
+          observation: {
+            scope: { kind: 'map', map: mapKey },
+            attemptedAt: 100,
+            observedAt: 100,
+            provenance: {
+              integration: 'local',
+              path: '/disposable-transport-fixture/.wayfinder/map.md',
+              operation: 'read',
+            },
+            completeness: { kind: 'complete' },
+            value: {
+              title: `Map replacement ${stateSequence}`,
+              source: { kind: 'file', path: '/disposable-transport-fixture/.wayfinder/map.md' },
+              status: 'open',
+              updatedAt: 100,
+              body: {
+                raw: '# Transport map',
+                destination: 'Keep opaque source identities intact.',
+                notes: [],
+                decisions: [],
+                notYetSpecified: [],
+                notYetSpecifiedNote: '',
+                outOfScope: [],
+                sections: [],
+                missingSections: [],
+              },
+              progress: { total: 1, completed: 0 },
+              warnings: [],
+            },
+          },
+        },
+        ticketsMembership: {
+          kind: 'current-complete',
+          observation: {
+            scope: { kind: 'tickets-membership', map: mapKey },
+            attemptedAt: 100,
+            observedAt: 100,
+            provenance: {
+              integration: 'local',
+              path: '/disposable-transport-fixture/.wayfinder/tickets',
+              operation: 'enumerate',
+            },
+            completeness: { kind: 'complete' },
+            value: { members: [ticketKey] },
+          },
+        },
+        tickets: [
+          {
+            key: ticketKey,
+            resource: {
+              kind: 'current-readable',
+              observation: {
+                scope: { kind: 'ticket', ticket: ticketKey },
+                attemptedAt: 100,
+                observedAt: 100,
+                provenance: {
+                  integration: 'local',
+                  path: '/disposable-transport-fixture/.wayfinder/tickets/ticket.md',
+                  operation: 'read',
+                },
+                completeness: { kind: 'complete' },
+                value: {
+                  title: 'Wire ticket',
+                  source: {
+                    kind: 'file',
+                    path: '/disposable-transport-fixture/.wayfinder/tickets/ticket.md',
+                  },
+                  status: 'open',
+                  body: 'Real ticket prose',
+                  typeEvidence: { kind: 'missing', labels: [] },
+                  state: 'frontier',
+                  isClaimed: false,
+                  isBlocked: false,
+                  assignees: [],
+                  blockedBy: [],
+                  blockersComplete: true,
+                  warnings: [],
+                },
+              },
+            },
+          },
+        ],
+      },
+    ],
+    displayOrder: { openMapIds: [mapKey.mapId], closedMapIds: [] },
+    activeMap: { kind: 'known-current', mapId: mapKey.mapId },
+  }
+  return {
+    ...state(stateSequence),
+    connections: [
+      {
+        id: 'local',
+        integration: 'local',
+        name: 'Local',
+        builtIn: true,
+        availability: { status: 'available', observedAt: 100 },
+      },
+    ],
+    registrations: [registration],
+    projects: [project],
+  }
+}
+
+function expectResourcePayload(
+  snapshot: ApplicationState,
+  stateSequence: number,
+  contentSequence = stateSequence,
+): void {
+  expect(snapshot.roadmap).toEqual({ capturedAt: stateSequence * 1000 })
+  const project = snapshot.projects[0]
+  if (!project) throw new Error('Missing wire Project resource.')
+  expect(project.key).toEqual({ integration: 'local', id: 'project/%2F:opaque' })
+  expect(publicProjectObservation(project)?.observedAt).toBe(100)
+  const map = publicMapResource(project, 'map/%2F:opaque')
+  if (!map) throw new Error('Missing wire map resource.')
+  expect(map.key).toEqual({ project: project.key, mapId: 'map/%2F:opaque' })
+  expect(publicMapObservation(map)).toMatchObject({
+    observedAt: 100,
+    value: { title: `Map replacement ${contentSequence}`, body: { raw: '# Transport map' } },
+  })
+  const ticket = publicTicketResource(map, 'ticket/%2F:opaque')
+  if (!ticket) throw new Error('Missing wire ticket resource.')
+  expect(ticket.key).toEqual({ map: map.key, ticketId: 'ticket/%2F:opaque' })
+  expect(publicTicketObservation(ticket)).toMatchObject({
+    observedAt: 100,
+    value: { body: 'Real ticket prose', source: { kind: 'file' } },
+  })
+}
+
+function unsafeResourceState(scope: string): ApplicationState {
+  const snapshot = resourceState(1)
+  const project = snapshot.projects[0]
+  const map = project?.maps[0]
+  const ticket = map?.tickets[0]
+  if (!project || !map || !ticket) throw new Error('Incomplete wire resource fixture.')
+  const target =
+    scope === 'project'
+      ? publicProjectObservation(project)?.value
+      : scope === 'map'
+        ? publicMapObservation(map)?.value
+        : scope === 'ticket'
+          ? publicTicketObservation(ticket)?.value
+          : scope === 'membership'
+            ? project.mapsMembership
+            : scope === 'roadmap'
+              ? snapshot.roadmap
+              : snapshot
+  if (!target) throw new Error('Missing successful fixture content.')
+  Object.assign(target, { token: 'never-cross-the-wire' })
+  return snapshot
 }
 
 interface ApplicationHarness {
@@ -75,7 +289,11 @@ function applicationHarness(initial = state(0)): ApplicationHarness {
     }),
   )
   const execute = vi.fn(async (_command: Command): Promise<CommandOutcome> => {
-    const next = state(current.stateSequence + 1, current.serverEpoch)
+    const next = {
+      ...current,
+      stateSequence: current.stateSequence + 1,
+      roadmap: { capturedAt: (current.stateSequence + 1) * 1000 },
+    }
     current = next
     for (const listener of listeners) listener(next)
     return {
@@ -257,6 +475,23 @@ async function expectRecovery(harness: TransportHarness): Promise<void> {
 }
 
 describe('transport codecs', () => {
+  it('decodes the sole keyed resource payload without normalizing opaque identities', () => {
+    const decoded = stateEnvelopeCodec.decode({ type: 'state', state: resourceState(1) })
+    expect(decoded.ok).toBe(true)
+    if (!decoded.ok) throw new Error('Valid resource state was refused.')
+    expectResourcePayload(decoded.value.state, 1)
+  })
+
+  it.each(['state', 'project', 'map', 'ticket', 'membership', 'roadmap'])(
+    'rejects undeclared secret fields in the %s resource payload',
+    (scope) => {
+      expect(stateEnvelopeCodec.decode({ type: 'state', state: resourceState(1) }).ok).toBe(true)
+      expect(
+        stateEnvelopeCodec.decode({ type: 'state', state: unsafeResourceState(scope) }).ok,
+      ).toBe(false)
+    },
+  )
+
   it('strictly rejects malformed state, query, command, and result envelopes', () => {
     expect(
       stateEnvelopeCodec.decode({ type: 'state', state: { ...state(1), token: 'secret' } }).ok,
@@ -319,20 +554,24 @@ describe('Automation override transport', () => {
 
 describe('createRoadmapTransport', () => {
   it('replays current state to late clients and broadcasts full replacements', async () => {
-    const harness = await transportHarness()
+    const harness = await transportHarness(applicationHarness(resourceState(0)))
     const first = await openSocket(harness.wsUrl)
     expect(first.first.stateSequence).toBe(0)
+    expectResourcePayload(first.first, 0)
 
     const nextMessage = once(first.socket, 'message')
-    harness.application.publish(state(1))
+    harness.application.publish(resourceState(1))
     const [data] = await nextMessage
     const decoded = stateEnvelopeCodec.decode(JSON.parse(String(data)) as unknown)
     expect(decoded.ok && decoded.value.state.stateSequence).toBe(1)
+    if (!decoded.ok) throw new Error('Invalid resource replacement on the wire.')
+    expectResourcePayload(decoded.value.state, 1)
     first.socket.close()
     await once(first.socket, 'close')
 
     const late = await openSocket(harness.wsUrl)
     expect(late.first.stateSequence).toBe(1)
+    expectResourcePayload(late.first, 1)
     late.socket.close()
   })
 
@@ -378,7 +617,7 @@ describe('createRoadmapTransport', () => {
   })
 
   it('publishes command state before returning the exact same authoritative state', async () => {
-    const harness = await transportHarness()
+    const harness = await transportHarness(applicationHarness(resourceState(0)))
     const connected = await openSocket(harness.wsUrl)
     const events: string[] = []
     const published = new Promise<void>((resolve) => {
@@ -405,6 +644,8 @@ describe('createRoadmapTransport', () => {
     const response = await responsePromise
     const decoded = commandResultEnvelopeCodec.decode(response)
     expect(decoded.ok && decoded.value.outcome.state.stateSequence).toBe(1)
+    if (!decoded.ok) throw new Error('Invalid command resource state on the wire.')
+    expectResourcePayload(decoded.value.outcome.state, 1, 0)
     expect(events).toEqual(['published', 'responded'])
     connected.socket.close()
   })
@@ -959,27 +1200,31 @@ describe('bounded ingress lifecycle regressions after repair', () => {
     },
   )
 
-  it('refuses unsafe output from an admitted command without exposing credentials', async () => {
-    const diagnostics = vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    const application = applicationHarness()
-    const unsafe = { ...state(1), token: 'never-cross-the-wire' }
-    application.execute.mockResolvedValueOnce({
-      ok: true,
-      result: { type: 'configuration-updated', configurationVersion: 1 },
-      state: unsafe,
-    })
-    const harness = await transportHarness(application)
-    const response = await bounded(post(`${harness.httpUrl}/api/command`, VALID_COMMAND))
-    const body = await response.text()
-    expect(response.status).toBe(500)
-    expect(JSON.parse(body)).toEqual({ error: expect.any(String) })
-    expect(body).not.toContain('never-cross-the-wire')
-    expect(application.execute).toHaveBeenCalledOnce()
-    expect(application.query).not.toHaveBeenCalled()
-    expect(diagnostics).toHaveBeenCalled()
-    expect(inspect(diagnostics.mock.calls)).not.toContain('never-cross-the-wire')
-    await expectRecovery(harness)
-  })
+  it.each(['state', 'project', 'map', 'ticket', 'membership', 'roadmap'])(
+    'refuses unsafe %s output from an admitted command without exposing credentials',
+    async (scope) => {
+      const diagnostics = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+      const application = applicationHarness()
+      expect(stateEnvelopeCodec.decode({ type: 'state', state: resourceState(1) }).ok).toBe(true)
+      const unsafe = unsafeResourceState(scope)
+      application.execute.mockResolvedValueOnce({
+        ok: true,
+        result: { type: 'configuration-updated', configurationVersion: 1 },
+        state: unsafe,
+      })
+      const harness = await transportHarness(application)
+      const response = await bounded(post(`${harness.httpUrl}/api/command`, VALID_COMMAND))
+      const body = await response.text()
+      expect(response.status).toBe(500)
+      expect(JSON.parse(body)).toEqual({ error: expect.any(String) })
+      expect(body).not.toContain('never-cross-the-wire')
+      expect(application.execute).toHaveBeenCalledOnce()
+      expect(application.query).not.toHaveBeenCalled()
+      expect(diagnostics).toHaveBeenCalled()
+      expect(inspect(diagnostics.mock.calls)).not.toContain('never-cross-the-wire')
+      await expectRecovery(harness)
+    },
+  )
 
   it.each(['__proto__', 'constructor', 'toString', 'unsupported-result'])(
     'contains an admitted query with inherited or unsupported output %s',

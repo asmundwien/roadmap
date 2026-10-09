@@ -1,5 +1,11 @@
-import type { ApplicationState, CommandOutcome, Project, QueryResult } from '@roadmap/contracts'
+import type {
+  ApplicationState,
+  CommandOutcome,
+  QueryResult,
+  RegisteredProject,
+} from '@roadmap/contracts'
 import { describe, expect, it } from 'vitest'
+import { neverReadProject } from '@/views/overview/test-fixtures'
 import { createRoadmapStore, type SocketLike } from './roadmap-store'
 
 type SocketEvent = 'open' | 'message' | 'close'
@@ -25,20 +31,14 @@ class FakeSocket implements SocketLike {
   }
 }
 
-function project(name: string): Project {
-  return {
-    key: { integration: 'github', id: name },
-    name,
-    openMaps: [],
-    closedMaps: [],
-    warnings: [],
-  }
+function project(name: string): RegisteredProject {
+  return neverReadProject({ integration: 'github', id: name }, name)
 }
 
 function state(
   stateSequence: number,
   serverEpoch = 'epoch-a',
-  projects: Project[] = [],
+  projects: RegisteredProject[] = [],
 ): ApplicationState {
   return {
     serverEpoch,
@@ -47,7 +47,7 @@ function state(
     supportedIntegrations: [],
     connections: [],
     registrations: [],
-    projects: [],
+    projects,
     authorizationOperations: [],
     configuration: { valid: true, issues: [], notices: [] },
     automation: {
@@ -57,7 +57,7 @@ function state(
       evidence: [],
       overrides: [],
     },
-    roadmap: { capturedAt: stateSequence * 1000, projects, unreachable: [] },
+    roadmap: { capturedAt: stateSequence * 1000 },
   }
 }
 
@@ -455,9 +455,7 @@ describe('createRoadmapStore', () => {
     sockets[0]?.emit('message', wire(state(2, 'epoch-a', [project('b/two')])))
 
     expect(store.getSnapshot().transport).toBe('live')
-    expect(store.getSnapshot().state?.roadmap.projects.map((value) => value.name)).toEqual([
-      'b/two',
-    ])
+    expect(store.getSnapshot().state?.projects.map((value) => value.name)).toEqual(['b/two'])
   })
 
   it('stays not-ready when the socket opens without a valid baseline', async () => {
@@ -533,7 +531,7 @@ describe('createRoadmapStore', () => {
         synchronization: 'synchronized',
         state: { serverEpoch: 'epoch-b', stateSequence: 2 },
       })
-      expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe('continued-b')
+      expect(store.getSnapshot().state?.projects[0]?.name).toBe('continued-b')
     },
   )
 
@@ -559,7 +557,7 @@ describe('createRoadmapStore', () => {
         synchronization: 'synchronized',
         state: { serverEpoch: 'epoch-b', stateSequence: expectedSequence },
       })
-      expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe(expectedProject)
+      expect(store.getSnapshot().state?.projects[0]?.name).toBe(expectedProject)
       expect(sockets).toHaveLength(1)
     },
   )
@@ -610,11 +608,11 @@ describe('createRoadmapStore', () => {
       synchronization: 'synchronized',
       state: { serverEpoch: 'epoch-b', stateSequence: 4 },
     })
-    expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe('retained-maximum')
+    expect(store.getSnapshot().state?.projects[0]?.name).toBe('retained-maximum')
     sockets[1]?.emit('message', wire(state(3, 'epoch-b', [project('older')])))
-    expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe('retained-maximum')
+    expect(store.getSnapshot().state?.projects[0]?.name).toBe('retained-maximum')
     sockets[1]?.emit('message', wire(state(5, 'epoch-b', [project('resumed')])))
-    expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe('resumed')
+    expect(store.getSnapshot().state?.projects[0]?.name).toBe('resumed')
     stop()
   })
 
@@ -733,7 +731,7 @@ describe('createRoadmapStore', () => {
       synchronization: 'retained',
       state: { serverEpoch: 'epoch-b', stateSequence: 4 },
     })
-    expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe('retained-b')
+    expect(store.getSnapshot().state?.projects[0]?.name).toBe('retained-b')
     await flushTimers()
     expect(sockets).toHaveLength(2)
     sockets[1]?.emit('open')
@@ -745,7 +743,7 @@ describe('createRoadmapStore', () => {
       synchronization: 'synchronized',
       state: { serverEpoch: 'epoch-c', stateSequence: 1 },
     })
-    expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe('baseline-c')
+    expect(store.getSnapshot().state?.projects[0]?.name).toBe('baseline-c')
     sockets[1]?.emit('message', wire(state(2, 'epoch-c')))
     expect(store.getSnapshot().state?.stateSequence).toBe(2)
     stop()
@@ -810,7 +808,7 @@ describe('createRoadmapStore', () => {
     socket?.emit('message', wire(state(4, 'epoch-a', [project('newest-a')])))
     socket?.emit('message', wire(state(4, 'epoch-a', [project('equal-a')])))
     socket?.emit('message', wire(state(3, 'epoch-a', [project('older-a')])))
-    expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe('newest-a')
+    expect(store.getSnapshot().state?.projects[0]?.name).toBe('newest-a')
 
     socket?.emit('message', wire(state(0, 'epoch-b', [project('unproven-b')])))
     expect(store.getSnapshot()).toMatchObject({
@@ -818,7 +816,7 @@ describe('createRoadmapStore', () => {
       state: { serverEpoch: 'epoch-a', stateSequence: 4 },
     })
     socket?.emit('message', wire(state(5, 'epoch-a', [project('continued-a')])))
-    expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe('continued-a')
+    expect(store.getSnapshot().state?.projects[0]?.name).toBe('continued-a')
   })
 
   it('accepts independently observable Automation evidence', () => {
@@ -915,7 +913,7 @@ describe('createRoadmapStore', () => {
 
     expect(store.getSnapshot().transport).toBe('disconnected')
     expect(store.getSnapshot().synchronization).toBe('retained')
-    expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe('kept')
+    expect(store.getSnapshot().state?.projects[0]?.name).toBe('kept')
     await flushTimers()
     sockets[1]?.emit('close')
     await flushTimers()
@@ -988,7 +986,7 @@ describe('createRoadmapStore', () => {
     await execution
 
     expect(store.getSnapshot().state?.stateSequence).toBe(3)
-    expect(store.getSnapshot().state?.roadmap.projects[0]?.name).toBe('newer')
+    expect(store.getSnapshot().state?.projects[0]?.name).toBe('newer')
   })
 
   it('surfaces HTTP failure ambiguity without replacing authoritative state', async () => {

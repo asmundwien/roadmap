@@ -1,10 +1,11 @@
-import type { WayfinderMap } from '@roadmap/contracts'
+import type { MapResource } from '@roadmap/contracts'
 import { Alert } from '@roadmap/ui/alert'
 import { Surface, SurfaceDescription } from '@roadmap/ui/surface'
 import { Controls, type FitViewOptions, type NodeTypes, ReactFlow } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import classNames from 'classnames/bind'
 import { useMemo } from 'react'
+import { resourceObservation } from '@/views/shared/resource-results'
 import { type MapGraph, type MapNode, mapGraph } from './graph'
 import styles from './map.module.css'
 import { TicketNode, TicketOpenContext } from './ticket-node'
@@ -14,14 +15,14 @@ const nodeTypes = { ticket: TicketNode } satisfies NodeTypes
 const fitViewOptions: FitViewOptions = { padding: 0.16, minZoom: 0.1, maxZoom: 1, duration: 0 }
 
 export type MapContainerProps = {
-  map: WayfinderMap
+  map: MapResource
   onOpenTicket: (id: string) => void
 }
 
 export function MapContainer({ map, onOpenTicket }: MapContainerProps) {
   const projectGraph = useMemo(() => {
     let previous: MapGraph | undefined
-    return (snapshot: WayfinderMap) => {
+    return (snapshot: MapResource) => {
       const next = mapGraph(snapshot, previous)
       previous = next
       return next
@@ -29,33 +30,44 @@ export function MapContainer({ map, onOpenTicket }: MapContainerProps) {
   }, [])
   // Opening a modal or replacing its callback does not project or lay out the map again.
   const graph = useMemo(() => projectGraph(map), [map, projectGraph])
-  const graphKey = JSON.stringify([map.project.integration, map.project.id, map.id])
+  const graphKey = JSON.stringify([map.key.project.integration, map.key.project.id, map.key.mapId])
+  const content = resourceObservation(map.resource)?.value
 
   return (
     <div className={cx('mapContainer')}>
-      {!map.ticketsComplete && (
+      {map.ticketsMembership.kind !== 'current-complete' && (
         <Alert variant="info">
-          Ticket records are incomplete. Some work may be absent from this map.
+          {map.ticketsMembership.kind === 'unavailable'
+            ? map.ticketsMembership.unavailable.cause
+            : 'Current ticket membership is incomplete or has never been established.'}{' '}
+          Known ticket traces remain inspectable, but their presence does not prove current
+          membership.
         </Alert>
       )}
-      {map.body.missingSections.length > 0 && (
+      {content && content.body.missingSections.length > 0 && (
         <Alert variant="info">
-          Map sections are missing: {map.body.missingSections.join(', ')}.
+          Map sections are missing: {content.body.missingSections.join(', ')}.
         </Alert>
       )}
-      {map.warnings.length > 0 && (
+      {content && content.warnings.length > 0 && (
         <Alert variant="info">
           <ul className={cx('warnings')}>
-            {[...new Set(map.warnings)].map((warning) => (
+            {[...new Set(content.warnings)].map((warning) => (
               <li key={warning}>{warning}</li>
             ))}
           </ul>
         </Alert>
       )}
       <p className={cx('graphHelp')}>
-        {map.tickets.length} {map.tickets.length === 1 ? 'ticket' : 'tickets'} on this map,
-        including {map.tickets.filter((ticket) => ticket.state === 'closed').length} closed. Arrows
-        point from blockers to dependent tickets. Use the controls to zoom or fit the map.
+        {map.tickets.length} known ticket {map.tickets.length === 1 ? 'identity' : 'identities'},
+        including{' '}
+        {
+          graph.nodes.filter(
+            (node) => node.data.kind === 'ticket' && node.data.observation.value.state === 'closed',
+          ).length
+        }{' '}
+        closed in readable or historical content. Arrows point from blockers to dependent tickets.
+        Retained content is not Automation permission. Use the controls to zoom or fit the map.
       </p>
       {graph.nodes.length === 0 ? (
         <Surface>
@@ -86,7 +98,7 @@ export function MapContainer({ map, onOpenTicket }: MapContainerProps) {
               fitView
               fitViewOptions={fitViewOptions}
               colorMode="system"
-              aria-label={`Ticket dependencies for ${map.title ?? map.displayId ?? map.id}`}
+              aria-label={`Ticket dependencies for ${content?.title ?? content?.displayId ?? map.key.mapId}`}
             >
               <Controls showInteractive={false} fitViewOptions={fitViewOptions} />
             </ReactFlow>

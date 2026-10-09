@@ -257,31 +257,54 @@ describe('RoadmapApplication GitHub canonical Workspace occupancy', () => {
           application.current().projects.find((project) => project.key.id === 'a'),
         ).toMatchObject({
           key: A,
-          availability: { status: 'available', observedAt: 1000 },
-          openMaps: [expect.objectContaining({ id: '108', title: 'Repository A map' })],
+          resource: { kind: 'current-readable', observation: { observedAt: 1000 } },
+          maps: [
+            {
+              key: { project: A, mapId: '108' },
+              resource: {
+                kind: 'current-readable',
+                observation: { value: { title: 'Repository A map' } },
+              },
+            },
+          ],
         })
         expect(
           application.current().projects.find((project) => project.key.id === 'b'),
         ).toMatchObject({
           key: B,
-          availability: { status: 'available', observedAt: 1000 },
-          openMaps: [
-            expect.objectContaining({
-              id: '109',
-              title: 'Repository B map',
-              url: 'https://github.com/Other/Repository/issues/109',
-            }),
+          resource: { kind: 'current-readable', observation: { observedAt: 1000 } },
+          maps: [
+            {
+              key: { project: B, mapId: '109' },
+              resource: {
+                kind: 'current-readable',
+                observation: {
+                  value: {
+                    title: 'Repository B map',
+                    source: {
+                      kind: 'issue',
+                      url: 'https://github.com/Other/Repository/issues/109',
+                    },
+                  },
+                },
+              },
+            },
           ],
         })
         expect(
-          application.current().roadmap.projects.find((project) => project.key.id === 'b'),
+          application.current().projects.find((project) => project.key.id === 'b')?.resource,
         ).toMatchObject({
-          key: B,
-          sourceUrl: 'https://github.com/Other/Repository',
-          openMaps: [expect.objectContaining({ id: '109', title: 'Repository B map' })],
+          kind: 'current-readable',
+          observation: {
+            value: {
+              source: { integration: 'github', url: 'https://github.com/Other/Repository' },
+            },
+          },
         })
         const b = application.current().projects.find((project) => project.key.id === 'b')
-        expect(b?.warnings).toContainEqual(expect.stringMatching(/Workspace.*remotes.*repository/))
+        expect(b?.managementWarnings).toContainEqual(
+          expect.stringMatching(/Workspace.*remotes.*repository/),
+        )
         expect(b?.actions.filter((action) => action.kind === 'server-launch')).toEqual([])
         expect(b?.actions).toContainEqual(
           expect.objectContaining({
@@ -308,10 +331,10 @@ describe('RoadmapApplication GitHub canonical Workspace occupancy', () => {
         })
         expect(effects).toEqual([])
         expect(
-          application.current().projects.find((project) => project.key.id === 'b')?.availability,
+          application.current().projects.find((project) => project.key.id === 'b')?.resource,
         ).toMatchObject({
-          status: 'available',
-          observedAt: 1000,
+          kind: 'current-readable',
+          observation: { observedAt: 1000 },
         })
       },
     )
@@ -339,21 +362,26 @@ describe('RoadmapApplication GitHub canonical Workspace occupancy', () => {
         expect(state.projects.find((project) => project.key.id === 'a')).toMatchObject({
           key: A,
           connectionId: 'authorized',
-          availability: { status: 'available', observedAt: 1000 },
-          openMaps: [expect.objectContaining({ id: '108', title: 'Repository A map' })],
+          resource: { kind: 'current-readable', observation: { observedAt: 1000 } },
+          maps: [
+            {
+              key: { project: A, mapId: '108' },
+              resource: {
+                kind: 'current-readable',
+                observation: { value: { title: 'Repository A map' } },
+              },
+            },
+          ],
         })
         const b = state.projects.find((project) => project.key.id === 'b')
         expect(b).toMatchObject({
           key: B,
           connectionId: 'unauthorized',
           locator: { integration: 'github', repositoryId: '99' },
-          availability: { status: 'unavailable' },
-          openMaps: [],
-          closedMaps: [],
+          resource: { kind: 'never-observed' },
+          maps: [],
         })
-        expect(b?.availability.observedAt).toBeUndefined()
         expect(b?.actions.filter((action) => action.kind === 'server-launch')).toEqual([])
-        expect(state.roadmap.projects.some((project) => project.key.id === 'b')).toBe(false)
         expect(
           await application.execute({
             type: 'refresh-project',
@@ -377,9 +405,9 @@ describe('RoadmapApplication GitHub canonical Workspace occupancy', () => {
           availability: { status: 'available', observedAt: 1000 },
         })
         expect(
-          application.current().projects.find((project) => project.key.id === 'b')?.availability,
+          application.current().projects.find((project) => project.key.id === 'b')?.resource,
         ).toMatchObject({
-          status: 'unavailable',
+          kind: 'never-observed',
         })
       },
     )

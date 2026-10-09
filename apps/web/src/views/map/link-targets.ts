@@ -1,4 +1,5 @@
-import type { Ticket, WayfinderMap } from '@roadmap/contracts'
+import type { MapResource, TicketResource } from '@roadmap/contracts'
+import { resourceObservation } from '@/views/shared/resource-results'
 
 export type ProseLinkTarget =
   | { kind: 'selection'; selection: { kind: 'map' } | { kind: 'ticket'; id: string } }
@@ -15,28 +16,32 @@ const LOCAL_LINK_DISABLED =
  * GitHub and absolute links keep their real URL.
  */
 export function resolveProseLink(
-  map: WayfinderMap,
+  map: MapResource,
   sourcePath: string | undefined,
   href: string | undefined,
 ): ProseLinkTarget | null {
   if (!href) return null
   if (href.startsWith('#')) return { kind: 'disabled', reason: LOCAL_LINK_DISABLED }
   if (isAbsoluteHref(href)) return { kind: 'href', href }
-  if (map.project.integration !== 'local' || !sourcePath) return null
+  if (map.key.project.integration !== 'local' || !sourcePath) return null
 
   const resolvedPath = resolveFileHref(sourcePath, href)
   if (!resolvedPath) return { kind: 'disabled', reason: LOCAL_LINK_DISABLED }
-  if (map.sourcePath && samePath(resolvedPath, map.sourcePath))
+  const mapSource = resourceObservation(map.resource)?.value.source
+  if (mapSource?.kind === 'file' && samePath(resolvedPath, mapSource.path))
     return { kind: 'selection', selection: { kind: 'map' } }
 
   const ticket = ticketBySourcePath(map.tickets, resolvedPath)
-  if (ticket) return { kind: 'selection', selection: { kind: 'ticket', id: ticket.id } }
+  if (ticket) return { kind: 'selection', selection: { kind: 'ticket', id: ticket.key.ticketId } }
 
   return { kind: 'disabled', reason: LOCAL_LINK_DISABLED }
 }
 
-function ticketBySourcePath(tickets: Ticket[], path: string): Ticket | undefined {
-  return tickets.find((ticket) => ticket.sourcePath && samePath(path, ticket.sourcePath))
+function ticketBySourcePath(tickets: TicketResource[], path: string): TicketResource | undefined {
+  return tickets.find((ticket) => {
+    const source = resourceObservation(ticket.resource)?.value.source
+    return source?.kind === 'file' && samePath(path, source.path)
+  })
 }
 
 function isAbsoluteHref(href: string): boolean {

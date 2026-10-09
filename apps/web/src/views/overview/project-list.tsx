@@ -5,7 +5,7 @@ import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/s
 import { Surface, SurfaceDescription, SurfaceTitle } from '@roadmap/ui/surface'
 import type { ReactNode } from 'react'
 import { Link } from '@/navigation'
-import { projectPath, routePaths } from '@/router'
+import { mapPath, projectPath, routePaths } from '@/router'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
 import type { AttentionItem, ProjectPortfolio, ProjectPresentation } from './project-presentation'
 import { formatMonth, formatRecency } from './recency'
@@ -19,10 +19,11 @@ export function OverviewHeader({ capturedAt, portfolio }: OverviewHeaderProps) {
   return (
     <PageHeader>
       <PageTitle>Roadmap</PageTitle>
-      <PageDescription>The whole of things · updated {formatClock(capturedAt)}</PageDescription>
+      <PageDescription>Published {formatClock(capturedAt)}</PageDescription>
       <PageDescription>
         {portfolio.projects.length} projects · {portfolio.active.length} active ·{' '}
-        {portfolio.resting.length} at rest · {portfolio.attention.length} need attention
+        {portfolio.resting.length} at rest · {portfolio.uncertain.length} uncertain ·{' '}
+        {portfolio.attention.length} need attention
       </PageDescription>
     </PageHeader>
   )
@@ -45,7 +46,7 @@ export function ProjectOverviewSections({ portfolio }: ProjectOverviewSectionsPr
         {portfolio.active.map((project) => (
           <ActiveProjectRow key={projectKey(project)} presentation={project} />
         ))}
-        {portfolio.active.length === 0 && <p>No Projects have an open map.</p>}
+        {portfolio.active.length === 0 && <p>No current active map is established.</p>}
       </OverviewSection>
 
       <OverviewSection label="Projects at rest">
@@ -55,7 +56,13 @@ export function ProjectOverviewSections({ portfolio }: ProjectOverviewSectionsPr
         {portfolio.resting.length === 0 && <p>No Projects are at rest.</p>}
       </OverviewSection>
 
-      <OverviewSection label="Waiting for a first map">
+      <OverviewSection label="Source or ordering uncertain">
+        {portfolio.uncertain.map((project) => (
+          <WaitingProjectRow key={projectKey(project)} presentation={project} />
+        ))}
+      </OverviewSection>
+
+      <OverviewSection label="Known empty map membership">
         {portfolio.waiting.map((project) => (
           <WaitingProjectRow key={projectKey(project)} presentation={project} />
         ))}
@@ -63,7 +70,7 @@ export function ProjectOverviewSections({ portfolio }: ProjectOverviewSectionsPr
           <p>
             {portfolio.projects.length === 0
               ? 'No Projects registered yet.'
-              : 'Every Project has a Wayfinder map.'}
+              : 'No Projects have confirmed empty map membership.'}
           </p>
         )}
       </OverviewSection>
@@ -102,7 +109,7 @@ type ActiveProjectRowProps = { presentation: ProjectPresentation }
 function ActiveProjectRow({ presentation }: ActiveProjectRowProps) {
   const { project, connection, destination, decisions, openTickets, hasFog, priorities } =
     presentation
-  const unavailable = project.availability.status === 'unavailable'
+  const unavailable = project.resource.kind !== 'current-readable'
   return (
     <Surface>
       <SurfaceTitle>
@@ -110,6 +117,7 @@ function ActiveProjectRow({ presentation }: ActiveProjectRowProps) {
         <IntegrationBadge integration={project.key.integration} />
       </SurfaceTitle>
       {connection && <SurfaceDescription>{connection.name}</SurfaceDescription>}
+      <SurfaceDescription>{presentation.sourceMessage}</SurfaceDescription>
       <SurfaceDescription>{destination}</SurfaceDescription>
       <SurfaceDescription>
         {decisions === null ? 'Decision count unknown' : `${decisions} decided`} ·{' '}
@@ -147,6 +155,7 @@ function RestingProjectRow({ presentation }: RestingProjectRowProps) {
       <SurfaceDescription>
         At rest{activityAt === undefined ? '' : ` · ${formatMonth(activityAt)}`}
       </SurfaceDescription>
+      <SurfaceDescription>{presentation.sourceMessage}</SurfaceDescription>
     </Surface>
   )
 }
@@ -155,8 +164,7 @@ type WaitingProjectRowProps = { presentation: ProjectPresentation }
 
 function WaitingProjectRow({ presentation }: WaitingProjectRowProps) {
   const { project, connection } = presentation
-  const unavailableCause =
-    project.availability.status === 'unavailable' ? project.availability.cause : null
+  const uncertain = project.activeMap.kind === 'uncertain'
   return (
     <Surface>
       <SurfaceTitle>
@@ -164,13 +172,28 @@ function WaitingProjectRow({ presentation }: WaitingProjectRowProps) {
         <IntegrationBadge integration={project.key.integration} />
       </SurfaceTitle>
       <SurfaceDescription>
-        {unavailableCause !== null
-          ? unavailableCause
-          : `Registered${connection ? ` through ${connection.name}` : ''} · no Wayfinder maps yet`}
+        {presentation.sourceMessage}
+        {uncertain
+          ? ` ${project.activeMap.kind === 'uncertain' ? project.activeMap.cause : ''}`
+          : ` Registered${connection ? ` through ${connection.name}` : ''}. No current Wayfinder maps.`}
       </SurfaceDescription>
+      <SurfaceDescription>
+        {presentation.mapCount === null
+          ? 'Current map count unknown'
+          : `${presentation.mapCount} current maps`}{' '}
+        ·{' '}
+        {presentation.decisions === null
+          ? 'Decision count unknown'
+          : `${presentation.decisions} decisions recorded`}
+      </SurfaceDescription>
+      {project.maps.map((map) => (
+        <Link key={map.key.mapId} href={mapPath(map.key)}>
+          Inspect map {map.key.mapId}
+        </Link>
+      ))}
       <div>
-        <Badge variant={unavailableCause !== null ? 'danger' : 'neutral'}>
-          {unavailableCause !== null ? 'Unavailable' : 'Waiting'}
+        <Badge variant={uncertain ? 'danger' : 'neutral'}>
+          {uncertain ? 'Uncertain' : 'Known empty'}
         </Badge>
       </div>
     </Surface>
@@ -178,7 +201,7 @@ function WaitingProjectRow({ presentation }: WaitingProjectRowProps) {
 }
 
 function projectKey(presentation: ProjectPresentation): string {
-  return `${presentation.project.key.integration}:${presentation.project.key.id}`
+  return JSON.stringify([presentation.project.key.integration, presentation.project.key.id])
 }
 
 function formatClock(at: number): string {

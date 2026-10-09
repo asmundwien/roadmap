@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { LocalObservationInput } from '../observation/coordinator.ts'
 import type { ObservationAttempt, ObservationBatch } from '../observation/source.ts'
 import { createLocalProjectRegistration, refineLocalWorkspaceProof } from '../projects/registry.ts'
+import { createFixtureReadSequence } from '../source-test-fixtures.ts'
 import { readLocalProject } from './from-local.ts'
 
 const fixtureRoots: string[] = []
@@ -28,7 +29,9 @@ describe('readLocalProject', () => {
       '## Decisions\n\n- [Story](tickets/02-ticket.md)\n',
     )
     const before = Date.now()
-    const slice = await readLocalProject(input(root))
+    const slice = await readLocalProject(input(root), {
+      nextReadSequence: createFixtureReadSequence(),
+    })
     const map = onlyMap(slice)
 
     expect(slice.attempts).toContainEqual(
@@ -69,6 +72,40 @@ describe('readLocalProject', () => {
     expect(byId(slice, '15').value.createdAt).toBeUndefined()
   })
 
+  it('numbers named filesystem operations independently of unchanged observation times', async () => {
+    const root = await createFixture('sequence-map', 'Sequence map', [
+      { id: '1', body: 'Unchanged ticket prose.' },
+    ])
+    const options = { nextReadSequence: createFixtureReadSequence(), now: () => 1_000 }
+    const baseline = await readLocalProject(input(root), options)
+    const refreshed = await readLocalProject(input(root), options)
+
+    expect(baseline.attempts.map((attempt) => [attempt.scope.kind, attempt.readSequence])).toEqual([
+      ['project', 1],
+      ['maps-membership', 2],
+      ['map', 3],
+      ['tickets-membership', 4],
+      ['ticket', 5],
+    ])
+    expect(refreshed.attempts.map((attempt) => [attempt.scope.kind, attempt.readSequence])).toEqual(
+      [
+        ['project', 6],
+        ['maps-membership', 7],
+        ['map', 8],
+        ['tickets-membership', 9],
+        ['ticket', 10],
+      ],
+    )
+    expect(onlyMap(refreshed).value).toEqual(onlyMap(baseline).value)
+    expect(byId(refreshed, '1').value).toEqual(byId(baseline, '1').value)
+    expect(refreshed.attempts.every((attempt) => attempt.attemptedAt === 1_000)).toBe(true)
+    expect(
+      refreshed.attempts.every(
+        (attempt) => attempt.kind === 'observed' && attempt.observedAt === 1_000,
+      ),
+    ).toBe(true)
+  })
+
   it('observes all enumerated map identities without inferring status from their order', async () => {
     const root = await createFixture('active-map', 'Active', [])
     const finished = join(root, '.wayfinder/finished-map')
@@ -77,7 +114,9 @@ describe('readLocalProject', () => {
       join(finished, 'map.md'),
       '---\ntitle: Finished\nlabels: [wayfinder:map]\nstatus: closed\n---\n\n# Finished\n',
     )
-    const slice = await readLocalProject(input(root))
+    const slice = await readLocalProject(input(root), {
+      nextReadSequence: createFixtureReadSequence(),
+    })
     const maps = slice.attempts.filter(
       (attempt): attempt is MapAttempt =>
         attempt.kind === 'observed' && attempt.scope.kind === 'map',
@@ -123,7 +162,9 @@ describe('readLocalProject', () => {
         `---\nid: ${ticket.id}\ntitle: Incomplete ${ticket.id}\nlabels: [wayfinder:task]\n${ticket.fields}blocked-by: []\n---\n\nReadable prose ${ticket.id}.\n`,
       )
     }
-    const slice = await readLocalProject(input(root))
+    const slice = await readLocalProject(input(root), {
+      nextReadSequence: createFixtureReadSequence(),
+    })
 
     expect(onlyMap(slice).completeness.kind).toBe('incomplete')
     expect(onlyMap(slice).value.progress).toBeNull()
@@ -184,7 +225,9 @@ describe('readLocalProject', () => {
       join(directory, 'tickets/99-incomplete.md'),
       '---\nid: 99\ntitle: Incomplete blocker\nlabels: [wayfinder:task]\nblocked-by: []\n---\n\nRaw incomplete blocker prose must survive.\n',
     )
-    const slice = await readLocalProject(input(root))
+    const slice = await readLocalProject(input(root), {
+      nextReadSequence: createFixtureReadSequence(),
+    })
 
     expect(onlyMap(slice).value.body.raw).toBe(rawMap)
     expect(onlyMap(slice).value.status).toBe('unknown')
@@ -211,7 +254,9 @@ describe('readLocalProject', () => {
     const duplicate = '---\nid: 1\ntitle: Duplicate\nstatus: open\n---\n\nDuplicate prose.\n'
     await writeFile(join(tickets, '02-no-id.md'), missing)
     await writeFile(join(tickets, '03-duplicate.md'), duplicate)
-    const slice = await readLocalProject(input(root))
+    const slice = await readLocalProject(input(root), {
+      nextReadSequence: createFixtureReadSequence(),
+    })
 
     expect(byId(slice, '1').value.body).toBe('First identity prose.')
     expect(onlyMap(slice).value.progress).toBeNull()

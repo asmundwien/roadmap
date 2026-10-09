@@ -68,6 +68,7 @@ describe('createLocalObserver', () => {
         {
           kind: 'failed',
           scope: { kind: 'project', project: { integration: 'local', id: 'missing' } },
+          readSequence: 1,
           attemptedAt: expect.any(Number),
           provenance: { integration: 'local', path: root, operation: 'inspect-root' },
           failure: { kind: 'filesystem', operation: 'inspect-root', code: 'ENOENT' },
@@ -202,13 +203,14 @@ describe('createLocalObserver', () => {
     let failure = false
     const observer = createLocalObserver(source('admitted-key', root), {
       reconcileMs: 10,
+      now: () => 1_000,
       pathExists: async () => false,
-      readProject: async (input) => {
+      readProject: async (input, options) => {
         if (failure)
           throw Object.assign(new Error('secret provider payload must not escape'), {
             code: 'EACCES',
           })
-        return readLocalProject(input)
+        return readLocalProject(input, options)
       },
       logger: silentLogger(),
     })
@@ -240,6 +242,18 @@ describe('createLocalObserver', () => {
           ),
       ).toBe(false)
       expect(JSON.stringify(updates.at(-1))).not.toContain('secret provider payload')
+      const firstFailure = updates
+        .at(-1)
+        ?.attempts.find((attempt) => attempt.scope.kind === 'project')
+      const repeatedFailure = await observer.refresh()
+      const nextFailure = repeatedFailure.attempts.find(
+        (attempt) => attempt.scope.kind === 'project',
+      )
+      if (!firstFailure || !nextFailure) throw new Error('Expected repeated root failure evidence.')
+      expect(firstFailure.readSequence).toBeGreaterThan(priorMap.readSequence)
+      expect(nextFailure.readSequence).toBeGreaterThan(firstFailure.readSequence)
+      expect(nextFailure.attemptedAt).toBe(1_000)
+      expect(onlyMap(repeatedFailure)).toEqual(priorMap)
     } finally {
       await observer.stop()
     }
@@ -292,6 +306,14 @@ describe('createLocalObserver', () => {
           },
         }),
       )
+      const ticketMembership = updates
+        .at(-1)
+        ?.attempts.find((attempt) => attempt.scope.kind === 'tickets-membership')
+      const ticketAbsence = updates
+        .at(-1)
+        ?.attempts.find((attempt) => attempt.scope.kind === 'ticket')
+      expect(ticketMembership?.readSequence).toBeGreaterThan(0)
+      expect(ticketAbsence?.readSequence).toBe(ticketMembership?.readSequence)
       await rm(join(root, '.wayfinder/known-map'), { recursive: true })
       await vi.advanceTimersByTimeAsync(10)
       await reader.settle()
@@ -314,6 +336,12 @@ describe('createLocalObserver', () => {
           },
         }),
       )
+      const mapMembership = updates
+        .at(-1)
+        ?.attempts.find((attempt) => attempt.scope.kind === 'maps-membership')
+      const mapAbsence = updates.at(-1)?.attempts.find((attempt) => attempt.scope.kind === 'map')
+      expect(mapMembership?.readSequence).toBeGreaterThan(0)
+      expect(mapAbsence?.readSequence).toBe(mapMembership?.readSequence)
     } finally {
       await observer.stop()
     }
@@ -349,6 +377,28 @@ describe('createLocalObserver', () => {
     await expect(observer.refresh()).rejects.toThrow()
     await vi.advanceTimersByTimeAsync(600_000)
     expect(updates).toHaveLength(2)
+  })
+
+  it('publishes unchanged actual reads at the same clock while repeated observations replay evidence', async () => {
+    const root = await createFixture('active')
+    const updates: SourceContribution[] = []
+    const observer = createLocalObserver(source('demo', root), {
+      now: () => 1_000,
+      pathExists: async () => false,
+      logger: silentLogger(),
+    })
+    try {
+      observer.subscribe((contribution) => updates.push(contribution))
+      const baseline = await observer.observe()
+      expect(await observer.observe()).toEqual(baseline)
+      const refreshed = await observer.refresh()
+      expect(onlyMap(refreshed).value).toEqual(onlyMap(baseline).value)
+      expect(onlyMap(refreshed).observedAt).toBe(1_000)
+      expect(onlyMap(refreshed).readSequence).toBeGreaterThan(onlyMap(baseline).readSequence)
+      expect(updates).toHaveLength(2)
+    } finally {
+      await observer.stop()
+    }
   })
 
   it('does not serialize watcher exception text into logger messages', async () => {

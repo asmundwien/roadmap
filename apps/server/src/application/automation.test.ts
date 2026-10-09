@@ -2,13 +2,7 @@ import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import type {
-  Project,
-  ProjectKey,
-  Ticket,
-  TicketTypeEvidence,
-  WayfinderMap,
-} from '@roadmap/contracts'
+import type { ProjectKey, TicketTypeEvidence } from '@roadmap/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   type AutomationAppend,
@@ -51,7 +45,13 @@ import type {
   ProjectConfiguration,
   ProjectRevalidationRequest,
 } from '../projects/registry.ts'
-import { sourceFixture } from '../source-test-fixtures.ts'
+import {
+  createSourceFixtureOwner,
+  type FixtureMap,
+  type FixtureProject,
+  type FixtureTicket,
+  publicProjectObservation,
+} from '../source-test-fixtures.ts'
 import { isRecord } from '../type-guards.ts'
 import { createRoadmapApplication } from './application.ts'
 import type { CredentialVault } from './credential-vault.ts'
@@ -73,8 +73,8 @@ afterEach(async () => {
 function ticket(
   id: string,
   typeEvidence: TicketTypeEvidence = TASK,
-  overrides: Partial<Ticket> = {},
-): Ticket {
+  overrides: Partial<FixtureTicket> = {},
+): FixtureTicket {
   return {
     id,
     displayId: id,
@@ -95,9 +95,9 @@ function ticket(
 
 function map(
   project: ProjectKey,
-  tickets: Ticket[],
-  overrides: Partial<WayfinderMap> = {},
-): WayfinderMap {
+  tickets: FixtureTicket[],
+  overrides: Partial<FixtureMap> = {},
+): FixtureMap {
   return {
     project,
     id: 'map',
@@ -125,7 +125,11 @@ function map(
   }
 }
 
-function project(id: string, tickets: Ticket[], overrides: Partial<Project> = {}): Project {
+function project(
+  id: string,
+  tickets: FixtureTicket[],
+  overrides: Partial<FixtureProject> = {},
+): FixtureProject {
   const key = { integration: 'local' as const, id }
   return {
     key,
@@ -207,29 +211,47 @@ function memoryAutomationDatabase(
   }
 }
 
-function controlledObservers(initial: Project[]) {
+function controlledObservers(initial: FixtureProject[]) {
   let projects = initial
   let observedAt = 100
-  const owners = new Set<{
+  type Owner = {
     input: LocalObservationInput | GitHubObservationInput
+    read: ReturnType<typeof createSourceFixtureOwner>
     listeners: Set<(value: SourceContribution) => void>
-  }>()
+    lastSourceContribution: SourceContribution | undefined
+  }
+  const owners = new Set<Owner>()
 
-  function contribution(
-    input: LocalObservationInput | GitHubObservationInput,
-    completedAt = observedAt,
-  ): SourceContribution {
+  function localMap(entry: FixtureMap, root: string): FixtureMap {
+    const sourcePath = resolve(root, entry.id)
+    const tickets = entry.tickets.map((ticket) => ({
+      ...ticket,
+      sourcePath: join(dirname(sourcePath), 'tickets', `${ticket.id}.md`),
+    }))
+    return {
+      ...entry,
+      sourcePath,
+      tickets,
+      frontier: tickets.filter((ticket) => ticket.state === 'frontier'),
+    }
+  }
+
+  function contribution(owner: Owner, completedAt = observedAt): SourceContribution {
+    const { input, read } = owner
     const key: ProjectKey = { integration: input.integration, id: input.ref.projectId }
     const entry = projects.find(
       (candidate) => candidate.key.integration === key.integration && candidate.key.id === key.id,
     ) ?? { ...project(key.id, []), key, openMaps: [], closedMaps: [] }
-    const sourceProject = {
-      ...entry,
-      ...(input.integration === 'local'
-        ? { sourcePath: input.workspace.path }
-        : { name: input.source.locator.nameWithOwner }),
-    }
-    const batch = sourceFixture(
+    const sourceProject: FixtureProject =
+      input.integration === 'local'
+        ? {
+            ...entry,
+            sourcePath: input.workspace.path,
+            openMaps: entry.openMaps.map((map) => localMap(map, input.workspace.path)),
+            closedMaps: entry.closedMaps.map((map) => localMap(map, input.workspace.path)),
+          }
+        : { ...entry, name: input.source.locator.nameWithOwner }
+    const batch = read(
       [sourceProject],
       completedAt,
       input.integration === 'github'
@@ -277,22 +299,33 @@ function controlledObservers(initial: Project[]) {
       }
       return { ...attempt, provenance: { integration: 'local', path, operation } }
     })
-    return { project: key, attempts, health: { status: 'available', observedAt: completedAt } }
+    const value: SourceContribution = {
+      project: key,
+      attempts,
+      health: { status: 'available', observedAt: completedAt },
+    }
+    owner.lastSourceContribution = value
+    return value
   }
 
   function observer(input: LocalObservationInput | GitHubObservationInput): SourceObserver {
-    const owner = { input, listeners: new Set<(value: SourceContribution) => void>() }
+    const owner: Owner = {
+      input,
+      read: createSourceFixtureOwner(),
+      listeners: new Set<(value: SourceContribution) => void>(),
+      lastSourceContribution: undefined,
+    }
     owners.add(owner)
     return {
       async observe() {
-        return contribution(input)
+        return contribution(owner)
       },
       subscribe(listener) {
         owner.listeners.add(listener)
         return () => owner.listeners.delete(listener)
       },
       async refresh() {
-        return contribution(input)
+        return contribution(owner)
       },
       async stop() {
         owners.delete(owner)
@@ -304,15 +337,15 @@ function controlledObservers(initial: Project[]) {
   const observers: SourceObserverFactories = { local: observer, github: observer }
   return {
     observers,
-    push(next: Project[]) {
+    push(next: FixtureProject[]) {
       projects = next
       observedAt += 1
       for (const owner of owners) {
-        const value = contribution(owner.input)
+        const value = contribution(owner)
         for (const listener of owner.listeners) listener(value)
       }
     },
-    pushProject(next: Project) {
+    pushProject(next: FixtureProject) {
       projects = projects.map((entry) =>
         entry.key.integration === next.key.integration && entry.key.id === next.key.id
           ? next
@@ -325,7 +358,7 @@ function controlledObservers(initial: Project[]) {
           owner.input.ref.projectId !== next.key.id
         )
           continue
-        const value = contribution(owner.input)
+        const value = contribution(owner)
         for (const listener of owner.listeners) listener(value)
       }
     },
@@ -338,14 +371,18 @@ function controlledObservers(initial: Project[]) {
           projectKey.integration !== 'local'
         )
           continue
+        const lastSourceContribution = owner.lastSourceContribution
+        if (!lastSourceContribution)
+          throw new Error('Controlled observer must read before failing.')
         const value: SourceContribution = {
           project: projectKey,
           attempts: [
-            ...contribution(owner.input, lastObservedAt).attempts.filter(
+            ...lastSourceContribution.attempts.filter(
               (attempt) => attempt.scope.kind !== 'maps-membership',
             ),
             {
               kind: 'failed',
+              readSequence: owner.read.nextReadSequence(),
               scope: { kind: 'maps-membership', project: projectKey },
               attemptedAt: observedAt,
               provenance: {
@@ -362,6 +399,7 @@ function controlledObservers(initial: Project[]) {
             observedAt: lastObservedAt,
           },
         }
+        owner.lastSourceContribution = value
         for (const listener of owner.listeners) listener(value)
       }
     },
@@ -501,7 +539,7 @@ function githubAuthorizationFixtures(): {
   }
 }
 
-function githubProject(id: string, tickets: Ticket[]): Project {
+function githubProject(id: string, tickets: FixtureTicket[]): FixtureProject {
   const key: ProjectKey = { integration: 'github', id }
   const remoteTickets = tickets.map((entry) => ({
     ...entry,
@@ -522,7 +560,7 @@ function githubProject(id: string, tickets: Ticket[]): Project {
 }
 
 function configuration(
-  projects: Project[],
+  projects: FixtureProject[],
   overrides: Partial<ProjectConfiguration['automation']> = {},
 ): ProjectConfiguration {
   return {
@@ -661,12 +699,16 @@ function deferredLauncher(
     classifications,
     dispatches,
     sessions,
+    settleSessions() {
+      for (const session of sessions)
+        session.resolve(wayfinderResult({ code: null, signal: 'SIGTERM', stdout: '' }))
+    },
     maximumRunning: () => maximumRunning,
   }
 }
 
 async function harness(options: {
-  projects: Project[]
+  projects: FixtureProject[]
   launcher: AutomationLauncher
   database?: MemoryAutomationDatabase
   configuration?: ProjectConfiguration
@@ -720,11 +762,16 @@ function queuedDatabase(targets: readonly AutomationTarget[]): AutomationDatabas
 function appendGate(type: AutomationEvent['type']) {
   const entered = Promise.withResolvers<void>()
   const release = Promise.withResolvers<void>()
+  let didEnter = false
   return {
-    entered: entered.promise,
+    async waitForEntry() {
+      await vi.waitFor(() => expect(didEnter, `Expected ${type} append to be entered.`).toBe(true))
+      await entered.promise
+    },
     release: () => release.resolve(),
     async beforeAppend(batch: AutomationAppend) {
       if (!batch.events.some((event) => event.type === type)) return
+      didEnter = true
       entered.resolve()
       await release.promise
     },
@@ -793,7 +840,9 @@ describe('Automation admission after durable append', () => {
           }),
         ).toMatchObject({ ok: false, error: { code: 'configuration-invalid' } })
       } finally {
-        await current.application.stop()
+        const stopping = current.application.stop()
+        launches.settleSessions()
+        await stopping
       }
     },
   )
@@ -842,6 +891,9 @@ describe('Automation admission after durable append', () => {
             automation: { ...disabled.automation, enabled: true },
           }
           try {
+            expect(current.application.current().automation.overrides).toContainEqual(
+              expect.objectContaining({ target, [stage]: { status: 'eligible' } }),
+            )
             const pending =
               admission === 'override'
                 ? current.application.execute({
@@ -852,10 +904,13 @@ describe('Automation admission after durable append', () => {
                   })
                 : null
             if (admission === 'automatic') current.configured.emit(enabled)
-            await gate.entered
+            await gate.waitForEntry()
             expect(launches.classifications).toEqual([])
             expect(launches.dispatches).toEqual([])
             expect(database.events().some((event) => event.type === startType)).toBe(false)
+            expect(
+              database.evidence().some((entry) => entry.target.ticketId === target.ticketId),
+            ).toBe(stage === 'wayfinder')
             if (change === 'invalid configuration') {
               current.configured.emit(INVALID_CONFIGURATION)
               await vi.waitFor(() =>
@@ -909,10 +964,53 @@ describe('Automation admission after durable append', () => {
                 )
             } else if (change === 'missing source') current.source.push([project('revoked', [])])
             else if (change === 'source failure') {
+              const baseline = current.application.current().projects[0]
+              if (!baseline) throw new Error('The admitted Project must have a baseline.')
+              const unavailable = {
+                kind: 'source-failure',
+                scope: { kind: 'maps-membership', project: sourceProject.key },
+                attemptedAt: 101,
+                provenance: {
+                  integration: 'local',
+                  path: join(`/tmp/${sourceProject.key.id}`, '.wayfinder'),
+                  operation: 'enumerate',
+                },
+                failure: { kind: 'filesystem', operation: 'enumerate', code: 'EACCES' },
+              }
               current.source.fail(sourceProject.key)
-              expect(current.application.current().projects[0]?.availability.status).toBe(
-                'unavailable',
-              )
+              const failed = current.application.current().projects[0]
+              expect(failed).toMatchObject({
+                resource: { kind: 'current-readable', observation: { observedAt: 100 } },
+                mapsMembership: { kind: 'unavailable', unavailable },
+                activeMap: { kind: 'uncertain' },
+                displayOrder: baseline.displayOrder,
+              })
+              expect(failed?.maps).toHaveLength(baseline.maps.length)
+              for (const map of baseline.maps) {
+                if (map.resource.kind !== 'current-readable')
+                  throw new Error('The admitted map must have a readable baseline.')
+                const retainedMap = failed?.maps.find((entry) => entry.key.mapId === map.key.mapId)
+                expect(retainedMap?.resource).toEqual({
+                  kind: 'retained-unavailable',
+                  lastSuccessful: map.resource.observation,
+                  unavailable: expect.objectContaining(unavailable),
+                })
+                expect(map.resource.observation.observedAt).toBe(100)
+                expect(retainedMap?.tickets).toHaveLength(map.tickets.length)
+                for (const ticket of map.tickets) {
+                  if (ticket.resource.kind !== 'current-readable')
+                    throw new Error('The admitted ticket must have a readable baseline.')
+                  expect(
+                    retainedMap?.tickets.find((entry) => entry.key.ticketId === ticket.key.ticketId)
+                      ?.resource,
+                  ).toEqual({
+                    kind: 'retained-unavailable',
+                    lastSuccessful: ticket.resource.observation,
+                    unavailable: expect.objectContaining(unavailable),
+                  })
+                  expect(ticket.resource.observation.observedAt).toBe(100)
+                }
+              }
               expect(current.application.current().connections[0]?.availability.status).toBe(
                 'degraded',
               )
@@ -957,6 +1055,12 @@ describe('Automation admission after durable append', () => {
             await vi.waitFor(() =>
               expect(database.events().some((event) => event.type === failureType)).toBe(true),
             )
+            const reservation = database.events().filter((event) => event.type === startType)
+            const nonlaunch = database.events().filter((event) => event.type === failureType)
+            expect(reservation).toHaveLength(1)
+            expect(nonlaunch).toHaveLength(1)
+            expect(nonlaunch[0]?.opportunityId).toBe(reservation[0]?.opportunityId)
+            expect(current.application.current().automation.evidence[0]?.target).toEqual(target)
             expect(launches.classifications).toEqual([])
             expect(launches.dispatches).toEqual([])
             expect(database.events().some((event) => event.type === 'wayfinder-running')).toBe(
@@ -972,6 +1076,11 @@ describe('Automation admission after durable append', () => {
             )
             current.configured.emit({ ...enabled, configurationVersion: 4 })
             current.source.push([project('revoked', [])])
+            expect(current.application.current().automation.evidence[0]?.target).toEqual(target)
+            expect(current.application.current().automation.evidence[0]?.[stage]).toMatchObject({
+              status: 'launch-failed',
+              admission,
+            })
             current.source.push([sourceProject])
             await vi.waitFor(() =>
               expect(current.application.current().configurationVersion).toBe(4),
@@ -989,7 +1098,9 @@ describe('Automation admission after durable append', () => {
             expect(launches.dispatches).toEqual([])
           } finally {
             gate.release()
-            await current.application.stop()
+            const stopping = current.application.stop()
+            launches.settleSessions()
+            await stopping
           }
           const restartedLaunches = deferredLauncher()
           const restarted = await harness({
@@ -1001,7 +1112,9 @@ describe('Automation admission after durable append', () => {
             expect(restartedLaunches.classifications).toEqual([])
             expect(restartedLaunches.dispatches).toEqual([])
           } finally {
-            await restarted.application.stop()
+            const stopping = restarted.application.stop()
+            restartedLaunches.settleSessions()
+            await stopping
           }
         },
       )
@@ -1031,13 +1144,16 @@ describe('Automation admission after durable append', () => {
           configuration: disabled,
         })
         try {
+          expect(current.application.current().automation.overrides).toContainEqual(
+            expect.objectContaining({ target, [stage]: { status: 'eligible' } }),
+          )
           const pending = current.application.execute({
             type: 'start-automation-override',
             expectedConfigurationVersion: 1,
             target,
             stage,
           })
-          await gate.entered
+          await gate.waitForEntry()
           expect(launches.classifications).toEqual([])
           expect(launches.dispatches).toEqual([])
           if (change === 'unrelated source')
@@ -1076,7 +1192,9 @@ describe('Automation admission after durable append', () => {
           ).toBe(false)
         } finally {
           gate.release()
-          await current.application.stop()
+          const stopping = current.application.stop()
+          launches.settleSessions()
+          await stopping
         }
       },
     )
@@ -1106,6 +1224,9 @@ describe('Automation admission after durable append', () => {
           configuration: disabled,
         })
         try {
+          expect(current.application.current().automation.overrides).toContainEqual(
+            expect.objectContaining({ target, [stage]: { status: 'eligible' } }),
+          )
           const pending =
             admission === 'override'
               ? current.application.execute({
@@ -1121,20 +1242,22 @@ describe('Automation admission after durable append', () => {
               configurationVersion: 2,
               automation: { ...disabled.automation, enabled: true },
             })
-          await gate.entered
-          const retainedObservedAt = current.application
+          await gate.waitForEntry()
+          const githubResource = current.application
             .current()
-            .projects.find((entry) => entry.key.integration === 'github')?.availability.observedAt
+            .projects.find((entry) => entry.key.integration === 'github')
+          const retainedObservedAt =
+            githubResource && publicProjectObservation(githubResource)?.observedAt
           expect(retainedObservedAt).toBe(100)
           expect(launches.classifications).toEqual([])
           expect(launches.dispatches).toEqual([])
           current.source.pushProject(project('local-neutral', [ticket('2')]))
-          expect(
-            current.application
-              .current()
-              .projects.find((entry) => entry.key.integration === 'github')?.availability
-              .observedAt,
-          ).toBe(retainedObservedAt)
+          const stillRetained = current.application
+            .current()
+            .projects.find((entry) => entry.key.integration === 'github')
+          expect(stillRetained && publicProjectObservation(stillRetained)?.observedAt).toBe(
+            retainedObservedAt,
+          )
           gate.release()
           if (pending) expect(await pending).toMatchObject({ ok: true })
           const requests = () =>
@@ -1158,7 +1281,9 @@ describe('Automation admission after durable append', () => {
           expect(launches.maximumRunning()).toBe(stage === 'classification' ? 1 : 0)
         } finally {
           gate.release()
-          await current.application.stop()
+          const stopping = current.application.stop()
+          launches.settleSessions()
+          await stopping
         }
       },
     )
@@ -1191,13 +1316,16 @@ describe('Automation admission after durable append', () => {
           configuration: configuration([sourceProject], { enabled: false }),
         })
         try {
+          expect(current.application.current().automation.overrides).toContainEqual(
+            expect.objectContaining({ target, [stage]: { status: 'eligible' } }),
+          )
           const pending = current.application.execute({
             type: 'start-automation-override',
             expectedConfigurationVersion: 1,
             target,
             stage,
           })
-          await gate.entered
+          await gate.waitForEntry()
           if (failedAppend === 'nonlaunch')
             current.source.push([
               project('append-failure', [ticket('1', TASK, { isClaimed: true, state: 'claimed' })]),
@@ -1230,7 +1358,9 @@ describe('Automation admission after durable append', () => {
           expect(launches.dispatches).toEqual([])
         } finally {
           gate.release()
-          await current.application.stop()
+          const stopping = current.application.stop()
+          launches.settleSessions()
+          await stopping
         }
       },
     )
@@ -1276,7 +1406,7 @@ describe('Automation admission after durable append', () => {
           project: sourceProject.key,
           enabled: true,
         })
-        await gate.entered
+        await gate.waitForEntry()
         expect(current.configured.writes).toEqual([])
         expect(database.evidence()[0]?.wayfinder).toMatchObject({
           status: 'outcome-unknown',
@@ -1301,7 +1431,9 @@ describe('Automation admission after durable append', () => {
         expect(launches.dispatches).toEqual([])
       } finally {
         gate.release()
-        await current.application.stop()
+        const stopping = current.application.stop()
+        launches.settleSessions()
+        await stopping
       }
     },
   )
@@ -1318,24 +1450,31 @@ describe('Automation admission after durable append', () => {
       database,
       configuration: disabled,
     })
-    current.configured.emit({
-      ...disabled,
-      configurationVersion: 2,
-      automation: { ...disabled.automation, enabled: true },
-    })
-    await gate.entered
-    const stopping = current.application.stop()
-    gate.release()
-    await stopping
-    expect(launches.classifications).toEqual([])
-    expect(database.events().map((event) => event.type)).toEqual([
-      'classification-started',
-      'classification-launch-failed',
-    ])
-    expect(database.evidence()[0]?.classification).toMatchObject({
-      status: 'launch-failed',
-      admission: 'automatic',
-    })
+    try {
+      current.configured.emit({
+        ...disabled,
+        configurationVersion: 2,
+        automation: { ...disabled.automation, enabled: true },
+      })
+      await gate.waitForEntry()
+      const stopping = current.application.stop()
+      gate.release()
+      await stopping
+      expect(launches.classifications).toEqual([])
+      expect(database.events().map((event) => event.type)).toEqual([
+        'classification-started',
+        'classification-launch-failed',
+      ])
+      expect(database.evidence()[0]?.classification).toMatchObject({
+        status: 'launch-failed',
+        admission: 'automatic',
+      })
+    } finally {
+      gate.release()
+      const stopping = current.application.stop()
+      launches.settleSessions()
+      await stopping
+    }
   })
 })
 
@@ -2375,7 +2514,7 @@ describe('RoadmapApplication Automation', () => {
           nameWithOwner: 'owner/harness-pointers',
         },
         workspace: { path: workspace },
-        availability: { status: 'available' },
+        resource: { kind: 'current-readable' },
       })
       expect(launches.classifications).toHaveLength(1)
       expect(launches.classifications[0]?.request).toMatchObject({
@@ -2456,6 +2595,7 @@ describe('RoadmapApplication Automation', () => {
     }
     const sourceProject = project('real', [ticket('9')])
     sourceProject.openMaps[0] = map(sourceProject.key, sourceProject.openMaps[0]?.tickets ?? [], {
+      id: '.wayfinder/map.md',
       sourcePath: join(root, '.wayfinder/map.md'),
     })
     const configured = configuration([sourceProject], {
@@ -2479,9 +2619,14 @@ describe('RoadmapApplication Automation', () => {
       expect(observed).not.toBe('')
     })
     const session: unknown = JSON.parse(observed)
-    expect(session).toMatchObject({ cwd: root, kind: 'wayfinder', map: 'map', ticket: '9' })
+    expect(session).toMatchObject({
+      cwd: root,
+      kind: 'wayfinder',
+      map: '.wayfinder/map.md',
+      ticket: '9',
+    })
     expect(isRecord(session) && session.input).toBe(
-      `Configured map=${join(root, '.wayfinder/map.md')} ticket=/tmp/project-9/.wayfinder/tickets/9.md report=${sessionReportSchemaJson}`,
+      `Configured map=${join(root, '.wayfinder/map.md')} ticket=${join(root, '.wayfinder/tickets/9.md')} report=${sessionReportSchemaJson}`,
     )
     await vi.waitFor(() =>
       expect(current.database.evidence()[0]?.wayfinder).toEqual({
@@ -2516,6 +2661,7 @@ describe('RoadmapApplication Automation', () => {
     }
     const sourceProject = project('series', [ticket('1'), ticket('2')])
     sourceProject.openMaps[0] = map(sourceProject.key, sourceProject.openMaps[0]?.tickets ?? [], {
+      id: '.wayfinder/map.md',
       sourcePath: join(root, '.wayfinder/map.md'),
     })
     const configured = configuration([sourceProject], { wayfinderCommand: wayfinder })
@@ -2526,7 +2672,7 @@ describe('RoadmapApplication Automation', () => {
     }
     const targets = ['1', '2'].map((ticketId) => ({
       project: sourceProject.key,
-      mapId: 'map',
+      mapId: '.wayfinder/map.md',
       ticketId,
     }))
     const queued = queuedDatabase(targets)

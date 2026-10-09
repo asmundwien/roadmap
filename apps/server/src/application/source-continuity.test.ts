@@ -4,10 +4,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import type { ApplicationState, ProjectKey } from '@roadmap/contracts'
+import { stateEnvelopeCodec } from '@roadmap/contracts/codecs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ChangeEvent } from '../change-feed.ts'
 import type { ConfigurationDocument, ConfigurationRead } from '../configuration/document.ts'
 import { createGitHubProjectAdmission } from '../github/admission.ts'
+import { GitHubError } from '../github/client.ts'
 import { type CredentialBundle, createGitHubConnectionPort } from '../github/connections.ts'
 import type { RawMapIssue } from '../github/map-query.ts'
 import { createGitHubObserverPool } from '../github/observer.ts'
@@ -21,6 +23,12 @@ import type {
   GitHubProviderRead,
   ProjectConfiguration,
 } from '../projects/registry.ts'
+import {
+  publicMapResource,
+  publicProjectObservation,
+  publicTicketObservation,
+  publicTicketResource,
+} from '../source-test-fixtures.ts'
 import { createRoadmapApplication } from './application.ts'
 import { createApplicationOperations } from './operations.ts'
 
@@ -74,7 +82,12 @@ const CONFIGURATION: ProjectConfiguration = {
   automation: { enabled: false, enabledProjects: [] },
 }
 
-function rawMap(nameWithOwner: string, body: string, claimed = false): RawMapIssue {
+function rawMap(
+  nameWithOwner: string,
+  body: string,
+  claimed = false,
+  blockedByB = false,
+): RawMapIssue {
   const assignees = claimed
     ? [
         {
@@ -116,7 +129,21 @@ function rawMap(nameWithOwner: string, body: string, claimed = false): RawMapIss
             pageInfo: { hasNextPage: false },
             nodes: assignees,
           },
-          blockedBy: { totalCount: 0, pageInfo: { hasNextPage: false }, nodes: [] },
+          blockedBy: {
+            totalCount: blockedByB ? 1 : 0,
+            pageInfo: { hasNextPage: false },
+            nodes: blockedByB
+              ? [
+                  {
+                    number: 109,
+                    title: 'Blocker in B',
+                    url: 'https://github.com/acme/source-b/issues/109',
+                    state: 'OPEN',
+                    repository: { databaseId: '202', nameWithOwner: 'acme/source-b' },
+                  },
+                ]
+              : [],
+          },
         },
       ],
     },
@@ -175,6 +202,10 @@ function fixture(
     credentials: CredentialBundle
     identity: GitHubConnection['githubIdentity']
     map: RawMapIssue
+    siblingMap: RawMapIssue | null
+    mapListed: boolean
+    missingMapAlias: boolean
+    repositoryUnavailable: boolean
     identityGate: ReturnType<typeof readGate> | null
     mapGate: ReturnType<typeof readGate> | null
     inFlight: number
@@ -186,6 +217,10 @@ function fixture(
       credentials: CREDENTIALS_A,
       identity: CONNECTION_A.githubIdentity,
       map: rawMap('acme/source-a', 'A baseline body'),
+      siblingMap: null,
+      mapListed: true,
+      missingMapAlias: false,
+      repositoryUnavailable: false,
       identityGate: null,
       mapGate: null,
       inFlight: 0,
@@ -197,6 +232,10 @@ function fixture(
       credentials: CREDENTIALS_B,
       identity: CONNECTION_B.githubIdentity,
       map: rawMap('acme/source-b', 'B candidate body', true),
+      siblingMap: null,
+      mapListed: true,
+      missingMapAlias: false,
+      repositoryUnavailable: false,
       identityGate: null,
       mapGate: null,
       inFlight: 0,
@@ -232,6 +271,8 @@ function fixture(
         request(accessToken, path, async (value) => {
           if (path === `/repositories/${value.id}`) {
             await value.identityGate?.enter()
+            if (value.repositoryUnavailable)
+              throw new GitHubError({ kind: 'transient', cause: 'network' })
             return { id: Number(value.id), full_name: value.nameWithOwner }
           }
           if (path === `/repos/${value.nameWithOwner}`)
@@ -240,21 +281,55 @@ function fixture(
             path ===
             `/repos/${value.nameWithOwner}/issues?state=all&labels=wayfinder%3Amap&per_page=100&page=1`
           )
-            return [{ number: 108 }]
+            return [
+              ...(value.mapListed ? [{ number: 108 }] : []),
+              ...(value.siblingMap ? [{ number: 110 }] : []),
+            ]
           throw new Error(`Unexpected Connection-bound repository request ${path}`)
         }),
       graphql: (_query, variables = {}) =>
         request(accessToken, 'map-read', async (value) => {
           const [owner, name] = value.nameWithOwner.split('/')
-          if (variables.o0 !== owner || variables.n0 !== name || variables.i0 !== 108)
+          if (
+            variables.o0 !== owner ||
+            variables.n0 !== name ||
+            variables.i0 !== (value.mapListed ? 108 : 110)
+          )
             throw new Error('GraphQL request does not match the current Connection repository')
+          if (
+            value.mapListed &&
+            value.siblingMap &&
+            (variables.o1 !== owner || variables.n1 !== name || variables.i1 !== 110)
+          )
+            throw new Error(
+              'Sibling GraphQL request does not match the current Connection repository',
+            )
           // Capture the provider response before blocking, so later polls read later content.
-          const map = value.map
+          const map = value.mapListed ? value.map : value.siblingMap
+          const missing = value.mapListed && value.missingMapAlias
+          const sibling = value.siblingMap
           await value.mapGate?.enter()
           return {
             data: {
               rateLimit: { cost: 1, remaining: 5000, limit: 5000, resetAt: '2027-01-01T00:00:00Z' },
-              m0: { databaseId: Number(value.id), nameWithOwner: value.nameWithOwner, issue: map },
+              ...(!missing
+                ? {
+                    m0: {
+                      databaseId: Number(value.id),
+                      nameWithOwner: value.nameWithOwner,
+                      issue: map,
+                    },
+                  }
+                : {}),
+              ...(value.mapListed && sibling
+                ? {
+                    m1: {
+                      databaseId: Number(value.id),
+                      nameWithOwner: value.nameWithOwner,
+                      issue: sibling,
+                    },
+                  }
+                : {}),
             },
             errors: [],
           }
@@ -284,6 +359,7 @@ function fixture(
     projectId: string
     hold: boolean
     retired: boolean
+    readonly latest: SourceContribution
     replay(): void
   }> = []
   const events: ChangeEvent[] = []
@@ -347,6 +423,10 @@ function fixture(
           projectId: input.ref.projectId,
           hold: false,
           retired: false,
+          get latest(): SourceContribution {
+            if (!last) throw new Error('No actual provider contribution was captured')
+            return last
+          },
           replay() {
             if (!last || !callback) throw new Error('No actual provider contribution was captured')
             callback(last)
@@ -390,6 +470,28 @@ function fixture(
       const value = repository(id)
       value.map = rawMap(value.nameWithOwner, body, claimed)
     },
+    blockOnB(id: string, body = 'A baseline body') {
+      const value = repository(id)
+      value.map = rawMap(value.nameWithOwner, body, false, true)
+    },
+    failRepository(id: string, unavailable: boolean) {
+      repository(id).repositoryUnavailable = unavailable
+    },
+    addSibling(id: string) {
+      const value = repository(id)
+      value.siblingMap = {
+        ...rawMap(value.nameWithOwner, 'Readable sibling body'),
+        number: 110,
+        url: `https://github.com/${value.nameWithOwner}/issues/110`,
+        updatedAt: '2026-09-01T00:00:00Z',
+      }
+    },
+    missingAlias(id: string, missing: boolean) {
+      repository(id).missingMapAlias = missing
+    },
+    listMap(id: string, listed: boolean) {
+      repository(id).mapListed = listed
+    },
     gate(id: string, stage: 'identity' | 'map') {
       const gate = readGate()
       gates.push(gate)
@@ -415,6 +517,12 @@ function project(state: ApplicationState, key: ProjectKey) {
   return value
 }
 
+function ticketObservation(state: ApplicationState, key: ProjectKey) {
+  const map = publicMapResource(project(state, key), '108')
+  const ticket = map && publicTicketResource(map, '109')
+  return ticket ? publicTicketObservation(ticket) : null
+}
+
 function expectOnlyActiveA(state: ApplicationState) {
   expect(state.configurationVersion).toBe(1)
   expect(state.configuration.valid).toBe(true)
@@ -430,7 +538,6 @@ function expectOnlyActiveA(state: ApplicationState) {
     },
     workspace: { path: PROJECT_A.workspace.path, gitIdentity: '101' },
   })
-  expect(state.roadmap.projects.map((row) => row.key)).toEqual([SOURCE_A])
   expect(JSON.stringify(state)).not.toContain('B candidate body')
   expect(JSON.stringify(state)).not.toContain(CREDENTIALS_A.accessToken)
   expect(JSON.stringify(state)).not.toContain(CREDENTIALS_B.accessToken)
@@ -441,6 +548,247 @@ afterEach(() => {
 })
 
 describe('RoadmapApplication independent source continuity', () => {
+  // Exercises coordinator.activate owner reuse, pool.reconcileTopology, and cached reproject.
+  // A changed blocker reference at the same actual read time must not bypass parent failure.
+  it('retains topology-corrected cached GitHub tickets without inventing a new source read', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1000)
+    const test = fixture()
+    test.blockOnB('101')
+    test.addSibling('101')
+    const external = {
+      kind: 'external',
+      integration: 'github',
+      repositoryId: '202',
+      nameWithOwner: 'acme/source-b',
+    }
+    const registered = { kind: 'registered', project: SOURCE_B }
+    const ownProvenance = {
+      integration: 'github',
+      connectionId: 'connection-a',
+      repositoryId: '101',
+      stage: 'map-read',
+    }
+    const parentFailure = (attemptedAt: number) => ({
+      scope: { kind: 'project', project: SOURCE_A },
+      attemptedAt,
+      provenance: {
+        integration: 'github',
+        connectionId: 'connection-a',
+        repositoryId: '101',
+        stage: 'repository',
+      },
+      failure: { kind: 'transient', cause: 'network' },
+    })
+    try {
+      await test.application.start()
+      const baseline = project(test.application.current(), SOURCE_A)
+      const ownerA = test.callbacks.find((owner) => owner.projectId === SOURCE_A.id)
+      if (!ownerA) throw new Error('Missing actual A observer')
+      const ownTicketRead = () => {
+        const attempt = ownerA.latest.attempts.find(
+          (value) =>
+            value.kind === 'observed' &&
+            value.scope.kind === 'ticket' &&
+            value.scope.ticket.map.mapId === '108' &&
+            value.scope.ticket.ticketId === '109',
+        )
+        if (!attempt || attempt.kind !== 'observed') throw new Error('Missing actual A ticket read')
+        return attempt
+      }
+      const ownProjectFailure = () => {
+        const attempt = ownerA.latest.attempts.find(
+          (value) => value.kind === 'failed' && value.scope.kind === 'project',
+        )
+        if (!attempt || attempt.kind !== 'failed')
+          throw new Error('Missing actual A Project failure')
+        return attempt
+      }
+      const baselineRead = ownTicketRead()
+      expect(baseline).toMatchObject({
+        activeMap: { kind: 'known-current', mapId: '108' },
+        displayOrder: { openMapIds: ['108', '110'] },
+      })
+      const baselineMap = publicMapResource(baseline, '108')
+      expect(baselineMap && publicTicketResource(baselineMap, '109')?.resource).toMatchObject({
+        kind: 'current-readable',
+        observation: {
+          attemptedAt: 1000,
+          observedAt: 1000,
+          provenance: ownProvenance,
+          value: { body: 'A baseline body', blockedBy: [{ reference: external, ticketId: '109' }] },
+        },
+      })
+
+      test.failRepository('101', true)
+      vi.setSystemTime(2000)
+      expect(
+        await test.application.execute({
+          type: 'refresh-project',
+          project: SOURCE_A,
+          expectedConfigurationVersion: 1,
+        }),
+      ).toMatchObject({ ok: true })
+      const failedRead = ownProjectFailure()
+      expect(failedRead.readSequence).toBeGreaterThan(baselineRead.readSequence)
+      expect(ownTicketRead().readSequence).toBe(baselineRead.readSequence)
+      const unavailable = project(test.application.current(), SOURCE_A)
+      expect(unavailable).toMatchObject({
+        resource: { kind: 'retained-unavailable', unavailable: parentFailure(2000) },
+        activeMap: { kind: 'uncertain' },
+        displayOrder: { openMapIds: ['108', '110'] },
+      })
+      const failedMap = publicMapResource(unavailable, '108')
+      expect(failedMap && publicTicketResource(failedMap, '109')?.resource).toMatchObject({
+        kind: 'retained-unavailable',
+        unavailable: parentFailure(2000),
+        lastSuccessful: {
+          attemptedAt: 1000,
+          observedAt: 1000,
+          value: { blockedBy: [{ reference: external, ticketId: '109' }] },
+        },
+      })
+      const requestsBeforeTopology = test.requests.filter(
+        (request) => request.repositoryId === '101',
+      )
+
+      vi.setSystemTime(3000)
+      test.emit({
+        ...CONFIGURATION,
+        configurationVersion: 2,
+        connections: [...CONFIGURATION.connections, CONNECTION_B],
+        projects: [PROJECT_A, PROJECT_B],
+      })
+      await vi.advanceTimersByTimeAsync(0)
+      await vi.waitFor(() => expect(test.application.current().configurationVersion).toBe(2))
+      const reprojected = test.application.current()
+      const envelope: unknown = JSON.parse(JSON.stringify({ type: 'state', state: reprojected }))
+      const decoded = stateEnvelopeCodec.decode(envelope)
+      expect(decoded.ok).toBe(true)
+      if (!decoded.ok)
+        throw new Error('Cached topology reclassification invalidated outgoing state')
+      expect(decoded.value.state).toEqual(reprojected)
+      expect(ownTicketRead()).toMatchObject({
+        readSequence: baselineRead.readSequence,
+        attemptedAt: baselineRead.attemptedAt,
+        observedAt: baselineRead.observedAt,
+      })
+      expect(ownProjectFailure()).toEqual(failedRead)
+      const retained = project(reprojected, SOURCE_A)
+      expect(retained).toMatchObject({
+        resource: { kind: 'retained-unavailable', unavailable: parentFailure(2000) },
+        activeMap: { kind: 'uncertain' },
+        displayOrder: { openMapIds: ['108', '110'] },
+      })
+      const retainedMap = publicMapResource(retained, '108')
+      expect(retainedMap && publicTicketResource(retainedMap, '109')?.resource).toMatchObject({
+        kind: 'retained-unavailable',
+        unavailable: parentFailure(2000),
+        lastSuccessful: {
+          attemptedAt: 1000,
+          observedAt: 1000,
+          provenance: ownProvenance,
+          value: {
+            body: 'A baseline body',
+            blockedBy: [{ reference: registered, ticketId: '109' }],
+          },
+        },
+      })
+      expect(project(reprojected, SOURCE_B).resource).toMatchObject({
+        kind: 'current-readable',
+        observation: { attemptedAt: 3000, observedAt: 3000 },
+      })
+      expect(test.requests.filter((request) => request.repositoryId === '101')).toEqual(
+        requestsBeforeTopology,
+      )
+      expect(test.inputs.filter((input) => input.ref.projectId === SOURCE_A.id)).toHaveLength(1)
+      expect(ownerA.retired).toBe(false)
+
+      // A real later own read restores current evidence; identical cached data is not a read.
+      test.failRepository('101', false)
+      test.blockOnB('101', 'A newly fetched body')
+      vi.setSystemTime(4000)
+      expect(
+        await test.application.execute({
+          type: 'refresh-project',
+          project: SOURCE_A,
+          expectedConfigurationVersion: 2,
+        }),
+      ).toMatchObject({ ok: true })
+      const recoveredRead = ownTicketRead()
+      expect(recoveredRead.readSequence).toBeGreaterThan(failedRead.readSequence)
+      expect(ticketObservation(test.application.current(), SOURCE_A)).toMatchObject({
+        attemptedAt: 4000,
+        observedAt: 4000,
+        provenance: ownProvenance,
+        value: {
+          body: 'A newly fetched body',
+          blockedBy: [{ reference: registered, ticketId: '109' }],
+        },
+      })
+      const recoveredMap = publicMapResource(project(test.application.current(), SOURCE_A), '108')
+      expect(recoveredMap && publicTicketResource(recoveredMap, '109')?.resource.kind).toBe(
+        'current-readable',
+      )
+      expect(project(test.application.current(), SOURCE_A).activeMap).toEqual({
+        kind: 'known-current',
+        mapId: '108',
+      })
+
+      test.failRepository('101', true)
+      vi.setSystemTime(5000)
+      expect(
+        await test.application.execute({
+          type: 'refresh-project',
+          project: SOURCE_A,
+          expectedConfigurationVersion: 2,
+        }),
+      ).toMatchObject({ ok: true })
+      const laterFailure = ownProjectFailure()
+      expect(laterFailure.readSequence).toBeGreaterThan(recoveredRead.readSequence)
+      const readsBeforeRemoval = test.requests.filter((request) => request.repositoryId === '101')
+      vi.setSystemTime(6000)
+      test.emit({ ...CONFIGURATION, configurationVersion: 3 })
+      await vi.advanceTimersByTimeAsync(0)
+      await vi.waitFor(() => expect(test.application.current().configurationVersion).toBe(3))
+      expect(ownTicketRead()).toMatchObject({
+        readSequence: recoveredRead.readSequence,
+        attemptedAt: recoveredRead.attemptedAt,
+        observedAt: recoveredRead.observedAt,
+      })
+      expect(ownProjectFailure()).toEqual(laterFailure)
+      const removed = project(test.application.current(), SOURCE_A)
+      const removedMap = publicMapResource(removed, '108')
+      expect(removedMap && publicTicketResource(removedMap, '109')?.resource).toMatchObject({
+        kind: 'retained-unavailable',
+        unavailable: parentFailure(5000),
+        lastSuccessful: {
+          attemptedAt: 4000,
+          observedAt: 4000,
+          provenance: ownProvenance,
+          value: {
+            body: 'A newly fetched body',
+            blockedBy: [{ reference: external, ticketId: '109' }],
+          },
+        },
+      })
+      expect(removed.activeMap.kind).toBe('uncertain')
+      expect(test.requests.filter((request) => request.repositoryId === '101')).toEqual(
+        readsBeforeRemoval,
+      )
+      ownerA.replay()
+      expect(project(test.application.current(), SOURCE_A)).toEqual(removed)
+      for (const state of test.states) {
+        const published: unknown = JSON.parse(JSON.stringify({ type: 'state', state }))
+        expect(stateEnvelopeCodec.decode(published).ok).toBe(true)
+      }
+      expect(test.launches).toEqual([])
+      expect(test.writes).toEqual([])
+    } finally {
+      await test.stop()
+    }
+  })
+
   it.each(['manual refresh', 'ordinary recovery'])(
     'admits a restored saved canonical Local root through %s without refreshing GitHub provenance',
     async (recovery) => {
@@ -461,10 +809,10 @@ describe('RoadmapApplication independent source continuity', () => {
       try {
         await test.application.start()
         const before = test.application.current()
-        expect(project(before, LOCAL).availability).toMatchObject({ status: 'unavailable' })
-        expect(project(before, LOCAL).availability.observedAt).toBeUndefined()
+        expect(project(before, LOCAL).resource.kind).toBe('never-observed')
+        expect(publicProjectObservation(project(before, LOCAL))).toBeNull()
         expect(test.localInputs).toEqual([])
-        expect(project(before, SOURCE_A).availability.observedAt).toBe(1_000)
+        expect(publicProjectObservation(project(before, SOURCE_A))?.observedAt).toBe(1_000)
         await mkdir(join(workspace, '.wayfinder'), { recursive: true })
         expect(await realpath(workspace)).toBe(canonical)
         if (recovery === 'manual refresh') {
@@ -479,8 +827,8 @@ describe('RoadmapApplication independent source continuity', () => {
         } else {
           await vi.advanceTimersByTimeAsync(2_000)
           await vi.waitFor(() =>
-            expect(project(test.application.current(), LOCAL).availability.status).toBe(
-              'available',
+            expect(project(test.application.current(), LOCAL).resource.kind).toBe(
+              'current-readable',
             ),
           )
         }
@@ -496,12 +844,16 @@ describe('RoadmapApplication independent source continuity', () => {
         })
         expect(project(after, LOCAL)).toMatchObject({
           name: 'Saved Local management',
-          availability: { status: 'available' },
-          openMaps: [],
-          closedMaps: [],
+          resource: { kind: 'current-readable' },
+          maps: [],
+          activeMap: { kind: 'known-empty' },
         })
-        expect(project(after, LOCAL).availability.observedAt).toBeGreaterThanOrEqual(3_000)
-        expect(project(after, LOCAL).availability.observedAt).toBeLessThanOrEqual(13_000)
+        expect(publicProjectObservation(project(after, LOCAL))?.observedAt).toBeGreaterThanOrEqual(
+          3_000,
+        )
+        expect(publicProjectObservation(project(after, LOCAL))?.observedAt).toBeLessThanOrEqual(
+          13_000,
+        )
         expect(project(after, SOURCE_A)).toEqual(project(before, SOURCE_A))
         expect(test.localInputs).toHaveLength(1)
         expect(test.localInputs[0]).toMatchObject({
@@ -564,8 +916,8 @@ describe('RoadmapApplication independent source continuity', () => {
           }),
         ).toMatchObject({ ok: false })
         await vi.advanceTimersByTimeAsync(10_000)
-        expect(project(test.application.current(), LOCAL).availability.status).toBe('unavailable')
-        expect(project(test.application.current(), LOCAL).availability.observedAt).toBeUndefined()
+        expect(project(test.application.current(), LOCAL).resource.kind).toBe('never-observed')
+        expect(publicProjectObservation(project(test.application.current(), LOCAL))).toBeNull()
         expect(test.application.current().registrations).toEqual(before.registrations)
         expect(project(test.application.current(), SOURCE_A)).toEqual(project(before, SOURCE_A))
         expect(test.localInputs).toEqual([])
@@ -652,16 +1004,26 @@ describe('RoadmapApplication independent source continuity', () => {
         }
         expect(test.localInputs).toEqual([])
         expect(project(state, LOCAL)).toMatchObject({
-          availability: { status: 'unavailable' },
-          openMaps: [],
-          closedMaps: [],
+          resource: { kind: 'never-observed' },
+          maps: [],
         })
-        expect(state.roadmap.projects.some((row) => row.key.integration === 'local')).toBe(false)
         expect(project(state, SOURCE_A)).toMatchObject({
           name: 'Saved GitHub',
-          availability: { status: 'available' },
-          openMaps: [
-            { id: '108', ticketsComplete: true, tickets: [{ id: '109', body: 'A baseline body' }] },
+          resource: { kind: 'current-readable' },
+          maps: [
+            {
+              key: { project: SOURCE_A, mapId: '108' },
+              ticketsMembership: { kind: 'current-complete' },
+              tickets: [
+                {
+                  key: { map: { project: SOURCE_A, mapId: '108' }, ticketId: '109' },
+                  resource: {
+                    kind: 'current-readable',
+                    observation: { value: { body: 'A baseline body' } },
+                  },
+                },
+              ],
+            },
           ],
         })
         expect(
@@ -694,12 +1056,10 @@ describe('RoadmapApplication independent source continuity', () => {
             expectedConfigurationVersion: 1,
           }),
         ).toMatchObject({ ok: true, result: { type: 'project-refreshed', project: SOURCE_A } })
-        expect(project(test.application.current(), SOURCE_A).openMaps[0]?.tickets[0]).toMatchObject(
-          {
-            body: 'Remote body after occupancy rejection',
-            isClaimed: true,
-          },
-        )
+        expect(ticketObservation(test.application.current(), SOURCE_A)?.value).toMatchObject({
+          body: 'Remote body after occupancy rejection',
+          isClaimed: true,
+        })
         expect(test.events.filter((event) => event.type === 'ticket-claimed')).toHaveLength(1)
         const eventsAfterRefresh = [...test.events]
         for (const key of [LOCAL, SOURCE_A]) {
@@ -739,9 +1099,9 @@ describe('RoadmapApplication independent source continuity', () => {
         expect(afterRepair.registrations).toEqual(refreshed.registrations)
         expect(afterRepair.connections).toEqual(refreshed.connections)
         expect(afterRepair.automation).toEqual(refreshed.automation)
-        expect(afterRepair.roadmap.projects).toEqual(refreshed.roadmap.projects)
-        expect(project(afterRepair, SOURCE_A).availability).toEqual(
-          project(refreshed, SOURCE_A).availability,
+        expect(afterRepair.projects).toEqual(refreshed.projects)
+        expect(project(afterRepair, SOURCE_A).resource).toEqual(
+          project(refreshed, SOURCE_A).resource,
         )
         for (const key of [LOCAL, SOURCE_A]) {
           expect(
@@ -796,15 +1156,13 @@ describe('RoadmapApplication independent source continuity', () => {
         )
         await test.application.start()
         const before = test.application.current()
-        expect(project(before, SOURCE_A).availability.observedAt).toBeTypeOf('number')
-        expect(project(before, SOURCE_A)).toMatchObject({
-          availability: { status: 'available' },
-          openMaps: [{ id: '108', tickets: [{ id: '109', body: 'A baseline body' }] }],
-        })
+        expect(publicProjectObservation(project(before, SOURCE_A))?.observedAt).toBeTypeOf('number')
+        expect(project(before, SOURCE_A).resource.kind).toBe('current-readable')
+        expect(ticketObservation(before, SOURCE_A)?.value.body).toBe('A baseline body')
         expect(
           project(before, SOURCE_A).actions.some((action) => action.kind === 'server-launch'),
         ).toBe(true)
-        expect(project(before, LOCAL).availability.status).toBe('unavailable')
+        expect(project(before, LOCAL).resource.kind).toBe('never-observed')
         expect(test.localInputs).toEqual([])
         await symlink(worktree, alias, 'dir')
         for (const key of [SOURCE_A, LOCAL]) {
@@ -834,13 +1192,18 @@ describe('RoadmapApplication independent source continuity', () => {
         expect(after.automation).toEqual(before.automation)
         expect(after.authorizationOperations).toEqual(before.authorizationOperations)
         expect(after.projects.map((row) => row.key)).toEqual(before.projects.map((row) => row.key))
-        expect(project(after, SOURCE_A).openMaps).toEqual(project(before, SOURCE_A).openMaps)
-        expect(project(after, SOURCE_A).closedMaps).toEqual(project(before, SOURCE_A).closedMaps)
-        expect(project(after, SOURCE_A).availability).toEqual(
-          project(before, SOURCE_A).availability,
+        expect(project(after, LOCAL).managementWarnings).toContainEqual(
+          expect.stringMatching(/Workspace unavailable:.*recorded Git-history identity/),
         )
-        expect(after.roadmap.projects).toEqual(before.roadmap.projects)
+        expect(project(after, SOURCE_A).managementWarnings).toContainEqual(
+          expect.stringMatching(/Workspace unavailable:.*canonical Workspace.*already registered/),
+        )
         for (const key of [LOCAL, SOURCE_A]) {
+          expect(project(after, key).resource).toEqual(project(before, key).resource)
+          expect(project(after, key).mapsMembership).toEqual(project(before, key).mapsMembership)
+          expect(project(after, key).maps).toEqual(project(before, key).maps)
+          expect(project(after, key).displayOrder).toEqual(project(before, key).displayOrder)
+          expect(project(after, key).activeMap).toEqual(project(before, key).activeMap)
           expect(project(after, key).name).toBe(project(before, key).name)
           expect(
             project(after, key).actions.some((action) => action.kind === 'server-launch'),
@@ -915,7 +1278,7 @@ describe('RoadmapApplication independent source continuity', () => {
     try {
       await application.start()
       const before = application.current()
-      expect(project(before, LOCAL).availability.status).toBe('unavailable')
+      expect(project(before, LOCAL).resource.kind).toBe('never-observed')
       expect(
         await application.execute({
           type: 'repair-project-workspace',
@@ -950,7 +1313,7 @@ describe('RoadmapApplication independent source continuity', () => {
     try {
       await test.application.start()
       expectOnlyActiveA(test.application.current())
-      expect(project(test.application.current(), SOURCE_A).openMaps[0]?.tickets[0]?.body).toBe(
+      expect(ticketObservation(test.application.current(), SOURCE_A)?.value?.body).toBe(
         'A baseline body',
       )
       expect(test.events).toEqual([])
@@ -969,12 +1332,23 @@ describe('RoadmapApplication independent source continuity', () => {
       const current = test.application.current()
       expectOnlyActiveA(current)
       expect(project(current, SOURCE_A)).toMatchObject({
-        availability: { status: 'available', observedAt: 31_000 },
-        openMaps: [
+        resource: { kind: 'current-readable', observation: { observedAt: 31_000 } },
+        maps: [
           {
-            id: '108',
-            body: { destination: 'A changed while B is pending' },
-            tickets: [{ id: '109', body: 'A changed while B is pending', isClaimed: true }],
+            key: { project: SOURCE_A, mapId: '108' },
+            resource: {
+              kind: 'current-readable',
+              observation: { value: { body: { destination: 'A changed while B is pending' } } },
+            },
+            tickets: [
+              {
+                key: { map: { project: SOURCE_A, mapId: '108' }, ticketId: '109' },
+                resource: {
+                  kind: 'current-readable',
+                  observation: { value: { body: 'A changed while B is pending', isClaimed: true } },
+                },
+              },
+            ],
           },
         ],
       })
@@ -1007,10 +1381,10 @@ describe('RoadmapApplication independent source continuity', () => {
       candidate.release()
       await vi.advanceTimersByTimeAsync(0)
       expect(test.application.current().configurationVersion).toBe(2)
-      expect(project(test.application.current(), SOURCE_A).openMaps[0]?.tickets[0]?.body).toBe(
+      expect(ticketObservation(test.application.current(), SOURCE_A)?.value?.body).toBe(
         'A changed while B is pending',
       )
-      expect(project(test.application.current(), SOURCE_B).openMaps[0]?.tickets[0]?.body).toBe(
+      expect(ticketObservation(test.application.current(), SOURCE_B)?.value?.body).toBe(
         'B candidate body',
       )
       expect(test.events.filter((event) => event.type === 'ticket-claimed')).toHaveLength(1)
@@ -1038,7 +1412,7 @@ describe('RoadmapApplication independent source continuity', () => {
       await vi.advanceTimersByTimeAsync(30_000)
       expect(gate.pending()).toBe(true)
       expect(test.maximumInFlight('101')).toBe(1)
-      expect(project(test.application.current(), SOURCE_A).openMaps[0]?.tickets[0]?.body).toBe(
+      expect(ticketObservation(test.application.current(), SOURCE_A)?.value?.body).toBe(
         'A baseline body',
       )
       expect(test.events).toEqual([])
@@ -1049,7 +1423,7 @@ describe('RoadmapApplication independent source continuity', () => {
       })
       await vi.advanceTimersByTimeAsync(0)
       expect(test.maximumInFlight('101')).toBe(1)
-      expect(project(test.application.current(), SOURCE_A).openMaps[0]?.tickets[0]).toMatchObject({
+      expect(ticketObservation(test.application.current(), SOURCE_A)?.value).toMatchObject({
         body: 'Newest serialized A update',
         isClaimed: true,
       })
@@ -1075,7 +1449,7 @@ describe('RoadmapApplication independent source continuity', () => {
           expect.objectContaining({ repositoryId: '101', path: 'map-read', at: 31_000 }),
         ]),
       )
-      expect(project(test.application.current(), SOURCE_A).openMaps[0]?.tickets[0]?.body).toBe(
+      expect(ticketObservation(test.application.current(), SOURCE_A)?.value?.body).toBe(
         'A baseline body',
       )
       test.emit({
@@ -1090,7 +1464,19 @@ describe('RoadmapApplication independent source continuity', () => {
       expect(project(test.application.current(), SOURCE_A)).toMatchObject({
         connectionId: 'connection-b',
         locator: { repositoryId: '202' },
-        openMaps: [{ tickets: [{ id: '109', body: 'B candidate body' }] }],
+        maps: [
+          {
+            tickets: [
+              {
+                key: { map: { project: SOURCE_A, mapId: '108' }, ticketId: '109' },
+                resource: {
+                  kind: 'current-readable',
+                  observation: { value: { body: 'B candidate body' } },
+                },
+              },
+            ],
+          },
+        ],
       })
       const committed = test.application.current()
       const published = test.states.length
@@ -1100,11 +1486,243 @@ describe('RoadmapApplication independent source continuity', () => {
       expect(test.application.current()).toBe(committed)
       expect(test.states).toHaveLength(published)
       expect(test.events).toHaveLength(events)
-      expect(project(test.application.current(), SOURCE_A).openMaps[0]?.tickets[0]?.body).toBe(
+      expect(ticketObservation(test.application.current(), SOURCE_A)?.value?.body).toBe(
         'B candidate body',
       )
     } finally {
       await test.stop()
     }
   })
+
+  // Catches missing provider aliases being treated as deletion or silently promoting a readable sibling.
+  it('keeps a missing GitHub alias retained while a sibling reads and same-key recovery advances provenance', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1000)
+    const test = fixture()
+    test.addSibling('101')
+    try {
+      await test.application.start()
+      expect(project(test.application.current(), SOURCE_A)).toMatchObject({
+        activeMap: { kind: 'known-current', mapId: '108' },
+        displayOrder: { openMapIds: ['108', '110'] },
+      })
+      test.missingAlias('101', true)
+      vi.setSystemTime(2000)
+      expect(
+        (
+          await test.application.execute({
+            type: 'refresh-project',
+            project: SOURCE_A,
+            expectedConfigurationVersion: 1,
+          })
+        ).ok,
+      ).toBe(true)
+      expect(project(test.application.current(), SOURCE_A)).toMatchObject({
+        activeMap: { kind: 'uncertain' },
+        displayOrder: { openMapIds: ['108', '110'] },
+        maps: [
+          {
+            key: { project: SOURCE_A, mapId: '108' },
+            resource: {
+              kind: 'retained-unavailable',
+              lastSuccessful: {
+                observedAt: 1000,
+                provenance: {
+                  integration: 'github',
+                  connectionId: 'connection-a',
+                  repositoryId: '101',
+                  stage: 'map-read',
+                },
+                value: {
+                  source: { kind: 'issue', url: 'https://github.com/acme/source-a/issues/108' },
+                  body: { raw: expect.stringContaining('A baseline body') },
+                },
+              },
+              unavailable: {
+                attemptedAt: 2000,
+                failure: { kind: 'access-ambiguous', evidence: 'missing-alias' },
+              },
+            },
+          },
+          {
+            key: { project: SOURCE_A, mapId: '110' },
+            resource: {
+              kind: 'current-readable',
+              observation: {
+                observedAt: 2000,
+                value: { body: { raw: expect.stringContaining('Readable sibling body') } },
+              },
+            },
+          },
+        ],
+      })
+      test.missingAlias('101', false)
+      test.update('101', 'Recovered alias body')
+      vi.setSystemTime(3000)
+      expect(
+        (
+          await test.application.execute({
+            type: 'refresh-project',
+            project: SOURCE_A,
+            expectedConfigurationVersion: 1,
+          })
+        ).ok,
+      ).toBe(true)
+      expect(project(test.application.current(), SOURCE_A)).toMatchObject({
+        activeMap: { kind: 'known-current', mapId: '108' },
+        maps: [
+          {
+            key: { project: SOURCE_A, mapId: '108' },
+            resource: {
+              kind: 'current-readable',
+              observation: {
+                observedAt: 3000,
+                provenance: {
+                  integration: 'github',
+                  connectionId: 'connection-a',
+                  repositoryId: '101',
+                  stage: 'map-read',
+                },
+                value: { body: { raw: expect.stringContaining('Recovered alias body') } },
+              },
+            },
+          },
+          { key: { project: SOURCE_A, mapId: '110' }, resource: { kind: 'current-readable' } },
+        ],
+      })
+      expect(test.launches).toEqual([])
+    } finally {
+      await test.stop()
+    }
+  })
+  // Catches earlier omission proof hiding a returning identity's actual failed provider read.
+  it.each([true, false])(
+    'reports a returning GitHub missing alias after proven absence with prior success %s',
+    async (hadSuccess) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(1000)
+      const test = fixture()
+      test.addSibling('101')
+      test.missingAlias('101', !hadSuccess)
+      const target = { project: SOURCE_A, mapId: '108', ticketId: '109' }
+      try {
+        await test.application.start()
+        const baseline = publicMapResource(project(test.application.current(), SOURCE_A), '108')
+        expect(baseline?.resource.kind).toBe(hadSuccess ? 'current-readable' : 'never-observed')
+        test.listMap('101', false)
+        vi.setSystemTime(2000)
+        expect(
+          (
+            await test.application.execute({
+              type: 'refresh-project',
+              project: SOURCE_A,
+              expectedConfigurationVersion: 1,
+            })
+          ).ok,
+        ).toBe(true)
+        expect(
+          publicMapResource(project(test.application.current(), SOURCE_A), '108')?.resource,
+        ).toMatchObject({
+          kind: 'proven-absent',
+          absence: { observedAt: 2000, proof: { kind: 'complete-membership' } },
+          trace: hadSuccess
+            ? { kind: 'last-successful-trace', lastSuccessful: { observedAt: 1000 } }
+            : { kind: 'no-known-trace' },
+        })
+        test.listMap('101', true)
+        test.missingAlias('101', true)
+        vi.setSystemTime(3000)
+        expect(
+          (
+            await test.application.execute({
+              type: 'refresh-project',
+              project: SOURCE_A,
+              expectedConfigurationVersion: 1,
+            })
+          ).ok,
+        ).toBe(true)
+        const returning = project(test.application.current(), SOURCE_A)
+        expect(returning).toMatchObject({
+          mapsMembership: {
+            kind: 'current-complete',
+            observation: {
+              observedAt: 3000,
+              value: {
+                members: [
+                  { project: SOURCE_A, mapId: '108' },
+                  { project: SOURCE_A, mapId: '110' },
+                ],
+              },
+            },
+          },
+          activeMap: { kind: 'uncertain' },
+          displayOrder: { openMapIds: ['110'] },
+        })
+        const failure = {
+          scope: { kind: 'map', map: { project: SOURCE_A, mapId: '108' } },
+          attemptedAt: 3000,
+          provenance: {
+            integration: 'github',
+            connectionId: 'connection-a',
+            repositoryId: '101',
+            stage: 'map-read',
+          },
+          failure: { kind: 'access-ambiguous', evidence: 'missing-alias' },
+          cause: 'GitHub source is inaccessible; absence is not proven.',
+        }
+        const returnedMap = publicMapResource(returning, '108')
+        expect(returnedMap?.resource).toMatchObject(
+          hadSuccess
+            ? { kind: 'retained-unavailable', unavailable: failure }
+            : { kind: 'never-observed', current: failure },
+        )
+        if (hadSuccess && baseline?.resource.kind === 'current-readable' && returnedMap) {
+          expect(returnedMap.resource).toMatchObject({
+            lastSuccessful: baseline.resource.observation,
+          })
+          expect(publicTicketResource(returnedMap, '109')?.resource).toMatchObject({
+            kind: 'retained-unavailable',
+            lastSuccessful: { observedAt: 1000, value: { body: 'A baseline body' } },
+          })
+        }
+        expect(
+          await test.application.execute({
+            type: 'start-automation-override',
+            expectedConfigurationVersion: 1,
+            target,
+            stage: 'classification',
+          }),
+        ).toMatchObject({ ok: false })
+        expect(test.application.current().automation.evidence).toEqual([])
+        expect(test.launches).toEqual([])
+        test.missingAlias('101', false)
+        test.update('101', 'Returned same-key provider prose')
+        vi.setSystemTime(4000)
+        expect(
+          (
+            await test.application.execute({
+              type: 'refresh-project',
+              project: SOURCE_A,
+              expectedConfigurationVersion: 1,
+            })
+          ).ok,
+        ).toBe(true)
+        expect(project(test.application.current(), SOURCE_A)).toMatchObject({
+          activeMap: { kind: 'known-current', mapId: '108' },
+          displayOrder: { openMapIds: ['108', '110'] },
+        })
+        expect(
+          publicMapResource(project(test.application.current(), SOURCE_A), '108')?.resource,
+        ).toMatchObject({
+          kind: 'current-readable',
+          observation: {
+            observedAt: 4000,
+            value: { body: { raw: expect.stringContaining('Returned same-key provider prose') } },
+          },
+        })
+      } finally {
+        await test.stop()
+      }
+    },
+  )
 })

@@ -49,9 +49,10 @@ import {
   type ProjectRef,
   type RegistryMutation,
 } from '../projects/registry.ts'
+import { ResourceCatalog } from '../resources/catalog.ts'
 import { type CredentialVault, CredentialVaultError } from './credential-vault.ts'
 import type { ApplicationOperations } from './operations.ts'
-import { createSourceProjection, projectApplicationState } from './projection.ts'
+import { projectApplicationState, projectResources } from './projection.ts'
 
 export interface RoadmapApplication {
   start(): Promise<void>
@@ -127,11 +128,12 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     admissions: options.admissions,
     runtime: { github: resolveGitHubAccess },
   })
-  const sourceProjection = createSourceProjection()
+  const catalog = new ResourceCatalog()
   const emptyCommitted: CommittedObservation = {
     registry: { ...EMPTY_CONFIGURATION, admissions: [] },
     observation: { committedAt: 0, attempts: [] },
     contributions: [],
+    sourceBindings: new Map(),
     configurationValid: true,
     pendingAdmission: false,
     pendingConfigurations: [],
@@ -173,7 +175,7 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     ? createAutomationEngine({
         database: options.automation.database,
         launcher: options.automation.launcher,
-        source: () => coordinator.current(),
+        resources: () => catalog.current(),
         onEvidenceChange() {
           publish()
           void enqueue(disableInterruptedProjects).catch(() => undefined)
@@ -182,7 +184,8 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     : null
   let state = buildState()
   let stateFingerprint = semanticFingerprint(state)
-  const unsubscribeObservation = coordinator.subscribe(() => {
+  const unsubscribeObservation = coordinator.subscribe((committed) => {
+    catalog.commit(committed)
     publish()
     automationEngine?.reconcile()
   })
@@ -191,10 +194,10 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
     return coordinator.current()?.registry ?? emptyCommitted.registry
   }
   function buildState(): ApplicationState {
-    const committed = coordinator.current() ?? emptyCommitted
+    const resources = catalog.current() ?? { committed: emptyCommitted, projects: [] }
     return projectApplicationState({
-      committed,
-      source: sourceProjection.commit(committed),
+      committed: resources.committed,
+      source: projectResources(resources),
       serverEpoch,
       stateSequence,
       supportedIntegrations,
@@ -262,11 +265,15 @@ export function createRoadmapApplication(options: RoadmapApplicationOptions): Ro
         attempts: committed.observation.attempts,
         projects: candidate.projects.map((project) => ({ key: project.key, name: project.name })),
         baselineProjects,
-        order: candidate.roadmap.projects.flatMap((project) =>
-          [...project.openMaps, ...project.closedMaps].map((map) => ({
-            map: { project: map.project, mapId: map.id },
-            tickets: map.tickets.map((ticket) => ticket.id),
-          })),
+        order: candidate.projects.flatMap((project) =>
+          [...project.displayOrder.openMapIds, ...project.displayOrder.closedMapIds].flatMap(
+            (mapId) => {
+              const map = project.maps.find((resource) => resource.key.mapId === mapId)
+              return map
+                ? [{ map: map.key, tickets: map.tickets.map((ticket) => ticket.key.ticketId) }]
+                : []
+            },
+          ),
         ),
       })
   }
@@ -1390,7 +1397,6 @@ function semanticFingerprint(state: ApplicationState): string {
     authorizationOperations: state.authorizationOperations,
     configuration: state.configuration,
     automation: state.automation,
-    roadmap: { projects: state.roadmap.projects, unreachable: state.roadmap.unreachable },
   })
 }
 function compareConfigurations(

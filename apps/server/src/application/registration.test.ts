@@ -355,14 +355,22 @@ describe('public application registration authority', () => {
           ])
           expect(application.current().projects[0]).toMatchObject({
             key: { integration: 'local', id },
-            availability: { status: 'available' },
+            resource: { kind: 'current-readable' },
           })
-          expect(application.current().roadmap.projects[0]).toMatchObject({
+          expect(application.current().projects[0]).toMatchObject({
             key: { integration: 'local', id },
-            openMaps: [
+            maps: [
               expect.objectContaining({
-                id: '.wayfinder/registration-map/map.md',
-                title: 'Normalized Local map',
+                key: {
+                  project: { integration: 'local', id },
+                  mapId: '.wayfinder/registration-map/map.md',
+                },
+                resource: {
+                  kind: 'current-readable',
+                  observation: expect.objectContaining({
+                    value: expect.objectContaining({ title: 'Normalized Local map' }),
+                  }),
+                },
               }),
             ],
           })
@@ -425,30 +433,46 @@ describe('public application registration authority', () => {
         expect(application.current().projects).toEqual([
           expect.objectContaining({
             key: { integration: 'local', id: 'shared-name' },
-            availability: expect.objectContaining({ status: 'available' }),
+            resource: expect.objectContaining({ kind: 'current-readable' }),
           }),
           expect.objectContaining({
             key: { integration: 'local', id: 'shared-name-2' },
-            availability: expect.objectContaining({ status: 'available' }),
+            resource: expect.objectContaining({ kind: 'current-readable' }),
           }),
         ])
-        expect(application.current().roadmap.projects).toEqual(
+        expect(application.current().projects).toEqual(
           expect.arrayContaining([
             expect.objectContaining({
               key: { integration: 'local', id: 'shared-name' },
-              openMaps: [
+              maps: [
                 expect.objectContaining({
-                  id: '.wayfinder/registration-map/map.md',
-                  title: 'First Local map',
+                  key: {
+                    project: { integration: 'local', id: 'shared-name' },
+                    mapId: '.wayfinder/registration-map/map.md',
+                  },
+                  resource: {
+                    kind: 'current-readable',
+                    observation: expect.objectContaining({
+                      value: expect.objectContaining({ title: 'First Local map' }),
+                    }),
+                  },
                 }),
               ],
             }),
             expect.objectContaining({
               key: { integration: 'local', id: 'shared-name-2' },
-              openMaps: [
+              maps: [
                 expect.objectContaining({
-                  id: '.wayfinder/registration-map/map.md',
-                  title: 'Second Local map',
+                  key: {
+                    project: { integration: 'local', id: 'shared-name-2' },
+                    mapId: '.wayfinder/registration-map/map.md',
+                  },
+                  resource: {
+                    kind: 'current-readable',
+                    observation: expect.objectContaining({
+                      value: expect.objectContaining({ title: 'Second Local map' }),
+                    }),
+                  },
                 }),
               ],
             }),
@@ -485,9 +509,10 @@ describe('public application registration authority', () => {
         expect((await registerLocal(saved.application, workspace)).ok).toBe(true)
         expect(saved.application.current().configurationVersion).toBe(2)
         expect(saved.application.current().registrations[0]?.key).toEqual(project)
-        expect(saved.application.current().roadmap.projects[0]?.openMaps[0]?.title).toBe(
-          'Before restart',
-        )
+        expect(saved.application.current().projects[0]?.maps[0]?.resource).toMatchObject({
+          kind: 'current-readable',
+          observation: { value: { title: 'Before restart' } },
+        })
         persistedBytes = await readFile(filename, 'utf8')
         expect(JSON.parse(persistedBytes)).toEqual({
           ...BASE,
@@ -523,14 +548,19 @@ describe('public application registration authority', () => {
         ])
         expect(restarted.application.current().projects[0]).toMatchObject({
           key: project,
-          availability: { status: 'available' },
+          resource: { kind: 'current-readable' },
         })
-        expect(restarted.application.current().roadmap.projects[0]).toMatchObject({
+        expect(restarted.application.current().projects[0]).toMatchObject({
           key: project,
-          openMaps: [
+          maps: [
             expect.objectContaining({
-              id: '.wayfinder/saved-map/map.md',
-              title: 'After restart',
+              key: { project, mapId: '.wayfinder/saved-map/map.md' },
+              resource: {
+                kind: 'current-readable',
+                observation: expect.objectContaining({
+                  value: expect.objectContaining({ title: 'After restart' }),
+                }),
+              },
             }),
           ],
         })
@@ -728,7 +758,7 @@ describe('public application registration authority', () => {
           expect(test.application.current().projects[0]).toMatchObject({
             key: row.key,
             name: 'Managed Local',
-            availability: { status: 'unavailable' },
+            resource: { kind: 'never-observed' },
           })
           expect(test.observedPaths).toEqual([])
           expect(
@@ -761,11 +791,14 @@ describe('public application registration authority', () => {
         expect(test.application.current().projects[0]).toMatchObject({
           key: test.row.key,
           name: 'Managed remote',
-          availability: { status: 'available', observedAt: 1000 },
+          resource: { kind: 'current-readable', observation: { observedAt: 1000 } },
         })
-        expect(test.application.current().roadmap.projects[0]?.openMaps[0]?.id).toBe('108')
+        expect(test.application.current().projects[0]?.activeMap).toEqual({
+          kind: 'known-current',
+          mapId: '108',
+        })
         expect(
-          publications.some((state) => state.projects[0]?.availability.status === 'available'),
+          publications.some((state) => state.projects[0]?.resource.kind === 'current-readable'),
         ).toBe(true)
         expect(test.requests.filter((path) => path === '/repositories/42')).toHaveLength(1)
         expect(test.requests.filter((path) => path === 'map-read')).toHaveLength(1)
@@ -795,7 +828,13 @@ describe('public application registration authority', () => {
       await test.application.start()
       try {
         const before = test.application.current().projects[0]
-        const evidence = test.application.current().roadmap.projects
+        const evidence = before && {
+          resource: before.resource,
+          mapsMembership: before.mapsMembership,
+          maps: before.maps,
+          activeMap: before.activeMap,
+          displayOrder: before.displayOrder,
+        }
         const requests = [...test.requests]
         const starts = test.starts()
         expect((await repair(test.application, test.row.key, moved)).ok).toBe(true)
@@ -805,10 +844,16 @@ describe('public application registration authority', () => {
           locator: { repositoryId: '42', nameWithOwner: 'Acme/Renamed' },
           workspace: { path: await realpath(moved) },
         })
-        expect(test.application.current().projects[0]?.availability.observedAt).toBe(
-          before?.availability.observedAt,
-        )
-        expect(test.application.current().roadmap.projects).toEqual(evidence)
+        const after = test.application.current().projects[0]
+        expect(
+          after && {
+            resource: after.resource,
+            mapsMembership: after.mapsMembership,
+            maps: after.maps,
+            activeMap: after.activeMap,
+            displayOrder: after.displayOrder,
+          },
+        ).toEqual(evidence)
         expect(test.starts()).toBe(starts)
         expect(test.requests.filter((path) => path === '/repositories/42')).toEqual(
           requests.filter((path) => path === '/repositories/42'),
@@ -844,7 +889,7 @@ describe('public application registration authority', () => {
       await test.application.start()
       try {
         expect(test.application.current().registrations).toEqual([test.row])
-        expect(test.application.current().projects[0]?.availability.status).toBe('unavailable')
+        expect(test.application.current().projects[0]?.resource.kind).toBe('never-observed')
         expect(test.requests).toEqual([])
         expect((await repair(test.application, test.row.key, moved)).ok).toBe(false)
         expect(test.writes).toEqual([])

@@ -18,6 +18,7 @@ import {
   mapState,
   observedLabel,
   projectIdentity,
+  projectObservedAt,
 } from '@/views/shared/settings-shared'
 
 type DetailsSectionProps = {
@@ -85,8 +86,8 @@ export function DetailsSection({ project, connection }: DetailsSectionProps) {
           <dd>{project.workspace.path}</dd>
           <dt>Route identity</dt>
           <dd>{projectIdentity(project)}</dd>
-          <dt>Observed</dt>
-          <dd>{observedLabel(project.availability.observedAt)}</dd>
+          <dt>Last successful source read</dt>
+          <dd>{observedLabel(projectObservedAt(project))}</dd>
           <dt>Map state</dt>
           <dd>{mapState(project)}</dd>
         </SettingsFacts>

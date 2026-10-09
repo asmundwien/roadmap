@@ -16,6 +16,7 @@ interface GitHubMapContext {
   readonly project: SourceProjectKey
   readonly repositoryId: string
   readonly connectionId: string
+  readonly readSequence: number
   readonly resolveProject: (
     nameWithOwner: string,
     repositoryId?: string,
@@ -66,7 +67,12 @@ export function observeGitHubMap(fetched: FetchedMap, context: GitHubMapContext)
     unidentifiedTickets: [],
     warnings: body.missingSections.map((section) => `Missing map section: ${section}.`),
   }
-  const times = { attemptedAt: fetched.attemptedAt, observedAt: fetched.observedAt, provenance }
+  const times = {
+    attemptedAt: fetched.attemptedAt,
+    observedAt: fetched.observedAt,
+    readSequence: context.readSequence,
+    provenance,
+  }
   return {
     attempts: [
       observedAttempt({

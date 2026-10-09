@@ -1,5 +1,6 @@
 import type { ProjectKey, RegisteredProject, SafeError } from '@roadmap/contracts'
 import { Alert } from '@roadmap/ui/alert'
+import { resourceObservation } from './resource-results'
 
 type ErrorTextProps = { error: SafeError | string | null }
 
@@ -13,7 +14,7 @@ export function sameProject(a: ProjectKey, b: ProjectKey): boolean {
 }
 
 export function projectIdentity(project: Pick<RegisteredProject, 'key'>): string {
-  return `${project.key.integration}:${project.key.id}`
+  return JSON.stringify([project.key.integration, project.key.id])
 }
 
 export function locatorLabel(project: Pick<RegisteredProject, 'locator'>): string {
@@ -23,11 +24,22 @@ export function locatorLabel(project: Pick<RegisteredProject, 'locator'>): strin
 }
 
 export function mapState(project: RegisteredProject): string {
-  const open = project.openMaps.length
-  const closed = project.closedMaps.length
-  if (open + closed === 0) return 'No Wayfinder maps yet.'
-  if (open === 0) return `${closed} closed ${closed === 1 ? 'map' : 'maps'} · at rest`
-  return `${open} open · ${closed} closed`
+  if (project.activeMap.kind === 'uncertain') return project.activeMap.cause
+  const membership = project.mapsMembership
+  if (membership.kind !== 'current-complete') return 'Current map membership is unknown.'
+  if (membership.observation.value.members.length === 0) return 'No current Wayfinder maps.'
+  const open = project.displayOrder.openMapIds.length
+  const closed = project.displayOrder.closedMapIds.length
+  const incomplete = project.maps.some(
+    (map) =>
+      map.resource.kind === 'current-readable' &&
+      map.resource.observation.completeness.kind === 'incomplete',
+  )
+  return `${open} open · ${closed} closed${incomplete ? ' · incomplete source content' : ''}`
+}
+
+export function projectObservedAt(project: RegisteredProject): number | undefined {
+  return resourceObservation(project.resource)?.observedAt
 }
 
 export function observedLabel(observedAt: number | undefined): string {

@@ -1,26 +1,28 @@
 import type {
   ApplicationState,
   Connection,
+  MapResource,
   ProjectKey,
   RegisteredProject,
-  WayfinderMap,
 } from '@roadmap/contracts'
 import { stripInlineMarkdown } from '@/views/shared/gist'
+import { orderedMaps, resourceMessage, resourceObservation } from '@/views/shared/resource-results'
 
-type ProjectJourney = 'active' | 'resting' | 'waiting'
+type ProjectJourney = 'active' | 'resting' | 'waiting' | 'uncertain'
 
 export interface ProjectPresentation {
   project: RegisteredProject
   connection: Connection | null
   journey: ProjectJourney
-  activeMap: WayfinderMap | null
+  activeMap: MapResource | null
   destination: string
-  mapCount: number
+  mapCount: number | null
   decisions: number | null
   openTickets: number | null
   hasFog: boolean
   priorities: string[]
   activityAt?: number
+  sourceMessage: string
 }
 
 export type AttentionItem =
@@ -50,15 +52,13 @@ export interface ProjectPortfolio {
   active: ProjectPresentation[]
   resting: ProjectPresentation[]
   waiting: ProjectPresentation[]
+  uncertain: ProjectPresentation[]
   attention: AttentionItem[]
 }
 
 type PresentationState = Pick<ApplicationState, 'connections' | 'projects' | 'configuration'>
 
-/**
- * The registration-led interpretation shared by the Overview and Project settings. Source facts
- * stay on the Project; this projection owns only presentation precedence and grouping.
- */
+/** Derives presentation without establishing resource membership or active ordering. */
 export function presentProjects(state: PresentationState): ProjectPortfolio {
   const connections = new Map(state.connections.map((connection) => [connection.id, connection]))
   const projects = state.projects.map((project) => presentProject(project, connections))
@@ -67,12 +67,14 @@ export function presentProjects(state: PresentationState): ProjectPortfolio {
     .sort((left, right) => (right.activityAt ?? 0) - (left.activityAt ?? 0))
   const resting = projects.filter((project) => project.journey === 'resting')
   const waiting = projects.filter((project) => project.journey === 'waiting')
+  const uncertain = projects.filter((project) => project.journey === 'uncertain')
 
   return {
     projects,
     active,
     resting,
     waiting,
+    uncertain,
     attention: [
       ...configurationAttention(state),
       ...connectionAttention(state.connections, projects),
@@ -85,38 +87,68 @@ function presentProject(
   project: RegisteredProject,
   connections: ReadonlyMap<string, Connection>,
 ): ProjectPresentation {
-  const activeMap = project.openMaps[0] ?? null
-  const maps = [...project.openMaps, ...project.closedMaps]
-  const latestClosed = project.closedMaps[0]
-  const destination = activeMap
-    ? stripInlineMarkdown(activeMap.body.destination) || activeMap.title || 'Untitled map'
-    : ''
-
+  const ordered = orderedMaps(project)
+  const activeMapId = project.activeMap.kind === 'known-current' ? project.activeMap.mapId : null
+  const activeMap =
+    activeMapId === null
+      ? null
+      : (project.maps.find((map) => map.key.mapId === activeMapId) ?? null)
+  const active = activeMap ? resourceObservation(activeMap.resource)?.value : undefined
+  const latestClosed = ordered.closed[0]
+  const closed = latestClosed ? resourceObservation(latestClosed.resource)?.value : undefined
+  const membership = project.mapsMembership
+  const complete = membership.kind === 'current-complete'
+  const currentMaps = complete
+    ? membership.observation.value.members.map((key) =>
+        project.maps.find((map) => map.key.mapId === key.mapId),
+      )
+    : null
+  const decisions =
+    currentMaps?.reduce<number | null>((sum, map) => {
+      if (sum === null || !map || map.resource.kind !== 'current-readable') return null
+      const observation = map.resource.observation
+      if (observation.completeness.kind !== 'complete' || observation.value.progress === null)
+        return null
+      return sum + observation.value.progress.completed
+    }, 0) ?? null
+  const journey: ProjectJourney =
+    project.activeMap.kind === 'uncertain'
+      ? 'uncertain'
+      : activeMap
+        ? 'active'
+        : currentMaps?.length === 0
+          ? 'waiting'
+          : 'resting'
   return {
     project,
     connection: connections.get(project.connectionId) ?? null,
-    journey: activeMap ? 'active' : maps.length === 0 ? 'waiting' : 'resting',
+    journey,
     activeMap,
-    destination,
-    mapCount: maps.length,
-    decisions: maps.reduce<number | null>(
-      (sum, map) => (sum === null || map.progress === null ? null : sum + map.progress.completed),
-      0,
-    ),
-    openTickets: activeMap
-      ? activeMap.progress === null
+    destination: active
+      ? stripInlineMarkdown(active.body.destination) || active.title || 'Untitled map'
+      : '',
+    mapCount: currentMaps?.length ?? null,
+    decisions,
+    openTickets: active
+      ? active.progress === null
         ? null
-        : activeMap.progress.total - activeMap.progress.completed
-      : 0,
+        : active.progress.total - active.progress.completed
+      : project.activeMap.kind === 'known-empty'
+        ? 0
+        : null,
     hasFog: Boolean(
-      activeMap &&
-        (activeMap.body.notYetSpecified.length > 0 || activeMap.body.notYetSpecifiedNote !== ''),
+      active && (active.body.notYetSpecified.length > 0 || active.body.notYetSpecifiedNote !== ''),
     ),
     priorities:
-      activeMap?.frontier.map(
-        (ticket) => ticket.title ?? ticket.displayId ?? `Ticket ${ticket.id}`,
-      ) ?? [],
-    activityAt: activeMap?.updatedAt ?? latestClosed?.closedAt ?? latestClosed?.updatedAt,
+      activeMap?.tickets.flatMap((ticket) => {
+        if (ticket.resource.kind !== 'current-readable') return []
+        const value = ticket.resource.observation.value
+        return value.state === 'frontier'
+          ? [value.title ?? value.displayId ?? `Ticket ${ticket.key.ticketId}`]
+          : []
+      }) ?? [],
+    activityAt: active?.updatedAt ?? closed?.closedAt ?? closed?.updatedAt,
+    sourceMessage: resourceMessage(project.resource),
   }
 }
 
@@ -168,25 +200,27 @@ function connectionAttention(
 
 function projectAttention(projects: readonly ProjectPresentation[]): AttentionItem[] {
   return projects.flatMap((presentation): AttentionItem[] => {
-    const { project, connection } = presentation
+    const { project, sourceMessage } = presentation
     const items: AttentionItem[] = []
-    if (project.availability.status === 'unavailable') {
+    if (project.resource.kind !== 'current-readable' || project.activeMap.kind === 'uncertain') {
       items.push({
         kind: 'project',
-        key: `project:${project.key.integration}:${project.key.id}:availability`,
-        title: `${project.name} is unavailable`,
-        detail: connection
-          ? `${connection.name}: ${project.availability.cause}`
-          : project.availability.cause,
+        key: JSON.stringify([project.key.integration, project.key.id, 'source']),
+        title: `${project.name} source needs attention`,
+        detail: `${sourceMessage}${project.activeMap.kind === 'uncertain' ? ` ${project.activeMap.cause}` : ''}`,
         project: project.key,
       })
     }
-    if (project.warnings.length > 0) {
+    const warnings = [
+      ...(resourceObservation(project.resource)?.value.warnings ?? []),
+      ...project.managementWarnings,
+    ]
+    if (warnings.length > 0) {
       items.push({
         kind: 'project',
-        key: `project:${project.key.integration}:${project.key.id}:warnings`,
-        title: `${project.name} has ${project.warnings.length === 1 ? 'a warning' : `${project.warnings.length} warnings`}`,
-        detail: project.warnings.join(' '),
+        key: JSON.stringify([project.key.integration, project.key.id, 'warnings']),
+        title: `${project.name} has warnings`,
+        detail: warnings.join(' '),
         project: project.key,
       })
     }

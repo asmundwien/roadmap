@@ -5,7 +5,7 @@ const localProject = {
   integration: 'local',
   id: 'work / café %2F#1',
 } satisfies Parameters<typeof projectPath>[0]
-const localMap = { project: localProject, id: '.wayfinder/路线 2/%2F#map.md' }
+const localMap = { project: localProject, mapId: '.wayfinder/路线 2/%2F#map.md' }
 
 describe('resource link identity', () => {
   it('keeps a GitHub owner/repository ID in one project parameter', () => {
@@ -33,7 +33,12 @@ describe('resource link identity', () => {
   })
 
   it('preserves opaque project, map, and ticket identities in a ticket link', () => {
-    expect(pathParams(routePaths.ticket, ticketPath(localMap, 'tickets/问题 a %2F#2.md'))).toEqual({
+    expect(
+      pathParams(
+        routePaths.ticket,
+        ticketPath({ map: localMap, ticketId: 'tickets/问题 a %2F#2.md' }),
+      ),
+    ).toEqual({
       integration: 'local',
       projectId: 'work / café %2F#1',
       mapId: '.wayfinder/路线 2/%2F#map.md',
@@ -44,9 +49,9 @@ describe('resource link identity', () => {
   it('keeps colon-prefixed project and map IDs literal in a nested ticket link', () => {
     const map = {
       project: { integration: 'local', id: ':projectId' },
-      id: ':mapId',
-    } satisfies Parameters<typeof ticketPath>[0]
-    expect(pathParams(routePaths.ticket, ticketPath(map, 'ticket-1'))).toEqual({
+      mapId: ':mapId',
+    } satisfies Parameters<typeof mapPath>[0]
+    expect(pathParams(routePaths.ticket, ticketPath({ map, ticketId: 'ticket-1' }))).toEqual({
       integration: 'local',
       projectId: ':projectId',
       mapId: ':mapId',

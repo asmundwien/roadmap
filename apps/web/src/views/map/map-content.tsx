@@ -1,18 +1,22 @@
-import type { MapBody, WayfinderMap } from '@roadmap/contracts'
+import type { MapBody, MapResource } from '@roadmap/contracts'
 import classNames from 'classnames/bind'
+import { resourceObservation } from '@/views/shared/resource-results'
 import styles from './map-content.module.css'
 import { Prose } from './prose'
 
 const cx = classNames.bind(styles)
 
 export type MapContentProps = {
-  map: WayfinderMap
+  map: MapResource
   onOpenTicket: (id: string) => void
   onOpenMap: () => void
 }
 
 export function MapContent({ map, onOpenTicket, onOpenMap }: MapContentProps) {
-  const markdown = map.body.raw.trim() !== '' ? map.body.raw : structuredMarkdown(map.body)
+  const content = resourceObservation(map.resource)?.value
+  if (content === undefined) return null
+  const markdown =
+    content.body.raw.trim() !== '' ? content.body.raw : structuredMarkdown(content.body)
 
   return (
     <div className={cx('body')}>
@@ -20,7 +24,7 @@ export function MapContent({ map, onOpenTicket, onOpenMap }: MapContentProps) {
       {markdown.trim() !== '' ? (
         <Prose
           map={map}
-          sourcePath={map.sourcePath}
+          sourcePath={content.source.kind === 'file' ? content.source.path : undefined}
           markdown={markdown}
           onOpenTicket={onOpenTicket}
           onOpenMap={onOpenMap}

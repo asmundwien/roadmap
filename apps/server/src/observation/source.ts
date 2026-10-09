@@ -74,6 +74,7 @@ type ScopedAttempt<S extends SourceScope, V> =
   | {
       readonly kind: 'observed'
       readonly scope: S
+      readonly readSequence: number
       readonly attemptedAt: number
       readonly observedAt: number
       readonly provenance: SourceProvenance
@@ -83,6 +84,7 @@ type ScopedAttempt<S extends SourceScope, V> =
   | {
       readonly kind: 'failed'
       readonly scope: S
+      readonly readSequence: number
       readonly attemptedAt: number
       readonly provenance: SourceProvenance
       readonly failure: SourceFailure
@@ -90,6 +92,7 @@ type ScopedAttempt<S extends SourceScope, V> =
 
 export type AbsentAttempt = {
   readonly kind: 'proven-absent'
+  readonly readSequence: number
   readonly attemptedAt: number
   readonly observedAt: number
   readonly provenance: SourceProvenance
@@ -287,6 +290,18 @@ export interface SourceObserver {
   stop(): Promise<void>
 }
 
+/** Issues actual operation order within one source owner, independently of its clock. */
+export type ReadSequenceAllocator = () => number
+
+export function createReadSequenceAllocator(): ReadSequenceAllocator {
+  let sequence = 0
+  return () => {
+    if (sequence === Number.MAX_SAFE_INTEGER) throw new Error('Source read sequence exhausted.')
+    sequence += 1
+    return sequence
+  }
+}
+
 type ObservedAttempt = Extract<ObservationAttempt, { kind: 'observed' }>
 type FailedAttempt = Extract<ObservationAttempt, { kind: 'failed' }>
 
@@ -427,6 +442,10 @@ function identity(value: unknown): value is string {
 
 function finite(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
+}
+
+function positiveSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
 }
 
 function optionalText(value: unknown): boolean {
@@ -875,14 +894,16 @@ function isObservationAttempt(value: unknown): value is ObservationAttempt {
   if (
     !record(value) ||
     !isScope(value.scope) ||
+    !Object.hasOwn(value, 'readSequence') ||
     !finite(value.attemptedAt) ||
+    !positiveSafeInteger(value.readSequence) ||
     !isProvenance(value.provenance) ||
     value.provenance.integration !== scopeProject(value.scope).integration
   )
     return false
   if (value.kind === 'failed') {
     return (
-      onlyKeys(value, ['kind', 'scope', 'attemptedAt', 'provenance', 'failure']) &&
+      onlyKeys(value, ['kind', 'scope', 'readSequence', 'attemptedAt', 'provenance', 'failure']) &&
       isFailure(value.failure) &&
       (value.failure.kind !== 'filesystem' ||
         (value.provenance.integration === 'local' &&
@@ -899,6 +920,7 @@ function isObservationAttempt(value: unknown): value is ObservationAttempt {
       onlyKeys(value, [
         'kind',
         'scope',
+        'readSequence',
         'attemptedAt',
         'observedAt',
         'provenance',
@@ -910,7 +932,15 @@ function isObservationAttempt(value: unknown): value is ObservationAttempt {
     )
   if (
     value.kind !== 'proven-absent' ||
-    !onlyKeys(value, ['kind', 'scope', 'attemptedAt', 'observedAt', 'provenance', 'proof']) ||
+    !onlyKeys(value, [
+      'kind',
+      'scope',
+      'readSequence',
+      'attemptedAt',
+      'observedAt',
+      'provenance',
+      'proof',
+    ]) ||
     !record(value.proof)
   )
     return false

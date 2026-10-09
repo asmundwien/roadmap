@@ -193,6 +193,104 @@ afterEach(() => {
 })
 
 describe('createGitHubObserverPool', () => {
+  it('publishes distinct actual reads when source time and payload stay identical', async () => {
+    const repository = {
+      id: '1',
+      nameWithOwner: 'acme/roadmap',
+      maps: new Map([[1, rawMap(1, 'Unchanged map')]]),
+    }
+    const access = fakeClient([repository], 4_000)
+    const pool = createGitHubObserverPool({ now: () => 1_000 })
+    const input = sourceInput('one', repository, access.client)
+    const observer = pool.create(input)
+    const updates: SourceContribution[] = []
+    observer.subscribe((contribution) => updates.push(contribution))
+    try {
+      const baseline = await observer.observe()
+      pool.reconcileTopology([input])
+      const publicationCount = updates.length
+      const refreshed = await observer.refresh()
+      expect(updates).toHaveLength(publicationCount + 1)
+      expect(refreshed.attempts.map(({ readSequence, ...attempt }) => attempt)).toEqual(
+        baseline.attempts.map(({ readSequence, ...attempt }) => attempt),
+      )
+      for (let index = 0; index < baseline.attempts.length; index += 1) {
+        const previous = baseline.attempts[index]
+        const current = refreshed.attempts[index]
+        expect(previous).toBeDefined()
+        expect(current?.readSequence).toBeGreaterThan(previous?.readSequence ?? 0)
+      }
+      expect(baseline.attempts.map((attempt) => attempt.readSequence)).toEqual([1, 2, 3, 3])
+      expect(refreshed.attempts.map((attempt) => attempt.readSequence)).toEqual([4, 5, 6, 6])
+    } finally {
+      await pool.stop()
+    }
+  })
+
+  it('preserves cached ticket read identity while reclassifying topology under a newer root failure', async () => {
+    const parent: FakeRepository = {
+      id: '1',
+      nameWithOwner: 'acme/parent',
+      maps: new Map([[1, rawBlockedMap('acme/parent', '2', 'acme/dependency')]]),
+    }
+    const dependency = {
+      id: '2',
+      nameWithOwner: 'acme/dependency',
+      maps: new Map<number, RawMapIssue>(),
+    }
+    const access = fakeClient([parent, dependency], 4_000)
+    const pool = createGitHubObserverPool({ now: () => 1_000, logger: { warn() {} } })
+    const parentInput = sourceInput('one', parent, access.client, 'parent-key')
+    const dependencyInput = sourceInput('two', dependency, access.client, 'dependency-key')
+    const observer = pool.create(parentInput)
+    const dependencyObserver = pool.create(dependencyInput)
+    const updates: SourceContribution[] = []
+    observer.subscribe((contribution) => updates.push(contribution))
+    try {
+      const baseline = await observer.observe()
+      pool.reconcileTopology([parentInput])
+      const initialTicket = baseline.attempts.find((attempt) => attempt.scope.kind === 'ticket')
+      expect(initialTicket).toMatchObject({ readSequence: 3, observedAt: 1_000 })
+      parent.failure = new GitHubError({ kind: 'transient', cause: 'server' })
+      const failed = await observer.refresh()
+      expect(failed.attempts.find((attempt) => attempt.scope.kind === 'project')).toMatchObject({
+        kind: 'failed',
+        readSequence: 4,
+      })
+      await dependencyObserver.observe()
+      const mapReads = access.graphqlCalls.length
+      pool.reconcileTopology([parentInput, dependencyInput])
+      const reinterpreted = updates
+        .at(-1)
+        ?.attempts.find((attempt) => attempt.scope.kind === 'ticket')
+      expect(reinterpreted).toMatchObject({
+        kind: 'observed',
+        readSequence: 3,
+        observedAt: 1_000,
+        value: {
+          blockedBy: [
+            expect.objectContaining({
+              reference: {
+                kind: 'registered',
+                project: { integration: 'github', id: 'dependency-key' },
+                ticketId: '20',
+              },
+            }),
+          ],
+        },
+      })
+      expect(
+        updates.at(-1)?.attempts.find((attempt) => attempt.scope.kind === 'project'),
+      ).toMatchObject({
+        kind: 'failed',
+        readSequence: 4,
+      })
+      expect(access.graphqlCalls).toHaveLength(mapReads)
+    } finally {
+      await pool.stop()
+    }
+  })
+
   it('observes admitted stable scopes across isolated Connection access including complete empty membership', async () => {
     const first = {
       id: '1',
@@ -1401,6 +1499,12 @@ describe('GitHub scoped source evidence through the real client', () => {
           }),
         ]),
       )
+      const membership = updates
+        .at(-1)
+        ?.attempts.find((attempt) => attempt.scope.kind === 'maps-membership')
+      const absence = updates.at(-1)?.attempts.find((attempt) => attempt.kind === 'proven-absent')
+      expect(membership?.readSequence).toBe(5)
+      expect(absence?.readSequence).toBe(membership?.readSequence)
       expect(updates.at(-1)).not.toHaveProperty(
         'attempts',
         expect.arrayContaining([

@@ -4,6 +4,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { RoadmapProvider } from '@/store/roadmap-provider'
+import { resourceObservation } from '@/views/shared/resource-results'
 import { type MapNode, mapGraph } from './graph'
 import { blocker, makeMap, makeRoadmapStore, ticket } from './test-fixtures'
 import { TicketModal } from './ticket-modal'
@@ -17,8 +18,10 @@ function dependencyPairs(graph: ReturnType<typeof mapGraph>) {
       sourceKind: source?.data.kind,
       sourceReference: source?.data.kind === 'blocker' ? source.data.blocker.reference : undefined,
       sourceTicket:
-        source?.data.kind === 'ticket' ? source.data.ticket.id : source?.data.blocker.ticketId,
-      targetTicket: target?.data.kind === 'ticket' ? target.data.ticket.id : undefined,
+        source?.data.kind === 'ticket'
+          ? source.data.ticket.key.ticketId
+          : source?.data.blocker.ticketId,
+      targetTicket: target?.data.kind === 'ticket' ? target.data.ticket.key.ticketId : undefined,
     }
   })
 }
@@ -30,16 +33,17 @@ describe('mapGraph', () => {
       integration: 'github',
       nameWithOwner: 'outside/repository',
     })
-    const map = {
-      ...makeMap([ticket('7', 'closed'), ticket('8', 'frontier', [external])]),
-      project: { integration: 'github', id: 'outside/repository' } as const,
-    }
+    const map = makeMap(
+      [ticket('7', 'closed'), ticket('8', 'frontier', [external])],
+      {},
+      { project: { integration: 'github', id: 'outside/repository' }, mapId: '1' },
+    )
 
     const graph = mapGraph(map)
     const dependency = graph.edges[0]
     const source = graph.nodes.find((node) => node.id === dependency?.source)
     const internal = graph.nodes.find(
-      (node) => node.data.kind === 'ticket' && node.data.ticket.id === '7',
+      (node) => node.data.kind === 'ticket' && node.data.ticket.key.ticketId === '7',
     )
 
     expect(source?.data).toMatchObject({
@@ -58,7 +62,9 @@ describe('mapGraph', () => {
     })
     expect(source?.id).not.toBe(internal?.id)
     expect(graph.nodes).toHaveLength(3)
-    expect(map.tickets[1]?.state).toBe('frontier')
+    expect(map.tickets[1] && resourceObservation(map.tickets[1].resource)?.value.state).toBe(
+      'frontier',
+    )
   })
 
   it('keeps same-ID blockers in other projects separate from an in-map ticket', () => {
@@ -222,7 +228,9 @@ describe('mapGraph', () => {
     const graph = mapGraph(map)
 
     expect(
-      graph.nodes.flatMap((node) => (node.data.kind === 'ticket' ? [node.data.ticket.state] : [])),
+      graph.nodes.flatMap((node) =>
+        node.data.kind === 'ticket' ? [node.data.observation.value.state] : [],
+      ),
     ).toEqual(['closed', 'frontier', 'closed'])
     expect(dependencyPairs(graph)).toEqual([
       {
@@ -327,8 +335,11 @@ describe('mapGraph', () => {
     Object.freeze(map.tickets)
     for (const item of map.tickets) {
       Object.freeze(item)
-      Object.freeze(item.blockedBy)
-      for (const dependency of item.blockedBy) Object.freeze(dependency)
+      const content = resourceObservation(item.resource)?.value
+      if (content) {
+        Object.freeze(content.blockedBy)
+        for (const dependency of content.blockedBy) Object.freeze(dependency)
+      }
     }
 
     mapGraph(map)
@@ -351,13 +362,14 @@ describe('blocker source links', () => {
         title: 'Source-only blocker',
         url: 'https://outside.test/issues/7',
       }
-      const map = {
-        ...makeMap([
-          { ...ticket('7', 'closed'), title: 'Internal seven' },
+      const map = makeMap(
+        [
+          ticket('7', 'closed', [], undefined, 0, 'task', { title: 'Internal seven' }),
           ticket('8', 'frontier', [source]),
-        ]),
-        project: { integration: 'github', id: 'outside/repository' } as const,
-      }
+        ],
+        {},
+        { project: { integration: 'github', id: 'outside/repository' }, mapId: '1' },
+      )
 
       const markup = renderToStaticMarkup(
         createElement(
@@ -385,7 +397,7 @@ describe('blocker source links', () => {
 
   it('offers internal ticket navigation for a registered blocker in the matching project', () => {
     const map = makeMap([
-      { ...ticket('7', 'closed'), title: 'Internal seven' },
+      ticket('7', 'closed', [], undefined, 0, 'task', { title: 'Internal seven' }),
       ticket('8', 'frontier', [{ ...blocker('7', false), url: 'https://outside.test/issues/7' }]),
     ])
 
@@ -451,4 +463,13 @@ describe('blocker source links', () => {
       expect(markup).not.toContain('Open ticket')
     },
   )
+})
+
+describe('map resource graph identities', () => {
+  it('keeps equal ticket IDs under different map keys separate', () => {
+    const first = makeMap([ticket('same', 'frontier')])
+    const second = makeMap([ticket('same', 'frontier')], {}, { ...first.key, mapId: 'other-map' })
+
+    expect(mapGraph(first).nodes[0]?.id).not.toBe(mapGraph(second).nodes[0]?.id)
+  })
 })

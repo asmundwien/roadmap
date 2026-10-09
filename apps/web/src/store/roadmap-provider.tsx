@@ -1,4 +1,4 @@
-import type { ApplicationState, Snapshot } from '@roadmap/contracts'
+import type { ApplicationState } from '@roadmap/contracts'
 import { Alert } from '@roadmap/ui/alert'
 import {
   createContext,
@@ -22,11 +22,9 @@ export interface RoadmapViewState {
   transport: TransportLiveness
   synchronization: Exclude<RoadmapStoreSnapshot['synchronization'], 'not-ready'>
   projects: ApplicationState['projects']
-  roadmapProjects: Snapshot['projects']
   connections: ApplicationState['connections']
   configuration: ApplicationState['configuration']
   automation: ApplicationState['automation']
-  unreachable: Snapshot['unreachable']
   capturedAt: number
   supportedIntegrations: ApplicationState['supportedIntegrations']
   authorizationOperations: ApplicationState['authorizationOperations']
@@ -85,11 +83,9 @@ export function useRoadmap(): RoadmapViewState {
     transport: snapshot.transport,
     synchronization: snapshot.synchronization,
     projects: state.projects,
-    roadmapProjects: roadmap.projects,
     connections: state.connections,
     automation: state.automation,
     configuration: state.configuration,
-    unreachable: roadmap.unreachable,
     capturedAt: roadmap.capturedAt,
     supportedIntegrations: state.supportedIntegrations,
     authorizationOperations: state.authorizationOperations,

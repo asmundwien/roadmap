@@ -10,7 +10,12 @@ import type {
   SourceObserver,
   SourceTicketKey,
 } from '../observation/source.ts'
-import { absentAttempt, failedAttempt, sourceScopeKey } from '../observation/source.ts'
+import {
+  absentAttempt,
+  createReadSequenceAllocator,
+  failedAttempt,
+  sourceScopeKey,
+} from '../observation/source.ts'
 import { type LocalProjectReadOptions, readLocalProject } from '../wayfinder/from-local.ts'
 
 const DEBOUNCE_MS = 250
@@ -62,6 +67,7 @@ export function createLocalObserver(
   const pathExists = options.pathExists ?? defaultPathExists
   const watchDirectory = options.watchDirectory ?? defaultWatchDirectory
   const now = options.now ?? Date.now
+  const nextReadSequence = createReadSequenceAllocator()
   const logger = options.logger ?? console
   const project = { integration: input.ref.integration, id: input.ref.projectId }
   const watchPath = join(input.workspace.path, '.wayfinder')
@@ -120,7 +126,11 @@ export function createLocalObserver(
       const attemptedAt = now()
       let batch: ObservationBatch
       try {
-        batch = await readProject(input, { knownTickets: [...knownTickets.values()], now })
+        batch = await readProject(input, {
+          knownTickets: [...knownTickets.values()],
+          now,
+          nextReadSequence,
+        })
       } catch (error) {
         const code =
           typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined
@@ -129,6 +139,7 @@ export function createLocalObserver(
             failedAttempt({
               kind: 'failed',
               scope: { kind: 'project', project },
+              readSequence: nextReadSequence(),
               attemptedAt,
               provenance: {
                 integration: 'local',
@@ -335,6 +346,7 @@ function proveOmittedMembers(
         absentAttempt({
           kind: 'proven-absent',
           scope: prior.scope,
+          readSequence: attempt.readSequence,
           attemptedAt: attempt.attemptedAt,
           observedAt: attempt.observedAt,
           provenance: attempt.provenance,
@@ -363,6 +375,7 @@ function proveOmittedMembers(
         absentAttempt({
           kind: 'proven-absent',
           scope: prior.scope,
+          readSequence: attempt.readSequence,
           attemptedAt: attempt.attemptedAt,
           observedAt: attempt.observedAt,
           provenance: attempt.provenance,

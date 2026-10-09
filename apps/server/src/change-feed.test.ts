@@ -1,9 +1,18 @@
-import type { ProjectKey, Snapshot, Ticket, TicketState, WayfinderMap } from '@roadmap/contracts'
+import type { ProjectKey, TicketState } from '@roadmap/contracts'
 import { describe, expect, it } from 'vitest'
 import { type ChangeEvent, type ChangeFeedInput, createChangeFeed } from './change-feed.ts'
-import { sourceFixture } from './source-test-fixtures.ts'
+import {
+  createSourceFixtureOwner,
+  type FixtureMap,
+  type FixtureSnapshot,
+  type FixtureTicket,
+} from './source-test-fixtures.ts'
 
-function ticket(id: string, state: TicketState, overrides: Partial<Ticket> = {}): Ticket {
+function ticket(
+  id: string,
+  state: TicketState,
+  overrides: Partial<FixtureTicket> = {},
+): FixtureTicket {
   return {
     id,
     displayId: `#${id}`,
@@ -33,7 +42,7 @@ function ticket(id: string, state: TicketState, overrides: Partial<Ticket> = {})
   }
 }
 
-function wayfinderMap(id: string, tickets: Ticket[]): WayfinderMap {
+function wayfinderMap(id: string, tickets: FixtureTicket[]): FixtureMap {
   return {
     project: { integration: 'github', id: 'a/roadmap' },
     id,
@@ -61,7 +70,7 @@ function wayfinderMap(id: string, tickets: Ticket[]): WayfinderMap {
   }
 }
 
-function snapshot(maps: WayfinderMap[]): Snapshot {
+function snapshot(maps: FixtureMap[]): FixtureSnapshot {
   return {
     capturedAt: 1,
     projects: [
@@ -78,7 +87,8 @@ function snapshot(maps: WayfinderMap[]): Snapshot {
 }
 
 function notificationInput(
-  current: Snapshot,
+  current: FixtureSnapshot,
+  readForProject: (project: ProjectKey) => ReturnType<typeof createSourceFixtureOwner>,
   baselineProjects: readonly ProjectKey[] = [],
 ): ChangeFeedInput {
   const configuration = {
@@ -95,7 +105,10 @@ function notificationInput(
     ),
   }
   return {
-    attempts: sourceFixture(current.projects, current.capturedAt, configuration).attempts,
+    attempts: current.projects.flatMap(
+      (project) =>
+        readForProject(project.key)([project], current.capturedAt, configuration).attempts,
+    ),
     projects: current.projects.map((project) => ({ key: project.key, name: project.name })),
     baselineProjects,
     order: current.projects.flatMap((project) =>
@@ -108,16 +121,31 @@ function notificationInput(
 }
 
 function fakeSource() {
+  const readers = new Map<string, ReturnType<typeof createSourceFixtureOwner>>()
+  function readForProject(project: ProjectKey) {
+    const key = JSON.stringify([project.integration, project.id])
+    let read = readers.get(key)
+    if (!read) {
+      read = createSourceFixtureOwner()
+      readers.set(key, read)
+    }
+    return read
+  }
   const listeners = new Set<(current: ChangeFeedInput) => void>()
   return {
+    input(current: FixtureSnapshot, baselineProjects: readonly ProjectKey[] = []) {
+      for (const project of baselineProjects)
+        readers.set(JSON.stringify([project.integration, project.id]), createSourceFixtureOwner())
+      return notificationInput(current, readForProject, baselineProjects)
+    },
     onChange(listener: (current: ChangeFeedInput) => void) {
       listeners.add(listener)
       return () => {
         listeners.delete(listener)
       }
     },
-    push(current: Snapshot, baselineProjects: readonly ProjectKey[] = []) {
-      this.pushInput(notificationInput(current, baselineProjects))
+    push(current: FixtureSnapshot, baselineProjects: readonly ProjectKey[] = []) {
+      this.pushInput(this.input(current, baselineProjects))
     },
     pushInput(current: ChangeFeedInput) {
       for (const listener of listeners) listener(current)
@@ -125,7 +153,7 @@ function fakeSource() {
   }
 }
 
-function compareObservations(previous: Snapshot, next: Snapshot): ChangeEvent[] {
+function compareObservations(previous: FixtureSnapshot, next: FixtureSnapshot): ChangeEvent[] {
   const source = fakeSource()
   const feed = createChangeFeed(source)
   const events: ChangeEvent[] = []
@@ -250,7 +278,7 @@ describe('createChangeFeed', () => {
         })),
       )
     })
-    function withUnaffectedProject(current: Snapshot, state: TicketState): Snapshot {
+    function withUnaffectedProject(current: FixtureSnapshot, state: TicketState): FixtureSnapshot {
       return {
         ...current,
         projects: [
@@ -322,12 +350,13 @@ describe('createChangeFeed', () => {
     const events: ChangeEvent[] = []
     feed.onEvent((batch) => events.push(...batch))
     const current = snapshot([wayfinderMap('1', [ticket('2', 'frontier')])])
-    const recovered = notificationInput(current)
+    const recovered = source.input(current)
     source.pushInput({
       ...recovered,
       order: [],
       attempts: recovered.attempts.map((attempt) => ({
         kind: 'failed',
+        readSequence: attempt.readSequence,
         scope: attempt.scope,
         attemptedAt: 2,
         provenance: attempt.provenance,
@@ -347,12 +376,13 @@ describe('createChangeFeed', () => {
     feed.onEvent((batch) => events.push(...batch))
     source.push(snapshot([wayfinderMap('1', [ticket('2', 'frontier')])]))
     const replacement = snapshot([wayfinderMap('3', [ticket('4', 'frontier')])])
-    const input = notificationInput(replacement, [{ integration: 'github', id: 'a/roadmap' }])
+    const input = source.input(replacement, [{ integration: 'github', id: 'a/roadmap' }])
     source.pushInput({
       ...input,
       order: [],
       attempts: input.attempts.map((attempt) => ({
         kind: 'failed',
+        readSequence: attempt.readSequence,
         scope: attempt.scope,
         attemptedAt: 2,
         provenance: attempt.provenance,
@@ -370,7 +400,7 @@ describe('createChangeFeed', () => {
     const feed = createChangeFeed(source)
     const events: ChangeEvent[] = []
     feed.onEvent((batch) => events.push(...batch))
-    const baseline = notificationInput(snapshot([]))
+    const baseline = source.input(snapshot([]))
     source.pushInput({
       ...baseline,
       attempts: baseline.attempts.map((attempt) =>
@@ -392,7 +422,7 @@ describe('createChangeFeed', () => {
     feed.onEvent((batch) => events.push(...batch))
     const current = snapshot([wayfinderMap('1', [ticket('2', 'frontier')])])
     source.push(current)
-    const incomplete = notificationInput(
+    const incomplete = source.input(
       snapshot([
         wayfinderMap('1', [
           ticket('2', 'blocked', {
@@ -420,7 +450,7 @@ describe('createChangeFeed', () => {
     const events: ChangeEvent[] = []
     feed.onEvent((batch) => events.push(...batch))
     source.push(snapshot([wayfinderMap('1', [ticket('2', 'frontier')])]))
-    const closed = notificationInput(
+    const closed = source.input(
       snapshot([
         wayfinderMap('1', [
           ticket('2', 'closed', {
@@ -450,7 +480,7 @@ describe('createChangeFeed', () => {
       feed.onEvent((batch) => events.push(...batch))
       const current = snapshot([wayfinderMap('1', [ticket('2', 'frontier')])])
       source.push(current)
-      const omitted = notificationInput(snapshot([wayfinderMap('1', [])]))
+      const omitted = source.input(snapshot([wayfinderMap('1', [])]))
       source.pushInput({
         ...omitted,
         attempts: omitted.attempts.map((attempt) => {
@@ -459,6 +489,7 @@ describe('createChangeFeed', () => {
           if (kind === 'failed')
             return {
               kind: 'failed',
+              readSequence: attempt.readSequence,
               scope: attempt.scope,
               attemptedAt: 2,
               provenance: attempt.provenance,
@@ -500,7 +531,7 @@ describe('createChangeFeed', () => {
         wayfinderMap('3', [ticket('4', 'frontier')]),
       ]),
     )
-    const next = notificationInput(
+    const next = source.input(
       snapshot([
         wayfinderMap('5', []),
         wayfinderMap('3', [ticket('4', 'claimed')]),

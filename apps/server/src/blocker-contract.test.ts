@@ -5,17 +5,42 @@ import { describe, expect, test } from 'vitest'
 const project = { integration: 'github', id: 'owner/repo' }
 
 function applicationWithBlocker(blocker: unknown) {
+  const blockerState =
+    typeof blocker === 'object' && blocker !== null && 'state' in blocker
+      ? blocker.state
+      : undefined
+  const isBlocked = blockerState !== 'closed'
+  const map = { project, mapId: '1' }
+  const ticketKey = { map, ticketId: '2' }
+  const provenance = {
+    integration: 'github',
+    connectionId: 'github',
+    repositoryId: '42',
+    stage: 'map-read',
+  }
+  const common = { attemptedAt: 1, observedAt: 1, provenance, completeness: { kind: 'complete' } }
   const ticket = {
-    id: '2',
-    body: '',
-    typeEvidence: { kind: 'missing', labels: [] },
-    state: 'blocked',
-    isClaimed: false,
-    isBlocked: true,
-    assignees: [],
-    blockedBy: [blocker],
-    blockersComplete: true,
-    warnings: [],
+    key: ticketKey,
+    resource: {
+      kind: 'current-readable',
+      observation: {
+        ...common,
+        scope: { kind: 'ticket', ticket: ticketKey },
+        value: {
+          source: { kind: 'issue', url: 'https://github.com/owner/repo/issues/2' },
+          status: 'open',
+          body: '',
+          typeEvidence: { kind: 'missing', labels: [] },
+          state: isBlocked ? 'blocked' : 'frontier',
+          isClaimed: false,
+          isBlocked,
+          assignees: [],
+          blockedBy: [blocker],
+          blockersComplete: true,
+          warnings: [],
+        },
+      },
+    },
   }
   return {
     serverEpoch: 'test',
@@ -24,7 +49,92 @@ function applicationWithBlocker(blocker: unknown) {
     supportedIntegrations: [],
     connections: [],
     registrations: [],
-    projects: [],
+    projects: [
+      {
+        key: project,
+        connectionId: 'github',
+        locator: { integration: 'github', repositoryId: '42', nameWithOwner: 'owner/repo' },
+        workspace: { path: '/fixture' },
+        name: 'owner/repo',
+        actions: [],
+        managementWarnings: [],
+        resource: {
+          kind: 'current-readable',
+          observation: {
+            ...common,
+            provenance: { ...provenance, stage: 'repository' },
+            scope: { kind: 'project', project },
+            value: {
+              name: 'owner/repo',
+              source: {
+                integration: 'github',
+                repositoryId: '42',
+                nameWithOwner: 'owner/repo',
+                url: 'https://github.com/owner/repo',
+              },
+              warnings: [],
+            },
+          },
+        },
+        mapsMembership: {
+          kind: 'current-complete',
+          observation: {
+            ...common,
+            provenance: { ...provenance, stage: 'map-list' },
+            scope: { kind: 'maps-membership', project },
+            value: { members: [map] },
+          },
+        },
+        maps: [
+          {
+            key: map,
+            resource: {
+              kind: 'current-readable',
+              observation: {
+                ...common,
+                scope: { kind: 'map', map },
+                value: {
+                  source: { kind: 'issue', url: 'https://github.com/owner/repo/issues/1' },
+                  status: 'open',
+                  updatedAt: 1,
+                  body: {
+                    raw: '',
+                    destination: '',
+                    notes: [],
+                    decisions: [],
+                    notYetSpecified: [],
+                    notYetSpecifiedNote: '',
+                    outOfScope: [],
+                    sections: [],
+                    missingSections: [],
+                  },
+                  progress: { total: 1, completed: 0 },
+                  warnings: [],
+                },
+              },
+            },
+            ticketsMembership: {
+              kind: 'current-complete',
+              observation: {
+                ...common,
+                scope: { kind: 'tickets-membership', map },
+                value: { members: [ticketKey] },
+              },
+            },
+            tickets: [ticket],
+          },
+        ],
+        displayOrder: { openMapIds: ['1'], closedMapIds: [] },
+        activeMap:
+          blockerState === 'unknown'
+            ? {
+                kind: 'uncertain',
+                reason: 'map-incomplete',
+                cause: 'A map required for ordering is incomplete.',
+              }
+            : { kind: 'known-current', mapId: '1' },
+      },
+    ],
     authorizationOperations: [],
     configuration: { valid: true, issues: [], notices: [] },
     automation: {
@@ -34,42 +144,7 @@ function applicationWithBlocker(blocker: unknown) {
       evidence: [],
       overrides: [],
     },
-    roadmap: {
-      capturedAt: 1,
-      unreachable: [],
-      projects: [
-        {
-          key: project,
-          name: 'owner/repo',
-          warnings: [],
-          closedMaps: [],
-          openMaps: [
-            {
-              project,
-              id: '1',
-              isOpen: true,
-              updatedAt: 1,
-              body: {
-                raw: '',
-                destination: '',
-                notes: [],
-                decisions: [],
-                notYetSpecified: [],
-                notYetSpecifiedNote: '',
-                outOfScope: [],
-                sections: [],
-                missingSections: [],
-              },
-              tickets: [ticket],
-              frontier: [],
-              progress: { total: 1, completed: 0 },
-              ticketsComplete: true,
-              warnings: [],
-            },
-          ],
-        },
-      ],
-    },
+    roadmap: { capturedAt: 1 },
   }
 }
 

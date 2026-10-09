@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { RoadmapProvider } from '@/store/roadmap-provider'
 import type { RoadmapStore } from '@/store/roadmap-store'
+import { neverReadProject } from '@/views/overview/test-fixtures'
 import { ConnectionSettings } from './page'
 
 const github = {
@@ -60,7 +61,7 @@ function state(connections: Connection[]): ApplicationState {
       evidence: [],
       overrides: [],
     },
-    roadmap: { capturedAt: 0, projects: [], unreachable: [] },
+    roadmap: { capturedAt: 0 },
   }
 }
 
@@ -106,19 +107,8 @@ describe('ConnectionSettings', () => {
         ...initial,
         projects: [
           {
-            key,
+            ...neverReadProject(key, 'Project'),
             connectionId: 'connection',
-            locator:
-              key.integration === 'local'
-                ? { integration: 'local', path: '/tmp/project' }
-                : { integration: 'github', repositoryId: '42', nameWithOwner: 'acme/project' },
-            workspace: { path: '/tmp/project' },
-            name: 'Project',
-            availability: { status: 'available', observedAt: 1_000 },
-            openMaps: [],
-            closedMaps: [],
-            warnings: [],
-            actions: [],
           },
         ],
         automation: {
@@ -189,15 +179,7 @@ describe('ConnectionSettings', () => {
       ...initial,
       projects: [
         {
-          key: { integration: 'local', id: 'my workspace' },
-          connectionId: 'local',
-          locator: { integration: 'local', path: '/tmp/my-workspace' },
-          workspace: { path: '/tmp/my-workspace' },
-          name: 'My workspace',
-          availability: { status: 'available', observedAt: 1_000 },
-          openMaps: [],
-          closedMaps: [],
-          warnings: [],
+          ...neverReadProject({ integration: 'local', id: 'my workspace' }, 'My workspace'),
           actions: [
             { id: 'open-workspace', label: 'Open in VS Code', kind: 'server-launch' },
             { id: 'reveal-source', label: 'View source folder', kind: 'server-launch' },
@@ -227,15 +209,7 @@ describe('ConnectionSettings', () => {
       ...initial,
       projects: [
         {
-          key: { integration: 'github', id: 'acme/app' },
-          connectionId: 'github',
-          locator: { integration: 'github', repositoryId: '42', nameWithOwner: 'acme/app' },
-          workspace: { path: '/tmp/app', gitIdentity: '42' },
-          name: 'App',
-          availability: { status: 'available', observedAt: 1_000 },
-          openMaps: [],
-          closedMaps: [],
-          warnings: [],
+          ...neverReadProject({ integration: 'github', id: 'acme/app' }, 'App'),
           actions: [
             { id: 'open-workspace', label: 'Open in VS Code', kind: 'server-launch' },
             { id: 'reveal-source', label: 'View source folder', kind: 'server-launch' },

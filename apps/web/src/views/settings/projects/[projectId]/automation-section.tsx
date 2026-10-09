@@ -9,6 +9,7 @@ import { Link } from '@/navigation'
 import { routePaths, ticketPath } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { unacknowledgedInterruption } from '@/views/settings/project-automation'
+import { resourceMessage } from '@/views/shared/resource-results'
 import { ErrorText, sameProject } from '@/views/shared/settings-shared'
 
 type AutomationSectionProps = { project: RegisteredProject }
@@ -22,15 +23,13 @@ export function AutomationSection({ project }: AutomationSectionProps) {
   const preferred = automation.enabledProjects.some((key) => sameProject(key, project.key))
   const toggleState = busy ? 'pending' : preferred ? 'on' : 'off'
   const affectedMap = interruption
-    ? (project.openMaps.find(
-        (map) => map.id === interruption.target.mapId && sameProject(map.project, project.key),
-      ) ??
-      project.closedMaps.find(
-        (map) => map.id === interruption.target.mapId && sameProject(map.project, project.key),
-      ))
+    ? project.maps.find(
+        (map) =>
+          map.key.mapId === interruption.target.mapId && sameProject(map.key.project, project.key),
+      )
     : undefined
   const affectedTicket = affectedMap?.tickets.find(
-    (ticket) => ticket.id === interruption?.target.ticketId,
+    (ticket) => ticket.key.ticketId === interruption?.target.ticketId,
   )
 
   const setEnabled = async (enabled: boolean) => {
@@ -90,9 +89,11 @@ export function AutomationSection({ project }: AutomationSectionProps) {
                 Session succeeded. Queued work may resume when automation is enabled.
               </span>
               {affectedMap && affectedTicket && (
-                <Link href={ticketPath(affectedMap, affectedTicket.id)}>
-                  Review affected ticket
-                </Link>
+                <>
+                  <Link href={ticketPath(affectedTicket.key)}>Review affected ticket</Link>
+                  <span>{resourceMessage(affectedMap.resource)}</span>
+                  <span>{resourceMessage(affectedTicket.resource)}</span>
+                </>
               )}
               <Button
                 type="button"

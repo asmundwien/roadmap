@@ -14,8 +14,10 @@ import type { ConfigurationDocument, ConfigurationRead } from './configuration/d
 import type { ProjectConfiguration } from './projects/registry.ts'
 import {
   controlledSourceFixture,
+  createSourceFixtureOwner,
+  type FixtureProject,
   fixtureAdmissions,
-  sourceFixture,
+  publicProjectObservation,
 } from './source-test-fixtures.ts'
 import { createRoadmapTransport, type RoadmapTransport } from './transport.ts'
 
@@ -110,22 +112,25 @@ async function backend(epoch: string): Promise<Backend> {
     serverEpoch: epoch,
     admissions: fixtureAdmissions,
     observers: {
-      local: () =>
-        controlledSourceFixture(
+      local() {
+        const read = createSourceFixtureOwner()
+        return controlledSourceFixture(
           { integration: 'local', id: 'fixture' },
-          sourceFixture(
+          read(
             [
               {
                 key: { integration: 'local', id: 'fixture' },
                 name: epoch,
+                sourcePath: '/disposable-authority-fixture',
                 openMaps: [],
                 closedMaps: [],
                 warnings: [],
-              },
+              } satisfies FixtureProject,
             ],
             100,
           ),
-        ).observer,
+        ).observer
+      },
       github() {
         throw new Error('Unused source')
       },
@@ -267,7 +272,29 @@ async function publishName(fixture: Backend, name: string): Promise<void> {
 }
 
 function expectEpoch(store: RoadmapStore, epoch: string, synchronization = 'synchronized') {
-  expect(store.getSnapshot()).toMatchObject({ synchronization, state: { serverEpoch: epoch } })
+  const snapshot = store.getSnapshot()
+  expect(snapshot).toMatchObject({ synchronization, state: { serverEpoch: epoch } })
+  const state = snapshot.state
+  if (!state) throw new Error('Expected an authoritative or retained application state.')
+  const project = state.projects[0]
+  if (!project) throw new Error('Expected the registered source Project.')
+  expect(project.key).toEqual({ integration: 'local', id: 'fixture' })
+  expect(project.resource.kind).toBe('current-readable')
+  expect(publicProjectObservation(project)).toMatchObject({
+    scope: { kind: 'project', project: { integration: 'local', id: 'fixture' } },
+    observedAt: 100,
+    value: {
+      name: epoch,
+      source: { integration: 'local', path: '/disposable-authority-fixture' },
+    },
+  })
+  expect(project.maps).toEqual([])
+  expect(project.mapsMembership).toMatchObject({
+    kind: 'current-complete',
+    observation: { value: { members: [] } },
+  })
+  expect(project.activeMap).toEqual({ kind: 'known-empty' })
+  expect(state.roadmap).toEqual({ capturedAt: state.roadmap.capturedAt })
 }
 
 afterEach(async () => {

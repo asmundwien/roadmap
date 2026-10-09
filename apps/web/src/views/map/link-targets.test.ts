@@ -1,65 +1,33 @@
-import type { WayfinderMap } from '@roadmap/contracts'
+import type { MapResource } from '@roadmap/contracts'
 import { describe, expect, it } from 'vitest'
+import { resourceObservation } from '@/views/shared/resource-results'
 import { resolveProseLink } from './link-targets'
+import { makeMap as resourceMap, ticket } from './test-fixtures'
 
 const ROOT = '/Users/asmund.wien/source/hdir/platform/microsoft-risiko'
 
-function makeMap(): WayfinderMap {
-  return {
-    project: { integration: 'local', id: 'microsoft-risiko' },
-    id: '.wayfinder/azure-strategy-leadership-deck/map.md',
-    title: 'Microsoft Risiko',
-    isOpen: true,
-    updatedAt: 0,
-    body: {
-      raw: '',
-      destination: '',
-      notes: [],
-      decisions: [],
-      notYetSpecified: [],
-      notYetSpecifiedNote: '',
-      outOfScope: [],
-      sections: [],
-      missingSections: [],
-    },
-    tickets: [
-      {
-        id: '2',
+function makeMap(): MapResource {
+  const mapDirectory = `${ROOT}/.wayfinder/azure-strategy-leadership-deck`
+  return resourceMap(
+    [
+      ticket('2', 'closed', [], undefined, 0, 'research', {
         displayId: '2',
         title: 'Scroll story',
-        body: '',
-        typeEvidence: { kind: 'recognized', value: 'research', labels: ['research'] },
-        state: 'closed',
-        isClaimed: false,
-        isBlocked: false,
-        assignees: [],
-        blockedBy: [],
-        blockersComplete: true,
-        warnings: [],
-        sourcePath: `${ROOT}/.wayfinder/azure-strategy-leadership-deck/tickets/02-re-story-for-scroll.md`,
-      },
-      {
-        id: '16',
+        source: { kind: 'file', path: `${mapDirectory}/tickets/02-re-story-for-scroll.md` },
+      }),
+      ticket('16', 'frontier', [], undefined, 0, 'task', {
         displayId: '16',
         title: 'Landing orientation',
-        body: '',
-        typeEvidence: { kind: 'recognized', value: 'task', labels: ['task'] },
-        state: 'frontier',
-        isClaimed: false,
-        isBlocked: false,
-        assignees: [],
-        blockedBy: [],
-        blockersComplete: true,
-        warnings: [],
-        sourcePath: `${ROOT}/.wayfinder/azure-strategy-leadership-deck/tickets/16-landing-orientation.md`,
-      },
+        source: { kind: 'file', path: `${mapDirectory}/tickets/16-landing-orientation.md` },
+      }),
     ],
-    frontier: [],
-    progress: { total: 2, completed: 1 },
-    ticketsComplete: true,
-    warnings: [],
-    sourcePath: `${ROOT}/.wayfinder/azure-strategy-leadership-deck/map.md`,
-  }
+    { destination: '' },
+    {
+      project: { integration: 'local', id: 'microsoft-risiko' },
+      mapId: '.wayfinder/azure-strategy-leadership-deck/map.md',
+    },
+    { title: 'Microsoft Risiko', source: { kind: 'file', path: `${mapDirectory}/map.md` } },
+  )
 }
 
 describe('resolveProseLink', () => {
@@ -124,5 +92,94 @@ describe('resolveProseLink', () => {
       kind: 'href',
       href: 'https://example.com',
     })
+  })
+})
+
+describe('resource trace source links', () => {
+  it('keeps a local historical ticket destination under unavailable map evidence', () => {
+    const map = makeMap()
+    const observation = resourceObservation(map.resource)
+    const first = map.tickets[0]
+    const ticketObservation = first === undefined ? null : resourceObservation(first.resource)
+    if (observation === null || first === undefined || ticketObservation === null)
+      throw new Error('Expected source observations')
+    map.resource = {
+      kind: 'retained-unavailable',
+      lastSuccessful: observation,
+      unavailable: {
+        kind: 'no-current-evidence',
+        scope: observation.scope,
+        cause: 'No current source observation is available.',
+      },
+    }
+    first.resource = {
+      kind: 'proven-absent',
+      absence: {
+        scope: ticketObservation.scope,
+        attemptedAt: 1000,
+        observedAt: 1000,
+        provenance: {
+          integration: 'local',
+          path: `${ROOT}/.wayfinder/azure-strategy-leadership-deck/tickets`,
+          operation: 'enumerate',
+        },
+        proof: {
+          kind: 'complete-membership',
+          parent: { kind: 'tickets-membership', map: map.key },
+        },
+      },
+      trace: { kind: 'last-successful-trace', lastSuccessful: ticketObservation },
+    }
+
+    expect(
+      resolveProseLink(
+        map,
+        `${ROOT}/.wayfinder/azure-strategy-leadership-deck/map.md`,
+        'tickets/02-re-story-for-scroll.md',
+      ),
+    ).toEqual({
+      kind: 'selection',
+      selection: { kind: 'ticket', id: '2' },
+    })
+    expect(
+      resolveProseLink(
+        map,
+        `${ROOT}/.wayfinder/azure-strategy-leadership-deck/tickets/02-re-story-for-scroll.md`,
+        '../map.md',
+      ),
+    ).toEqual({
+      kind: 'selection',
+      selection: { kind: 'map' },
+    })
+  })
+
+  it('uses the actual recovered ticket path instead of a prior same-key destination', () => {
+    const map = makeMap()
+    const first = map.tickets[0]
+    if (first === undefined || first.resource.kind !== 'current-readable')
+      throw new Error('Expected readable ticket')
+    const path = `${ROOT}/.wayfinder/azure-strategy-leadership-deck/tickets/recovered-story.md`
+    first.resource.observation.value.source = { kind: 'file', path }
+    first.resource.observation.provenance = { integration: 'local', path, operation: 'read' }
+    first.resource.observation.attemptedAt = 2000
+    first.resource.observation.observedAt = 2000
+
+    expect(
+      resolveProseLink(
+        map,
+        `${ROOT}/.wayfinder/azure-strategy-leadership-deck/map.md`,
+        'tickets/recovered-story.md',
+      ),
+    ).toEqual({
+      kind: 'selection',
+      selection: { kind: 'ticket', id: '2' },
+    })
+    expect(
+      resolveProseLink(
+        map,
+        `${ROOT}/.wayfinder/azure-strategy-leadership-deck/map.md`,
+        'tickets/02-re-story-for-scroll.md',
+      )?.kind,
+    ).toBe('disabled')
   })
 })

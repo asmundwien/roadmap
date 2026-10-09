@@ -1,6 +1,7 @@
 import type { GitHubObservationInput } from '../observation/coordinator.ts'
 import type {
   ObservationAttempt,
+  ReadSequenceAllocator,
   SourceContribution,
   SourceFailure,
   SourceMapKey,
@@ -13,13 +14,14 @@ import type {
 } from '../observation/source.ts'
 import {
   absentAttempt,
+  createReadSequenceAllocator,
   failedAttempt,
   observedAttempt,
   sourceScopeKey,
 } from '../observation/source.ts'
 import { GitHubAccessError } from '../projects/registry.ts'
 import { observeGitHubMap } from '../wayfinder/from-github.ts'
-import { GitHubError, type RateLimit } from './client.ts'
+import { type GitHubClient, GitHubError, type RateLimit } from './client.ts'
 import { type FetchedMap, fetchMaps } from './map-query.ts'
 import { listRepositoryMaps, type RepositoryIdentity, readRepository } from './repository.ts'
 
@@ -42,14 +44,19 @@ interface Worker {
   rateLimit: RateLimit | null
   timer: ReturnType<typeof setTimeout> | null
 }
+interface CachedFetchedMap {
+  readonly fetched: FetchedMap
+  readonly readSequence: number
+}
 interface Owner {
   readonly input: GitHubObservationInput
   readonly project: SourceProjectKey
   readonly worker: Worker
   readonly attempts: Map<string, ObservationAttempt>
+  readonly nextReadSequence: ReadSequenceAllocator
   readonly mapMembers: Map<string, readonly SourceMapKey[]>
   readonly ticketMembers: Map<string, readonly SourceTicketKey[]>
-  readonly fetchedMaps: Map<string, FetchedMap>
+  readonly fetchedMaps: Map<string, CachedFetchedMap>
   readonly listeners: Set<(contribution: SourceContribution) => void>
   repository: RepositoryIdentity | null
   contribution: SourceContribution | null
@@ -113,12 +120,14 @@ export function createGitHubObserverPool(options: GitHubObserverOptions = {}): G
     scope: SourceScope,
     stage: ObservationStage,
     attemptedAt: number,
+    readSequence: number,
     failure: SourceFailure,
   ): void {
     record(owner, {
       kind: 'failed',
       scope,
       attemptedAt,
+      readSequence,
       provenance: provenance(owner, stage),
       failure,
     })
@@ -154,6 +163,7 @@ export function createGitHubObserverPool(options: GitHubObserverOptions = {}): G
 
   async function readIdentity(owner: Owner): Promise<RepositoryRead> {
     const read: RepositoryRead = { owner, repository: null, failures: [] }
+    const readSequence = owner.nextReadSequence()
     const attemptedAt = now()
     try {
       const repository = await readRepository(
@@ -167,6 +177,7 @@ export function createGitHubObserverPool(options: GitHubObserverOptions = {}): G
         kind: 'observed',
         scope: { kind: 'project', project: owner.project },
         attemptedAt,
+        readSequence,
         observedAt: now(),
         provenance: provenance(owner, 'repository'),
         completeness: { kind: 'complete' },
@@ -192,7 +203,14 @@ export function createGitHubObserverPool(options: GitHubObserverOptions = {}): G
           ? 'credentials'
           : 'repository'
       read.failures.push({ failure, stage })
-      failed(owner, { kind: 'project', project: owner.project }, stage, attemptedAt, failure)
+      failed(
+        owner,
+        { kind: 'project', project: owner.project },
+        stage,
+        attemptedAt,
+        readSequence,
+        failure,
+      )
     }
     return read
   }
@@ -205,6 +223,7 @@ export function createGitHubObserverPool(options: GitHubObserverOptions = {}): G
       kind: 'maps-membership',
       project: owner.project,
     } satisfies SourceScope
+    const membershipReadSequence = owner.nextReadSequence()
     const attemptedAt = now()
     let refs: Awaited<ReturnType<typeof listRepositoryMaps>>
     try {
@@ -215,7 +234,7 @@ export function createGitHubObserverPool(options: GitHubObserverOptions = {}): G
     } catch (error) {
       if (owner.stopped || stopped) return
       const failure = sourceFailure(error)
-      failed(owner, membershipScope, 'map-list', attemptedAt, failure)
+      failed(owner, membershipScope, 'map-list', attemptedAt, membershipReadSequence, failure)
       read.failures.push({ failure, stage: 'map-list' })
       return
     }
@@ -228,6 +247,7 @@ export function createGitHubObserverPool(options: GitHubObserverOptions = {}): G
       kind: 'observed',
       scope: membershipScope,
       attemptedAt,
+      readSequence: membershipReadSequence,
       observedAt,
       provenance: provenance(owner, 'map-list'),
       completeness: { kind: 'complete' },
@@ -243,25 +263,49 @@ export function createGitHubObserverPool(options: GitHubObserverOptions = {}): G
         scope: { kind: 'map', map },
         attemptedAt,
         observedAt,
+        readSequence: membershipReadSequence,
         provenance: provenance(owner, 'map-list'),
         proof: { kind: 'complete-membership', parent: membershipScope },
       })
     }
     const fetchAttemptedAt = now()
+    const readSequences = new Map<number, number>()
+    const mapClient: GitHubClient = {
+      graphql(query, variables = {}) {
+        // Number named scopes when their actual provider batch starts, not during interpretation.
+        for (let index = 0; `i${index}` in variables; index += 1) {
+          const mapNumber = variables[`i${index}`]
+          if (typeof mapNumber !== 'number')
+            throw new Error('GitHub map read requires a named map alias.')
+          readSequences.set(mapNumber, owner.nextReadSequence())
+        }
+        return client.graphql(query, variables)
+      },
+      restGet: (path) => client.restGet(path),
+    }
+    function mapReadSequence(mapNumber: number): number {
+      const sequence = readSequences.get(mapNumber)
+      if (sequence === undefined) throw new Error('GitHub map evidence requires an actual read.')
+      return sequence
+    }
     let fetched: Awaited<ReturnType<typeof fetchMaps>>
     try {
-      fetched = await fetchMaps(client, refs, now)
+      fetched = await fetchMaps(mapClient, refs, now)
     } catch (error) {
       if (owner.stopped || stopped) return
       const failure = sourceFailure(error)
-      for (const ref of refs)
+      for (const ref of refs) {
+        const readSequence = readSequences.get(ref.number)
+        if (readSequence === undefined) continue
         failed(
           owner,
           { kind: 'map', map: { project: owner.project, mapId: String(ref.number) } },
           'map-read',
           fetchAttemptedAt,
+          readSequence,
           failure,
         )
+      }
       read.failures.push({ failure, stage: 'map-read' })
       return
     }
@@ -271,9 +315,10 @@ export function createGitHubObserverPool(options: GitHubObserverOptions = {}): G
       owner.worker.rateLimit = conservativeRateLimit(owner.worker.rateLimit, fetched.rateLimit)
     for (const entry of fetched.maps) {
       try {
-        commitMap(owner, repository, entry, resolveProject)
-        owner.fetchedMaps.set(String(entry.ref.number), entry)
-        reconcileTickets(owner, entry)
+        const readSequence = mapReadSequence(entry.ref.number)
+        commitMap(owner, repository, entry, readSequence, resolveProject)
+        owner.fetchedMaps.set(String(entry.ref.number), { fetched: entry, readSequence })
+        reconcileTickets(owner, entry, readSequence)
       } catch (error) {
         const failure = sourceFailure(error)
         failed(
@@ -281,6 +326,7 @@ export function createGitHubObserverPool(options: GitHubObserverOptions = {}): G
           { kind: 'map', map: { project: owner.project, mapId: String(entry.ref.number) } },
           'map-read',
           entry.attemptedAt,
+          mapReadSequence(entry.ref.number),
           failure,
         )
         read.failures.push({ failure, stage: 'map-read' })
@@ -292,6 +338,7 @@ export function createGitHubObserverPool(options: GitHubObserverOptions = {}): G
         { kind: 'map', map: { project: owner.project, mapId: String(entry.ref.number) } },
         'map-read',
         entry.attemptedAt,
+        mapReadSequence(entry.ref.number),
         entry.failure,
       )
       read.failures.push({ failure: entry.failure, stage: 'map-read' })
@@ -302,6 +349,7 @@ export function createGitHubObserverPool(options: GitHubObserverOptions = {}): G
     owner: Owner,
     repository: RepositoryIdentity,
     entry: FetchedMap,
+    readSequence: number,
     resolveProject: ReturnType<typeof resolver>,
   ): void {
     if (
@@ -313,12 +361,13 @@ export function createGitHubObserverPool(options: GitHubObserverOptions = {}): G
       project: owner.project,
       repositoryId: repository.id,
       connectionId: owner.input.source.connectionId,
+      readSequence,
       resolveProject,
     })
     for (const attempt of batch.attempts) record(owner, attempt)
   }
 
-  function reconcileTickets(owner: Owner, entry: FetchedMap): void {
+  function reconcileTickets(owner: Owner, entry: FetchedMap, readSequence: number): void {
     const map = { project: owner.project, mapId: String(entry.ref.number) }
     const membershipScope = { kind: 'tickets-membership', map } satisfies SourceScope
     const membershipKey = sourceScopeKey(membershipScope)
@@ -343,6 +392,7 @@ export function createGitHubObserverPool(options: GitHubObserverOptions = {}): G
         scope: { kind: 'ticket', ticket },
         attemptedAt: entry.attemptedAt,
         observedAt: entry.observedAt,
+        readSequence,
         provenance: provenance(owner, 'map-read'),
         proof: { kind: 'complete-membership', parent: membershipScope },
       })
@@ -515,17 +565,18 @@ export function createGitHubObserverPool(options: GitHubObserverOptions = {}): G
     if (owner.stopped || owner.reading || !owner.repository || !owner.contribution) return
     // Only reclassify existing successful ticket evidence. A topology edit does not replace
     // later failures/absence proofs or advance any observation clock.
-    for (const entry of owner.fetchedMaps.values()) {
-      const batch = observeGitHubMap(entry, {
+    for (const { fetched, readSequence } of owner.fetchedMaps.values()) {
+      const batch = observeGitHubMap(fetched, {
         project: owner.project,
         repositoryId: owner.repository.id,
         connectionId: owner.input.source.connectionId,
+        readSequence,
         resolveProject,
       })
       for (const attempt of batch.attempts) {
         if (attempt.kind !== 'observed' || attempt.scope.kind !== 'ticket') continue
         const current = owner.attempts.get(sourceScopeKey(attempt.scope))
-        if (current?.kind === 'observed' && current.observedAt === attempt.observedAt)
+        if (current?.kind === 'observed' && current.readSequence === attempt.readSequence)
           record(owner, attempt)
       }
     }
@@ -552,6 +603,7 @@ export function createGitHubObserverPool(options: GitHubObserverOptions = {}): G
         project: projectKey(input),
         worker,
         attempts: new Map(),
+        nextReadSequence: createReadSequenceAllocator(),
         mapMembers: new Map(),
         ticketMembers: new Map(),
         fetchedMaps: new Map(),

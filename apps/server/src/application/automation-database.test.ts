@@ -2,7 +2,6 @@ import * as filesystem from 'node:fs/promises'
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { Project, Ticket } from '@roadmap/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   type AutomationDatabase,
@@ -16,7 +15,11 @@ import { createConfigurationDocument } from '../configuration/document.ts'
 import { createLocalProjectAdmission } from '../local/admission.ts'
 import type { SourceContribution } from '../observation/source.ts'
 import type { ProjectConfiguration } from '../projects/registry.ts'
-import { sourceFixture } from '../source-test-fixtures.ts'
+import {
+  createSourceFixtureOwner,
+  type FixtureProject,
+  type FixtureTicket,
+} from '../source-test-fixtures.ts'
 import { createRoadmapApplication } from './application.ts'
 
 vi.mock('node:fs/promises', async (importOriginal) => {
@@ -278,7 +281,7 @@ describe('Automation event database', () => {
     roots.push(root)
     const workspace = await realpath(root)
     const sourceTarget = { ...target, mapId: '.wayfinder/map.md' }
-    const candidate: Ticket = {
+    const candidate: FixtureTicket = {
       id: 'ticket',
       displayId: 'ticket',
       title: 'Resolve the route',
@@ -293,7 +296,7 @@ describe('Automation event database', () => {
       warnings: [],
       sourcePath: join(workspace, '.wayfinder/tickets/ticket.md'),
     }
-    const source: Project = {
+    const source: FixtureProject = {
       key: target.project,
       name: 'Project',
       closedMaps: [],
@@ -372,9 +375,10 @@ describe('Automation event database', () => {
       admissions: { local: createLocalProjectAdmission() },
       observers: {
         local(input) {
+          const read = createSourceFixtureOwner()
           const contribution: SourceContribution = {
             project: { integration: input.ref.integration, id: input.ref.projectId },
-            attempts: sourceFixture([source], 100).attempts,
+            attempts: read([source], 100).attempts,
             health: { status: 'available', observedAt: 100 },
           }
           return {

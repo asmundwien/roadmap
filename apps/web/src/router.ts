@@ -1,4 +1,4 @@
-import type { ProjectKey, WayfinderMap } from '@roadmap/contracts'
+import type { MapResource, ProjectKey, TicketResource } from '@roadmap/contracts'
 import { generatePath, matchPath } from 'react-router'
 
 export const routePaths = {
@@ -48,10 +48,10 @@ export function projectImportPath(connectionId: string): string {
   return `${connectionPath(connectionId)}/projects/import`
 }
 
-export function mapPath(map: Pick<WayfinderMap, 'project' | 'id'>): string {
-  return `${projectPath(map.project)}${generatePath('/maps/:mapId', { mapId: map.id })}`
+export function mapPath(map: MapResource['key']): string {
+  return `${projectPath(map.project)}${generatePath('/maps/:mapId', { mapId: map.mapId })}`
 }
 
-export function ticketPath(map: Pick<WayfinderMap, 'project' | 'id'>, ticketId: string): string {
-  return `${mapPath(map)}${generatePath('/tickets/:ticketId', { ticketId })}`
+export function ticketPath(ticket: TicketResource['key']): string {
+  return `${mapPath(ticket.map)}${generatePath('/tickets/:ticketId', { ticketId: ticket.ticketId })}`
 }

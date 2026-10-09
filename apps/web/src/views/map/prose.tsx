@@ -1,4 +1,4 @@
-import type { WayfinderMap } from '@roadmap/contracts'
+import type { MapResource } from '@roadmap/contracts'
 import classNames from 'classnames/bind'
 import { type ReactNode, useMemo } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
@@ -10,7 +10,7 @@ const cx = classNames.bind(styles)
 const remarkPlugins = [remarkGfm]
 
 export type ProseProps = {
-  map: WayfinderMap
+  map: MapResource
   sourcePath?: string
   markdown: string
   onOpenTicket: (id: string) => void
@@ -30,7 +30,7 @@ export function Prose({ map, sourcePath, markdown, onOpenTicket, onOpenMap }: Pr
         const resolved = resolveProseLink(map, sourcePath, href)
         const target: ProseLinkTarget | null =
           resolved === null &&
-          map.project.integration === 'local' &&
+          map.key.project.integration === 'local' &&
           href &&
           !/^(?:[a-zA-Z][a-zA-Z\d+.-]*:|\/\/)/.test(href)
             ? {

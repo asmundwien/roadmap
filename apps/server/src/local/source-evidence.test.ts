@@ -11,6 +11,7 @@ import type {
   SourceScope,
 } from '../observation/source.ts'
 import { createLocalProjectRegistration, refineLocalWorkspaceProof } from '../projects/registry.ts'
+import { createFixtureReadSequence } from '../source-test-fixtures.ts'
 import { type LocalProjectReadOptions, readLocalProject } from '../wayfinder/from-local.ts'
 import { createLocalObserver } from './observer.ts'
 
@@ -40,6 +41,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 
 let rootPath: string
 let admittedInput: LocalObservationInput
+let nextReadSequence: () => number
 const project = { integration: 'local', id: 'registered-opaque-key' } as const
 const map = { project, mapId: '.wayfinder/known-map/map.md' }
 const NOW = Date.parse('2026-10-08T12:00:00.000Z')
@@ -47,6 +49,7 @@ const NOW = Date.parse('2026-10-08T12:00:00.000Z')
 beforeEach(async () => {
   vi.useFakeTimers()
   vi.setSystemTime(NOW)
+  nextReadSequence = createFixtureReadSequence()
   rootPath = await mkdtemp(join(tmpdir(), 'roadmap-local-evidence-'))
   await mkdir(join(rootPath, '.wayfinder'))
   admittedInput = createInput()
@@ -78,7 +81,7 @@ function createInput(): LocalObservationInput {
 }
 
 function read() {
-  return readLocalProject(admittedInput)
+  return readLocalProject(admittedInput, { nextReadSequence })
 }
 
 function fail(operation: 'enumerate' | 'read', path: string, code: string): void {
@@ -199,6 +202,7 @@ describe('local source evidence', () => {
         expect(latest(result, scope)).toEqual({
           kind: 'failed',
           scope,
+          readSequence: expect.any(Number),
           attemptedAt: NOW,
           provenance: { integration: 'local', operation: sourceOperation, path },
           failure: { kind: 'filesystem', operation: sourceOperation, code: expected },

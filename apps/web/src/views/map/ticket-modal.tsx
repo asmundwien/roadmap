@@ -5,9 +5,10 @@ import type {
   AutomationProcessResult,
   Blocker,
   ClassificationAttempt,
+  MapResource,
   SessionReportEvidence,
-  Ticket,
-  WayfinderMap,
+  TicketResource,
+  TicketResourceResult,
   WayfinderSession,
 } from '@roadmap/contracts'
 import { ticketTypeOf } from '@roadmap/contracts'
@@ -20,6 +21,7 @@ import { Surface, SurfaceTitle } from '@roadmap/ui/surface'
 import classNames from 'classnames/bind'
 import { useState } from 'react'
 import { type RoadmapViewState, useRoadmap } from '@/store/roadmap-provider'
+import { resourceMessage, resourceObservation } from '@/views/shared/resource-results'
 import { TicketMark } from '@/views/shared/ticket-mark'
 import { TICKET_STATE_META } from '@/views/shared/ticket-presentation'
 import { blockerNodeId } from './graph'
@@ -28,22 +30,26 @@ import styles from './ticket-modal.module.css'
 
 const cx = classNames.bind(styles)
 
+type TicketValue = Extract<
+  TicketResourceResult,
+  { kind: 'current-readable' }
+>['observation']['value']
+
 function automationEvidenceFor(
-  map: WayfinderMap,
-  ticket: Ticket,
+  ticket: TicketResource['key'],
   evidence: readonly AutomationEvidence[],
 ): AutomationEvidence | undefined {
   return evidence.find(
     (candidate) =>
-      candidate.target.project.integration === map.project.integration &&
-      candidate.target.project.id === map.project.id &&
-      candidate.target.mapId === map.id &&
-      candidate.target.ticketId === ticket.id,
+      candidate.target.project.integration === ticket.map.project.integration &&
+      candidate.target.project.id === ticket.map.project.id &&
+      candidate.target.mapId === ticket.map.mapId &&
+      candidate.target.ticketId === ticket.ticketId,
   )
 }
 
 export type TicketModalProps = {
-  map: WayfinderMap
+  map: MapResource
   ticketId: string | null
   onClose: () => void
   onOpenTicket: (id: string) => void
@@ -52,32 +58,47 @@ export type TicketModalProps = {
 
 export function TicketModal({ map, ticketId, onClose, onOpenTicket, onOpenMap }: TicketModalProps) {
   const roadmap = useRoadmap()
-  const ticket = map.tickets.find((item) => item.id === ticketId)
+  const ticket = map.tickets.find((item) => item.key.ticketId === ticketId)
+  const content = ticket === undefined ? null : resourceObservation(ticket.resource)?.value
 
   return (
     <Modal
       open={ticketId !== null}
       onClose={onClose}
-      title={ticket?.title ?? ticket?.displayId ?? ticketId ?? 'Ticket'}
+      title={content?.title ?? content?.displayId ?? ticketId ?? 'Ticket'}
       className={cx('modal')}
     >
       {ticket === undefined ? (
         ticketId !== null && (
-          <Alert variant="info">
-            Ticket {ticketId} is absent from the current map snapshot. It may have been deleted or
-            become unavailable.
-            {!map.ticketsComplete && ' Some ticket records are missing from this map.'}
-          </Alert>
+          <>
+            <Alert variant="info">
+              Ticket {ticketId} has no known resource in this map. No other ticket has been
+              selected.
+            </Alert>
+            <TicketAutomation
+              roadmap={roadmap}
+              ticket={{ map: map.key, ticketId }}
+              tracker={undefined}
+            />
+          </>
         )
       ) : (
-        <TicketContent
-          key={`${map.project.integration}:${map.project.id}:${map.id}:${ticket.id}`}
-          map={map}
-          ticket={ticket}
-          roadmap={roadmap}
-          onOpenTicket={onOpenTicket}
-          onOpenMap={onOpenMap}
-        />
+        <>
+          <Alert variant="info">Ticket source. {resourceMessage(ticket.resource)}</Alert>
+          <TicketContent
+            key={JSON.stringify([
+              map.key.project.integration,
+              map.key.project.id,
+              map.key.mapId,
+              ticket.key.ticketId,
+            ])}
+            map={map}
+            ticketResource={ticket}
+            roadmap={roadmap}
+            onOpenTicket={onOpenTicket}
+            onOpenMap={onOpenMap}
+          />
+        </>
       )}
     </Modal>
   )
@@ -89,41 +110,52 @@ type AutomationViewState = Pick<
 >
 
 type TicketContentProps = {
-  map: WayfinderMap
-  ticket: Ticket
+  map: MapResource
+  ticketResource: TicketResource
   roadmap: AutomationViewState
   onOpenTicket: (id: string) => void
   onOpenMap: () => void
 }
 
-function TicketContent({ map, ticket, roadmap, onOpenTicket, onOpenMap }: TicketContentProps) {
+function TicketContent({
+  map,
+  ticketResource,
+  roadmap,
+  onOpenTicket,
+  onOpenMap,
+}: TicketContentProps) {
+  const ticket = resourceObservation(ticketResource.resource)?.value
+  if (ticket === undefined) {
+    return <TicketAutomation roadmap={roadmap} ticket={ticketResource.key} tracker={undefined} />
+  }
   const type = ticketTypeOf(ticket.typeEvidence)
   const stateMeta = TICKET_STATE_META[ticket.state]
-  const decision = map.body.decisions.find((item) => item.title === ticket.title)
-  const control = roadmap.automation.overrides.find(
-    (item) =>
-      item.target.project.integration === map.project.integration &&
-      item.target.project.id === map.project.id &&
-      item.target.mapId === map.id &&
-      item.target.ticketId === ticket.id,
+  const decision = resourceObservation(map.resource)?.value.body.decisions.find(
+    (item) => item.title === ticket.title,
   )
-  const evidence = automationEvidenceFor(map, ticket, roadmap.automation.evidence)
-  const proseProps = { map, sourcePath: ticket.sourcePath, onOpenTicket, onOpenMap }
+  const proseProps = {
+    map,
+    sourcePath: ticket.source.kind === 'file' ? ticket.source.path : undefined,
+    onOpenTicket,
+    onOpenMap,
+  }
 
   return (
     <div className={cx('content')}>
       <div className={cx('identity')}>
-        <span>{ticket.displayId ?? ticket.id}</span>
+        <span>{ticket.displayId ?? ticketResource.key.ticketId}</span>
         <Badge>{type}</Badge>
         <Badge variant={stateMeta.variant}>
           <TicketMark state={ticket.state} type={type} size="small" />
           {trackerStateLabel(ticket)}
         </Badge>
       </div>
-      {ticket.url && (
-        <Link href={ticket.url} external>
+      {ticket.source.kind === 'issue' ? (
+        <Link href={ticket.source.url} external>
           View item in source
         </Link>
+      ) : (
+        <p className={cx('supporting')}>{ticket.source.path}</p>
       )}
       {(ticket.assignees.length > 0 || ticket.closedAt !== undefined) && (
         <dl className={cx('metadata')}>
@@ -182,27 +214,23 @@ function TicketContent({ map, ticket, roadmap, onOpenTicket, onOpenMap }: Ticket
       {!ticket.blockersComplete && (
         <Alert variant="info">Some blockers could not be resolved.</Alert>
       )}
-      {!map.ticketsComplete && (
-        <Alert variant="info">Some ticket records are missing from this map.</Alert>
+      {map.ticketsMembership.kind !== 'current-complete' && (
+        <Alert variant="info">
+          Current ticket membership is not complete. Known traces do not prove current presence.
+        </Alert>
       )}
       {ticket.warnings.map((warning) => (
         <Alert key={warning} variant="info">
           {warning}
         </Alert>
       ))}
-      <AutomationSection
-        roadmap={roadmap}
-        control={control}
-        evidence={evidence}
-        map={map}
-        ticket={ticket}
-      />
+      <TicketAutomation roadmap={roadmap} ticket={ticketResource.key} tracker={ticket} />
     </div>
   )
 }
 
 type BlockerItemProps = {
-  map: WayfinderMap
+  map: MapResource
   blocker: Blocker
   onOpenTicket: (id: string) => void
 }
@@ -211,9 +239,9 @@ function BlockerItem({ map, blocker, onOpenTicket }: BlockerItemProps) {
   const { reference } = blocker
   const local =
     reference.kind === 'registered' &&
-    reference.project.integration === map.project.integration &&
-    reference.project.id === map.project.id
-      ? map.tickets.find((ticket) => ticket.id === blocker.ticketId)
+    reference.project.integration === map.key.project.integration &&
+    reference.project.id === map.key.project.id
+      ? map.tickets.find((ticket) => ticket.key.ticketId === blocker.ticketId)
       : undefined
   const scope =
     reference.kind === 'registered'
@@ -222,18 +250,28 @@ function BlockerItem({ map, blocker, onOpenTicket }: BlockerItemProps) {
         ? `${reference.integration}:${reference.nameWithOwner}`
         : reference.locator
   const identity = blocker.displayId ?? blocker.ticketId
+  const localContent = local === undefined ? null : resourceObservation(local.resource)?.value
   const title = blocker.title ?? identity
 
   if (local !== undefined) {
     return (
       <div className={cx('blocker')}>
-        <Button size="small" onClick={() => onOpenTicket(local.id)}>
-          {local.title ?? local.displayId ?? local.id}
+        <Button size="small" onClick={() => onOpenTicket(local.key.ticketId)}>
+          {localContent?.title ?? localContent?.displayId ?? local.key.ticketId}
         </Button>
-        <Badge variant={TICKET_STATE_META[local.state].variant}>
-          <TicketMark state={local.state} type={ticketTypeOf(local.typeEvidence)} size="small" />
-          {trackerStateLabel(local)}
-        </Badge>
+        {localContent && (
+          <Badge variant={TICKET_STATE_META[localContent.state].variant}>
+            <TicketMark
+              state={localContent.state}
+              type={ticketTypeOf(localContent.typeEvidence)}
+              size="small"
+            />
+            {trackerStateLabel(localContent)}
+          </Badge>
+        )}
+        {local.resource.kind !== 'current-readable' && (
+          <span className={cx('supporting')}>{resourceMessage(local.resource)}</span>
+        )}
       </div>
     )
   }
@@ -255,15 +293,47 @@ function BlockerItem({ map, blocker, onOpenTicket }: BlockerItemProps) {
   )
 }
 
+type TicketAutomationProps = {
+  roadmap: AutomationViewState
+  ticket: TicketResource['key']
+  tracker: TicketValue | undefined
+}
+
+function TicketAutomation({ roadmap, ticket, tracker }: TicketAutomationProps) {
+  const control = roadmap.automation.overrides.find(
+    (item) =>
+      item.target.project.integration === ticket.map.project.integration &&
+      item.target.project.id === ticket.map.project.id &&
+      item.target.mapId === ticket.map.mapId &&
+      item.target.ticketId === ticket.ticketId,
+  )
+  const evidence = automationEvidenceFor(ticket, roadmap.automation.evidence)
+  return (
+    <AutomationSection
+      roadmap={roadmap}
+      control={control}
+      evidence={evidence}
+      ticket={ticket}
+      tracker={tracker}
+    />
+  )
+}
+
 type AutomationSectionProps = {
   roadmap: AutomationViewState
   control: AutomationOverrideControl | undefined
   evidence: AutomationEvidence | undefined
-  map: WayfinderMap
-  ticket: Ticket
+  ticket: TicketResource['key']
+  tracker: TicketValue | undefined
 }
 
-function AutomationSection({ roadmap, control, evidence, map, ticket }: AutomationSectionProps) {
+function AutomationSection({
+  roadmap,
+  control,
+  evidence,
+  ticket,
+  tracker,
+}: AutomationSectionProps) {
   const [feedback, setFeedback] = useState<{ kind: 'notice' | 'error'; text: string } | null>(null)
   const fallbackReason =
     roadmap.automation.availability.status === 'unavailable'
@@ -276,7 +346,7 @@ function AutomationSection({ roadmap, control, evidence, map, ticket }: Automati
       const outcome = await roadmap.execute({
         type: 'start-automation-override',
         expectedConfigurationVersion: roadmap.configurationVersion,
-        target: { project: map.project, mapId: map.id, ticketId: ticket.id },
+        target: { project: ticket.map.project, mapId: ticket.map.mapId, ticketId: ticket.ticketId },
         stage,
       })
       setFeedback(
@@ -304,7 +374,10 @@ function AutomationSection({ roadmap, control, evidence, map, ticket }: Automati
       {evidence !== undefined && (
         <section className={cx('evidence')} aria-label="Recorded Automation evidence">
           <dl>
-            <EvidenceFact term="Tracker state" value={trackerStateLabel(ticket)} />
+            <EvidenceFact
+              term="Tracker state"
+              value={tracker === undefined ? 'No source content known' : trackerStateLabel(tracker)}
+            />
           </dl>
           <ClassificationEvidence attempt={evidence.classification} />
           {evidence.wayfinder !== undefined && <WayfinderEvidence session={evidence.wayfinder} />}
@@ -546,7 +619,7 @@ function wayfinderStateLabel(session: WayfinderSession): string {
   }
 }
 
-function trackerStateLabel(ticket: Ticket): string {
+function trackerStateLabel(ticket: TicketValue): string {
   if (ticket.state === 'closed') return sentenceCase(TICKET_STATE_META.closed.word)
   if (ticket.isBlocked && ticket.isClaimed) return 'Blocked + claimed'
   return sentenceCase(TICKET_STATE_META[ticket.state].word)
