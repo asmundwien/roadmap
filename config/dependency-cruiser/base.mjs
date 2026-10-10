@@ -68,7 +68,7 @@ export const forbidden = [
     'contracts-leaf-direction',
     { path: `${contracts}operations[.]ts$` },
     { path: `${contracts}wire[.]ts$` },
-    'Staged state-bearing outcomes require state, but never wire.',
+    'Operation schemas do not import transport envelopes.',
   ),
   refuse(
     'server-private-not-to-public-dto',

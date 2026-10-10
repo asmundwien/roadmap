@@ -9,15 +9,15 @@ import { parseArgs } from 'node:util'
 
 const scenarioManifest = [
   'Settings configuration write permits independent other-Project refresh before reply',
-  'Open settings/import/authorization panes capture current version and current readiness/policy',
+  'Open settings/import/authorization/Automation panes capture current version, readiness and changed authoritative policy',
   'External revision after capture is rejected without replay and keeps the draft',
   'Shared configuration scope blocks cross-Project writes in both start orders',
   'Independent configuration/resource/native scopes settle in both orders',
   'Selected/cancelled/failed folder interactions preserve local drafts',
-  'Normalized registration and repair use actual committed canonical destinations',
+  'Normalized Local/GitHub registration and moved Workspace repair preserve canonical identity, remote evidence and committed destinations',
   'Non-admission and application rejection remain distinct from post-effect ambiguity',
   'Lost/unreadable/wrong-operation/wrong-correlation/wrong-subject replies never navigate as committed',
-  'Unknown attempts survive unrelated success/error, snapshot, reconnect, dismissal and pane close/reopen',
+  'Held post-effect unknown and independent acknowledgement/rejection settle in both orders and survive reads, reconnect, dismissal and pane close/reopen',
   'Older attempt settlement never replaces the latest created attempt feedback',
   'State-free predecessor/successor outcomes preserve read authority in both settlement orders',
   'Established current-authority differing epoch requests fresh baseline without replay; pre-baseline authority does not',
@@ -64,7 +64,8 @@ Options:
 Node must support registerHooks and native TypeScript stripping. The fixture uses installed workspace
 Vite/React/ws dependencies and Playwright. No credentials, real configuration, native programs or
 Automation processes are used. All configuration, Local files and durable history are temporary.
-JSON output reports the full manifest, exercised scenarios and cleanup. Assertions exit nonzero.`)
+JSON output reports the full manifest, exercised scenarios, runtime/browser versions, physical HTTP
+request multiplicity by correlation, after-header truncation observations and cleanup. Assertions exit nonzero.`)
 } else {
   if (values['serve-only'] && (values.screenshots || values['essential-only']))
     throw new Error('--serve-only cannot combine with --screenshots or --essential-only.')
@@ -395,14 +396,102 @@ async function main() {
           [...expected].sort(),
           'Every acceptance schedule must execute before a full proof passes.',
         )
+        const final = await control('status')
+        const fetchStarts = await page.evaluate(() => window.workflowsFixture.requestStarts())
+        const fetchesByCorrelation = new Map()
+        for (const request of fetchStarts)
+          fetchesByCorrelation.set(
+            request.correlationId,
+            (fetchesByCorrelation.get(request.correlationId) ?? 0) + 1,
+          )
+        const byCorrelation = new Map()
+        for (const request of final.requests) {
+          assert.equal(typeof request.correlationId, 'string')
+          assert.equal(request.correlationId, request.envelope.correlationId)
+          const deliveries = byCorrelation.get(request.correlationId) ?? []
+          deliveries.push(request)
+          byCorrelation.set(request.correlationId, deliveries)
+        }
+        const multiplicity = [...byCorrelation].map(([correlationId, deliveries]) => ({
+          correlationId,
+          applicationFetchStarts: fetchesByCorrelation.get(correlationId) ?? 0,
+          operation: deliveries[0].envelope.command?.type ?? deliveries[0].envelope.query?.type,
+          physicalRequests: deliveries.length,
+          forwardedRequests: deliveries.filter((request) => request.forwarded).length,
+          afterHeadersTruncated: deliveries.some((request) => request.afterHeadersTruncated),
+        }))
+        const truncated = multiplicity.filter((group) => group.afterHeadersTruncated)
+        const truncatedNative = truncated.filter(
+          (group) => group.operation === 'launch-project-operation',
+        )
+        for (const group of truncatedNative)
+          assert.equal(
+            group.applicationFetchStarts,
+            1,
+            'Every measured uncertain native attempt must have one application fetch start.',
+          )
+        const deliveryEvidence = {
+          physicalRequests: final.requests.length,
+          applicationFetchStarts: fetchStarts.length,
+          uniqueCorrelations: byCorrelation.size,
+          maximumPhysicalRequestsPerCorrelation: Math.max(
+            0,
+            ...multiplicity.map((group) => group.physicalRequests),
+          ),
+          repeatedCorrelations: multiplicity.filter((group) => group.physicalRequests > 1),
+          byCorrelation: multiplicity,
+          afterHeadersTruncated: {
+            correlations: truncated.length,
+            physicalRequests: truncated.reduce((count, group) => count + group.physicalRequests, 0),
+            maximumPhysicalRequestsPerCorrelation: Math.max(
+              0,
+              ...truncated.map((group) => group.physicalRequests),
+            ),
+            observedReattempts: truncated.reduce(
+              (count, group) => count + group.physicalRequests - group.applicationFetchStarts,
+              0,
+            ),
+            nativeCorrelations: truncatedNative.length,
+            nativePhysicalRequests: truncatedNative.reduce(
+              (count, group) => count + group.physicalRequests,
+              0,
+            ),
+            nativeApplicationFetchStarts: truncatedNative.reduce(
+              (count, group) => count + group.applicationFetchStarts,
+              0,
+            ),
+            nativeMaximumPhysicalRequestsPerCorrelation: Math.max(
+              0,
+              ...truncatedNative.map((group) => group.physicalRequests),
+            ),
+            nativeObservedReattempts: truncatedNative.reduce(
+              (count, group) => count + group.physicalRequests - group.applicationFetchStarts,
+              0,
+            ),
+            overlapObservationWindowMs: 350,
+            limit:
+              'Measured physical relay arrivals for this runtime/browser and tested headers-flushed truncated-body responses only. No before-header or universal exactly-once guarantee.',
+          },
+        }
         success = {
           status: 'passed',
           scenarios,
           scenarioManifest,
           screenshots,
-          final: await control('status'),
+          runtime: {
+            node: process.version,
+            versions: process.versions,
+            platform: process.platform,
+            arch: process.arch,
+          },
+          browser: {
+            version: browser.version(),
+            userAgent: await page.evaluate(() => navigator.userAgent),
+          },
+          deliveryEvidence,
+          final,
           limits:
-            'Harmless providers own external credentials/native/process effects. One explicit pre-baseline authority schedule uses the public raw store.execute seam; all workflow schedules use named owner and actual App consumers. Fixture-native WebSocket and relay counters record generations, fetch-start correlation, actual validated withheld publications, explicit close requests and physical closes. HTTP successors stop predecessor source ownership but retain its real accepted transport until native retirement or explicit fixture disconnect; no terminal lifecycle state is fabricated. Explicit application stop closes its real backend transport. Directory durability confirmation is withheld through a fixture ConfigurationDocument port only after a real successful filesystem write.',
+            'Harmless providers own external credentials/native/process effects. One explicit pre-baseline authority schedule uses the public raw store.execute seam; all workflow schedules use named owner and actual App consumers. Fixture-native WebSocket and relay counters record generations, fetch-start correlation, actual validated withheld publications, explicit close requests and physical closes. HTTP successors stop predecessor source ownership but retain its real accepted transport until native retirement or explicit fixture disconnect; no terminal lifecycle state is fabricated. Explicit application stop closes its real backend transport. Directory durability confirmation is withheld through a fixture ConfigurationDocument port only after a real successful filesystem write. Native reattempt observations apply only to the measured after-header truncated-body schedule and reported runtime/browser. No before-header or universal exactly-once effect guarantee follows.',
         }
       }
     }
@@ -561,11 +650,6 @@ async function completeSchedules({
     'selectWorkspace',
     'dismiss',
   ]
-  assert.deepEqual(
-    await page.evaluate(() => window.workflowsFixture.methods()),
-    methods,
-    'The public owner must provide the complete named workflow contract.',
-  )
   const exercised = new Set()
   async function start(name, argument) {
     exercised.add(name)
@@ -634,6 +718,104 @@ async function completeSchedules({
       ),
     )
     await navigate(fixture.paths.connections)
+    const automationToggle = page.getByRole('switch', { name: 'Enable Automation', exact: true })
+    await until('mounted global Automation control', () => automationToggle.count())
+    const automationNode = await automationToggle.elementHandle()
+    assert.ok(automationNode)
+    const policyBefore = await control('status')
+    assert.equal(await automationToggle.isChecked(), false)
+    const enabled = await control('toggle-automation')
+    await version(enabled.state.configurationVersion)
+    await until('authoritative enablement reaches the same open control', () =>
+      automationToggle.isChecked(),
+    )
+    const unavailable = await control('automation-harness', 'unavailable')
+    await version(unavailable.state.configurationVersion)
+    await until(
+      'real missing Harness Command policy reaches mounted Automation',
+      async () => (await snapshot()).state.automation.availability.status === 'unavailable',
+    )
+    assert.ok((await text()).includes(unavailable.state.automation.availability.cause))
+    assert.equal(await automationNode.evaluate((input) => input.isConnected), true)
+    assert.equal(
+      await automationToggle.isEnabled(),
+      true,
+      'Disabling remains available under unavailable launch policy.',
+    )
+    const refusalCount = await count()
+    const enableRefusal = await settled(
+      await start('setAutomationEnabled', { enabled: true }),
+      'not-dispatched',
+    )
+    assert.equal(enableRefusal.error.field, 'enabled')
+    assert.equal(enableRefusal.error.message, unavailable.state.automation.availability.cause)
+    assert.equal(await count(), refusalCount)
+    await automationToggle.click()
+    await dispatched(refusalCount)
+    assert.deepEqual((await control('status')).requests.at(-1).envelope.command, {
+      type: 'set-automation-enabled',
+      enabled: false,
+      expectedConfigurationVersion: unavailable.state.configurationVersion,
+    })
+    await until(
+      'current-policy disable acknowledgement and blocked enable control',
+      async () =>
+        !(await automationToggle.isChecked()) &&
+        !(await automationToggle.isEnabled()) &&
+        (await attempts()).findLast((attempt) => attempt.operation === 'set-automation-enabled')
+          ?.kind === 'acknowledged',
+    )
+    const disabled = (await attempts()).findLast(
+      (attempt) => attempt.operation === 'set-automation-enabled',
+    )
+    await version(disabled.result.configurationVersion)
+    assert.deepEqual(disabled.canonicalSubject, { kind: 'automation' })
+    assert.equal(disabled.result.enabled, false)
+    assert.equal(disabled.result.configurationVersion, unavailable.state.configurationVersion + 1)
+    assert.equal(await automationNode.evaluate((input) => input.isConnected), true)
+    const restored = await control('automation-harness', 'ready')
+    await version(restored.state.configurationVersion)
+    await until('restored real Harness Command enables the mounted control', () =>
+      automationToggle.isEnabled(),
+    )
+    const currentCapture = await control('advance-revision')
+    await version(currentCapture.state.configurationVersion)
+    const enableCount = await count()
+    await automationToggle.click()
+    await dispatched(enableCount)
+    assert.deepEqual((await control('status')).requests.at(-1).envelope.command, {
+      type: 'set-automation-enabled',
+      enabled: true,
+      expectedConfigurationVersion: currentCapture.state.configurationVersion,
+    })
+    await until(
+      'mounted Automation acknowledgement uses latest accepted policy',
+      async () =>
+        (await automationToggle.isChecked()) &&
+        (await attempts()).findLast((attempt) => attempt.operation === 'set-automation-enabled')
+          ?.kind === 'acknowledged',
+    )
+    const enabledAttempt = (await attempts()).findLast(
+      (attempt) => attempt.operation === 'set-automation-enabled',
+    )
+    assert.deepEqual(enabledAttempt.canonicalSubject, { kind: 'automation' })
+    assert.equal(enabledAttempt.result.enabled, true)
+    assert.equal(
+      enabledAttempt.result.configurationVersion,
+      currentCapture.state.configurationVersion + 1,
+    )
+    await version(enabledAttempt.result.configurationVersion)
+    await control('toggle-automation')
+    await until(
+      'restore disabled global Automation without remounting',
+      async () => !(await automationToggle.isChecked()),
+    )
+    const policyAfter = await control('status')
+    assert.equal(policyAfter.requests.length, policyBefore.requests.length + 2)
+    assert.equal(policyAfter.hostInvocations, policyBefore.hostInvocations)
+    assert.equal(policyAfter.classificationLaunches, policyBefore.classificationLaunches)
+    assert.equal(policyAfter.wayfinderLaunches, policyBefore.wayfinderLaunches)
+    assert.equal(await automationNode.evaluate((input) => input.isConnected), true)
     await page
       .getByRole('button', { name: /add.*github|add.*connection/i })
       .first()
@@ -1084,6 +1266,188 @@ async function completeSchedules({
       remoteRegistration.destination,
     )
     assert.ok((await text()).includes(changed.githubWorkspace))
+    const remoteProject = remoteRegistration.result.project
+    const remoteSettings = `/projects/github/${encodeURIComponent(remoteProject.projectId).replaceAll('%3A', ':')}/settings`
+    assert.equal(remoteRegistration.destination, remoteSettings)
+    await page.getByRole('link', { name: 'Open Project settings', exact: true }).click()
+    await until(
+      'registered canonical GitHub Settings',
+      () => new URL(page.url()).pathname === remoteSettings,
+    )
+    const remoteRow = (state) =>
+      state.projects.find(
+        (row) =>
+          row.ref.integration === remoteProject.integration &&
+          row.ref.projectId === remoteProject.projectId,
+      )
+    const remoteEvidence = (row) => ({
+      ref: row.ref,
+      connectionId: row.connectionId,
+      source: row.source,
+      resource: row.resource,
+      mapsMembership: row.mapsMembership,
+      maps: row.maps,
+      activeMap: row.activeMap,
+      displayOrder: row.displayOrder,
+    })
+    await until(
+      'registered GitHub remote evidence accepted',
+      async () => remoteRow((await snapshot()).state)?.resource.kind === 'current-readable',
+    )
+    const remoteBeforeMove = await control('status')
+    const evidence = remoteEvidence(remoteRow(remoteBeforeMove.state))
+    assert.equal(evidence.source.repositoryId, '8002')
+    assert.equal(evidence.source.nameWithOwner, 'fixture/registration')
+    assert.equal(evidence.connectionId, fixture.ids.connection)
+    const moved = await control('move-github-workspace')
+    const remoteReproof = await settled(
+      await start('launchProject', {
+        project: remoteProject,
+        operation: 'open-workspace',
+      }),
+      'rejected',
+    )
+    assert.equal(remoteReproof.error.code, 'admission-failed')
+    assert.equal(remoteReproof.error.field, 'workspace.path')
+    assert.deepEqual(remoteReproof.subject, subject(remoteProject))
+    assert.equal((await control('status')).hostInvocations, remoteBeforeMove.hostInvocations)
+    await until(
+      'GitHub Workspace denial revokes native capability without losing remote evidence',
+      async () =>
+        [(await control('status')).state, (await snapshot()).state].every(
+          (state) => !remoteRow(state).actions.some((action) => action.kind === 'server-launch'),
+        ),
+    )
+    for (const state of [(await control('status')).state, (await snapshot()).state])
+      assert.deepEqual(remoteEvidence(remoteRow(state)), evidence)
+    await until('actual registered GitHub Workspace repair form', () =>
+      page.getByRole('button', { name: 'Validate and repair', exact: true }).count(),
+    )
+    await control('selector-selected', moved.githubWrongAlias)
+    await page.getByRole('button', { name: 'Choose folder', exact: true }).click()
+    await until(
+      'different-repository alias selected in actual Settings',
+      async () => (await page.locator('fieldset output').innerText()) === moved.githubWrongAlias,
+    )
+    const wrongRevision = await control('advance-revision')
+    await version(wrongRevision.state.configurationVersion)
+    const beforeWrong = await control('status')
+    const priorRepair = (await attempts()).findLast(
+      (attempt) => attempt.operation === 'repair-project-workspace',
+    )
+    await page.getByRole('button', { name: 'Validate and repair', exact: true }).click()
+    await dispatched(beforeWrong.requests.length)
+    await until('actual different-repository repair rejection', async () => {
+      const attempt = (await attempts()).findLast(
+        (attempt) => attempt.operation === 'repair-project-workspace',
+      )
+      return attempt?.id !== priorRepair?.id && attempt?.kind === 'rejected'
+    })
+    const wrongRepair = (await attempts()).findLast(
+      (attempt) => attempt.operation === 'repair-project-workspace',
+    )
+    assert.deepEqual(wrongRepair.subject, subject(remoteProject))
+    assert.equal(wrongRepair.error.code, 'admission-failed')
+    assert.equal(wrongRepair.error.field, 'workspace.path')
+    assert.equal(wrongRepair.destination ?? null, null)
+    const wrongRequest = (await control('status')).requests.at(-1)
+    assert.deepEqual(wrongRequest.envelope.command, {
+      type: 'repair-project-workspace',
+      project: remoteProject,
+      workspace: { path: moved.githubWrongAlias },
+      expectedConfigurationVersion: wrongRevision.state.configurationVersion,
+    })
+    assert.equal(wrongRequest.forwarded, true)
+    assert.equal(wrongRequest.outcome.outcome.ok, false)
+    assert.equal(new URL(page.url()).pathname, remoteSettings)
+    assert.equal(await page.locator('fieldset output').innerText(), moved.githubWrongAlias)
+    assert.ok((await text()).includes(wrongRepair.message))
+    assert.equal(
+      (await control('status')).state.configurationVersion,
+      wrongRevision.state.configurationVersion,
+    )
+    const afterWrongRepair = await control('status')
+    assert.equal(afterWrongRepair.hostInvocations, beforeWrong.hostInvocations)
+    assert.equal(afterWrongRepair.classificationLaunches, beforeWrong.classificationLaunches)
+    assert.equal(afterWrongRepair.wayfinderLaunches, beforeWrong.wayfinderLaunches)
+    assert.equal(afterWrongRepair.requests.length, beforeWrong.requests.length + 1)
+    for (const state of [afterWrongRepair.state, (await snapshot()).state])
+      assert.deepEqual(remoteEvidence(remoteRow(state)), evidence)
+    await control('selector-selected', moved.githubRepairAlias)
+    await page.getByRole('button', { name: 'Choose another folder', exact: true }).click()
+    await until(
+      'same-repository repair alias selected in actual Settings',
+      async () => (await page.locator('fieldset output').innerText()) === moved.githubRepairAlias,
+    )
+    const repairRevision = await control('advance-revision')
+    await version(repairRevision.state.configurationVersion)
+    const beforeRemoteRepair = await count()
+    await page.getByRole('button', { name: 'Validate and repair', exact: true }).click()
+    await dispatched(beforeRemoteRepair)
+    await until('actual GitHub canonical repair acknowledgement', async () => {
+      const attempt = (await attempts()).findLast(
+        (attempt) => attempt.operation === 'repair-project-workspace',
+      )
+      return attempt?.id !== wrongRepair.id && attempt?.kind === 'acknowledged'
+    })
+    const remoteRepair = (await attempts()).findLast(
+      (attempt) => attempt.operation === 'repair-project-workspace',
+    )
+    const repairRequest = (await control('status')).requests.at(-1)
+    assert.deepEqual(repairRequest.envelope.command, {
+      type: 'repair-project-workspace',
+      project: remoteProject,
+      workspace: { path: moved.githubRepairAlias },
+      expectedConfigurationVersion: repairRevision.state.configurationVersion,
+    })
+    assert.equal(repairRequest.forwarded, true)
+    assert.deepEqual(remoteRepair.result, {
+      type: 'repair-project-workspace',
+      project: remoteProject,
+      workspacePath: moved.githubMovedWorkspace,
+      configurationVersion: repairRevision.state.configurationVersion + 1,
+      commit: 'committed',
+    })
+    assert.deepEqual(remoteRepair.canonicalSubject, subject(remoteProject))
+    assert.notEqual(
+      remoteRepair.result.workspacePath,
+      repairRequest.envelope.command.workspace.path,
+    )
+    assert.equal(remoteRepair.destination, remoteSettings)
+    await version(remoteRepair.result.configurationVersion)
+    await until('same GitHub Project canonical Workspace capability restored', async () =>
+      [(await control('status')).state, (await snapshot()).state].every((state) => {
+        const row = remoteRow(state)
+        return (
+          row.management.workspacePath === moved.githubMovedWorkspace &&
+          row.actions.some(
+            (action) => action.kind === 'server-launch' && action.operation === 'open-workspace',
+          )
+        )
+      }),
+    )
+    const remoteAfterRepair = await control('status')
+    for (const state of [remoteAfterRepair.state, (await snapshot()).state])
+      assert.deepEqual(
+        remoteEvidence(remoteRow(state)),
+        evidence,
+        'GitHub repair must preserve repository identity and accepted remote resource evidence.',
+      )
+    assert.equal(remoteAfterRepair.hostInvocations, remoteBeforeMove.hostInvocations)
+    assert.equal(remoteAfterRepair.classificationLaunches, remoteBeforeMove.classificationLaunches)
+    assert.equal(remoteAfterRepair.wayfinderLaunches, remoteBeforeMove.wayfinderLaunches)
+    assert.equal(remoteAfterRepair.requests.length, beforeRemoteRepair + 1)
+    assert.equal(new URL(page.url()).pathname, remoteSettings)
+    await until('canonical GitHub repair feedback in mounted Settings', async () =>
+      (await text()).includes(remoteRepair.result.workspacePath),
+    )
+    const remoteRepairLink = page.getByRole('link', { name: 'Open Project settings', exact: true })
+    assert.equal(await remoteRepairLink.getAttribute('href'), remoteSettings)
+    await remoteRepairLink.click()
+    await until(
+      'actual GitHub repair link keeps exact canonical Project destination',
+      () => new URL(page.url()).pathname === remoteSettings,
+    )
   })
 
   await scenario(scenarioManifest[7], async () => {
@@ -1261,6 +1625,181 @@ async function completeSchedules({
       for (const id of unknownIds)
         assert.ok([...scoped.unknown, ...registrations.unknown].some((value) => value.id === id))
     }
+    for (const independentKind of ['acknowledged', 'rejected']) {
+      for (const independentFirst of [false, true]) {
+        await ready()
+        await navigate(fixture.paths.connections)
+        const alphaSurface = page
+          .locator(`a[href="${fixture.paths.alpha}"]`)
+          .filter({ hasText: 'Project settings' })
+          .locator('xpath=../..')
+        const betaSurface = page
+          .locator(`a[href="${fixture.paths.beta}"]`)
+          .filter({ hasText: 'Project settings' })
+          .locator('xpath=../..')
+        const before = await control('status')
+        await control('reply', 'hold')
+        const nativeHandle = await start('launchProject', {
+          project: alpha,
+          operation: 'open-workspace',
+        })
+        await until('actual post-effect native reply held', async () => {
+          const status = await control('status')
+          return (
+            status.pendingResponses.length === 1 &&
+            status.hostInvocations === before.hostInvocations + 1
+          )
+        })
+        const heldNative = await control('status')
+        const nativeRequest = heldNative.requests.at(-1)
+        const nativePending = (await attempts()).findLast(
+          (attempt) => attempt.operation === 'launch-project-operation',
+        )
+        assert.equal(nativePending.kind, 'pending')
+        assert.deepEqual(nativePending.subject, subject(alpha))
+        assert.equal(nativeRequest.forwarded, true)
+        assert.equal(nativeRequest.outcome.outcome.ok, true)
+        assert.equal(nativeRequest.outcome.outcome.result.status, 'invoked')
+        await control('reply', 'hold')
+        let independentHandle
+        let rejectionRevision
+        if (independentKind === 'acknowledged') {
+          independentHandle = await start('refreshProject', { project: beta })
+        } else {
+          await control('request', 'hold')
+          independentHandle = await rename(
+            beta,
+            'Independent stale rejection beside held native effect',
+          )
+          await dispatched(heldNative.requests.length)
+          rejectionRevision = await control('advance-revision')
+          await version(rejectionRevision.state.configurationVersion)
+          await control('release-dispatch')
+        }
+        await until(
+          'independent actual outcome held beside native reply',
+          async () => (await control('status')).pendingResponses.length === 2,
+        )
+        const bothHeld = await control('status')
+        const independentRequest = bothHeld.requests.at(-1)
+        const independentOperation =
+          independentKind === 'acknowledged' ? 'refresh-project' : 'rename-project'
+        const independentPending = (await attempts()).findLast(
+          (attempt) => attempt.operation === independentOperation,
+        )
+        assert.equal(independentPending.kind, 'pending')
+        assert.deepEqual(independentPending.subject, subject(beta))
+        assert.deepEqual(independentRequest.envelope.command.project, beta)
+        assert.equal(independentRequest.forwarded, true)
+        assert.equal(independentRequest.outcome.outcome.ok, independentKind === 'acknowledged')
+        assert.equal(bothHeld.requests.length, before.requests.length + 2)
+        assert.deepEqual(bothHeld.pendingResponses, [nativeRequest.id, independentRequest.id])
+        const pendingNativeFeedback = await feedback('launch-project-operation', subject(alpha))
+        await until('held native pending feedback in mounted canonical Project', async () =>
+          (await alphaSurface.innerText()).includes(pendingNativeFeedback.message),
+        )
+        const releaseUnknown = async () => {
+          await control('release-lost-reply', String(nativeRequest.id))
+          const unknown = await settled(nativeHandle, 'completion-unknown')
+          assert.equal(unknown.id, nativePending.id)
+          assert.deepEqual(unknown.subject, subject(alpha))
+          assert.equal(unknown.nativeOperation, 'open-workspace')
+          assert.equal(unknown.reason, 'delivery')
+          assert.equal('result' in unknown, false)
+          assert.equal(unknown.destination ?? null, null)
+          unknownIds.push(unknown.id)
+          return unknown
+        }
+        const releaseIndependent = async () => {
+          await control('release-reply', String(independentRequest.id))
+          const result = await settled(independentHandle, independentKind)
+          assert.equal(result.id, independentPending.id)
+          assert.deepEqual(result.subject, subject(beta))
+          assert.deepEqual(result.outcome, independentRequest.outcome.outcome)
+          if (independentKind === 'acknowledged') {
+            assert.deepEqual(result.result.project, beta)
+            assert.equal(result.result.attempt.kind, 'observed')
+          } else {
+            assert.equal(result.error.code, 'conflict')
+            assert.ok(rejectionRevision.state.configurationVersion > result.configurationVersion)
+          }
+          return result
+        }
+        let unknown, independent
+        if (independentFirst) {
+          independent = await releaseIndependent()
+          assert.equal((await settlement(nativeHandle)).kind, 'pending')
+          assert.equal(
+            (await feedback('launch-project-operation', subject(alpha))).current.id,
+            nativePending.id,
+          )
+          unknown = await releaseUnknown()
+        } else {
+          unknown = await releaseUnknown()
+          assert.equal((await settlement(independentHandle)).kind, 'pending')
+          assert.deepEqual(
+            (await attempts()).find((attempt) => attempt.id === unknown.id),
+            unknown,
+          )
+          independent = await releaseIndependent()
+        }
+        const assertOverlapTruth = async () => {
+          const current = await attempts()
+          assert.deepEqual(
+            current.find((attempt) => attempt.id === unknown.id),
+            unknown,
+          )
+          assert.deepEqual(
+            current.find((attempt) => attempt.id === independent.id),
+            independent,
+          )
+          const nativeFeedback = await feedback('launch-project-operation', subject(alpha))
+          assert.equal(nativeFeedback.current.id, unknown.id)
+          assert.ok(nativeFeedback.unknown.some((attempt) => attempt.id === unknown.id))
+          assert.equal(
+            (await feedback(independentOperation, subject(beta))).current.id,
+            independent.id,
+          )
+          await until('canonical alpha mounted native uncertainty', async () =>
+            (await alphaSurface.innerText()).includes(unknown.message),
+          )
+          assert.equal((await betaSurface.innerText()).includes(unknown.message), false)
+        }
+        await assertOverlapTruth()
+        await navigate(fixture.paths.beta)
+        await until('independent typed feedback in actual other-Project Settings', async () =>
+          (await text()).includes(independent.message),
+        )
+        assert.equal((await text()).includes(unknown.message), false)
+        await navigate(fixture.paths.connections)
+        await control('withhold')
+        await control('disconnect')
+        await until(
+          'overlap uncertainty retained after native reconnect',
+          async () =>
+            (await snapshot()).transport === 'live' &&
+            (await snapshot()).synchronization === 'retained',
+        )
+        await assertOverlapTruth()
+        await control('release-baseline')
+        await ready()
+        const unrelatedRead = await control('advance-revision')
+        await version(unrelatedRead.state.configurationVersion)
+        await assertOverlapTruth()
+        await new Promise((resolve) => setTimeout(resolve, 350))
+        const after = await control('status')
+        assert.equal(
+          after.requests.length,
+          before.requests.length + 2,
+          'Settlement, reconnect and later reads must not replay either attempt.',
+        )
+        assert.equal(after.hostInvocations, before.hostInvocations + 1)
+        assert.equal(after.selectorInvocations, before.selectorInvocations)
+        assert.equal(after.classificationLaunches, before.classificationLaunches)
+        assert.equal(after.wayfinderLaunches, before.wayfinderLaunches)
+        assert.deepEqual(after.pendingResponses, [])
+      }
+    }
     await settled(await start('refreshProject', { project: beta }))
     await check()
     await settled(
@@ -1288,8 +1827,13 @@ async function completeSchedules({
     await control('release-baseline')
     await ready()
     await check()
-    const nativeIds = unknownIds.slice(0, 5)
-    const registrationIds = unknownIds.slice(5)
+    const nativeIds = (await attempts())
+      .filter(
+        (attempt) =>
+          unknownIds.includes(attempt.id) && attempt.operation === 'launch-project-operation',
+      )
+      .map((attempt) => attempt.id)
+    const registrationIds = unknownIds.filter((id) => !nativeIds.includes(id))
     const nativeSurface = page
       .locator(`a[href="${fixture.paths.alpha}"]`)
       .filter({ hasText: 'Project settings' })

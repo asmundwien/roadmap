@@ -71,25 +71,6 @@ const settlements = new Map<
   string,
   { kind: 'pending' } | { kind: 'settled'; value: unknown } | { kind: 'threw'; message: string }
 >()
-const names: readonly (keyof RoadmapWorkflows)[] = [
-  'beginAuthorization',
-  'reauthorizeConnection',
-  'retryAuthorization',
-  'cancelAuthorization',
-  'renameConnection',
-  'removeConnection',
-  'registerProject',
-  'renameProject',
-  'repairWorkspace',
-  'removeProject',
-  'setAutomationEnabled',
-  'setProjectAutomationEnabled',
-  'startOverride',
-  'refreshProject',
-  'launchProject',
-  'selectWorkspace',
-  'dismiss',
-]
 
 type AsyncName = Exclude<keyof RoadmapWorkflows, 'dismiss'>
 type ActionInput = {
@@ -154,7 +135,6 @@ const api = {
   snapshot: () => store.getSnapshot(),
   sockets: () => socketRecords.map((record) => ({ ...record })),
   requestStarts: () => requestStarts.map((request) => ({ ...request })),
-  methods: () => names,
   navigate(path: string) {
     if (!navigateTo) throw new Error('The actual router is not mounted.')
     navigateTo(path)

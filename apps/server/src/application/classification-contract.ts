@@ -1,47 +1,23 @@
-import type { AnySchema } from 'ajv'
-import { Ajv2020 } from 'ajv/dist/2020.js'
+import { z } from 'zod'
 
 export const CLASSIFICATION_RESULT_SCHEMA_MARKER = '{{roadmap.classificationResultSchema}}'
 
-export const classificationResultSchema = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  type: 'object',
-  properties: {
-    schemaVersion: { const: 1 },
-    verdict: {
-      type: 'string',
-      oneOf: [
-        {
-          const: 'afk',
-          description: 'An agent can complete it without live human input or action.',
-        },
-        {
-          const: 'hitl',
-          description: 'Completion requires live human judgment, input, or action.',
-        },
-        {
-          const: 'unable',
-          description: 'The available tracker facts do not support a confident verdict.',
-        },
-      ],
-    },
-    reason: { type: 'string', minLength: 1, maxLength: 1000 },
-  },
-  required: ['schemaVersion', 'verdict', 'reason'],
-  additionalProperties: false,
-} satisfies AnySchema
+const classificationResult = z.strictObject({
+  schemaVersion: z.literal(1),
+  verdict: z.union([
+    z.literal('afk').describe('An agent can complete it without live human input or action.'),
+    z.literal('hitl').describe('Completion requires live human judgment, input, or action.'),
+    z.literal('unable').describe('The available tracker facts do not support a confident verdict.'),
+  ]),
+  reason: z.string().min(1).max(1000),
+})
 
-export interface ClassificationResult {
-  schemaVersion: 1
-  verdict: 'afk' | 'hitl' | 'unable'
-  reason: string
-}
+export type ClassificationResult = z.infer<typeof classificationResult>
 
+const classificationResultSchema = z.toJSONSchema(classificationResult, {
+  target: 'draft-2020-12',
+})
 export const classificationResultSchemaJson = JSON.stringify(classificationResultSchema, null, 2)
-
-const validateClassificationResult = new Ajv2020().compile<ClassificationResult>(
-  classificationResultSchema,
-)
 
 export function decodeClassificationResult(stdout: string): ClassificationResult | null {
   let input: unknown
@@ -50,5 +26,6 @@ export function decodeClassificationResult(stdout: string): ClassificationResult
   } catch {
     return null
   }
-  return validateClassificationResult(input) ? input : null
+  const result = classificationResult.safeParse(input)
+  return result.success ? result.data : null
 }

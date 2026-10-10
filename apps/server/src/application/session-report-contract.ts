@@ -1,29 +1,17 @@
-import type { AnySchema } from 'ajv'
-import { Ajv2020 } from 'ajv/dist/2020.js'
+import { z } from 'zod'
 
 export const SESSION_REPORT_SCHEMA_MARKER = '{{roadmap.sessionReportSchema}}'
 
-export const sessionReportSchema = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  type: 'object',
-  properties: {
-    schemaVersion: { const: 1 },
-    outcome: { type: 'string', enum: ['completed', 'stopped', 'failed'] },
-    reason: { type: 'string', minLength: 1, maxLength: 1000 },
-  },
-  required: ['schemaVersion', 'outcome', 'reason'],
-  additionalProperties: false,
-} satisfies AnySchema
+const sessionReport = z.strictObject({
+  schemaVersion: z.literal(1),
+  outcome: z.enum(['completed', 'stopped', 'failed']),
+  reason: z.string().min(1).max(1000),
+})
 
-export interface SessionReportResult {
-  schemaVersion: 1
-  outcome: 'completed' | 'stopped' | 'failed'
-  reason: string
-}
+export type SessionReportResult = z.infer<typeof sessionReport>
 
+const sessionReportSchema = z.toJSONSchema(sessionReport, { target: 'draft-2020-12' })
 export const sessionReportSchemaJson = JSON.stringify(sessionReportSchema, null, 2)
-
-const validateSessionReport = new Ajv2020().compile<SessionReportResult>(sessionReportSchema)
 
 export function decodeSessionReport(stdout: string): SessionReportResult | null {
   let input: unknown
@@ -32,5 +20,6 @@ export function decodeSessionReport(stdout: string): SessionReportResult | null 
   } catch {
     return null
   }
-  return validateSessionReport(input) ? input : null
+  const result = sessionReport.safeParse(input)
+  return result.success ? result.data : null
 }

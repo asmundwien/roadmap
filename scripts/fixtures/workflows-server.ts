@@ -51,6 +51,7 @@ type Backend = {
   server: Server
   url: string
   configurationPath: string
+  configuration: ReturnType<typeof createConfigurationDocument>
   stopPool: () => Promise<void>
 }
 type SocketClose = { code: number; reason: string }
@@ -101,6 +102,8 @@ type ReplyMode =
 type RequestRecord = {
   id: number
   endpoint: string
+  correlationId: string | null
+  afterHeadersTruncated: boolean
   envelope: unknown
   outcome: unknown
   forwarded: boolean
@@ -134,6 +137,10 @@ export async function createWorkflowsServer(middleware: Middleware, entryPath: s
   const movedWorkspace = join(root, 'alpha-moved')
   const githubWorkspace = join(root, 'github-registration')
   const githubAlias = join(root, 'github-registration-alias')
+  const githubMovedWorkspace = join(root, 'github-registration-moved')
+  const githubRepairAlias = join(root, 'github-repair-alias')
+  const githubWrongWorkspace = join(root, 'github-wrong-repository')
+  const githubWrongAlias = join(root, 'github-wrong-repository-alias')
   const alias = join(root, 'registration-alias')
   const repairAlias = join(root, 'alpha-alias')
   const databasePath = join(root, 'automation.json')
@@ -188,6 +195,7 @@ export async function createWorkflowsServer(middleware: Middleware, entryPath: s
   let selectorInvocations = 0
   let classificationLaunches = 0
   let wayfinderLaunches = 0
+  let withheldClassificationCommand: ProjectConfiguration['automation']['classificationCommand']
   const ambiguityWorkspaces = Array.from({ length: 5 }, (_, index) =>
     join(root, `ambiguous-registration-${index}`),
   )
@@ -204,6 +212,7 @@ export async function createWorkflowsServer(middleware: Middleware, entryPath: s
       if (remoteFailure === 'authorization')
         throw new GitHubError({ kind: 'authorization', proof: 'http-401' }, 401)
       if (path === '/repositories/8001') return { id: 8001, full_name: 'fixture/workflows' }
+      if (path === '/repos/fixture/workflows') return { id: 8001, full_name: 'fixture/workflows' }
       if (path === '/repos/fixture/registration' || path === '/repositories/8002')
         return { id: 8002, full_name: 'fixture/registration' }
       if (
@@ -248,12 +257,18 @@ export async function createWorkflowsServer(middleware: Middleware, entryPath: s
   const githubAdmission = createGitHubProjectAdmission({
     async inspectWorkspace(path) {
       const canonical = await realpath(path)
-      if (canonical !== githubWorkspace)
+      if (![githubWorkspace, githubMovedWorkspace, githubWrongWorkspace].includes(canonical))
         throw new Error('Fixture has no GitHub worktree authority for this directory.')
       await access(canonical, constants.R_OK | constants.X_OK)
       return {
         path: canonical,
-        remotes: [{ name: 'origin', nameWithOwner: 'fixture/registration' }],
+        remotes: [
+          {
+            name: 'origin',
+            nameWithOwner:
+              canonical === githubWrongWorkspace ? 'fixture/workflows' : 'fixture/registration',
+          },
+        ],
       }
     },
   })
@@ -458,6 +473,7 @@ export async function createWorkflowsServer(middleware: Middleware, entryPath: s
       server,
       url: '',
       configurationPath,
+      configuration: document,
       stopPool: () => pool.stop(),
     }
     backends.push(result)
@@ -511,6 +527,53 @@ export async function createWorkflowsServer(middleware: Middleware, entryPath: s
     if (!reply.response.destroyed)
       reply.response.writeHead(reply.status, { 'Content-Type': 'application/json' }).end(reply.body)
   }
+  function truncate(reply: Reply) {
+    if (reply.response.destroyed) return
+    const record = requests.find((record) => record.id === reply.id)
+    if (record) record.afterHeadersTruncated = true
+    reply.response.writeHead(reply.status, {
+      'Content-Type': 'application/json',
+      'Content-Length': reply.body.length,
+      Connection: 'close',
+    })
+    reply.response.flushHeaders()
+    reply.response.end(reply.body.subarray(0, Math.max(1, reply.body.length - 1)))
+  }
+  async function setHarnessAvailability(available: boolean) {
+    if (!backend) throw new Error('Missing backend.')
+    const current = backend
+    const loaded = await current.configuration.load()
+    if (!loaded.ok) throw new Error('Fixture configuration must remain valid.')
+    const configurationVersion = loaded.document.configurationVersion + 1
+    const { classificationCommand, ...automation } = loaded.document.automation
+    if (!available) withheldClassificationCommand = classificationCommand
+    if (available && !withheldClassificationCommand)
+      throw new Error('Missing previously configured harmless Classification Harness Command.')
+    const result = await current.configuration.write({
+      ...loaded.document,
+      configurationVersion,
+      automation: available
+        ? { ...automation, classificationCommand: withheldClassificationCommand }
+        : automation,
+    })
+    if (!result.ok) throw new Error(result.message)
+    await new Promise<void>((resolve) => {
+      let accepted = false
+      let unsubscribe = () => {}
+      unsubscribe = current.application.subscribe((state) => {
+        if (
+          state.phase === 'ready' &&
+          state.configurationVersion === configurationVersion &&
+          state.automation.availability.status === (available ? 'ready' : 'unavailable')
+        ) {
+          accepted = true
+          unsubscribe()
+          resolve()
+        }
+      })
+      if (accepted) unsubscribe()
+    })
+  }
   async function status() {
     // Preserve captured request counts and outcomes when later real HTTP requests append or settle.
     return {
@@ -524,6 +587,10 @@ export async function createWorkflowsServer(middleware: Middleware, entryPath: s
       repairAlias,
       githubWorkspace,
       githubAlias,
+      githubMovedWorkspace,
+      githubRepairAlias,
+      githubWrongWorkspace,
+      githubWrongAlias,
       ambiguityWorkspaces,
       databasePath,
       held,
@@ -596,6 +663,13 @@ export async function createWorkflowsServer(middleware: Middleware, entryPath: s
         flush(reply)
         break
       }
+      case 'release-lost-reply': {
+        const index = replies.findIndex((reply) => reply.id === Number(argument))
+        if (index < 0 || !replies[index]) throw new Error('Missing held reply.')
+        const [reply] = replies.splice(index, 1)
+        truncate(reply)
+        break
+      }
       case 'release-dispatch': {
         const dispatch = dispatches.shift()
         if (!dispatch) throw new Error('Missing held dispatch.')
@@ -630,6 +704,11 @@ export async function createWorkflowsServer(middleware: Middleware, entryPath: s
         break
       case 'toggle-automation':
         await mutation('set-automation-enabled')
+        break
+      case 'automation-harness':
+        if (argument !== 'ready' && argument !== 'unavailable')
+          throw new Error(`Unknown Automation Harness Command policy ${argument}`)
+        await setHarnessAvailability(argument === 'ready')
         break
       case 'selector-selected':
         selector = 'selected'
@@ -687,6 +766,10 @@ export async function createWorkflowsServer(middleware: Middleware, entryPath: s
         await rename(workspace, movedWorkspace)
         await rm(repairAlias)
         await symlink(movedWorkspace, repairAlias, 'dir')
+        break
+      case 'move-github-workspace':
+        await rename(githubWorkspace, githubMovedWorkspace)
+        await symlink(githubMovedWorkspace, githubRepairAlias, 'dir')
         break
       case 'invalid-configuration':
         if (!backend) throw new Error('Missing backend.')
@@ -767,6 +850,11 @@ export async function createWorkflowsServer(middleware: Middleware, entryPath: s
         const record: RequestRecord = {
           id: requests.length + 1,
           endpoint: url.pathname,
+          correlationId:
+            typeof request.headers['x-roadmap-request-id'] === 'string'
+              ? request.headers['x-roadmap-request-id']
+              : null,
+          afterHeadersTruncated: false,
           envelope: JSON.parse(body.toString()),
           outcome: null,
           forwarded: false,
@@ -854,15 +942,8 @@ export async function createWorkflowsServer(middleware: Middleware, entryPath: s
                   body: received,
                 }
                 if (mode === 'hold') replies.push(reply)
-                else if (mode === 'lost') {
-                  response.writeHead(reply.status, {
-                    'Content-Type': 'application/json',
-                    'Content-Length': received.length,
-                    Connection: 'close',
-                  })
-                  response.flushHeaders()
-                  response.end(received.subarray(0, Math.max(1, received.length - 1)))
-                } else flush(reply)
+                else if (mode === 'lost') truncate(reply)
+                else flush(reply)
               })
             },
           )
@@ -1006,6 +1087,7 @@ export async function createWorkflowsServer(middleware: Middleware, entryPath: s
       otherWorkspace,
       newWorkspace,
       githubWorkspace,
+      githubWrongWorkspace,
       ...ambiguityWorkspaces,
     ]) {
       const map = join(directory, '.wayfinder', 'workflow')
@@ -1056,6 +1138,7 @@ export async function createWorkflowsServer(middleware: Middleware, entryPath: s
     await symlink(newWorkspace, alias, 'dir')
     await symlink(workspace, repairAlias, 'dir')
     await symlink(githubWorkspace, githubAlias, 'dir')
+    await symlink(githubWrongWorkspace, githubWrongAlias, 'dir')
     const target = {
       project: { integration: 'local', id: ids.alpha },
       mapId: ids.map,

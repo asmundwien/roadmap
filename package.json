@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "A live, read-only visualization of wayfinder-organized projects on GitHub.",
+  "description": "A local view of GitHub and Local wayfinder projects with configuration, authorization, host actions, and opt-in Automation.",
   "packageManager": "pnpm@11.7.0",
   "engines": {
     "node": ">=22.22.0"

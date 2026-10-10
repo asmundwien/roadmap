@@ -442,11 +442,50 @@ for (const [consumer, tsconfig, owner] of [
         [...leaf.fileNames, ...fixtureProject.fileNames],
         fixtureProject.options,
       )
+      if (consumer === 'browser')
+        assert.ok(
+          positiveProgram
+            .getSourceFiles()
+            .every((file) => !normalize(file.fileName).includes('/@types/node/')),
+          'Browser public consumer proof must not load Node ambient declarations',
+        )
       requireClean(positiveProgram, `${consumer} public exports and decoders`)
       proveExports(positiveProgram, positive)
       const controls = await import(pathToFileURL(positive).href)
+      assert.equal(Object.keys(controls.decoderControls).length, 7, 'Seven public decoders')
       for (const [name, result] of Object.entries(controls.decoderControls))
         assert.equal(result.ok, true, `${consumer} positive ${name} decoder`)
+      for (const { request, result, matches } of controls.exactResultControls) {
+        assert.equal(matches, true, `${consumer} positive ${request.type} exact result`)
+        const parsed = controls.operationsValues.commandResultSchema.safeParse(result)
+        assert.equal(parsed.success, true, `${consumer} positive ${request.type} result schema`)
+        assert.deepEqual(parsed.data, result, `${consumer} positive ${request.type} schema result`)
+      }
+      assert.deepEqual(
+        controls.controlSubject,
+        controls.controlOutcome.subject,
+        `${consumer} positive canonical command subject`,
+      )
+      assert.equal(
+        controls.scopedOutcomeControls.matches,
+        true,
+        `${consumer} positive scoped outcome match`,
+      )
+      assert.deepEqual(
+        controls.scopedOutcomeControls.parsed,
+        controls.controlOutcome,
+        `${consumer} positive schema-parsed scoped outcome`,
+      )
+      assert.equal(controls.controlRefreshDecoded.ok, true, `${consumer} positive refresh decoder`)
+      assert.deepEqual(
+        controls.controlRefreshDecoded.value,
+        {
+          type: 'command-result',
+          correlationId: controls.controlCorrelation,
+          outcome: controls.controlRefreshOutcome,
+        },
+        `${consumer} positive decoded refresh outcome`,
+      )
       console.log(
         JSON.stringify({
           proof: 'public-exports',
@@ -456,6 +495,13 @@ for (const [consumer, tsconfig, owner] of [
             0,
           ),
           decoders: Object.keys(controls.decoderControls).length,
+          exactResults: controls.exactResultControls.length,
+          resultSchemas: controls.exactResultControls.length,
+          commandSubjects: 1,
+          scopedOutcomes: 2,
+          refreshDecoders: 1,
+          newPositiveControls: controls.exactResultControls.length * 2 + 4,
+          ...(consumer === 'browser' ? { nodeAmbientDeclarations: 0 } : {}),
         }),
       )
     }

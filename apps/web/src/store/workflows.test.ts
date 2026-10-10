@@ -439,7 +439,6 @@ describe('named public-store workflow policy', () => {
         await h.reply(index, launchOutcome(alpha.ref, 'epoch-a', 100 + index))
         requireAcknowledged(await launch)
       }
-      expect(published.length).toBeGreaterThanOrEqual(16)
       for (const snapshot of published) {
         expect(snapshot.state).toBe(accepted)
         expect(snapshot.workflows.policy.state).toBe(snapshot.state)

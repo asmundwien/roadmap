@@ -898,16 +898,10 @@ describe('createRoadmapTransport', () => {
     connected.socket.close()
   })
 
-  it('publishes read facts separately before returning a state-free command acknowledgement', async () => {
+  it('publishes decoded read facts separately from a correlated state-free command acknowledgement', async () => {
     const harness = await transportHarness(applicationHarness(resourceState(0)))
     const connected = await openSocket(harness.wsUrl)
-    const events: string[] = []
-    const published = new Promise<void>((resolve) => {
-      connected.socket.once('message', () => {
-        events.push('published')
-        resolve()
-      })
-    })
+    const published = once(connected.socket, 'message')
 
     const responsePromise = post(`${harness.httpUrl}/api/command`, {
       type: 'command',
@@ -918,13 +912,16 @@ describe('createRoadmapTransport', () => {
         connectionId: 'one',
         name: 'Renamed',
       },
-    }).then(async (response) => {
-      events.push('responded')
-      return response.json() as Promise<unknown>
     })
 
-    await published
-    const response = await responsePromise
+    const [publication, httpResponse] = await Promise.all([published, responsePromise])
+    const [data] = publication
+    const state = decodeStateEnvelope(JSON.parse(String(data)))
+    expect(state.ok).toBe(true)
+    if (!state.ok) throw new Error('Invalid resource replacement on the wire.')
+    expectResourcePayload(state.value.state, 1, 0)
+    expect(httpResponse.status).toBe(200)
+    const response: unknown = await httpResponse.json()
     const decoded = decodeCommandResultEnvelope(
       response,
       commandSchema.parse({
@@ -935,10 +932,17 @@ describe('createRoadmapTransport', () => {
       }),
       REQUEST_ID,
     )
-    expect(decoded.ok && decoded.value.outcome.stateSequence).toBe(1)
+    expect(decoded.ok).toBe(true)
+    if (!decoded.ok) throw new Error('Invalid correlated command acknowledgement.')
+    expect(decoded.value.outcome).toMatchObject({
+      ok: true,
+      operation: 'rename-connection',
+      subject: { kind: 'connection', connectionId: 'one' },
+      serverEpoch: 'epoch-a',
+      stateSequence: 1,
+    })
     expect(response).not.toHaveProperty('outcome.state')
     expectResourcePayload(harness.application.application.current(), 1, 0)
-    expect(events).toEqual(['published', 'responded'])
     connected.socket.close()
   })
 

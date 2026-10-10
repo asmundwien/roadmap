@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { setTimeout as delay, setImmediate as nextTurn } from 'node:timers/promises'
@@ -67,7 +68,6 @@ import {
 } from '../source-test-fixtures.ts'
 import { isRecord } from '../type-guards.ts'
 import { createRoadmapApplication } from './application.ts'
-import { sessionReportSchemaJson } from './session-report-contract.ts'
 
 const TASK: TicketTypeEvidence = { kind: 'recognized', value: 'task', labels: ['task'] }
 const COMMAND: HarnessCommand = {
@@ -2789,80 +2789,193 @@ describe('RoadmapApplication Automation', () => {
     }
   })
 
-  it('direct-spawns the classifier and detaches a Wayfinder session in the Workspace', async () => {
-    const temporaryRoot = await mkdtemp(join(tmpdir(), 'roadmap-automation-'))
-    roots.push(temporaryRoot)
-    const root = await realpath(temporaryRoot)
-    const outputPath = join(root, 'session.json')
-    const classifier: HarnessCommand = {
-      command: process.execPath,
-      args: [
-        '-e',
-        `process.stdin.resume(); process.stdout.write(JSON.stringify({schemaVersion:1, verdict:'afk', reason:'Ready.'}))`,
-      ],
-      promptDelivery: 'stdin',
-      promptTemplate:
-        'Classify {{roadmap.ticket}} for {{roadmap.map}} with {{roadmap.classificationResultSchema}}.',
-    }
-    const wayfinder: HarnessCommand = {
-      command: process.execPath,
-      args: [
-        '-e',
-        `let input=''; process.stdin.setEncoding('utf8'); process.stdin.on('data', value => input += value); process.stdin.on('end', () => { require('node:fs').writeFileSync(process.argv[1], JSON.stringify({cwd:process.cwd(), input, kind:process.env.ROADMAP_RUN_KIND, map:process.env.ROADMAP_MAP_ID, ticket:process.env.ROADMAP_TICKET_ID})); process.stdout.write(JSON.stringify({schemaVersion:1, outcome:'completed', reason:'Ticket resolved.'})) })`,
-        outputPath,
-      ],
-      promptDelivery: 'stdin',
-      promptTemplate:
-        'Configured map={{roadmap.map}} ticket={{roadmap.ticket}} report={{roadmap.sessionReportSchema}}',
-    }
-    const sourceProject = project('real', [ticket('9')])
-    sourceProject.openMaps[0] = map(sourceProject.key, sourceProject.openMaps[0]?.tickets ?? [], {
-      id: '.wayfinder/map.md',
-      sourcePath: join(root, '.wayfinder/map.md'),
-    })
-    const configured = configuration([sourceProject], {
-      classificationCommand: classifier,
-      wayfinderCommand: wayfinder,
-    })
-    configured.projects[0] = {
-      ref: { integration: 'local', projectId: sourceProject.key.id },
-      connectionId: 'local',
-      workspace: { path: root },
-    }
-    const current = await harness({
-      projects: [sourceProject],
-      launcher: createAutomationLauncher({ stopGraceMs: 10 }),
-      configuration: configured,
-    })
-
-    let observed = ''
-    await vi.waitFor(async () => {
-      observed = await readFile(outputPath, 'utf8')
-      expect(observed).not.toBe('')
-    })
-    const session: unknown = JSON.parse(observed)
-    expect(session).toMatchObject({
-      cwd: root,
-      kind: 'wayfinder',
-      map: '.wayfinder/map.md',
-      ticket: '9',
-    })
-    expect(isRecord(session) && session.input).toBe(
-      `Configured map=${join(root, '.wayfinder/map.md')} ticket=${join(root, '.wayfinder/tickets/9.md')} report=${sessionReportSchemaJson}`,
-    )
-    await vi.waitFor(() =>
-      expect(current.database.evidence()[0]?.wayfinder).toEqual({
-        status: 'finished',
-        admission: 'automatic',
-        processResult: { status: 'exited', code: 0 },
-        report: {
-          status: 'received',
-          report: { outcome: 'completed', reason: 'Ticket resolved.' },
+  it.each(['valid', 'missing', 'corrupt'] as const)(
+    'direct-spawns contract interpreters in the Workspace with %s Classification schema delivery',
+    async (schemaDelivery) => {
+      const temporaryRoot = await mkdtemp(join(tmpdir(), 'roadmap-automation-'))
+      roots.push(temporaryRoot)
+      const root = await realpath(temporaryRoot)
+      const classificationPath = join(root, 'classification.json')
+      const sessionPath = join(root, 'session.json')
+      const ajvPath = createRequire(import.meta.url).resolve('ajv/dist/2020.js')
+      const interpreter = `
+        let input = '';
+        process.stdin.setEncoding('utf8');
+        process.stdin.on('data', value => input += value);
+        process.stdin.on('end', () => {
+          const fs = require('node:fs');
+          const record = {
+            cwd: process.cwd(), input, kind: process.env.ROADMAP_RUN_KIND,
+            runId: process.env.ROADMAP_RUN_ID,
+            map: process.env.ROADMAP_MAP_ID, ticket: process.env.ROADMAP_TICKET_ID
+          };
+          try {
+            const prompt = JSON.parse(input);
+            const { Ajv2020 } = require(process.argv[2]);
+            const validate = new Ajv2020().compile(prompt.schema);
+            const classification = record.kind === 'classification';
+            const result = classification
+              ? { schemaVersion: 1, verdict: 'afk', reason: 'Ready.' }
+              : { schemaVersion: 1, outcome: 'completed', reason: 'Ticket resolved.' };
+            const discriminator = classification ? 'verdict' : 'outcome';
+            const missing = { ...result };
+            delete missing[discriminator];
+            if (!validate(result)
+              || validate(missing)
+              || validate({ ...result, [discriminator]: 'unsupported' })
+              || validate({ ...result, schemaVersion: 2 })
+              || validate({ ...result, reason: '' })
+              || validate({ ...result, reason: 'x'.repeat(1001) })
+              || validate({ ...result, secret: 'not public' })) {
+              throw new Error('Injected contract does not constrain the result');
+            }
+            record.result = result;
+            fs.writeFileSync(process.argv[1], JSON.stringify(record));
+            process.stdout.write(JSON.stringify(result));
+          } catch {
+            record.rejected = true;
+            fs.writeFileSync(process.argv[1], JSON.stringify(record));
+            process.exitCode = 2;
+          }
+        });
+      `
+      const classifier: HarnessCommand = {
+        command: process.execPath,
+        args: ['-e', interpreter, classificationPath, ajvPath],
+        promptDelivery: 'stdin',
+        promptTemplate:
+          '{"map":"{{roadmap.map}}","ticket":"{{roadmap.ticket}}","schema":{{roadmap.classificationResultSchema}}}',
+      }
+      const wayfinder: HarnessCommand = {
+        command: process.execPath,
+        args: ['-e', interpreter, sessionPath, ajvPath],
+        promptDelivery: 'stdin',
+        promptTemplate:
+          '{"map":"{{roadmap.map}}","ticket":"{{roadmap.ticket}}","schema":{{roadmap.sessionReportSchema}}}',
+      }
+      const sourceProject = project('real', [ticket('9')])
+      sourceProject.openMaps[0] = map(sourceProject.key, sourceProject.openMaps[0]?.tickets ?? [], {
+        id: '.wayfinder/map.md',
+        sourcePath: join(root, '.wayfinder/map.md'),
+      })
+      const configured = configuration([sourceProject], {
+        classificationCommand: classifier,
+        wayfinderCommand: wayfinder,
+      })
+      configured.projects[0] = {
+        ref: { integration: 'local', projectId: sourceProject.key.id },
+        connectionId: 'local',
+        workspace: { path: root },
+      }
+      const launcher = createAutomationLauncher({ stopGraceMs: 10 })
+      const current = await harness({
+        projects: [sourceProject],
+        launcher: {
+          classify(request) {
+            if (schemaDelivery === 'valid') return launcher.classify(request)
+            const prompt: unknown = JSON.parse(request.prompt)
+            if (!isRecord(prompt)) throw new Error('Expected a structured interpreter prompt.')
+            if (schemaDelivery === 'missing') delete prompt.schema
+            else prompt.schema = { type: 17 }
+            return launcher.classify({ ...request, prompt: JSON.stringify(prompt) })
+          },
+          dispatch: (request) => launcher.dispatch(request),
         },
-      }),
-    )
-    await current.application.stop()
-  })
+        configuration: configured,
+      })
+
+      try {
+        let classification: unknown
+        await vi.waitFor(async () => {
+          classification = JSON.parse(await readFile(classificationPath, 'utf8'))
+          expect(classification).toMatchObject({
+            cwd: root,
+            kind: 'classification',
+            runId: expect.stringMatching(/^[\da-f-]{36}$/i),
+            map: '.wayfinder/map.md',
+            ticket: '9',
+          })
+        })
+        if (!isRecord(classification) || typeof classification.input !== 'string') {
+          throw new Error('Classification process did not record its actual stdin.')
+        }
+        expect(JSON.parse(classification.input)).toMatchObject({
+          map: join(root, '.wayfinder/map.md'),
+          ticket: join(root, '.wayfinder/tickets/9.md'),
+        })
+        if (schemaDelivery !== 'valid') {
+          expect(classification).toHaveProperty('rejected', true)
+          expect(classification).not.toHaveProperty('result')
+          await vi.waitFor(() =>
+            expect(readApplicationState(current.application.current()).automation.evidence).toEqual(
+              [
+                expect.objectContaining({
+                  classification: expect.objectContaining({
+                    status: 'failed',
+                    admission: 'automatic',
+                    processResult: { status: 'exited', code: 2 },
+                  }),
+                }),
+              ],
+            ),
+          )
+          expect(current.database.evidence()[0]?.wayfinder).toBeUndefined()
+          await expect(readFile(sessionPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+          return
+        }
+        expect(classification).toHaveProperty('result', {
+          schemaVersion: 1,
+          verdict: 'afk',
+          reason: 'Ready.',
+        })
+        let session: unknown
+        await vi.waitFor(async () => {
+          session = JSON.parse(await readFile(sessionPath, 'utf8'))
+          expect(session).toMatchObject({
+            cwd: root,
+            kind: 'wayfinder',
+            runId: expect.stringMatching(/^[\da-f-]{36}$/i),
+            map: '.wayfinder/map.md',
+            ticket: '9',
+            result: { schemaVersion: 1, outcome: 'completed', reason: 'Ticket resolved.' },
+          })
+        })
+        if (!isRecord(session) || typeof session.input !== 'string') {
+          throw new Error('Session process did not record its actual stdin.')
+        }
+        expect(JSON.parse(session.input)).toMatchObject({
+          map: join(root, '.wayfinder/map.md'),
+          ticket: join(root, '.wayfinder/tickets/9.md'),
+        })
+        await vi.waitFor(() =>
+          expect(readApplicationState(current.application.current()).automation.evidence).toEqual([
+            expect.objectContaining({
+              classification: {
+                status: 'completed',
+                admission: 'automatic',
+                processResult: { status: 'exited', code: 0 },
+                verdict: { value: 'afk', reason: 'Ready.' },
+              },
+              wayfinder: {
+                status: 'finished',
+                admission: 'automatic',
+                processResult: { status: 'exited', code: 0 },
+                report: {
+                  status: 'received',
+                  report: { outcome: 'completed', reason: 'Ticket resolved.' },
+                },
+              },
+            }),
+          ]),
+        )
+        expect(readApplicationState(current.application.current()).automation.evidence).toEqual(
+          current.database.evidence().map(fixtureAutomationEvidence),
+        )
+      } finally {
+        await current.application.stop()
+      }
+    },
+  )
 
   it('advances two queued Sessions for one Project in series with the configured launcher', async () => {
     const temporaryRoot = await mkdtemp(join(tmpdir(), 'roadmap-automation-series-'))
@@ -2917,37 +3030,92 @@ describe('RoadmapApplication Automation', () => {
 
     await application.start()
 
-    await vi.waitFor(
-      async () =>
-        expect(await readFile(lifecyclePath, 'utf8')).toBe(
-          'started:1\nfinished:1\nstarted:2\nfinished:2\n',
-        ),
-      { timeout: 5_000 },
-    )
-    await vi.waitFor(() =>
-      expect(
-        readApplicationState(application.current()).automation.evidence.map(
-          (entry) => entry.wayfinder,
-        ),
-      ).toEqual([
-        expect.objectContaining({ status: 'finished' }),
-        expect.objectContaining({ status: 'finished' }),
-      ]),
-    )
-    await application.stop()
+    try {
+      let lifecycle: string[] = []
+      await vi.waitFor(
+        async () => {
+          lifecycle = (await readFile(lifecyclePath, 'utf8')).trim().split('\n')
+          expect(lifecycle.filter((entry) => entry.startsWith('finished:'))).toHaveLength(2)
+        },
+        { timeout: 5_000 },
+      )
+      expect(lifecycle.some((entry) => entry.startsWith('overlap:'))).toBe(false)
+      const active = new Set<string>()
+      for (const entry of lifecycle) {
+        const [phase, identity] = entry.split(':')
+        if (!identity) throw new Error('Session lifecycle omitted its ticket identity.')
+        if (phase === 'started') {
+          expect(active.size).toBe(0)
+          active.add(identity)
+        } else {
+          expect(phase).toBe('finished')
+          expect(active.has(identity)).toBe(true)
+          active.delete(identity)
+        }
+      }
+      expect(active.size).toBe(0)
+      for (const target of targets) {
+        expect(lifecycle.filter((entry) => entry.endsWith(`:${target.ticketId}`))).toEqual([
+          `started:${target.ticketId}`,
+          `finished:${target.ticketId}`,
+        ])
+      }
+      await vi.waitFor(() => {
+        const evidence = readApplicationState(application.current()).automation.evidence
+        expect(evidence).toHaveLength(2)
+        for (const target of targets) {
+          expect(evidence.filter((entry) => entry.target.ticketId === target.ticketId)).toEqual([
+            expect.objectContaining({
+              target: fixtureTicketRef(target),
+              wayfinder: {
+                status: 'finished',
+                admission: 'automatic',
+                processResult: { status: 'exited', code: 0 },
+                report: {
+                  status: 'received',
+                  report: { outcome: 'completed', reason: `Ticket ${target.ticketId} resolved.` },
+                },
+              },
+            }),
+          ])
+        }
+      })
+    } finally {
+      await application.stop()
+    }
 
     const stored = await createAutomationDatabaseDocument(databasePath).load()
-    expect(stored.events.map((event) => event.type)).toEqual([
-      'classification-started',
-      'classification-completed',
-      'classification-started',
-      'classification-completed',
-      'wayfinder-launching',
-      'wayfinder-running',
-      'wayfinder-finished',
-      'wayfinder-launching',
-      'wayfinder-running',
-      'wayfinder-finished',
-    ])
+    expect(stored.opportunities).toHaveLength(2)
+    for (const opportunity of stored.opportunities) {
+      expect(
+        stored.events
+          .filter((event) => event.opportunityId === opportunity.id)
+          .map((event) => event.type),
+      ).toEqual([
+        'classification-started',
+        'classification-completed',
+        'wayfinder-launching',
+        'wayfinder-running',
+        'wayfinder-finished',
+      ])
+    }
+    const durable = replayAutomationDatabase(stored).evidence
+    expect(durable).toHaveLength(2)
+    for (const target of targets) {
+      expect(durable.filter((entry) => entry.target.ticketId === target.ticketId)).toEqual([
+        expect.objectContaining({
+          target,
+          wayfinder: {
+            status: 'finished',
+            admission: 'automatic',
+            processResult: { status: 'exited', code: 0 },
+            report: {
+              status: 'received',
+              report: { outcome: 'completed', reason: `Ticket ${target.ticketId} resolved.` },
+            },
+          },
+        }),
+      ])
+    }
   })
 })

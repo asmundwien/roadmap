@@ -83,6 +83,16 @@ node scripts/workflows-browser.mjs --serve-only
 
 The complete runner uses temporary files and harmless host/provider/process substitutes. `--essential-only` runs just the first concurrency regression; it is not the complete workflow proof. Direct-node serve-only handles SIGINT and SIGTERM and reports cleanup before exit.
 
+The [standing cutover proof contract](docs/architecture.md#standing-cutover-proof-contract) maps application, transport, decoder, compiler/import and mounted-browser invariants to their permanent fixtures. Run the complete browser matrix alongside the four repository gates:
+
+```sh
+pnpm test:client-owner-browser
+pnpm test:resource-results-browser
+pnpm test:workflows-browser
+```
+
+The [completion evidence and production comparison](https://github.com/asmundwien/roadmap/issues/117) reports exercised snapshots, complete file manifests, semantic deletions and proof limits. The workflow runner measures physical HTTP arrivals separately from application fetch calls. Its after-header truncation observation does not promise exactly-once host effects or bound transparent retries before headers.
+
 
 ## Navigation
 
