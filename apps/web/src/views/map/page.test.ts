@@ -428,6 +428,8 @@ describe('URL-selected ticket Automation evidence', () => {
     expect(markup).toContain('Current source evidence is unavailable.')
     expect(markup).toMatch(/<button[^>]*disabled[^>]*>Run Classification<\/button>/)
     expect(markup).toMatch(/<button[^>]*disabled[^>]*>Start Wayfinder Session<\/button>/)
+    expect(markup).not.toContain('Classification Run started.')
+    expect(markup).not.toContain('Wayfinder Session started.')
   })
 
   it('keeps durable Automation evidence addressable when the selected Project and map are absent', () => {

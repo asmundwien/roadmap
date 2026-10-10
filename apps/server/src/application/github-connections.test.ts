@@ -194,7 +194,13 @@ function sourceOptions(
     logger: { warn() {} },
   })
   return {
-    operations: createApplicationOperations(),
+    operations: createApplicationOperations({
+      host: {
+        async execute() {
+          throw new Error('Unexpected host interaction in authorization fixture.')
+        },
+      },
+    }),
     admissions: { local: createLocalProjectAdmission(), github: createGitHubProjectAdmission() },
     observers: {
       local: (input: Parameters<typeof createLocalObserver>[0]) =>
@@ -293,9 +299,28 @@ describe('RoadmapApplication GitHub Connections', () => {
       configuration.emit(BASE_CONFIGURATION)
       expect(readApplicationState(application.current()).authorizationOperations).toEqual([])
       released.resolve()
-      expect((await begun).ok).toBe(true)
+      const outcome = await begun
+      if (
+        !outcome.ok ||
+        outcome.result.type !== 'begin-github-authorization' ||
+        outcome.result.phase !== 'waiting'
+      )
+        throw new Error('Expected the acquired device authorization.')
+      expect(outcome).toMatchObject({
+        operation: 'begin-github-authorization',
+        subject: { kind: 'none' },
+        ok: true,
+        result: {
+          type: 'begin-github-authorization',
+          operationId: outcome.result.operationId,
+          phase: 'waiting',
+          verificationUri: 'https://github.com/login/device',
+          userCode: 'ACTUAL-CODE',
+          expiresAt: 60_000,
+        },
+      })
       expect(readApplicationState(application.current()).authorizationOperations).toMatchObject([
-        { status: 'waiting', userCode: 'ACTUAL-CODE' },
+        { id: outcome.result.operationId, status: 'waiting', userCode: 'ACTUAL-CODE' },
       ])
     } finally {
       released.resolve()
@@ -322,15 +347,30 @@ describe('RoadmapApplication GitHub Connections', () => {
         await application.start()
         const begun = await application.execute(
           commandSchema.parse({
-            type: 'begin-github-authorization',
+            type: 'reauthorize-github-connection',
             connectionId: 'github-connection',
-            name: 'Repair account',
             expectedConfigurationVersion: 1,
           }),
         )
-        if (!begun.ok || begun.result.type !== 'authorization-started')
+        if (
+          !begun.ok ||
+          begun.result.type !== 'reauthorize-github-connection' ||
+          begun.result.phase !== 'waiting'
+        )
           throw new Error('Expected actual waiting reauthorization.')
         const operationId = begun.result.operationId
+        expect(begun).toMatchObject({
+          operation: 'reauthorize-github-connection',
+          subject: { kind: 'connection', connectionId: 'github-connection' },
+          result: {
+            type: 'reauthorize-github-connection',
+            operationId,
+            phase: 'waiting',
+            verificationUri: 'https://github.com/login/device',
+            userCode: 'CODE-1',
+            expiresAt: 60_000,
+          },
+        })
         expect(
           readApplicationState(application.current()).authorizationOperations[0],
         ).toMatchObject({ id: operationId, status: 'waiting', connectionId: 'github-connection' })
@@ -405,7 +445,20 @@ describe('RoadmapApplication GitHub Connections', () => {
           expectedConfigurationVersion: 1,
         }),
       )
-      expect(begun.ok).toBe(true)
+      if (
+        !begun.ok ||
+        begun.result.type !== 'begin-github-authorization' ||
+        begun.result.phase !== 'waiting'
+      )
+        throw new Error('Expected the initial device authorization.')
+      expect(begun.result).toEqual({
+        type: 'begin-github-authorization',
+        operationId: begun.result.operationId,
+        phase: 'waiting',
+        verificationUri: 'https://github.com/login/device',
+        userCode: 'CODE-1',
+        expiresAt: 60_000,
+      })
       await vi.advanceTimersByTimeAsync(1)
       await vi.waitFor(() =>
         expect(readApplicationState(application.current()).authorizationOperations[0]?.status).toBe(
@@ -419,6 +472,42 @@ describe('RoadmapApplication GitHub Connections', () => {
         connection: { kind: 'current', accountId: '42' },
       })
       if (receipt?.status !== 'granted') throw new Error('Expected actual provider grant.')
+      expect(receipt.id).toBe(begun.result.operationId)
+      const cancelledAfterGrant = await application.execute(
+        commandSchema.parse({
+          type: 'cancel-github-authorization',
+          operationId: begun.result.operationId,
+          expectedConfigurationVersion: granted.configurationVersion,
+        }),
+      )
+      expect(cancelledAfterGrant).toMatchObject({
+        operation: 'cancel-github-authorization',
+        subject: { kind: 'authorization', operationId: begun.result.operationId },
+        ok: true,
+        result: {
+          type: 'cancel-github-authorization',
+          operationId: begun.result.operationId,
+          phase: 'granted',
+          connection: { connectionId: receipt.connection.id, accountId: '42' },
+          configurationVersion: 2,
+        },
+      })
+      const retryGranted = await application.execute(
+        commandSchema.parse({
+          type: 'retry-github-authorization',
+          operationId: begun.result.operationId,
+          expectedConfigurationVersion: granted.configurationVersion,
+        }),
+      )
+      expect(retryGranted).toMatchObject({
+        operation: 'retry-github-authorization',
+        subject: { kind: 'authorization', operationId: begun.result.operationId },
+        ok: false,
+        error: { code: 'validation', field: 'operationId' },
+      })
+      expect(github.beginDeviceAuthorization).toHaveBeenCalledOnce()
+      expect(configuration.writes).toHaveLength(1)
+      expect(credentials.records.get(receipt.connection.id)).toEqual(CREDENTIALS)
       const removed = await application.execute(
         commandSchema.parse({
           type: 'remove-connection',
@@ -432,6 +521,26 @@ describe('RoadmapApplication GitHub Connections', () => {
         status: 'granted',
         connection: { kind: 'historical', id: receipt.connection.id, accountId: '42' },
       })
+      const cancelledHistoricalGrant = await application.execute(
+        commandSchema.parse({
+          type: 'cancel-github-authorization',
+          operationId: begun.result.operationId,
+          expectedConfigurationVersion: 3,
+        }),
+      )
+      expect(cancelledHistoricalGrant).toMatchObject({
+        ok: true,
+        result: {
+          type: 'cancel-github-authorization',
+          operationId: begun.result.operationId,
+          phase: 'granted',
+          connection: { connectionId: receipt.connection.id, accountId: '42' },
+          configurationVersion: 2,
+        },
+      })
+      expect(credentials.records.has(receipt.connection.id)).toBe(false)
+      expect(configuration.writes).toHaveLength(2)
+      expect(github.beginDeviceAuthorization).toHaveBeenCalledOnce()
       await application.stop()
       expect(application.current()).toMatchObject({
         phase: 'stopped',
@@ -473,11 +582,33 @@ describe('RoadmapApplication GitHub Connections', () => {
       }),
     )
 
-    expect(begun).toMatchObject({ ok: true, result: { type: 'authorization-started' } })
+    if (
+      !begun.ok ||
+      begun.result.type !== 'begin-github-authorization' ||
+      begun.result.phase !== 'waiting'
+    )
+      throw new Error('Expected actual waiting authorization.')
+    expect(begun).toMatchObject({
+      operation: 'begin-github-authorization',
+      subject: { kind: 'none' },
+      ok: true,
+      result: {
+        type: 'begin-github-authorization',
+        operationId: begun.result.operationId,
+        phase: 'waiting',
+        verificationUri: 'https://github.com/login/device',
+        userCode: 'CODE-1',
+        expiresAt: 60_000,
+      },
+    })
+    expect(begun).not.toHaveProperty('state')
+    expect(JSON.stringify(begun)).not.toContain('private-device')
+    expect(JSON.stringify(begun)).not.toContain('access-one')
     expect(readApplicationState(application.current()).supportedIntegrations).toContainEqual(
       github.integration,
     )
     expect(readApplicationState(application.current()).authorizationOperations[0]).toMatchObject({
+      id: begun.result.operationId,
       status: 'waiting',
       verificationUri: 'https://github.com/login/device',
       userCode: 'CODE-1',
@@ -638,14 +769,28 @@ describe('RoadmapApplication GitHub Connections', () => {
             return handle
           })
         }
-        await application.execute(
+        const begun = await application.execute(
           commandSchema.parse({
-            type: 'begin-github-authorization',
-            ...(reauthorizing ? { connectionId: 'github-connection' } : {}),
-            name: 'Personal GitHub',
+            ...(reauthorizing
+              ? { type: 'reauthorize-github-connection', connectionId: 'github-connection' }
+              : { type: 'begin-github-authorization', name: 'Personal GitHub' }),
             expectedConfigurationVersion: 1,
           }),
         )
+        if (
+          !begun.ok ||
+          (begun.result.type !== 'begin-github-authorization' &&
+            begun.result.type !== 'reauthorize-github-connection') ||
+          begun.result.phase !== 'waiting'
+        )
+          throw new Error('Expected the actual device authorization before grant persistence.')
+        expect(begun.result).toMatchObject({
+          operationId: begun.result.operationId,
+          phase: 'waiting',
+          verificationUri: 'https://github.com/login/device',
+          userCode: 'CODE-1',
+          expiresAt: 60_000,
+        })
         await vi.advanceTimersByTimeAsync(1)
         await vi.waitFor(() =>
           expect(
@@ -671,6 +816,41 @@ describe('RoadmapApplication GitHub Connections', () => {
             ? { status: 'granted' }
             : { status: 'terminal', outcome: 'failed' },
         )
+        const terminal = await application.execute(
+          commandSchema.parse({
+            type: 'cancel-github-authorization',
+            operationId: begun.result.operationId,
+            expectedConfigurationVersion: committed ? 2 : 1,
+          }),
+        )
+        expect(terminal).toMatchObject({
+          operation: 'cancel-github-authorization',
+          subject: { kind: 'authorization', operationId: begun.result.operationId },
+          ok: true,
+          result: {
+            type: 'cancel-github-authorization',
+            operationId: begun.result.operationId,
+            phase: failure === 'directory-close' ? 'granted' : 'failed',
+          },
+        })
+        if (!terminal.ok || terminal.result.type !== 'cancel-github-authorization')
+          throw new Error('Expected actual authorization settlement.')
+        if (failure === 'directory-close') {
+          const connection = stored.value.connections.find((item) => item.integration === 'github')
+          if (!connection) throw new Error('Expected the committed granted Connection.')
+          expect(terminal.result).toMatchObject({
+            phase: 'granted',
+            connection: { connectionId: connection.id, accountId: '42' },
+            configurationVersion: 2,
+          })
+        } else {
+          expect(terminal.result).toMatchObject({
+            phase: 'failed',
+            error: { code: 'authorization-failed', message: expect.any(String) },
+          })
+          expect(terminal.result).not.toHaveProperty('connection')
+          expect(terminal.result).not.toHaveProperty('configurationVersion')
+        }
         if (failure === 'directory-sync') {
           expect(readApplicationState(application.current()).automation.availability).toMatchObject(
             {
@@ -698,6 +878,7 @@ describe('RoadmapApplication GitHub Connections', () => {
           states,
           current: readApplicationState(application.current()),
           stored: stored.value,
+          terminal,
         })
         expect(publicAndDisk).not.toContain('access-renewed')
         expect(publicAndDisk).not.toContain('refresh-renewed')
@@ -796,16 +977,52 @@ describe('RoadmapApplication GitHub Connections', () => {
         expectedConfigurationVersion: 1,
       }),
     )
-    if (!begun.ok || begun.result.type !== 'authorization-started') throw new Error('not started')
+    if (
+      !begun.ok ||
+      begun.result.type !== 'begin-github-authorization' ||
+      begun.result.phase !== 'waiting'
+    )
+      throw new Error('Expected actual waiting authorization.')
     const operationId = begun.result.operationId
+    expect(begun.result).toEqual({
+      type: 'begin-github-authorization',
+      operationId,
+      phase: 'waiting',
+      verificationUri: 'https://github.com/login/device',
+      userCode: 'CODE-1',
+      expiresAt: 60_000,
+    })
 
-    await application.execute(
+    const cancelled = await application.execute(
       commandSchema.parse({
         type: 'cancel-github-authorization',
         operationId,
         expectedConfigurationVersion: 1,
       }),
     )
+    expect(cancelled).toMatchObject({
+      operation: 'cancel-github-authorization',
+      subject: { kind: 'authorization', operationId },
+      ok: true,
+      result: { type: 'cancel-github-authorization', operationId, phase: 'cancelled' },
+    })
+    if (!cancelled.ok) throw new Error('Expected actual cancellation.')
+    expect(cancelled.result).toEqual({
+      type: 'cancel-github-authorization',
+      operationId,
+      phase: 'cancelled',
+    })
+    const cancelledAgain = await application.execute(
+      commandSchema.parse({
+        type: 'cancel-github-authorization',
+        operationId,
+        expectedConfigurationVersion: 1,
+      }),
+    )
+    expect(cancelledAgain).toMatchObject({
+      ok: true,
+      result: { type: 'cancel-github-authorization', operationId, phase: 'cancelled' },
+    })
     expect(readApplicationState(application.current()).authorizationOperations[0]).toMatchObject({
       id: operationId,
       status: 'terminal',
@@ -814,13 +1031,26 @@ describe('RoadmapApplication GitHub Connections', () => {
     await vi.advanceTimersByTimeAsync(10)
     expect(github.pollDeviceAuthorization).not.toHaveBeenCalled()
 
-    await application.execute(
+    const retried = await application.execute(
       commandSchema.parse({
         type: 'retry-github-authorization',
         operationId,
         expectedConfigurationVersion: 1,
       }),
     )
+    expect(retried).toMatchObject({
+      operation: 'retry-github-authorization',
+      subject: { kind: 'authorization', operationId },
+      ok: true,
+      result: {
+        type: 'retry-github-authorization',
+        operationId,
+        phase: 'waiting',
+        verificationUri: 'https://github.com/login/device',
+        userCode: 'CODE-2',
+        expiresAt: 60_000,
+      },
+    })
     await vi.waitFor(() =>
       expect(readApplicationState(application.current()).authorizationOperations[0]).toMatchObject({
         id: operationId,
@@ -853,6 +1083,24 @@ describe('RoadmapApplication GitHub Connections', () => {
       },
       { interval: 1 },
     )
+    const cancelledAfterDenial = await application.execute(
+      commandSchema.parse({
+        type: 'cancel-github-authorization',
+        operationId,
+        expectedConfigurationVersion: 1,
+      }),
+    )
+    expect(cancelledAfterDenial).toMatchObject({
+      ok: true,
+      result: {
+        type: 'cancel-github-authorization',
+        operationId,
+        phase: 'denied',
+        error: { code: 'authorization-failed', message: expect.any(String) },
+      },
+    })
+    expect(github.pollDeviceAuthorization).toHaveBeenCalledTimes(2)
+    expect(configuration.writes).toEqual([])
     await application.stop()
   })
 
@@ -880,14 +1128,30 @@ describe('RoadmapApplication GitHub Connections', () => {
 
     const begun = await application.execute(
       commandSchema.parse({
-        type: 'begin-github-authorization',
+        type: 'reauthorize-github-connection',
         connectionId: 'github-connection',
-        name: 'Personal GitHub',
         expectedConfigurationVersion: 1,
       }),
     )
-    if (!begun.ok || begun.result.type !== 'authorization-started') throw new Error('not started')
+    if (
+      !begun.ok ||
+      begun.result.type !== 'reauthorize-github-connection' ||
+      begun.result.phase !== 'waiting'
+    )
+      throw new Error('Expected actual waiting reauthorization.')
     const operationId = begun.result.operationId
+    expect(begun).toMatchObject({
+      operation: 'reauthorize-github-connection',
+      subject: { kind: 'connection', connectionId: 'github-connection' },
+      result: {
+        type: 'reauthorize-github-connection',
+        operationId,
+        phase: 'waiting',
+        verificationUri: 'https://github.com/login/device',
+        userCode: 'CODE-1',
+        expiresAt: 60_000,
+      },
+    })
     await vi.advanceTimersByTimeAsync(1)
     await vi.waitFor(() =>
       expect(readApplicationState(application.current()).authorizationOperations).toContainEqual({
@@ -915,7 +1179,21 @@ describe('RoadmapApplication GitHub Connections', () => {
       ),
     ).toMatchObject({
       ok: true,
-      result: { type: 'project-refreshed', project: fixtureProjectManagement(GITHUB_INTENT).ref },
+      result: {
+        type: 'refresh-project',
+        project: fixtureProjectManagement(GITHUB_INTENT).ref,
+        attempt: {
+          kind: 'observed',
+          attemptedAt: 0,
+          observedAt: 0,
+          provenance: {
+            integration: 'github',
+            connectionId: 'github-connection',
+            repositoryId: '84',
+            stage: 'repository',
+          },
+        },
+      },
     })
     expect(providerTokens.length).toBeGreaterThan(0)
     expect(providerTokens.every((token) => token === 'access-renewed')).toBe(true)
@@ -970,9 +1248,8 @@ describe('RoadmapApplication GitHub Connections', () => {
     await second.start()
     await second.execute(
       commandSchema.parse({
-        type: 'begin-github-authorization',
+        type: 'reauthorize-github-connection',
         connectionId: 'github-connection',
-        name: 'Personal GitHub',
         expectedConfigurationVersion: 1,
       }),
     )
@@ -1138,15 +1415,26 @@ describe('RoadmapApplication GitHub Connections', () => {
 
       const begun = await application.execute(
         commandSchema.parse({
-          type: 'begin-github-authorization',
+          type: 'reauthorize-github-connection',
           connectionId: 'github-connection',
-          name: 'Personal GitHub',
           expectedConfigurationVersion: 1,
         }),
       )
-      if (!begun.ok || begun.result.type !== 'authorization-started')
-        throw new Error('The replacement authorization did not start.')
+      if (
+        !begun.ok ||
+        begun.result.type !== 'reauthorize-github-connection' ||
+        begun.result.phase !== 'waiting'
+      )
+        throw new Error('Expected actual waiting replacement authorization.')
       const operationId = begun.result.operationId
+      expect(begun.result).toEqual({
+        type: 'reauthorize-github-connection',
+        operationId,
+        phase: 'waiting',
+        verificationUri: 'https://github.com/login/device',
+        userCode: 'CODE-1',
+        expiresAt: 660_002,
+      })
       await vi.advanceTimersByTimeAsync(1)
       if (holdReplacementWrite) {
         await replacementWriteEntered.promise
@@ -1334,7 +1622,21 @@ describe('RoadmapApplication GitHub Connections', () => {
     for (const outcome of refreshed)
       expect(outcome).toMatchObject({
         ok: true,
-        result: { type: 'project-refreshed', project: fixtureProjectManagement(GITHUB_INTENT).ref },
+        result: {
+          type: 'refresh-project',
+          project: fixtureProjectManagement(GITHUB_INTENT).ref,
+          attempt: {
+            kind: 'observed',
+            attemptedAt: 300_001,
+            observedAt: 300_001,
+            provenance: {
+              integration: 'github',
+              connectionId: 'github-connection',
+              repositoryId: '84',
+              stage: 'repository',
+            },
+          },
+        },
       })
     expect(providerTokens.length).toBeGreaterThan(0)
     expect(providerTokens.every((token) => token === 'access-two')).toBe(true)
@@ -1371,7 +1673,8 @@ describe('RoadmapApplication GitHub Connections', () => {
       ),
     })
     const bad = createRoadmapApplication({
-      configuration: memoryConfiguration(githubConfiguration()).document,
+      configuration: memoryConfiguration({ ...githubConfiguration(), projects: [GITHUB_INTENT] })
+        .document,
       credentialVault: memoryVault({
         'github-connection': { ...CREDENTIALS, accessTokenExpiresAt: 1 },
       }).vault,
@@ -1383,6 +1686,37 @@ describe('RoadmapApplication GitHub Connections', () => {
     expect(readApplicationState(bad.current()).connections[1]?.availability.status).toBe(
       'authorization-required',
     )
+    const failedRefresh = await bad.execute(
+      commandSchema.parse({
+        type: 'refresh-project',
+        project: fixtureProjectRef(fixtureProjectManagement(GITHUB_INTENT).ref),
+        expectedConfigurationVersion: 1,
+      }),
+    )
+    expect(failedRefresh).toMatchObject({
+      operation: 'refresh-project',
+      subject: { kind: 'project', project: fixtureProjectManagement(GITHUB_INTENT).ref },
+      ok: true,
+      result: {
+        type: 'refresh-project',
+        project: fixtureProjectManagement(GITHUB_INTENT).ref,
+        attempt: {
+          kind: 'failed',
+          attemptedAt: 0,
+          provenance: {
+            integration: 'github',
+            connectionId: 'github-connection',
+            repositoryId: '84',
+            stage: 'credentials',
+          },
+          cause: expect.any(String),
+        },
+      },
+    })
+    if (!failedRefresh.ok || failedRefresh.result.type !== 'refresh-project')
+      throw new Error('Expected the completed authorization-required source attempt.')
+    expect(failedRefresh.result.attempt).not.toHaveProperty('observedAt')
+    expect(JSON.stringify(failedRefresh)).not.toContain('access-one')
     await bad.stop()
   })
 
@@ -1408,18 +1742,35 @@ describe('RoadmapApplication GitHub Connections', () => {
     })
 
     clock = 300_001
-    expect(
-      await application.execute(
-        commandSchema.parse({
-          type: 'refresh-project',
-          project: fixtureProjectRef(fixtureProjectManagement(GITHUB_INTENT).ref),
-          expectedConfigurationVersion: 1,
-        }),
-      ),
-    ).toMatchObject({
+    const degradedRefresh = await application.execute(
+      commandSchema.parse({
+        type: 'refresh-project',
+        project: fixtureProjectRef(fixtureProjectManagement(GITHUB_INTENT).ref),
+        expectedConfigurationVersion: 1,
+      }),
+    )
+    expect(degradedRefresh).toMatchObject({
+      operation: 'refresh-project',
+      subject: { kind: 'project', project: fixtureProjectManagement(GITHUB_INTENT).ref },
       ok: true,
-      result: { type: 'project-refreshed', project: fixtureProjectManagement(GITHUB_INTENT).ref },
+      result: {
+        type: 'refresh-project',
+        project: fixtureProjectManagement(GITHUB_INTENT).ref,
+        attempt: {
+          kind: 'degraded',
+          attemptedAt: 300_001,
+          observedAt: 0,
+          provenance: {
+            integration: 'github',
+            connectionId: 'github-connection',
+            repositoryId: '84',
+            stage: 'repository',
+          },
+          cause: expect.any(String),
+        },
+      },
     })
+    expect(JSON.stringify(degradedRefresh)).not.toContain('private network detail')
 
     expect(readApplicationState(application.current()).connections[1]?.availability).toEqual({
       status: 'available',
@@ -1460,7 +1811,7 @@ describe('RoadmapApplication GitHub Connections', () => {
 
   it('retries a network failure and does not restore interrupted or expired operations', async () => {
     vi.useFakeTimers()
-    const github = scriptedGitHub({ beginFailures: 1 })
+    const github = scriptedGitHub({ beginFailures: 2 })
     const configuration = memoryConfiguration(BASE_CONFIGURATION)
     const vault = memoryVault()
     const application = createRoadmapApplication({
@@ -1478,22 +1829,99 @@ describe('RoadmapApplication GitHub Connections', () => {
         expectedConfigurationVersion: 1,
       }),
     )
-    if (!begun.ok || begun.result.type !== 'authorization-started') throw new Error('not started')
+    if (
+      !begun.ok ||
+      begun.result.type !== 'begin-github-authorization' ||
+      begun.result.phase !== 'failed'
+    )
+      throw new Error('Expected the device acquisition failure.')
+    const operationId = begun.result.operationId
+    expect(begun).toMatchObject({
+      operation: 'begin-github-authorization',
+      subject: { kind: 'none' },
+      ok: true,
+      result: {
+        type: 'begin-github-authorization',
+        operationId,
+        phase: 'failed',
+        error: { code: 'authorization-failed', message: expect.any(String) },
+      },
+    })
+    expect(begun.result).not.toHaveProperty('verificationUri')
+    expect(begun.result).not.toHaveProperty('userCode')
+    expect(begun.result).not.toHaveProperty('expiresAt')
     expect(readApplicationState(application.current()).authorizationOperations[0]).toMatchObject({
+      id: operationId,
       status: 'terminal',
       outcome: 'failed',
     })
 
-    await application.execute(
+    const failedRetry = await application.execute(
       commandSchema.parse({
         type: 'retry-github-authorization',
-        operationId: begun.result.operationId,
+        operationId,
         expectedConfigurationVersion: 1,
       }),
     )
+    expect(failedRetry).toMatchObject({
+      operation: 'retry-github-authorization',
+      subject: { kind: 'authorization', operationId },
+      ok: true,
+      result: {
+        type: 'retry-github-authorization',
+        operationId,
+        phase: 'failed',
+        error: { code: 'authorization-failed', message: expect.any(String) },
+      },
+    })
+    expect(readApplicationState(application.current()).authorizationOperations[0]).toMatchObject({
+      id: operationId,
+      status: 'terminal',
+      outcome: 'failed',
+    })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(github.beginDeviceAuthorization).toHaveBeenCalledTimes(2)
+    expect(github.pollDeviceAuthorization).not.toHaveBeenCalled()
+    const cancelledAfterFailure = await application.execute(
+      commandSchema.parse({
+        type: 'cancel-github-authorization',
+        operationId,
+        expectedConfigurationVersion: 1,
+      }),
+    )
+    expect(cancelledAfterFailure).toMatchObject({
+      ok: true,
+      result: {
+        type: 'cancel-github-authorization',
+        operationId,
+        phase: 'failed',
+        error: { code: 'authorization-failed', message: expect.any(String) },
+      },
+    })
+    const retried = await application.execute(
+      commandSchema.parse({
+        type: 'retry-github-authorization',
+        operationId,
+        expectedConfigurationVersion: 1,
+      }),
+    )
+    expect(retried).toMatchObject({
+      operation: 'retry-github-authorization',
+      subject: { kind: 'authorization', operationId },
+      ok: true,
+      result: {
+        type: 'retry-github-authorization',
+        operationId,
+        phase: 'waiting',
+        verificationUri: 'https://github.com/login/device',
+        userCode: 'CODE-3',
+        expiresAt: 60_000,
+      },
+    })
     await vi.advanceTimersByTimeAsync(1)
     await vi.waitFor(() =>
       expect(readApplicationState(application.current()).authorizationOperations[0]).toMatchObject({
+        id: operationId,
         status: 'granted',
       }),
     )
@@ -1525,20 +1953,57 @@ describe('RoadmapApplication GitHub Connections', () => {
     })
     await restarted.start()
     expect(readApplicationState(restarted.current()).authorizationOperations).toEqual([])
-    await restarted.execute(
+    const expiredBegin = await restarted.execute(
       commandSchema.parse({
         type: 'begin-github-authorization',
         name: 'Expired',
         expectedConfigurationVersion: 1,
       }),
     )
+    if (
+      !expiredBegin.ok ||
+      expiredBegin.result.type !== 'begin-github-authorization' ||
+      expiredBegin.result.phase !== 'waiting'
+    )
+      throw new Error('Expected actual waiting device authorization before expiration.')
+    expect(expiredBegin.result).toEqual({
+      type: 'begin-github-authorization',
+      operationId: expiredBegin.result.operationId,
+      phase: 'waiting',
+      verificationUri: 'https://github.com/login/device',
+      userCode: 'CODE-1',
+      expiresAt: 60_000,
+    })
+    const expiredOperationId = expiredBegin.result.operationId
     await vi.advanceTimersByTimeAsync(1)
     await vi.waitFor(() =>
       expect(readApplicationState(restarted.current()).authorizationOperations[0]).toMatchObject({
+        id: expiredOperationId,
         status: 'terminal',
         outcome: 'expired',
       }),
     )
+    const cancelledAfterExpiry = await restarted.execute(
+      commandSchema.parse({
+        type: 'cancel-github-authorization',
+        operationId: expiredBegin.result.operationId,
+        expectedConfigurationVersion: 1,
+      }),
+    )
+    expect(cancelledAfterExpiry).toMatchObject({
+      ok: true,
+      result: {
+        type: 'cancel-github-authorization',
+        operationId: expiredBegin.result.operationId,
+        phase: 'expired',
+      },
+    })
+    if (!cancelledAfterExpiry.ok) throw new Error('Expected the expired operation truth.')
+    expect(cancelledAfterExpiry.result).toEqual({
+      type: 'cancel-github-authorization',
+      operationId: expiredBegin.result.operationId,
+      phase: 'expired',
+    })
     await restarted.stop()
   })
 
@@ -1597,7 +2062,15 @@ describe('RoadmapApplication GitHub Connections', () => {
             expiresAt: 60_000,
             intervalMs: 1,
           })
-        await beginning
+        const outcome = await beginning
+        expect(outcome).toMatchObject({
+          operation: 'begin-github-authorization',
+          subject: { kind: 'none' },
+          ok: false,
+          error: { code: 'not-supported' },
+        })
+        expect(outcome).not.toHaveProperty('state')
+        expect(JSON.stringify(outcome)).not.toContain('harmless-private-device')
         await stopping
         await vi.advanceTimersByTimeAsync(60_000)
         expect(readApplicationState(application.current()).authorizationOperations).toEqual(

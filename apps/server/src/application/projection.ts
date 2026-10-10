@@ -940,18 +940,21 @@ function projectActions(
         label: 'Open in VS Code',
         kind: 'server-launch',
         operation: 'open-workspace',
+        project: intent.ref,
       },
       {
         id: 'open-terminal',
         label: 'Open Terminal',
         kind: 'server-launch',
         operation: 'open-terminal',
+        project: intent.ref,
       },
       {
         id: 'reveal-source',
         label: 'View source folder',
         kind: 'server-launch',
         operation: 'reveal-source',
+        project: intent.ref,
       },
     )
   }

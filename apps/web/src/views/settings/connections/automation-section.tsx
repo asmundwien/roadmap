@@ -11,12 +11,14 @@ export function AutomationSection() {
   const { automation, configuration, configurationVersion, command, execute } = useRoadmap()
   const [error, setError] = useState<SafeError | string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [feedback, setFeedback] = useState<string | null>(null)
   const blocked = busy || command.inFlight || !configuration.valid
   const ready = automation.availability.status === 'ready'
 
   const setEnabled = async (enabled: boolean) => {
     setBusy(true)
     setError(null)
+    setFeedback(null)
     try {
       const outcome = await execute({
         type: 'set-automation-enabled',
@@ -24,8 +26,18 @@ export function AutomationSection() {
         enabled,
       })
       if (!outcome.ok) setError(outcome.error)
+      else {
+        const result = outcome.result
+        setFeedback(
+          result.commit === 'committed-unconfirmed'
+            ? `Global Automation ${result.enabled ? 'enablement' : 'disablement'} was committed at configuration version ${result.configurationVersion}, but durability is unconfirmed.`
+            : `Global Automation ${result.enabled ? 'enablement' : 'disablement'} was committed at configuration version ${result.configurationVersion}.`,
+        )
+      }
     } catch {
-      setError('The change may have completed. Check the relevant configuration before retrying.')
+      setError(
+        'The Global Automation change outcome is unknown because its reply was lost. Roadmap will not retry it.',
+      )
     } finally {
       setBusy(false)
     }
@@ -53,6 +65,11 @@ export function AutomationSection() {
             </Alert>
           )}
           <ErrorText error={error} />
+          {feedback !== null && (
+            <div role="status">
+              <Alert variant="info">{feedback}</Alert>
+            </div>
+          )}
         </Surface>
       </SectionBody>
     </Section>

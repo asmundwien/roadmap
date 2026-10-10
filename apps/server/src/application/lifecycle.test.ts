@@ -135,7 +135,18 @@ describe('RoadmapApplication terminal lifecycle', () => {
       released.resolve()
       const result = await command
       const stopped = await stopping
-      expect(result.ok).toBe(caseName !== 'unconfirmed')
+      expect(result).toMatchObject({
+        ok: true,
+        operation: 'rename-connection',
+        subject: { kind: 'connection', connectionId: 'local' },
+        result: {
+          type: 'rename-connection',
+          connectionId: 'local',
+          configurationVersion: 2,
+          commit: caseName === 'unconfirmed' ? 'committed-unconfirmed' : 'committed',
+        },
+      })
+      expect(result).not.toHaveProperty('state')
       expect(stopped.ok).toBe(caseName !== 'cleanup-rejected')
       expect(configuration.writes).toMatchObject([
         { configurationVersion: 2, connections: [{ name: 'Actually saved during stop' }] },
@@ -564,12 +575,13 @@ describe('RoadmapApplication terminal lifecycle', () => {
         admissions: {},
         observers: noSources(),
         operations: createApplicationOperations({
-          async selectWorkspace() {
-            selected.push('selector-opened')
-            return null
-          },
-          async launch() {
-            throw new Error('A lifecycle rejection must not launch a host action.')
+          host: {
+            async execute(operation) {
+              if (operation.type !== 'select-workspace')
+                throw new Error('A lifecycle rejection must not launch a host action.')
+              selected.push('selector-opened')
+              return { kind: 'cancelled' }
+            },
           },
         }),
       })
@@ -612,7 +624,9 @@ describe('RoadmapApplication terminal lifecycle', () => {
   it.each(['selected', 'cancelled', 'failed'] as const)(
     'drains an admitted native selector with an honest %s result',
     async (completion) => {
-      const selector = Promise.withResolvers<string | null>()
+      const selector = Promise.withResolvers<
+        { kind: 'selected'; path: string } | { kind: 'cancelled' }
+      >()
       const entered = Promise.withResolvers<void>()
       const configuration = configurationFixture()
       let selections = 0
@@ -621,13 +635,14 @@ describe('RoadmapApplication terminal lifecycle', () => {
         admissions: {},
         observers: noSources(),
         operations: createApplicationOperations({
-          async selectWorkspace() {
-            selections += 1
-            entered.resolve()
-            return selector.promise
-          },
-          async launch() {
-            throw new Error('The selector must not launch a process.')
+          host: {
+            async execute(operation) {
+              if (operation.type !== 'select-workspace')
+                throw new Error('The selector must not launch a process.')
+              selections += 1
+              entered.resolve()
+              return selector.promise
+            },
           },
         }),
       })
@@ -648,22 +663,33 @@ describe('RoadmapApplication terminal lifecycle', () => {
         })
         expect(selections).toBe(1)
         if (completion === 'failed') selector.reject(new Error('Private native selector detail.'))
-        else selector.resolve(completion === 'selected' ? '/harmless-selected-folder/' : null)
+        else
+          selector.resolve(
+            completion === 'selected'
+              ? { kind: 'selected', path: '/harmless-selected-folder/' }
+              : { kind: 'cancelled' },
+          )
         const result = await query
         if (completion === 'selected')
-          expect(result).toEqual({
+          expect(result).toMatchObject({
             ok: true,
-            type: 'workspace-selection',
-            path: '/harmless-selected-folder',
+            operation: 'select-workspace',
+            subject: { kind: 'none' },
+            result: { kind: 'selected', path: '/harmless-selected-folder/' },
           })
         else if (completion === 'cancelled')
-          expect(result).toEqual({ ok: true, type: 'workspace-selection' })
+          expect(result).toMatchObject({
+            ok: true,
+            operation: 'select-workspace',
+            subject: { kind: 'none' },
+            result: { kind: 'cancelled' },
+          })
         else expect(result).toMatchObject({ ok: false, error: { code: 'selection-failed' } })
         expect(await stopping).toEqual({ ok: true, value: undefined })
         expect(JSON.stringify(result)).not.toContain('Private native selector detail.')
         expect(application.diagnostics().lifecycle).toEqual({ phase: 'stopped' })
       } finally {
-        selector.resolve(null)
+        selector.resolve({ kind: 'cancelled' })
         await query
         await stopping
       }
@@ -680,11 +706,12 @@ describe('RoadmapApplication terminal lifecycle', () => {
       admissions: {},
       observers: noSources(),
       operations: createApplicationOperations({
-        async selectWorkspace() {
-          return null
-        },
-        async launch() {
-          throw new Error('Invalid configuration must not launch a host process.')
+        host: {
+          async execute(operation) {
+            if (operation.type !== 'select-workspace')
+              throw new Error('Invalid configuration must not launch a host process.')
+            return { kind: 'cancelled' }
+          },
         },
       }),
     })
@@ -693,9 +720,11 @@ describe('RoadmapApplication terminal lifecycle', () => {
       expect(readApplicationState(application.current()).configuration).toMatchObject({
         valid: false,
       })
-      expect(await application.query({ type: 'select-workspace' })).toEqual({
+      expect(await application.query({ type: 'select-workspace' })).toMatchObject({
         ok: true,
-        type: 'workspace-selection',
+        operation: 'select-workspace',
+        subject: { kind: 'none' },
+        result: { kind: 'cancelled' },
       })
       expect(
         await application.execute(

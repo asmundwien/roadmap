@@ -26,10 +26,10 @@ import { createRoadmapTransport, type RoadmapTransport } from './transport.ts'
 
 const ORIGIN = 'http://localhost:5173'
 const LAUNCH: Command = commandSchema.parse({
-  type: 'launch-action',
+  type: 'launch-project-operation',
   expectedConfigurationVersion: 1,
   project: fixtureProjectRef({ integration: 'local', id: 'fixture' }),
-  actionId: 'open-workspace',
+  operation: 'open-workspace',
 })
 
 function deferred() {
@@ -169,15 +169,23 @@ async function backend(epoch: string): Promise<Backend> {
       },
     },
     operations: createApplicationOperations({
-      selectWorkspace: async () => null,
-      async launch() {
-        fixture.effects += 1
-        fixture.effectReached.resolve()
-        if (fixture.loseNextReply) {
-          fixture.loseNextReply = false
-          commandResponse?.destroy()
-        }
-        await fixture.effectGate?.promise
+      host: {
+        async execute(operation) {
+          if (operation.type === 'select-workspace') return { kind: 'cancelled' }
+          expect(operation).toEqual({
+            type: 'open-workspace',
+            project: { integration: 'local', projectId: 'fixture' },
+            workspacePath: '/disposable-authority-fixture',
+          })
+          fixture.effects += 1
+          fixture.effectReached.resolve()
+          if (fixture.loseNextReply) {
+            fixture.loseNextReply = false
+            commandResponse?.destroy()
+          }
+          await fixture.effectGate?.promise
+          return { kind: 'invoked' }
+        },
       },
     }),
   })
@@ -219,18 +227,25 @@ interface WireSocket {
 function browser(initial: Backend, withhold = false) {
   let current = initial
   let hold = withhold
+  let unreadableReply = false
   const wires: WireSocket[] = []
   const observed: ReturnType<RoadmapStore['getSnapshot']>[] = []
   const store = createRoadmapStore(initial.url, {
     reconnectDelayMs: () => 5,
-    fetch(input, init) {
+    async fetch(input, init) {
       const url = new URL(String(input))
       const headers = new Headers(init?.headers)
       headers.set('Origin', ORIGIN)
-      return fetch(new URL(url.pathname, current.url), {
-        ...init,
-        headers,
-      })
+      const response = await fetch(new URL(url.pathname, current.url), { ...init, headers })
+      if (unreadableReply) {
+        unreadableReply = false
+        await response.text()
+        return new Response('{', {
+          status: response.status,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return response
     },
     createSocket(): SocketLike {
       const native = new WebSocket(`${current.url.replace('http:', 'ws:')}/ws`, {
@@ -282,6 +297,9 @@ function browser(initial: Backend, withhold = false) {
     wires,
     observed,
     stop,
+    makeNextReplyUnreadable() {
+      unreadableReply = true
+    },
     route(next: Backend) {
       current = next
     },
@@ -363,7 +381,7 @@ afterEach(async () => {
 })
 
 describe('HTTP outcomes and current WebSocket authority', () => {
-  // Accepting an HTTP state's epoch before the first validated socket baseline must fail this.
+  // An HTTP outcome cannot establish the first validated socket baseline.
   it('keeps an open socket without a baseline not-ready after a valid HTTP operation', async () => {
     const a = await backend('A')
     const client = browser(a, true)
@@ -374,7 +392,11 @@ describe('HTTP outcomes and current WebSocket authority', () => {
       state: null,
     })
     const outcome = await client.store.execute(commandSchema.parse(LAUNCH))
-    expect(outcome).toMatchObject({ ok: true, result: { type: 'action-launched' } })
+    expect(outcome).toMatchObject({
+      ok: true,
+      result: { type: 'launch-project-operation', status: 'invoked' },
+    })
+    expect(outcome).not.toHaveProperty('state')
     expect(client.store.getSnapshot()).toMatchObject({ synchronization: 'not-ready', state: null })
     expect(a.effects).toBe(1)
     client.flush()
@@ -399,8 +421,12 @@ describe('HTTP outcomes and current WebSocket authority', () => {
       const outcome = await delayed
       expect(outcome).toMatchObject({
         ok: true,
-        result: { type: 'action-launched', actionId: 'open-workspace' },
-        state: { serverEpoch: 'A' },
+        result: {
+          type: 'launch-project-operation',
+          operation: 'open-workspace',
+          status: 'invoked',
+        },
+        serverEpoch: 'A',
       })
       if (order === 'reply-first') {
         expect(client.store.getSnapshot()).toMatchObject({
@@ -433,7 +459,8 @@ describe('HTTP outcomes and current WebSocket authority', () => {
     client.route(c)
     client.withhold()
     const outcome = await client.store.execute(commandSchema.parse(LAUNCH))
-    expect(outcome).toMatchObject({ ok: true, state: { serverEpoch: 'C' } })
+    expect(outcome).toMatchObject({ ok: true, serverEpoch: 'C' })
+    expect(outcome).not.toHaveProperty('state')
     // A new socket is required; its baseline is withheld independently of the completed HTTP call.
     await until(() => client.wires.length === 2)
     await until(() => (client.wires[1]?.messages.length ?? 0) > 0)
@@ -451,6 +478,64 @@ describe('HTTP outcomes and current WebSocket authority', () => {
           .displayName === 'C continued',
     )
     expectEpoch(client.store, 'C')
+  })
+
+  it.each(['reply-first', 'baseline-first'])(
+    'retains established A until B baseline despite delayed A completion, %s',
+    async (order) => {
+      const a = await backend('A')
+      const client = browser(a)
+      await client.ready()
+      expectEpoch(client.store, 'A')
+      a.effectGate = deferred()
+      const delayed = client.store.execute(LAUNCH)
+      await a.effectReached.promise
+      const b = await backend('B')
+      await client.reconnect(b, true)
+      if (order === 'baseline-first') client.flush()
+      a.effectGate.resolve()
+      const outcome = await delayed
+      expect(outcome).toMatchObject({
+        ok: true,
+        serverEpoch: 'A',
+        result: { type: 'launch-project-operation', status: 'invoked' },
+      })
+      expect(outcome).not.toHaveProperty('state')
+      if (order === 'reply-first') {
+        expectEpoch(client.store, 'A', 'retained')
+        client.flush()
+      }
+      expectEpoch(client.store, 'B')
+      await publishName(b, 'B successor update')
+      await until(
+        () =>
+          readApplicationState(client.store.getSnapshot().state)?.projects[0]?.management
+            .displayName === 'B successor update',
+      )
+      expectEpoch(client.store, 'B')
+      expect(client.wires).toHaveLength(2)
+      expect(a.effects).toBe(1)
+      expect(a.commandRequests).toBe(1)
+      expect(b.effects).toBe(0)
+    },
+  )
+
+  it('keeps unreadable post-effect completion unknown without application replay', async () => {
+    const a = await backend('A')
+    const client = browser(a)
+    await client.ready()
+    client.makeNextReplyUnreadable()
+    await expect(client.store.execute(LAUNCH)).rejects.toBeInstanceOf(Error)
+    expect(client.store.getSnapshot().command.error?.code).toBe('transport-failed')
+    await publishName(a, 'A after unreadable completion')
+    await until(
+      () =>
+        readApplicationState(client.store.getSnapshot().state)?.projects[0]?.management
+          .displayName === 'A after unreadable completion',
+    )
+    expect(client.store.getSnapshot().command.error?.code).toBe('transport-failed')
+    expect(a.effects).toBe(1)
+    expect(a.commandRequests).toBe(1)
   })
 
   // Clearing uncertainty on an ordinary snapshot, or automatically replaying a native effect, must fail this.
@@ -520,12 +605,11 @@ describe('HTTP outcomes and current WebSocket authority', () => {
         const outcome = await command
         expect(outcome).toMatchObject({
           ok: true,
-          result: { type: 'configuration-updated', configurationVersion: 2 },
-          state: { phase: 'stopping', retained: { configurationVersion: 2 } },
+          result: { type, project, configurationVersion: 2, commit: 'committed' },
+          serverEpoch: 'A',
         })
-        if (!('state' in outcome))
-          throw new Error('A saved outcome must include its diagnostic state.')
-        const saved = readApplicationState(outcome.state)
+        expect(outcome).not.toHaveProperty('state')
+        const saved = readApplicationState(a.application.current())
         const previous = readApplicationState(retained)
         if (type === 'rename-project') {
           expect(a.persistedConfiguration?.projects[0]?.displayName).toBe('Saved after retirement')
@@ -543,9 +627,7 @@ describe('HTTP outcomes and current WebSocket authority', () => {
           state: retained,
           command: { error: null },
         })
-        expect(readApplicationState(a.application.current()).projects).toEqual(
-          readApplicationState(outcome.state).projects,
-        )
+        expect(readApplicationState(a.application.current()).projects).toEqual(saved.projects)
         expect(readApplicationState(a.application.current()).automation.availability.status).toBe(
           'unavailable',
         )
@@ -588,8 +670,12 @@ describe('HTTP outcomes and current WebSocket authority', () => {
       a.effectGate.resolve()
       expect(await command).toMatchObject({
         ok: true,
-        result: { type: 'action-launched', actionId: 'open-workspace' },
-        state: { serverEpoch: 'A' },
+        result: {
+          type: 'launch-project-operation',
+          operation: 'open-workspace',
+          status: 'invoked',
+        },
+        serverEpoch: 'A',
       })
       await Promise.all([transportDone, applicationDone, serverDone])
       expectEpoch(client.store, 'A', 'retained')

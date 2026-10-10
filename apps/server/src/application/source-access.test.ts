@@ -20,7 +20,6 @@ import {
 } from '../public-test-fixtures.ts'
 import { publicProjectObservation } from '../source-test-fixtures.ts'
 import { createRoadmapApplication } from './application.ts'
-import { createApplicationOperations } from './operations.ts'
 
 const PROJECT: ProjectKey = { integration: 'github', id: 'saved-project' }
 const CREDENTIALS: CredentialBundle = {
@@ -163,7 +162,6 @@ function fixture(initial: AccessFailure | null, liveRefresh = false) {
     credentialVault,
     github,
     now: Date.now,
-    operations: createApplicationOperations(),
     admissions: {
       github: createGitHubProjectAdmission({
         async inspectWorkspace() {
@@ -356,7 +354,13 @@ describe('RoadmapApplication saved GitHub access recovery', () => {
         )
         expect(outcome).toMatchObject({
           ok: true,
-          result: { type: 'project-refreshed', project: fixtureProjectRef(PROJECT) },
+          operation: 'refresh-project',
+          subject: { kind: 'project', project: fixtureProjectRef(PROJECT) },
+          result: {
+            type: 'refresh-project',
+            project: fixtureProjectRef(PROJECT),
+            attempt: { kind: 'observed', attemptedAt: 2_000, observedAt: 2_000 },
+          },
         })
         expectRecovered(test, 2_000)
       } finally {
@@ -384,13 +388,25 @@ describe('RoadmapApplication saved GitHub access recovery', () => {
         )
         test.recover()
         await vi.advanceTimersByTimeAsync(30_000)
-        await test.application.execute(
+        const outcome = await test.application.execute(
           commandSchema.parse({
             type: 'refresh-project',
             project: fixtureProjectRef(PROJECT),
             expectedConfigurationVersion: 7,
           }),
         )
+        expect(outcome).toMatchObject({
+          ok: true,
+          result: {
+            type: 'refresh-project',
+            project: fixtureProjectRef(PROJECT),
+            attempt: { kind: 'failed' },
+          },
+        })
+        if (!outcome.ok || outcome.result.type !== 'refresh-project') {
+          throw new Error('Refresh attempt was not acknowledged')
+        }
+        expect(outcome.result.attempt).not.toHaveProperty('observedAt')
         expect(
           readApplicationState(test.application.current()).connections.find(
             (connection) => connection.id === 'saved-github',
@@ -455,13 +471,22 @@ describe('RoadmapApplication provider credential resolution', () => {
         const providerRequests = [...test.requests]
         if (failure !== 'authorization-required') test.failRefresh(failure)
         vi.setSystemTime(failure === 'authorization-required' ? 2_000_000 : 1_000_000)
-        await test.application.execute(
+        const outcome = await test.application.execute(
           commandSchema.parse({
             type: 'refresh-project',
             project: fixtureProjectRef(PROJECT),
             expectedConfigurationVersion: 7,
           }),
         )
+        expect(outcome).toMatchObject({
+          ok: true,
+          result: {
+            type: 'refresh-project',
+            project: fixtureProjectRef(PROJECT),
+            attempt: { kind: 'degraded', observedAt: 1_000 },
+          },
+        })
+        expect(JSON.stringify(outcome)).not.toContain('harmless-secret')
 
         const state = readApplicationState(test.application.current())
         expectSavedManagement(state, 'octocat/provider-name')
@@ -533,13 +558,21 @@ describe('RoadmapApplication provider credential resolution', () => {
     try {
       await test.application.start()
       vi.setSystemTime(1_000_000)
-      await test.application.execute(
+      const outcome = await test.application.execute(
         commandSchema.parse({
           type: 'refresh-project',
           project: fixtureProjectRef(PROJECT),
           expectedConfigurationVersion: 7,
         }),
       )
+      expect(outcome).toMatchObject({
+        ok: true,
+        result: {
+          type: 'refresh-project',
+          project: fixtureProjectRef(PROJECT),
+          attempt: { kind: 'observed', attemptedAt: 1_000_000, observedAt: 1_000_000 },
+        },
+      })
 
       expect(readApplicationState(test.application.current()).projects[0]?.resource).toMatchObject({
         kind: 'current-readable',

@@ -351,21 +351,19 @@ function AutomationSection({
         target: ticket,
         stage,
       })
-      setFeedback(
-        outcome.ok
-          ? {
-              kind: 'notice',
-              text:
-                stage === 'classification'
-                  ? 'Classification Run started.'
-                  : 'Wayfinder Session started.',
-            }
-          : { kind: 'error', text: outcome.error.message },
-      )
+      if (!outcome.ok) {
+        setFeedback({ kind: 'error', text: outcome.error.message })
+      } else if (outcome.result.admission === 'override' && outcome.result.status === 'admitted') {
+        const result = outcome.result
+        setFeedback({
+          kind: 'notice',
+          text: `${result.stage === 'classification' ? 'Classification' : 'Wayfinder'} override durably admitted for ticket ${result.target.ticketId}. Admission does not confirm process start or completion.`,
+        })
+      }
     } catch {
       setFeedback({
         kind: 'error',
-        text: 'The Automation override may have been admitted. Check its recorded stage evidence before another attempt.',
+        text: 'The Automation override admission outcome is unknown because its reply was lost. Roadmap will not retry it.',
       })
     }
   }

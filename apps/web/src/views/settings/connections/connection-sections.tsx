@@ -10,7 +10,11 @@ import {
   SectionTitle,
 } from '@roadmap/ui/section'
 import classNames from 'classnames/bind'
-import { authorizationStatus } from './connection-details'
+import {
+  type AuthorizationResultFeedback,
+  authorizationPhaseStatus,
+  authorizationStatus,
+} from './connection-details'
 import connectionStyles from './connection-sections.module.css'
 
 const cx = classNames.bind(connectionStyles)
@@ -21,6 +25,7 @@ type ConnectionSetupSectionProps = {
   configurationNotices: string[]
   notice: string | null
   authorizations: AuthorizationOperation[]
+  feedback: AuthorizationResultFeedback[]
   hasConnections: boolean
   onOpenAuthorization: (operationId: AuthorizationOperationId) => void
 }
@@ -31,6 +36,7 @@ export function ConnectionSetupSection({
   configurationNotices,
   notice,
   authorizations,
+  feedback,
   hasConnections,
   onOpenAuthorization,
 }: ConnectionSetupSectionProps) {
@@ -61,19 +67,45 @@ export function ConnectionSetupSection({
           </Alert>
         ))}
         {notice && <Alert variant="info">{notice}</Alert>}
-        {authorizations.map((authorization) => (
+        {authorizations
+          .filter(
+            (authorization) =>
+              !feedback.some((item) => item.result.operationId === authorization.id),
+          )
+          .map((authorization) => (
+            <button
+              className={cx('settings-operation')}
+              type="button"
+              key={authorization.id}
+              onClick={() => onOpenAuthorization(authorization.id)}
+            >
+              <span>
+                <strong>GitHub authorization · {authorizationStatus(authorization)}</strong>
+                <small>
+                  {('cause' in authorization ? authorization.cause : undefined) ??
+                    'Open the device authorization progress.'}
+                </small>
+              </span>
+              <Icon icon={icon.internalLink} />
+            </button>
+          ))}
+        {feedback.map(({ result }) => (
           <button
             className={cx('settings-operation')}
             type="button"
-            key={authorization.id}
-            onClick={() => onOpenAuthorization(authorization.id)}
+            key={result.operationId}
+            onClick={() => onOpenAuthorization(result.operationId)}
           >
             <span>
-              <strong>GitHub authorization · {authorizationStatus(authorization)}</strong>
+              <strong>GitHub authorization · {authorizationPhaseStatus(result.phase)}</strong>
               <small>
-                {('cause' in authorization ? authorization.cause : undefined) ??
-                  'Open the device authorization progress.'}
+                {result.phase === 'failed' || result.phase === 'denied'
+                  ? result.error.message
+                  : result.phase === 'granted'
+                    ? `Connection ${result.connection.connectionId}, account ${result.connection.accountId}, configuration version ${result.configurationVersion}.`
+                    : 'Open the returned authorization phase.'}
               </small>
+              <small>The live authorization read has not published its next phase yet.</small>
             </span>
             <Icon icon={icon.internalLink} />
           </button>

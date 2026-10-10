@@ -1,4 +1,9 @@
-import type { Command, SafeError } from '@roadmap/contracts/operations'
+import {
+  type Command,
+  type CommandResultFor,
+  commandResultFor,
+  type SafeError,
+} from '@roadmap/contracts/operations'
 import type { Connection } from '@roadmap/contracts/state'
 import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
 import { useState } from 'react'
@@ -6,9 +11,13 @@ import { useRoadmap } from '@/store/roadmap-provider'
 import { ErrorText } from '@/views/shared/settings-shared'
 import { AuthorizationGroup, RemoveConnectionGroup } from './management-sections'
 
-type ManageSectionProps = { connection: Connection }
+type ManageSectionProps = {
+  connection: Connection
+  removing: boolean
+  onRemove: () => Promise<void>
+}
 
-export function ManageSection({ connection }: ManageSectionProps) {
+export function ManageSection({ connection, removing, onRemove }: ManageSectionProps) {
   const {
     projects,
     authorizationOperations,
@@ -30,21 +39,24 @@ export function ManageSection({ connection }: ManageSectionProps) {
   )
   const authorization =
     related.findLast((operation) => operation.status === 'waiting') ?? related.at(-1)
-  const blocked = busy || command.inFlight || !configuration.valid
+  const blocked = removing || busy || command.inFlight || !configuration.valid
 
-  const run = async (next: Command): Promise<boolean> => {
+  const run = async <C extends Command>(next: C): Promise<CommandResultFor<C> | null> => {
     setBusy(true)
     setError(null)
     try {
       const outcome = await execute(next)
       if (!outcome.ok) {
         setError(outcome.error)
-        return false
+        return null
       }
-      return true
+      if (!commandResultFor(next, outcome.result)) {
+        throw new Error('The result does not match the initiating Connection command.')
+      }
+      return outcome.result
     } catch {
       setError('The change may have completed. Check the relevant configuration before retrying.')
-      return false
+      return null
     } finally {
       setBusy(false)
     }
@@ -68,13 +80,7 @@ export function ManageSection({ connection }: ManageSectionProps) {
             run={run}
           />
         )}
-        <RemoveConnectionGroup
-          connectionId={connection.id}
-          dependents={dependents}
-          configurationVersion={configurationVersion}
-          blocked={blocked}
-          run={run}
-        />
+        <RemoveConnectionGroup dependents={dependents} blocked={blocked} onRemove={onRemove} />
       </SectionBody>
     </Section>
   )

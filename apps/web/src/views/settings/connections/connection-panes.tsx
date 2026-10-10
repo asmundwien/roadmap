@@ -1,4 +1,4 @@
-import type { AuthorizationOperationId, ConfigurationVersion } from '@roadmap/contracts/identity'
+import type { ConfigurationVersion } from '@roadmap/contracts/identity'
 import type { Command, SafeError } from '@roadmap/contracts/operations'
 import type { AuthorizationOperation } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
@@ -8,12 +8,21 @@ import { Link } from '@roadmap/ui/link'
 import { Modal } from '@roadmap/ui/modal'
 import { TextInput } from '@roadmap/ui/text-input'
 import classNames from 'classnames/bind'
-import { type FormEvent, useState } from 'react'
+import { type FormEvent, useRef, useState } from 'react'
+import { Link as InternalLink } from '@/navigation'
+import { connectionPath } from '@/router'
 import { AuthorizationControls, DeviceCode } from '@/views/shared/authorization-presentation'
 import { SettingsForm } from '@/views/shared/settings-form'
 import { SettingsFormActions } from '@/views/shared/settings-form-actions'
 import { ErrorText } from '@/views/shared/settings-shared'
-import { authorizationStatus, type ConnectionOperation } from './connection-details'
+import {
+  type AuthorizationPhaseResult,
+  type AuthorizationResultFeedback,
+  authorizationPhaseStatus,
+  authorizationResultPending,
+  authorizationStatus,
+  type ConnectionOperation,
+} from './connection-details'
 import styles from './connection-panes.module.css'
 
 const cx = classNames.bind(styles)
@@ -22,20 +31,22 @@ type AddConnectionPaneProps = {
   operation: ConnectionOperation
   configurationVersion: ConfigurationVersion
   onClose: () => void
-  onStarted: (operationId: AuthorizationOperationId) => void
+  onResult: (result: AuthorizationPhaseResult) => void
 }
 
 export function AddConnectionPane({
   operation,
   configurationVersion,
   onClose,
-  onStarted,
+  onResult,
 }: AddConnectionPaneProps) {
   const [error, setError] = useState<SafeError | string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [completionUnknown, setCompletionUnknown] = useState(false)
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (busy || completionUnknown) return
     const name = String(new FormData(event.currentTarget).get('name') ?? '').trim()
     if (!name) {
       setError('Enter a name that distinguishes this GitHub Connection.')
@@ -53,12 +64,9 @@ export function AddConnectionPane({
         setError(outcome.error)
         return
       }
-      if (outcome.result.type !== 'authorization-started') {
-        setError('The server returned an unexpected authorization result.')
-        return
-      }
-      onStarted(outcome.result.operationId)
+      onResult(outcome.result)
     } catch {
+      setCompletionUnknown(true)
       setError(
         'Authorization may have started. Check its operation status before starting another attempt.',
       )
@@ -86,9 +94,9 @@ export function AddConnectionPane({
         <ErrorText error={error} />
         <SettingsFormActions>
           <Button type="button" onClick={onClose}>
-            Cancel
+            Close
           </Button>
-          <Button variant="primary" type="submit" disabled={busy}>
+          <Button variant="primary" type="submit" disabled={busy || completionUnknown}>
             {busy ? 'Starting…' : 'Start authorization'}
           </Button>
         </SettingsFormActions>
@@ -97,32 +105,76 @@ export function AddConnectionPane({
   )
 }
 type AuthorizationPaneProps = {
-  authorization: AuthorizationOperation
+  authorization: AuthorizationOperation | undefined
+  feedback: AuthorizationResultFeedback | null
   operation: ConnectionOperation
   configurationVersion: ConfigurationVersion
   onClose: () => void
+  onResult: (feedback: AuthorizationResultFeedback) => void
   onFinished: (message: string) => void
 }
 
 export function AuthorizationPane({
   authorization,
+  feedback,
   operation,
   configurationVersion,
   onClose,
+  onResult,
   onFinished,
 }: AuthorizationPaneProps) {
   const [error, setError] = useState<SafeError | string | null>(null)
-  const [copied, setCopied] = useState(false)
+  const [copiedCode, setCopiedCode] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [completionUnknown, setCompletionUnknown] = useState(false)
+  const currentAuthorization = useRef(authorization)
+  currentAuthorization.current = authorization
+  const pending = authorizationResultPending(authorization, feedback)
+  const result = feedback?.result
+  const phase =
+    pending && result
+      ? result.phase
+      : authorization?.status === 'terminal'
+        ? authorization.outcome
+        : authorization?.status
+  const waiting =
+    pending && result?.phase === 'waiting'
+      ? result
+      : authorization?.status === 'waiting' && phase === 'waiting'
+        ? authorization
+        : null
+  const operationId = pending ? result?.operationId : authorization?.id
+  const phaseError =
+    pending && result && (result.phase === 'failed' || result.phase === 'denied')
+      ? result.error
+      : !pending && authorization?.status === 'terminal' && 'cause' in authorization
+        ? authorization.cause
+        : null
 
-  const execute = async (command: Command) => {
+  const execute = async (
+    command: Extract<
+      Command,
+      { type: 'retry-github-authorization' | 'cancel-github-authorization' }
+    >,
+  ) => {
+    if (busy || completionUnknown) return
     setBusy(true)
     setError(null)
+    const previous = authorization
     try {
       const outcome = await operation.execute(command)
-      if (!outcome.ok) setError(outcome.error)
+      if (!outcome.ok) {
+        setError(outcome.error)
+        return
+      }
+      onResult({
+        result: outcome.result,
+        previous,
+        consumed: currentAuthorization.current !== previous,
+      })
     } catch {
-      setError('The server did not confirm the authorization operation.')
+      setCompletionUnknown(true)
+      setError('The server did not confirm the authorization operation. Do not repeat it.')
     } finally {
       setBusy(false)
     }
@@ -132,21 +184,31 @@ export function AuthorizationPane({
     <Modal open title="GitHub authorization" onClose={onClose}>
       <header className={cx('settings-flow-head')}>
         <p className={cx('settings-eyebrow')}>Device authorization</p>
-        <h2>{authorizationStatus(authorization)}</h2>
+        <h2>{phase ? authorizationPhaseStatus(phase) : 'Waiting for authorization publication'}</h2>
         <p>
           GitHub authorization progress is live server state. Closing this pane does not cancel it.
         </p>
       </header>
+      {pending && authorization && (
+        <p>{`Live authorization read: ${authorizationStatus(authorization)}.`}</p>
+      )}
 
-      {authorization.status === 'waiting' && (
+      {pending && (
+        <Alert variant="info">
+          This operation returned the phase below. The live authorization read has not published its
+          next phase yet. Connection availability still comes from live server state.
+        </Alert>
+      )}
+
+      {waiting && operationId && (
         <>
           <DeviceCode>
-            <small>{authorization.verificationUri}</small>
-            <strong>{authorization.userCode}</strong>
-            <span>{`Expires ${new Date(authorization.expiresAt).toLocaleTimeString()}`}</span>
+            <small>{waiting.verificationUri}</small>
+            <strong>{waiting.userCode}</strong>
+            <span>{`Expires ${new Date(waiting.expiresAt).toLocaleTimeString()}`}</span>
           </DeviceCode>
           <AuthorizationControls>
-            <Link href={authorization.verificationUri} external>
+            <Link href={waiting.verificationUri} external>
               Open GitHub
             </Link>
             <ControlGroup>
@@ -154,20 +216,20 @@ export function AuthorizationPane({
                 type="button"
                 onClick={() => {
                   void navigator.clipboard
-                    .writeText(authorization.userCode)
-                    .then(() => setCopied(true))
+                    .writeText(waiting.userCode)
+                    .then(() => setCopiedCode(waiting.userCode))
                 }}
               >
-                {copied ? 'Code copied' : 'Copy code'}
+                {copiedCode === waiting.userCode ? 'Code copied' : 'Copy code'}
               </Button>
               <Button
                 type="button"
-                disabled={busy}
+                disabled={busy || completionUnknown}
                 onClick={() =>
                   void execute({
                     type: 'cancel-github-authorization',
                     expectedConfigurationVersion: configurationVersion,
-                    operationId: authorization.id,
+                    operationId,
                   })
                 }
               >
@@ -178,31 +240,49 @@ export function AuthorizationPane({
         </>
       )}
 
-      {authorization.status === 'granted' && (
+      {phase === 'granted' && (
         <Alert variant="info">
           <strong>GitHub authorized.</strong>
+          {result?.phase === 'granted' && pending ? (
+            <span>
+              {`Connection ${result.connection.connectionId}, account ${result.connection.accountId}, configuration version ${result.configurationVersion}. `}
+              <InternalLink href={connectionPath(result.connection.connectionId)}>
+                View granted Connection
+              </InternalLink>
+            </span>
+          ) : authorization?.status === 'granted' && authorization.connection.kind === 'current' ? (
+            <span>
+              {`Connection ${authorization.connection.id}, account ${authorization.connection.accountId}. `}
+              {result?.phase === 'granted' &&
+                `Grant committed at configuration version ${result.configurationVersion}. `}
+              <InternalLink href={connectionPath(authorization.connection.id)}>
+                View granted Connection
+              </InternalLink>
+            </span>
+          ) : null}
           <span>
-            {authorization.connection.kind === 'historical'
+            {authorization?.status === 'granted' && authorization.connection.kind === 'historical'
               ? 'The granted Connection account is no longer configured.'
-              : 'The Connection is configured. This grant does not establish Project source availability.'}
+              : 'This grant does not establish Project source availability.'}
           </span>
         </Alert>
       )}
-      {authorization.status !== 'waiting' && authorization.status !== 'granted' && (
-        <Alert>
-          <strong>{authorizationStatus(authorization)}</strong>
-          <span>{'cause' in authorization ? authorization.cause : undefined}</span>
+      {(phase === 'cancelled' || phase === 'expired') && (
+        <Alert variant="info">
+          <strong>{authorizationPhaseStatus(phase)}</strong>
+          <span>Closing or cancelling authorization does not revoke a completed grant.</span>
         </Alert>
       )}
+      <ErrorText error={phaseError} />
       <ErrorText error={error} />
 
-      {authorization.status !== 'waiting' && (
+      {phase !== 'waiting' && (
         <SettingsFormActions>
           <Button
             type="button"
             onClick={() =>
               onFinished(
-                authorization.status === 'granted'
+                phase === 'granted'
                   ? 'GitHub authorization grant recorded.'
                   : 'Authorization progress closed.',
               )
@@ -210,15 +290,15 @@ export function AuthorizationPane({
           >
             Close
           </Button>
-          {authorization.status !== 'granted' && (
+          {phase && phase !== 'granted' && operationId && (
             <Button
               type="button"
-              disabled={busy}
+              disabled={busy || completionUnknown}
               onClick={() =>
                 void execute({
                   type: 'retry-github-authorization',
                   expectedConfigurationVersion: configurationVersion,
-                  operationId: authorization.id,
+                  operationId,
                 })
               }
             >

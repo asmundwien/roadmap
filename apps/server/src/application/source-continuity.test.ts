@@ -15,6 +15,7 @@ import { GitHubError } from '../github/client.ts'
 import { createGitHubConnectionPort } from '../github/connections.ts'
 import type { RawMapIssue } from '../github/map-query.ts'
 import { createGitHubObserverPool } from '../github/observer.ts'
+import type { HostOperation } from '../host/operations.ts'
 import { createLocalProjectAdmission } from '../local/admission.ts'
 import { createLocalObserver } from '../local/observer.ts'
 import type { GitHubObservationInput, LocalObservationInput } from '../observation/coordinator.ts'
@@ -372,7 +373,7 @@ function fixture(
   }> = []
   const events: ChangeEvent[] = []
   const states: ReadyApplicationState[] = []
-  const launches: Array<{ executable: string; args: readonly string[] }> = []
+  const launches: HostOperation[] = []
   const application = createRoadmapApplication({
     configuration: document,
     github,
@@ -403,11 +404,13 @@ function fixture(
           }),
     },
     operations: createApplicationOperations({
-      async launch(executable, args) {
-        launches.push({ executable, args })
-      },
-      async selectWorkspace() {
-        throw new Error('This fixture must not open a host folder selector')
+      host: {
+        async execute(operation) {
+          if (operation.type === 'select-workspace')
+            throw new Error('This fixture must not open a host folder selector')
+          launches.push(operation)
+          return { kind: 'invoked' }
+        },
       },
     }),
     observers: {
@@ -646,7 +649,26 @@ describe('RoadmapApplication independent source continuity', () => {
             expectedConfigurationVersion: 1,
           }),
         ),
-      ).toMatchObject({ ok: true })
+      ).toMatchObject({
+        ok: true,
+        operation: 'refresh-project',
+        subject: { kind: 'project', project: fixtureProjectRef(SOURCE_A) },
+        result: {
+          type: 'refresh-project',
+          project: fixtureProjectRef(SOURCE_A),
+          attempt: {
+            kind: 'degraded',
+            attemptedAt: 2000,
+            observedAt: 1000,
+            provenance: {
+              integration: 'github',
+              connectionId: 'connection-a',
+              repositoryId: '101',
+              stage: 'repository',
+            },
+          },
+        },
+      })
       const failedRead = ownProjectFailure()
       expect(failedRead.readSequence).toBeGreaterThan(baselineRead.readSequence)
       expect(ownTicketRead().readSequence).toBe(baselineRead.readSequence)
@@ -740,7 +762,14 @@ describe('RoadmapApplication independent source continuity', () => {
             expectedConfigurationVersion: 2,
           }),
         ),
-      ).toMatchObject({ ok: true })
+      ).toMatchObject({
+        ok: true,
+        result: {
+          type: 'refresh-project',
+          project: fixtureProjectRef(SOURCE_A),
+          attempt: { kind: 'observed', attemptedAt: 4000, observedAt: 4000 },
+        },
+      })
       const recoveredRead = ownTicketRead()
       expect(recoveredRead.readSequence).toBeGreaterThan(failedRead.readSequence)
       expect(
@@ -778,7 +807,14 @@ describe('RoadmapApplication independent source continuity', () => {
             expectedConfigurationVersion: 2,
           }),
         ),
-      ).toMatchObject({ ok: true })
+      ).toMatchObject({
+        ok: true,
+        result: {
+          type: 'refresh-project',
+          project: fixtureProjectRef(SOURCE_A),
+          attempt: { kind: 'degraded', attemptedAt: 5000, observedAt: 4000 },
+        },
+      })
       const laterFailure = ownProjectFailure()
       expect(laterFailure.readSequence).toBeGreaterThan(recoveredRead.readSequence)
       const readsBeforeRemoval = test.requests.filter((request) => request.repositoryId === '101')
@@ -864,7 +900,13 @@ describe('RoadmapApplication independent source continuity', () => {
             ),
           ).toMatchObject({
             ok: true,
-            result: { type: 'project-refreshed', project: fixtureProjectRef(LOCAL) },
+            operation: 'refresh-project',
+            subject: { kind: 'project', project: fixtureProjectRef(LOCAL) },
+            result: {
+              type: 'refresh-project',
+              project: fixtureProjectRef(LOCAL),
+              attempt: { kind: 'observed', attemptedAt: 3000, observedAt: 3000 },
+            },
           })
         } else {
           await vi.advanceTimersByTimeAsync(2_000)
@@ -971,7 +1013,16 @@ describe('RoadmapApplication independent source continuity', () => {
               expectedConfigurationVersion: 1,
             }),
           ),
-        ).toMatchObject({ ok: false })
+        ).toMatchObject({
+          ok: true,
+          operation: 'refresh-project',
+          subject: { kind: 'project', project: fixtureProjectRef(LOCAL) },
+          result: {
+            type: 'refresh-project',
+            project: fixtureProjectRef(LOCAL),
+            attempt: { kind: 'failed', attemptedAt: 1000 },
+          },
+        })
         await vi.advanceTimersByTimeAsync(10_000)
         expect(project(readApplicationState(test.application.current()), LOCAL).resource.kind).toBe(
           'never-observed',
@@ -1141,7 +1192,13 @@ describe('RoadmapApplication independent source continuity', () => {
           ),
         ).toMatchObject({
           ok: true,
-          result: { type: 'project-refreshed', project: fixtureProjectRef(SOURCE_A) },
+          operation: 'refresh-project',
+          subject: { kind: 'project', project: fixtureProjectRef(SOURCE_A) },
+          result: {
+            type: 'refresh-project',
+            project: fixtureProjectRef(SOURCE_A),
+            attempt: { kind: 'observed' },
+          },
         })
         expect(
           ticketObservation(readApplicationState(test.application.current()), SOURCE_A)?.value,
@@ -1152,13 +1209,13 @@ describe('RoadmapApplication independent source continuity', () => {
         expect(test.events.filter((event) => event.type === 'ticket-claimed')).toHaveLength(1)
         const eventsAfterRefresh = [...test.events]
         for (const key of [LOCAL, SOURCE_A]) {
-          for (const actionId of ['open-workspace', 'open-terminal', 'reveal-source']) {
+          for (const operation of ['open-workspace', 'open-terminal', 'reveal-source']) {
             expect(
               await test.application.execute(
                 commandSchema.parse({
-                  type: 'launch-action',
+                  type: 'launch-project-operation',
                   project: fixtureProjectRef(key),
-                  actionId,
+                  operation,
                   expectedConfigurationVersion: 1,
                 }),
               ),
@@ -1259,13 +1316,13 @@ describe('RoadmapApplication independent source continuity', () => {
         expect(test.localInputs).toEqual([])
         await symlink(worktree, alias, 'dir')
         for (const key of [SOURCE_A, LOCAL]) {
-          for (const actionId of ['open-workspace', 'open-terminal', 'reveal-source']) {
+          for (const operation of ['open-workspace', 'open-terminal', 'reveal-source']) {
             expect(
               await test.application.execute(
                 commandSchema.parse({
-                  type: 'launch-action',
+                  type: 'launch-project-operation',
                   project: fixtureProjectRef(key),
-                  actionId,
+                  operation,
                   expectedConfigurationVersion: 1,
                 }),
               ),
@@ -1412,7 +1469,7 @@ describe('RoadmapApplication independent source continuity', () => {
     }
   })
 
-  it('polls active A while candidate B on another Connection has an unresolved actual provider baseline', async () => {
+  it('polls and refreshes active A while candidate B on another Connection has an unresolved actual provider baseline', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000)
     const test = fixture()
@@ -1469,6 +1526,37 @@ describe('RoadmapApplication independent source continuity', () => {
           ticket: expect.objectContaining({ project: SOURCE_A, mapId: '108', id: '109' }),
         },
       ])
+      vi.setSystemTime(32_000)
+      expect(
+        await test.application.execute(
+          commandSchema.parse({
+            type: 'refresh-project',
+            project: fixtureProjectRef(SOURCE_A),
+            expectedConfigurationVersion: 1,
+          }),
+        ),
+      ).toMatchObject({
+        ok: true,
+        operation: 'refresh-project',
+        subject: { kind: 'project', project: fixtureProjectRef(SOURCE_A) },
+        result: {
+          type: 'refresh-project',
+          project: fixtureProjectRef(SOURCE_A),
+          attempt: {
+            kind: 'observed',
+            attemptedAt: 32_000,
+            observedAt: 32_000,
+            provenance: {
+              integration: 'github',
+              connectionId: 'connection-a',
+              repositoryId: '101',
+              stage: 'repository',
+            },
+          },
+        },
+      })
+      expect(candidate.pending()).toBe(true)
+      expectOnlyActiveA(readApplicationState(test.application.current()))
       for (const state of test.states.slice(afterBaseline)) expectOnlyActiveA(state)
       expect(test.requests).toEqual(
         expect.arrayContaining([
@@ -1528,7 +1616,13 @@ describe('RoadmapApplication independent source continuity', () => {
       gate.release()
       expect(await refresh).toMatchObject({
         ok: true,
-        result: { type: 'project-refreshed', project: fixtureProjectRef(SOURCE_A) },
+        operation: 'refresh-project',
+        subject: { kind: 'project', project: fixtureProjectRef(SOURCE_A) },
+        result: {
+          type: 'refresh-project',
+          project: fixtureProjectRef(SOURCE_A),
+          attempt: { kind: 'observed', attemptedAt: 1000, observedAt: 1000 },
+        },
       })
       await vi.advanceTimersByTimeAsync(0)
       expect(test.maximumInFlight('101')).toBe(1)
@@ -1628,16 +1722,31 @@ describe('RoadmapApplication independent source continuity', () => {
       test.missingAlias('101', true)
       vi.setSystemTime(2000)
       expect(
-        (
-          await test.application.execute(
-            commandSchema.parse({
-              type: 'refresh-project',
-              project: fixtureProjectRef(SOURCE_A),
-              expectedConfigurationVersion: 1,
-            }),
-          )
-        ).ok,
-      ).toBe(true)
+        await test.application.execute(
+          commandSchema.parse({
+            type: 'refresh-project',
+            project: fixtureProjectRef(SOURCE_A),
+            expectedConfigurationVersion: 1,
+          }),
+        ),
+      ).toMatchObject({
+        ok: true,
+        result: {
+          type: 'refresh-project',
+          project: fixtureProjectRef(SOURCE_A),
+          attempt: {
+            kind: 'degraded',
+            attemptedAt: 2000,
+            observedAt: 1000,
+            provenance: {
+              integration: 'github',
+              connectionId: 'connection-a',
+              repositoryId: '101',
+              stage: 'map-read',
+            },
+          },
+        },
+      })
       expect(project(readApplicationState(test.application.current()), SOURCE_A)).toMatchObject({
         activeMap: { kind: 'uncertain' },
         displayOrder: {
@@ -1683,16 +1792,21 @@ describe('RoadmapApplication independent source continuity', () => {
       test.update('101', 'Recovered alias body')
       vi.setSystemTime(3000)
       expect(
-        (
-          await test.application.execute(
-            commandSchema.parse({
-              type: 'refresh-project',
-              project: fixtureProjectRef(SOURCE_A),
-              expectedConfigurationVersion: 1,
-            }),
-          )
-        ).ok,
-      ).toBe(true)
+        await test.application.execute(
+          commandSchema.parse({
+            type: 'refresh-project',
+            project: fixtureProjectRef(SOURCE_A),
+            expectedConfigurationVersion: 1,
+          }),
+        ),
+      ).toMatchObject({
+        ok: true,
+        result: {
+          type: 'refresh-project',
+          project: fixtureProjectRef(SOURCE_A),
+          attempt: { kind: 'observed', attemptedAt: 3000, observedAt: 3000 },
+        },
+      })
       expect(project(readApplicationState(test.application.current()), SOURCE_A)).toMatchObject({
         activeMap: {
           kind: 'known-current',
@@ -1746,16 +1860,21 @@ describe('RoadmapApplication independent source continuity', () => {
         test.listMap('101', false)
         vi.setSystemTime(2000)
         expect(
-          (
-            await test.application.execute(
-              commandSchema.parse({
-                type: 'refresh-project',
-                project: fixtureProjectRef(SOURCE_A),
-                expectedConfigurationVersion: 1,
-              }),
-            )
-          ).ok,
-        ).toBe(true)
+          await test.application.execute(
+            commandSchema.parse({
+              type: 'refresh-project',
+              project: fixtureProjectRef(SOURCE_A),
+              expectedConfigurationVersion: 1,
+            }),
+          ),
+        ).toMatchObject({
+          ok: true,
+          result: {
+            type: 'refresh-project',
+            project: fixtureProjectRef(SOURCE_A),
+            attempt: { kind: 'observed', attemptedAt: 2000, observedAt: 2000 },
+          },
+        })
         expect(
           publicMapResource(
             project(readApplicationState(test.application.current()), SOURCE_A),
@@ -1772,16 +1891,21 @@ describe('RoadmapApplication independent source continuity', () => {
         test.missingAlias('101', true)
         vi.setSystemTime(3000)
         expect(
-          (
-            await test.application.execute(
-              commandSchema.parse({
-                type: 'refresh-project',
-                project: fixtureProjectRef(SOURCE_A),
-                expectedConfigurationVersion: 1,
-              }),
-            )
-          ).ok,
-        ).toBe(true)
+          await test.application.execute(
+            commandSchema.parse({
+              type: 'refresh-project',
+              project: fixtureProjectRef(SOURCE_A),
+              expectedConfigurationVersion: 1,
+            }),
+          ),
+        ).toMatchObject({
+          ok: true,
+          result: {
+            type: 'refresh-project',
+            project: fixtureProjectRef(SOURCE_A),
+            attempt: { kind: 'degraded', attemptedAt: 3000, observedAt: 2000 },
+          },
+        })
         const returning = project(readApplicationState(test.application.current()), SOURCE_A)
         expect(returning).toMatchObject({
           mapsMembership: {
@@ -1844,16 +1968,21 @@ describe('RoadmapApplication independent source continuity', () => {
         test.update('101', 'Returned same-key provider prose')
         vi.setSystemTime(4000)
         expect(
-          (
-            await test.application.execute(
-              commandSchema.parse({
-                type: 'refresh-project',
-                project: fixtureProjectRef(SOURCE_A),
-                expectedConfigurationVersion: 1,
-              }),
-            )
-          ).ok,
-        ).toBe(true)
+          await test.application.execute(
+            commandSchema.parse({
+              type: 'refresh-project',
+              project: fixtureProjectRef(SOURCE_A),
+              expectedConfigurationVersion: 1,
+            }),
+          ),
+        ).toMatchObject({
+          ok: true,
+          result: {
+            type: 'refresh-project',
+            project: fixtureProjectRef(SOURCE_A),
+            attempt: { kind: 'observed', attemptedAt: 4000, observedAt: 4000 },
+          },
+        })
         expect(project(readApplicationState(test.application.current()), SOURCE_A)).toMatchObject({
           activeMap: {
             kind: 'known-current',

@@ -1,8 +1,10 @@
 import { z } from 'zod'
-import { actionIdSchema } from '../identity.ts'
-import { requestDataSchema } from './request-data.ts'
+import { actionIdSchema, projectRefSchema } from '../identity.ts'
+import { strictDataObject } from './request-data.ts'
 
 const absoluteHttpUrlSchema = z.url({ protocol: /^https?$/ })
+export const projectOperationSchema = z.enum(['open-workspace', 'open-terminal', 'reveal-source'])
+export type ProjectOperation = z.output<typeof projectOperationSchema>
 
 export const hrefSchema = z.string().refine(
   (href) => {
@@ -12,25 +14,34 @@ export const hrefSchema = z.string().refine(
   },
   { message: 'A destination must be a credential-free HTTP URL or absolute application path.' },
 )
-export const linkActionSchema = requestDataSchema.pipe(
-  z.strictObject({
+const roadmapHrefSchema = hrefSchema.refine((href) => href.startsWith('/'), {
+  message: 'A Roadmap action requires an absolute application path.',
+})
+const externalHrefSchema = hrefSchema.refine((href) => /^https?:\/\//.test(href), {
+  message: 'An external action requires a credential-free HTTP URL.',
+})
+export const linkActionSchema = z.union([
+  strictDataObject({
     id: actionIdSchema,
     label: z.string(),
-    kind: z.enum(['roadmap', 'external-link']),
-    href: hrefSchema,
+    kind: z.literal('roadmap'),
+    href: roadmapHrefSchema,
   }),
-)
-export const serverLaunchActionSchema = requestDataSchema.pipe(
-  z.strictObject({
+  strictDataObject({
     id: actionIdSchema,
     label: z.string(),
-    kind: z.literal('server-launch'),
-    operation: z.enum(['open-workspace', 'open-terminal', 'reveal-source']),
+    kind: z.literal('external-link'),
+    href: externalHrefSchema,
   }),
-)
-export const projectActionSchema = requestDataSchema.pipe(
-  z.union([linkActionSchema, serverLaunchActionSchema]),
-)
+])
+export const serverLaunchActionSchema = strictDataObject({
+  id: actionIdSchema,
+  label: z.string(),
+  kind: z.literal('server-launch'),
+  project: projectRefSchema,
+  operation: projectOperationSchema,
+})
+export const projectActionSchema = z.union([linkActionSchema, serverLaunchActionSchema])
 export type LinkAction = z.output<typeof linkActionSchema>
 export type ServerLaunchAction = z.output<typeof serverLaunchActionSchema>
 export type ProjectAction = z.output<typeof projectActionSchema>

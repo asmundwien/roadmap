@@ -283,9 +283,13 @@ async function fixture(options: {
       },
     },
     operations: createApplicationOperations({
-      async selectWorkspace() {
-        selections.push('selected')
-        return workspace
+      host: {
+        async execute(operation) {
+          if (operation.type !== 'select-workspace')
+            throw new Error('No host launch belongs to this lifecycle fixture.')
+          selections.push('selected')
+          return { kind: 'selected', path: workspace }
+        },
       },
     }),
     serverEpoch: 'automation-lifecycle-test',
@@ -471,7 +475,8 @@ describe('RoadmapApplication Automation lifecycle', () => {
       expect(await starting).toMatchObject({ status: 'fulfilled' })
       expect(await current.application.query({ type: 'select-workspace' })).toMatchObject({
         ok: true,
-        type: 'workspace-selection',
+        operation: 'select-workspace',
+        result: { kind: 'selected', path: current.workspace },
       })
       expect(current.selections).toEqual(['selected'])
       expect(
@@ -1247,13 +1252,20 @@ describe('RoadmapApplication Automation lifecycle', () => {
       const commandOutcome = await command
       expect(commandOutcome).toMatchObject({
         ok: true,
-        result: { type: 'configuration-updated', configurationVersion: 2 },
-        state: { phase: 'stopping', retained: { phase: 'ready', configurationVersion: 2 } },
+        operation: 'rename-project',
+        subject: { kind: 'project', project: fixtureProjectRef(current.target.project) },
+        result: {
+          type: 'rename-project',
+          project: fixtureProjectRef(current.target.project),
+          configurationVersion: 2,
+          commit: 'committed',
+        },
       })
-      if (commandOutcome.ok && commandOutcome.result.type === 'configuration-updated')
-        expect(commandOutcome.result.configurationVersion).toBe(
-          readApplicationState(commandOutcome.state).configurationVersion,
-        )
+      expect(commandOutcome).not.toHaveProperty('state')
+      expect(current.application.current()).toMatchObject({
+        phase: 'stopping',
+        retained: { phase: 'ready', configurationVersion: 2 },
+      })
       expect(await stopping).toMatchObject({ status: 'fulfilled' })
       expect(current.application.current()).toMatchObject({
         phase: 'stopped',

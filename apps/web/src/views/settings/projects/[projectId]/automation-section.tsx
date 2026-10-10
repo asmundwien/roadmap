@@ -11,13 +11,14 @@ import { routePaths, ticketPath } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { unacknowledgedInterruption } from '@/views/settings/project-automation'
 import { resourceMessage } from '@/views/shared/resource-results'
-import { ErrorText, sameProject } from '@/views/shared/settings-shared'
+import { ErrorText, projectIdentity, sameProject } from '@/views/shared/settings-shared'
 
 type AutomationSectionProps = { project: Project }
 
 export function AutomationSection({ project }: AutomationSectionProps) {
   const { automation, configuration, configurationVersion, command, execute } = useRoadmap()
   const [error, setError] = useState<SafeError | string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const blocked = busy || command.inFlight || !configuration.valid
   const interruption = unacknowledgedInterruption(project.ref, automation.evidence)
@@ -38,6 +39,7 @@ export function AutomationSection({ project }: AutomationSectionProps) {
     if (blocked) return
     setBusy(true)
     setError(null)
+    setNotice(null)
     try {
       const outcome = await execute({
         type: 'set-project-automation-enabled',
@@ -46,6 +48,20 @@ export function AutomationSection({ project }: AutomationSectionProps) {
         enabled,
       })
       if (!outcome.ok) setError(outcome.error)
+      else {
+        const result = outcome.result
+        const identity = projectIdentity({ ref: result.project })
+        const preference = result.enabled ? 'enabled' : 'disabled'
+        const commit =
+          result.commit === 'committed'
+            ? `Automation preference ${preference} committed for ${identity} at configuration version ${result.configurationVersion}.`
+            : `Automation preference ${preference} committed for ${identity} at configuration version ${result.configurationVersion}, but durability is unconfirmed. Check configuration before another change.`
+        setNotice(
+          interruption && result.enabled
+            ? `${commit} Interruption acknowledgement does not establish the Session outcome. It remains unknown.`
+            : commit,
+        )
+      }
     } catch {
       setError('The change may have completed. Check the relevant configuration before retrying.')
     } finally {
@@ -108,6 +124,7 @@ export function AutomationSection({ project }: AutomationSectionProps) {
             </Alert>
           )}
           {busy && interruption && <p role="status">Saving automation preference...</p>}
+          {notice && <Alert variant="info">{notice}</Alert>}
           <ErrorText error={error} />
         </Surface>
       </SectionBody>

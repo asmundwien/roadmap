@@ -8,7 +8,13 @@ export type AuthorizationFact =
       userCode: string
       expiresAt: number
     }
-  | { id: string; status: 'granted'; connectionId: string; accountId: string }
+  | {
+      id: string
+      status: 'granted'
+      connectionId: string
+      accountId: string
+      configurationVersion: number
+    }
   | {
       id: string
       status: 'denied' | 'expired' | 'cancelled' | 'failed'

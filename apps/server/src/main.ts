@@ -11,7 +11,7 @@ import { createGitHubProjectAdmission } from './github/admission.ts'
 import { createGitHubClient } from './github/client.ts'
 import { createGitHubConnectionPort } from './github/connections.ts'
 import { createGitHubObserverPool } from './github/observer.ts'
-import { launch, selectWorkspace } from './host/darwin.ts'
+import { createDarwinHostExecutor } from './host/darwin.ts'
 import { createLocalProjectAdmission } from './local/admission.ts'
 import { createLocalObserver } from './local/observer.ts'
 import { createNotifier } from './notify.ts'
@@ -37,7 +37,7 @@ async function main(): Promise<void> {
     : undefined
   const credentialVault = github ? createMacOsCredentialVault() : undefined
   const githubObservers = createGitHubObserverPool()
-  const operations = createApplicationOperations({ launch, selectWorkspace })
+  const operations = createApplicationOperations({ host: createDarwinHostExecutor() })
   const admissions = {
     local: createLocalProjectAdmission(),
     ...(github ? { github: createGitHubProjectAdmission() } : {}),

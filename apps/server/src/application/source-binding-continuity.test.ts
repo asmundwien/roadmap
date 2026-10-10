@@ -299,11 +299,10 @@ async function fixture() {
       }),
     },
     operations: createApplicationOperations({
-      async launch() {
-        throw new Error('No host effects are permitted.')
-      },
-      async selectWorkspace() {
-        throw new Error('No folder selector is permitted.')
+      host: {
+        async execute() {
+          throw new Error('No host effects or folder selector are permitted.')
+        },
       },
     }),
     observers: {
@@ -522,7 +521,11 @@ async function pendingOverlap(
   test.clock.value = 30
   test.baseline.release()
   await vi.advanceTimersByTimeAsync(0)
-  expect(await queuedOverride).toMatchObject({ ok: false })
+  expect(await queuedOverride).toMatchObject({
+    ok: false,
+    operation: 'start-automation-override',
+    subject: { kind: 'ticket', target: fixtureTicketRef(TARGET), stage: 'classification' },
+  })
   expect(readApplicationState(test.application.current()).configurationVersion).toBe(2)
   expect(test.launches).toEqual([])
   const committed = decoded(readApplicationState(test.application.current()))
@@ -725,7 +728,29 @@ describe('RoadmapApplication same-key source binding replacement', () => {
               expectedConfigurationVersion: 1,
             }),
           ),
-        ).toMatchObject({ ok: true })
+        ).toMatchObject({
+          ok: true,
+          operation: 'refresh-project',
+          subject: {
+            kind: 'project',
+            project: { integration: 'github', projectId: PROJECT.id },
+          },
+          result: {
+            type: 'refresh-project',
+            project: { integration: 'github', projectId: PROJECT.id },
+            attempt: {
+              kind: poll === 'repository failure' ? 'degraded' : 'observed',
+              attemptedAt: time,
+              observedAt: poll === 'repository failure' ? 10 : time,
+              provenance: {
+                integration: 'github',
+                connectionId: OLD.id,
+                repositoryId: '101',
+                stage: 'repository',
+              },
+            },
+          },
+        })
         const current = project(decoded(readApplicationState(test.application.current())))
         expect(current).toMatchObject({
           source: {

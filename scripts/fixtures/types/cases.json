@@ -211,93 +211,402 @@
   },
   {
     "name": "operation-family-begin-github-authorization",
-    "detail": "authorization-started",
+    "detail": "launch-project-operation",
     "code": 1360
   },
   {
     "name": "operation-family-retry-github-authorization",
-    "detail": "authorization-started",
+    "detail": "launch-project-operation",
     "code": 1360
   },
   {
     "name": "operation-family-cancel-github-authorization",
-    "detail": "authorization-cancelled",
+    "detail": "launch-project-operation",
     "code": 1360
   },
   {
     "name": "operation-family-rename-connection",
-    "detail": "configuration-updated",
+    "detail": "launch-project-operation",
     "code": 1360
   },
   {
     "name": "operation-family-remove-connection",
-    "detail": "configuration-updated",
+    "detail": "launch-project-operation",
     "code": 1360
   },
   {
     "name": "operation-family-register-project",
-    "detail": "configuration-updated",
+    "detail": "launch-project-operation",
     "code": 1360
   },
   {
     "name": "operation-family-rename-project",
-    "detail": "configuration-updated",
+    "detail": "launch-project-operation",
     "code": 1360
   },
   {
     "name": "operation-family-repair-project-workspace",
-    "detail": "configuration-updated",
+    "detail": "launch-project-operation",
     "code": 1360
   },
   {
     "name": "operation-family-remove-project",
-    "detail": "configuration-updated",
+    "detail": "launch-project-operation",
     "code": 1360
   },
   {
     "name": "operation-family-set-automation-enabled",
-    "detail": "configuration-updated",
+    "detail": "launch-project-operation",
     "code": 1360
   },
   {
     "name": "operation-family-set-project-automation-enabled",
-    "detail": "configuration-updated",
+    "detail": "launch-project-operation",
     "code": 1360
   },
   {
     "name": "operation-family-start-automation-override",
-    "detail": "automation-override-started",
+    "detail": "launch-project-operation",
     "code": 1360
   },
   {
     "name": "operation-family-refresh-project",
-    "detail": "project-refreshed",
+    "detail": "launch-project-operation",
     "code": 1360
   },
   {
-    "name": "operation-family-launch-action",
-    "detail": "action-launched",
+    "name": "operation-family-launch-project-operation",
+    "detail": "rename-project",
     "code": 1360
   },
-  { "name": "action-roadmap-destination", "detail": "href", "code": 1360 },
-  { "name": "authorization-grant-receipt-id", "detail": "id", "code": 1360 },
-  { "name": "authorization-grant-receipt-account", "detail": "accountId", "code": 1360 },
-  { "name": "resource-current-observation", "detail": "observation", "code": 1360 },
-  { "name": "lifecycle-failed-cause", "detail": "cause", "code": 1360 },
-  { "name": "classification-completed-admission", "detail": "admission", "code": 1360 },
-  { "name": "classification-failed-process", "detail": "processResult", "code": 1360 },
-  { "name": "classification-launch-failed-reason", "detail": "reason", "code": 1360 },
-  { "name": "classification-unknown-reason", "detail": "reason", "code": 1360 },
-  { "name": "session-launching-admission", "detail": "admission", "code": 1360 },
-  { "name": "session-finished-process", "detail": "processResult", "code": 1360 },
-  { "name": "session-launch-failed-reason", "detail": "reason", "code": 1360 },
-  { "name": "session-launch-failed-admission", "detail": "admission", "code": 1360 },
-  { "name": "session-unknown-admission", "detail": "admission", "code": 1360 },
-  { "name": "session-unknown-reason", "detail": "reason", "code": 1360 },
-  { "name": "session-classification-family", "detail": "status", "code": 1360 },
-  { "name": "query-request-command-family", "detail": "select-workspace", "code": 1360 },
-  { "name": "command-request-query-family", "detail": "type", "code": 1360 },
-  { "name": "query-result-command-family", "detail": "workspace-selection", "code": 1360 },
-  { "name": "ticket-type-required-labels", "detail": "labels", "code": 1360 },
-  { "name": "ticket-type-missing-nonempty-labels", "detail": "labels", "code": 1360 }
+  {
+    "name": "action-roadmap-destination",
+    "detail": "href",
+    "code": 1360
+  },
+  {
+    "name": "authorization-grant-receipt-id",
+    "detail": "id",
+    "code": 1360
+  },
+  {
+    "name": "authorization-grant-receipt-account",
+    "detail": "accountId",
+    "code": 1360
+  },
+  {
+    "name": "resource-current-observation",
+    "detail": "observation",
+    "code": 1360
+  },
+  {
+    "name": "lifecycle-failed-cause",
+    "detail": "cause",
+    "code": 1360
+  },
+  {
+    "name": "classification-completed-admission",
+    "detail": "admission",
+    "code": 1360
+  },
+  {
+    "name": "classification-failed-process",
+    "detail": "processResult",
+    "code": 1360
+  },
+  {
+    "name": "classification-launch-failed-reason",
+    "detail": "reason",
+    "code": 1360
+  },
+  {
+    "name": "classification-unknown-reason",
+    "detail": "reason",
+    "code": 1360
+  },
+  {
+    "name": "session-launching-admission",
+    "detail": "admission",
+    "code": 1360
+  },
+  {
+    "name": "session-finished-process",
+    "detail": "processResult",
+    "code": 1360
+  },
+  {
+    "name": "session-launch-failed-reason",
+    "detail": "reason",
+    "code": 1360
+  },
+  {
+    "name": "session-launch-failed-admission",
+    "detail": "admission",
+    "code": 1360
+  },
+  {
+    "name": "session-unknown-admission",
+    "detail": "admission",
+    "code": 1360
+  },
+  {
+    "name": "session-unknown-reason",
+    "detail": "reason",
+    "code": 1360
+  },
+  {
+    "name": "session-classification-family",
+    "detail": "status",
+    "code": 1360
+  },
+  {
+    "name": "query-request-command-family",
+    "detail": "select-workspace",
+    "code": 1360
+  },
+  {
+    "name": "command-request-query-family",
+    "detail": "type",
+    "code": 1360
+  },
+  {
+    "name": "query-result-command-family",
+    "detail": "select-workspace",
+    "code": 1360
+  },
+  {
+    "name": "ticket-type-required-labels",
+    "detail": "labels",
+    "code": 1360
+  },
+  {
+    "name": "ticket-type-missing-nonempty-labels",
+    "detail": "labels",
+    "code": 1360
+  },
+  {
+    "name": "operation-outcome-begin-github-authorization",
+    "detail": "launch-project-operation",
+    "code": 1360
+  },
+  {
+    "name": "operation-outcome-retry-github-authorization",
+    "detail": "launch-project-operation",
+    "code": 1360
+  },
+  {
+    "name": "operation-outcome-cancel-github-authorization",
+    "detail": "launch-project-operation",
+    "code": 1360
+  },
+  {
+    "name": "operation-outcome-rename-connection",
+    "detail": "launch-project-operation",
+    "code": 1360
+  },
+  {
+    "name": "operation-outcome-remove-connection",
+    "detail": "launch-project-operation",
+    "code": 1360
+  },
+  {
+    "name": "operation-outcome-register-project",
+    "detail": "launch-project-operation",
+    "code": 1360
+  },
+  {
+    "name": "operation-outcome-rename-project",
+    "detail": "launch-project-operation",
+    "code": 1360
+  },
+  {
+    "name": "operation-outcome-repair-project-workspace",
+    "detail": "launch-project-operation",
+    "code": 1360
+  },
+  {
+    "name": "operation-outcome-remove-project",
+    "detail": "launch-project-operation",
+    "code": 1360
+  },
+  {
+    "name": "operation-outcome-set-automation-enabled",
+    "detail": "launch-project-operation",
+    "code": 1360
+  },
+  {
+    "name": "operation-outcome-set-project-automation-enabled",
+    "detail": "launch-project-operation",
+    "code": 1360
+  },
+  {
+    "name": "operation-outcome-start-automation-override",
+    "detail": "launch-project-operation",
+    "code": 1360
+  },
+  {
+    "name": "operation-outcome-refresh-project",
+    "detail": "launch-project-operation",
+    "code": 1360
+  },
+  {
+    "name": "operation-outcome-launch-project-operation",
+    "detail": "rename-project",
+    "code": 1360
+  },
+  {
+    "name": "operation-family-reauthorize-github-connection",
+    "detail": "launch-project-operation",
+    "code": 1360
+  },
+  {
+    "name": "operation-outcome-reauthorize-github-connection",
+    "detail": "launch-project-operation",
+    "code": 1360
+  },
+  {
+    "name": "launch-project-missing",
+    "detail": "project",
+    "code": 1360
+  },
+  {
+    "name": "launch-project-wrong-brand",
+    "detail": "ProjectId",
+    "code": 1360
+  },
+  {
+    "name": "action-host-project",
+    "detail": "project",
+    "code": 1360
+  },
+  {
+    "name": "operation-subject-project-brand",
+    "detail": "ProjectId",
+    "code": 1360
+  },
+  {
+    "name": "operation-subject-connection-brand",
+    "detail": "ConnectionId",
+    "code": 1360
+  },
+  {
+    "name": "operation-subject-project-kind",
+    "detail": "project",
+    "code": 1360
+  },
+  {
+    "name": "operation-authorization-waiting-verificationUri",
+    "detail": "verificationUri",
+    "code": 1360
+  },
+  {
+    "name": "operation-authorization-waiting-userCode",
+    "detail": "userCode",
+    "code": 1360
+  },
+  {
+    "name": "operation-authorization-waiting-expiresAt",
+    "detail": "expiresAt",
+    "code": 1360
+  },
+  {
+    "name": "operation-authorization-granted-connection",
+    "detail": "connection",
+    "code": 1360
+  },
+  {
+    "name": "operation-authorization-granted-configurationVersion",
+    "detail": "configurationVersion",
+    "code": 1360
+  },
+  {
+    "name": "operation-authorization-denied-error",
+    "detail": "error",
+    "code": 1360
+  },
+  {
+    "name": "operation-authorization-failed-error",
+    "detail": "error",
+    "code": 1360
+  },
+  {
+    "name": "launch-project-operation-invalid",
+    "detail": "operation",
+    "code": 1360
+  },
+  {
+    "name": "reauthorize-connection-missing",
+    "detail": "connectionId",
+    "code": 1360
+  },
+  {
+    "name": "operation-result-project-brand",
+    "detail": "ProjectId",
+    "code": 1360
+  },
+  {
+    "name": "operation-registration-project-scope",
+    "detail": "integration",
+    "code": 1360
+  },
+  {
+    "name": "operation-authorization-granted-accountId",
+    "detail": "accountId",
+    "code": 1360
+  },
+  {
+    "name": "operation-authorization-granted-connection-brand",
+    "detail": "ConnectionId",
+    "code": 1360
+  },
+  {
+    "name": "operation-authorization-expired-operationId",
+    "detail": "operationId",
+    "code": 1360
+  },
+  {
+    "name": "operation-authorization-cancelled-operationId",
+    "detail": "operationId",
+    "code": 1360
+  },
+  {
+    "name": "command-envelope-correlation",
+    "detail": "correlationId",
+    "code": 1360
+  },
+  {
+    "name": "query-envelope-correlation",
+    "detail": "correlationId",
+    "code": 1360
+  },
+  {
+    "name": "command-envelope-correlation-brand",
+    "detail": "CorrelationId",
+    "code": 1360
+  },
+  {
+    "name": "operation-outcome-provenance",
+    "detail": "serverEpoch",
+    "code": 1360
+  },
+  {
+    "name": "operation-authorization-waiting-grant-payload",
+    "detail": "connection",
+    "code": 2353
+  },
+  {
+    "name": "operation-authorization-granted-waiting-payload",
+    "detail": "verificationUri",
+    "code": 2353
+  },
+  {
+    "name": "operation-authorization-cancelled-error",
+    "detail": "error",
+    "code": 2353
+  },
+  {
+    "name": "operation-outcome-sequence",
+    "detail": "stateSequence",
+    "code": 1360
+  }
 ]

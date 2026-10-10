@@ -1,5 +1,4 @@
 import {
-  actionIdSchema,
   authorizationOperationIdSchema,
   configurationVersionSchema,
   connectionIdSchema,
@@ -10,9 +9,12 @@ import {
   stateSequenceSchema,
   ticketIdSchema,
 } from '@roadmap/contracts/identity'
-import type { CommandOutcome, QueryResult } from '@roadmap/contracts/operations'
 import {
-  applicationStateSchema,
+  type CommandOutcome,
+  commandSubject,
+  type QueryResult,
+} from '@roadmap/contracts/operations'
+import {
   connectionSchema,
   type Project,
   type ReadyApplicationState,
@@ -122,14 +124,28 @@ const refreshCommand = {
   project: { integration: 'github', projectId: projectIdSchema.parse('a/one') },
 } satisfies Parameters<ReturnType<typeof createRoadmapStore>['execute']>[0]
 
-function refreshOutcome(next: ReadyApplicationState): CommandOutcome {
+function refreshOutcome(next: ReadyApplicationState): Extract<CommandOutcome, { ok: true }> {
   return {
     ok: true,
     result: {
-      type: 'project-refreshed',
-      project: { integration: 'github', projectId: projectIdSchema.parse('a/one') },
+      type: 'refresh-project',
+      project: refreshCommand.project,
+      attempt: {
+        kind: 'failed',
+        attemptedAt: 100,
+        provenance: {
+          integration: 'github',
+          connectionId: connectionIdSchema.parse('connection-1'),
+          repositoryId: 'repository-1',
+          stage: 'repository',
+        },
+        cause: 'GitHub is temporarily unreachable.',
+      },
     },
-    state: next,
+    operation: 'refresh-project',
+    subject: { kind: 'project', project: refreshCommand.project },
+    serverEpoch: next.serverEpoch,
+    stateSequence: next.stateSequence,
   }
 }
 
@@ -264,6 +280,22 @@ const unreadableReplies = [
   },
 ]
 
+const fixtureRef = refreshCommand.project
+const authorizationId = authorizationOperationIdSchema.parse('authorization-1')
+const version = configurationVersionSchema.parse(2)
+const waiting = {
+  operationId: authorizationId,
+  phase: 'waiting' as const,
+  verificationUri: 'https://github.com/login/device',
+  userCode: 'CODE',
+  expiresAt: 60000,
+}
+const launchResult = {
+  type: 'launch-project-operation' as const,
+  project: fixtureRef,
+  operation: 'open-workspace' as const,
+  status: 'invoked' as const,
+}
 const commandResultPairs: {
   name: string
   command: Parameters<ReturnType<typeof createRoadmapStore>['execute']>[0]
@@ -271,90 +303,29 @@ const commandResultPairs: {
   mismatches: { name: string; result: unknown }[]
 }[] = [
   {
-    name: 'authorization start',
+    name: 'authorization begin',
     command: {
       type: 'begin-github-authorization',
-      expectedConfigurationVersion: configurationVersionSchema.parse(1),
+      expectedConfigurationVersion: version,
       name: 'Work',
     },
-    result: {
-      type: 'authorization-started',
-      operationId: authorizationOperationIdSchema.parse('authorization-1'),
-    },
+    result: { type: 'begin-github-authorization', ...waiting },
     mismatches: [
-      {
-        name: 'operation family',
-        result: { type: 'authorization-cancelled', operationId: 'authorization-1' },
-      },
+      { name: 'operation family', result: { type: 'retry-github-authorization', ...waiting } },
     ],
   },
   {
     name: 'authorization retry',
     command: {
       type: 'retry-github-authorization',
-      expectedConfigurationVersion: configurationVersionSchema.parse(1),
-      operationId: authorizationOperationIdSchema.parse('authorization-1'),
+      expectedConfigurationVersion: version,
+      operationId: authorizationId,
     },
-    result: {
-      type: 'authorization-started',
-      operationId: authorizationOperationIdSchema.parse('authorization-1'),
-    },
+    result: { type: 'retry-github-authorization', ...waiting },
     mismatches: [
       {
         name: 'operation identifier',
-        result: { type: 'authorization-started', operationId: 'authorization-2' },
-      },
-    ],
-  },
-  {
-    name: 'configuration update',
-    command: {
-      type: 'rename-connection',
-      expectedConfigurationVersion: configurationVersionSchema.parse(1),
-      connectionId: connectionIdSchema.parse('connection-1'),
-      name: 'Work',
-    },
-    result: {
-      type: 'configuration-updated',
-      configurationVersion: configurationVersionSchema.parse(1),
-    },
-    mismatches: [
-      {
-        name: 'result/state configuration version',
-        result: { type: 'configuration-updated', configurationVersion: 2 },
-      },
-      { name: 'operation family', result: { type: 'action-launched', actionId: 'action-1' } },
-    ],
-  },
-  {
-    name: 'project refresh',
-    command: {
-      type: 'refresh-project',
-      expectedConfigurationVersion: configurationVersionSchema.parse(1),
-      project: { integration: 'github', projectId: projectIdSchema.parse('a/one') },
-    },
-    result: {
-      type: 'project-refreshed',
-      project: { integration: 'github', projectId: projectIdSchema.parse('a/one') },
-    },
-    mismatches: [
-      {
-        name: 'operation family',
-        result: { type: 'configuration-updated', configurationVersion: 2 },
-      },
-      {
-        name: 'project identifier',
-        result: {
-          type: 'project-refreshed',
-          project: { integration: 'github', projectId: 'b/two' },
-        },
-      },
-      {
-        name: 'project integration',
-        result: {
-          type: 'project-refreshed',
-          project: { integration: 'local', projectId: 'a/one' },
-        },
+        result: { type: 'retry-github-authorization', ...waiting, operationId: 'authorization-2' },
       },
     ],
   },
@@ -362,115 +333,173 @@ const commandResultPairs: {
     name: 'authorization cancellation',
     command: {
       type: 'cancel-github-authorization',
-      expectedConfigurationVersion: configurationVersionSchema.parse(1),
-      operationId: authorizationOperationIdSchema.parse('authorization-1'),
+      expectedConfigurationVersion: version,
+      operationId: authorizationId,
     },
     result: {
-      type: 'authorization-cancelled',
-      operationId: authorizationOperationIdSchema.parse('authorization-1'),
+      type: 'cancel-github-authorization',
+      operationId: authorizationId,
+      phase: 'cancelled',
     },
     mismatches: [
       {
         name: 'operation identifier',
-        result: { type: 'authorization-cancelled', operationId: 'authorization-2' },
+        result: {
+          type: 'cancel-github-authorization',
+          operationId: 'authorization-2',
+          phase: 'cancelled',
+        },
       },
     ],
   },
   {
-    name: 'action launch',
+    name: 'connection rename',
     command: {
-      type: 'launch-action',
-      expectedConfigurationVersion: configurationVersionSchema.parse(1),
-      actionId: actionIdSchema.parse('action-1'),
+      type: 'rename-connection',
+      expectedConfigurationVersion: version,
+      connectionId: connectionIdSchema.parse('connection-1'),
+      name: 'Work',
     },
-    result: { type: 'action-launched', actionId: actionIdSchema.parse('action-1') },
+    result: {
+      type: 'rename-connection',
+      connectionId: connectionIdSchema.parse('connection-1'),
+      configurationVersion: version,
+      commit: 'committed',
+    },
     mismatches: [
-      { name: 'action identifier', result: { type: 'action-launched', actionId: 'action-2' } },
+      { name: 'operation family', result: launchResult },
+      {
+        name: 'connection identifier',
+        result: {
+          type: 'rename-connection',
+          connectionId: 'connection-2',
+          configurationVersion: version,
+          commit: 'committed',
+        },
+      },
+    ],
+  },
+  {
+    name: 'project refresh',
+    command: refreshCommand,
+    result: refreshOutcome(state(2)).result,
+    mismatches: [
+      { name: 'operation family', result: launchResult },
+      {
+        name: 'project identifier',
+        result: {
+          ...refreshOutcome(state(2)).result,
+          project: { integration: 'github', projectId: 'b/two' },
+        },
+      },
+      {
+        name: 'project integration',
+        result: {
+          ...refreshOutcome(state(2)).result,
+          project: { integration: 'local', projectId: 'a/one' },
+        },
+      },
+    ],
+  },
+  {
+    name: 'native invocation',
+    command: {
+      type: 'launch-project-operation',
+      expectedConfigurationVersion: version,
+      project: fixtureRef,
+      operation: 'open-workspace',
+    },
+    result: launchResult,
+    mismatches: [
+      { name: 'finite operation', result: { ...launchResult, operation: 'open-terminal' } },
+      {
+        name: 'project scope',
+        result: { ...launchResult, project: { integration: 'local', projectId: 'a/one' } },
+      },
     ],
   },
   {
     name: 'automation override',
     command: {
       type: 'start-automation-override',
-      expectedConfigurationVersion: configurationVersionSchema.parse(1),
+      expectedConfigurationVersion: version,
       target: {
-        map: {
-          project: { integration: 'github', projectId: projectIdSchema.parse('a/one') },
-          mapId: mapIdSchema.parse('map-1'),
-        },
+        map: { project: fixtureRef, mapId: mapIdSchema.parse('map-1') },
         ticketId: ticketIdSchema.parse('ticket-1'),
       },
       stage: 'classification',
     },
     result: {
-      type: 'automation-override-started',
+      type: 'start-automation-override',
       target: {
-        map: {
-          project: { integration: 'github', projectId: projectIdSchema.parse('a/one') },
-          mapId: mapIdSchema.parse('map-1'),
-        },
+        map: { project: fixtureRef, mapId: mapIdSchema.parse('map-1') },
         ticketId: ticketIdSchema.parse('ticket-1'),
       },
       stage: 'classification',
+      admission: 'override',
+      status: 'admitted',
     },
     mismatches: [
-      {
-        name: 'project identifier',
-        result: {
-          type: 'automation-override-started',
-          target: {
-            map: { project: { integration: 'github', projectId: 'b/two' }, mapId: 'map-1' },
-            ticketId: 'ticket-1',
-          },
-          stage: 'classification',
-        },
-      },
-      {
-        name: 'project integration',
-        result: {
-          type: 'automation-override-started',
-          target: {
-            map: { project: { integration: 'local', projectId: 'a/one' }, mapId: 'map-1' },
-            ticketId: 'ticket-1',
-          },
-          stage: 'classification',
-        },
-      },
-      {
-        name: 'map identifier',
-        result: {
-          type: 'automation-override-started',
-          target: {
-            map: { project: { integration: 'github', projectId: 'a/one' }, mapId: 'map-2' },
-            ticketId: 'ticket-1',
-          },
-          stage: 'classification',
-        },
-      },
+      { name: 'operation family', result: launchResult },
       {
         name: 'ticket identifier',
         result: {
-          type: 'automation-override-started',
-          target: {
-            map: { project: { integration: 'github', projectId: 'a/one' }, mapId: 'map-1' },
-            ticketId: 'ticket-2',
-          },
+          type: 'start-automation-override',
+          target: { map: { project: fixtureRef, mapId: 'map-1' }, ticketId: 'ticket-2' },
           stage: 'classification',
-        },
-      },
-      {
-        name: 'override stage',
-        result: {
-          type: 'automation-override-started',
-          target: {
-            map: { project: { integration: 'github', projectId: 'a/one' }, mapId: 'map-1' },
-            ticketId: 'ticket-1',
-          },
-          stage: 'wayfinder',
+          admission: 'override',
+          status: 'admitted',
         },
       },
     ],
   },
+  ...(['project identifier', 'project integration', 'map identifier', 'stage'] as const).map(
+    (name) => {
+      const target = {
+        map: { project: fixtureRef, mapId: mapIdSchema.parse('map-1') },
+        ticketId: ticketIdSchema.parse('ticket-1'),
+      }
+      return {
+        name: `automation override ${name}`,
+        command: {
+          type: 'start-automation-override' as const,
+          expectedConfigurationVersion: version,
+          target,
+          stage: 'classification' as const,
+        },
+        result: {
+          type: 'start-automation-override' as const,
+          target,
+          stage: 'classification' as const,
+          admission: 'override' as const,
+          status: 'admitted' as const,
+        },
+        mismatches: [
+          {
+            name,
+            result: {
+              type: 'start-automation-override',
+              admission: 'override',
+              status: 'admitted',
+              stage: name === 'stage' ? 'wayfinder' : 'classification',
+              target: {
+                ...target,
+                map: {
+                  project:
+                    name === 'project identifier'
+                      ? { integration: 'github', projectId: 'b/two' }
+                      : name === 'project integration'
+                        ? { integration: 'local', projectId: 'a/one' }
+                        : fixtureRef,
+                  mapId: name === 'map identifier' ? 'map-2' : 'map-1',
+                },
+              },
+            },
+          },
+        ],
+      }
+    },
+  ),
 ]
 
 function deferred<T>() {
@@ -494,7 +523,27 @@ function harness(fetchRequest: typeof fetch = fetch) {
       sockets.push(socket)
       return socket
     },
-    fetch: fetchRequest,
+    fetch: async (input, init) => {
+      const response = await fetchRequest(input, init)
+      // Echo the initiating correlation in otherwise-valid application fixture replies.
+      const body: unknown = await response
+        .clone()
+        .json()
+        .catch(() => null)
+      if (
+        body &&
+        typeof body === 'object' &&
+        'type' in body &&
+        (body.type === 'command-result' || body.type === 'query-result') &&
+        !('correlationId' in body)
+      ) {
+        return jsonResponse(
+          { ...body, correlationId: new Headers(init?.headers).get('X-Roadmap-Request-Id') },
+          response.status,
+        )
+      }
+      return response
+    },
     reconnectDelayMs: (attempt) => {
       delays.push(attempt)
       return 0
@@ -613,9 +662,9 @@ describe('createRoadmapStore', () => {
   it.each([
     { name: 'equal', responseSequence: 4, expectedSequence: 4, expectedProject: 'socket-newest' },
     { name: 'older', responseSequence: 3, expectedSequence: 4, expectedProject: 'socket-newest' },
-    { name: 'newer', responseSequence: 5, expectedSequence: 5, expectedProject: 'http-newest' },
+    { name: 'newer', responseSequence: 5, expectedSequence: 4, expectedProject: 'socket-newest' },
   ])(
-    'orders $name same-epoch HTTP state within its request-start authority',
+    'retains WebSocket facts for a $name same-epoch HTTP outcome',
     async ({ responseSequence, expectedSequence, expectedProject }) => {
       const response = deferred<Response>()
       const { store, sockets } = harness(() => response.promise)
@@ -1022,7 +1071,7 @@ describe('createRoadmapStore', () => {
     expect(store.getSnapshot().transport).toBe('connecting')
   })
 
-  it('applies a command response before resolving execute and records application errors', async () => {
+  it('records application rejection without adopting its producer sequence', async () => {
     const response = deferred<Response>()
     const fetchRequest = () => response.promise
     const { store, sockets } = harness(fetchRequest as typeof fetch)
@@ -1039,11 +1088,14 @@ describe('createRoadmapStore', () => {
     const outcome: CommandOutcome = {
       ok: false,
       error: { code: 'conflict', message: 'Configuration changed.' },
-      state: state(2),
+      operation: 'rename-connection',
+      subject: { kind: 'connection', connectionId: connectionIdSchema.parse('github-1') },
+      serverEpoch: serverEpochSchema.parse('epoch-a'),
+      stateSequence: stateSequenceSchema.parse(2),
     }
     response.resolve(jsonResponse({ type: 'command-result', outcome }))
     await expect(execution).resolves.toEqual(outcome)
-    expect(store.getSnapshot().state?.stateSequence).toBe(2)
+    expect(store.getSnapshot().state?.stateSequence).toBe(1)
     expect(store.getSnapshot().command).toEqual({ inFlight: false, error: outcome.error })
   })
 
@@ -1059,14 +1111,7 @@ describe('createRoadmapStore', () => {
       project: { integration: 'github', projectId: projectIdSchema.parse('a/one') },
     })
     sockets[0]?.emit('message', wire(state(3, 'epoch-a', [project('newer')])))
-    const outcome: CommandOutcome = {
-      ok: true,
-      result: {
-        type: 'project-refreshed',
-        project: { integration: 'github', projectId: projectIdSchema.parse('a/one') },
-      },
-      state: state(2, 'epoch-a', [project('older-response')]),
-    }
+    const outcome = refreshOutcome(state(2, 'epoch-a'))
     response.resolve(jsonResponse({ type: 'command-result', outcome }))
     await execution
 
@@ -1101,9 +1146,10 @@ describe('createRoadmapStore', () => {
     })
     await expect(
       store.execute({
-        type: 'launch-action',
+        type: 'launch-project-operation',
         expectedConfigurationVersion: configurationVersionSchema.parse(1),
-        actionId: actionIdSchema.parse('action-1'),
+        project: refreshCommand.project,
+        operation: 'open-workspace',
       }),
     ).rejects.toBeInstanceOf(Error)
     expect(store.getSnapshot().command.error?.message).not.toContain('private-token')
@@ -1204,14 +1250,7 @@ describe('createRoadmapStore', () => {
   )
 
   it('keeps command completion unknown for a valid application envelope on HTTP 500', async () => {
-    const outcome: CommandOutcome = {
-      ok: true,
-      result: {
-        type: 'project-refreshed',
-        project: projectRefSchema.parse({ integration: 'github', projectId: 'a/one' }),
-      },
-      state: state(99),
-    }
+    const outcome = refreshOutcome(state(99))
     let attempts = 0
     const fetchRequest: typeof fetch = async () => {
       attempts += 1
@@ -1241,8 +1280,11 @@ describe('createRoadmapStore', () => {
   it('keeps query completion uncertain for a valid application envelope on HTTP 500', async () => {
     const result: QueryResult = {
       ok: true,
-      type: 'workspace-selection',
-      path: '/selected/workspace',
+      operation: 'select-workspace',
+      subject: { kind: 'none' },
+      serverEpoch: serverEpochSchema.parse('epoch-a'),
+      stateSequence: stateSequenceSchema.parse(2),
+      result: { kind: 'selected', path: '/selected/workspace' },
     }
     let attempts = 0
     const fetchRequest: typeof fetch = async () => {
@@ -1375,7 +1417,14 @@ describe('createRoadmapStore', () => {
   for (const { name, command, result, mismatches } of commandResultPairs) {
     it(`accepts the matching successful result for ${name}`, async () => {
       let attempts = 0
-      const outcome: CommandOutcome = { ok: true, result, state: state(2) }
+      const outcome = {
+        ok: true,
+        result,
+        operation: command.type,
+        subject: commandSubject(command),
+        serverEpoch: serverEpochSchema.parse('epoch-a'),
+        stateSequence: stateSequenceSchema.parse(2),
+      }
       const fetchRequest: typeof fetch = async () => {
         attempts += 1
         return jsonResponse({ type: 'command-result', outcome })
@@ -1386,7 +1435,7 @@ describe('createRoadmapStore', () => {
 
       await expect(store.execute(command)).resolves.toEqual(outcome)
 
-      expect(store.getSnapshot().state?.stateSequence).toBe(2)
+      expect(store.getSnapshot().state?.stateSequence).toBe(1)
       expect(store.getSnapshot().command).toEqual({ inFlight: false, error: null })
       expect(attempts).toBe(1)
     })
@@ -1395,7 +1444,14 @@ describe('createRoadmapStore', () => {
       `rejects a successful ${name} result with the wrong $name without replacing state`,
       async ({ result: wrongResult }) => {
         let attempts = 0
-        const outcome: unknown = { ok: true, result: wrongResult, state: state(99) }
+        const outcome = {
+          ok: true,
+          result: wrongResult,
+          operation: command.type,
+          subject: commandSubject(command),
+          serverEpoch: 'epoch-a',
+          stateSequence: 99,
+        }
         const fetchRequest: typeof fetch = async () => {
           attempts += 1
           return jsonResponse({ type: 'command-result', outcome })
@@ -1417,137 +1473,33 @@ describe('createRoadmapStore', () => {
     )
   }
 
-  it.each([{ phase: 'stopping' }, { phase: 'stopped' }, { phase: 'failed' }] satisfies {
-    phase: 'stopping' | 'stopped' | 'failed'
-  }[])(
-    'uses the actual retained saved configuration version in a $phase completion',
-    async ({ phase }) => {
-      const saved = { ...state(98), configurationVersion: configurationVersionSchema.parse(2) }
-      const outcome: CommandOutcome = {
+  it.each(['committed', 'committed-unconfirmed'] as const)(
+    'preserves %s configuration truth without replacing read facts',
+    async (commit) => {
+      const outcome = {
         ok: true,
-        result: {
-          type: 'configuration-updated',
-          configurationVersion: configurationVersionSchema.parse(2),
-        },
-        state: applicationStateSchema.parse({
-          phase,
-          serverEpoch: 'epoch-a',
-          stateSequence: 99,
-          capturedAt: 99000,
-          retained: saved,
-          ...(phase === 'failed' ? { cause: 'Shutdown failed after the write.' } : {}),
-        }),
-      }
-      const command = {
-        type: 'set-automation-enabled',
-        expectedConfigurationVersion: configurationVersionSchema.parse(1),
-        enabled: true,
-      } satisfies Parameters<ReturnType<typeof createRoadmapStore>['execute']>[0]
-      const { store, sockets } = harness(async () =>
-        jsonResponse({ type: 'command-result', outcome }),
-      )
-      store.start()
-      sockets[0]?.emit('message', wire(state(1)))
-
-      await expect(store.execute(command)).resolves.toEqual(outcome)
-      expect(store.getSnapshot().state).toEqual(outcome.state)
-      expect(store.getSnapshot().command).toEqual({ inFlight: false, error: null })
-
-      const wrongOutcome: unknown = {
-        ...outcome,
-        result: { type: 'configuration-updated', configurationVersion: 1 },
-      }
-      const rejected = harness(async () =>
-        jsonResponse({ type: 'command-result', outcome: wrongOutcome }),
-      )
-      rejected.store.start()
-      rejected.sockets[0]?.emit('message', wire(state(1)))
-      const previous = rejected.store.getSnapshot().state
-
-      await expect(rejected.store.execute(command)).rejects.toBeInstanceOf(Error)
-      expect(rejected.store.getSnapshot().state).toBe(previous)
-      expect(rejected.store.getSnapshot().command).toMatchObject({
-        inFlight: false,
-        error: { code: 'transport-failed' },
-      })
-    },
-  )
-
-  it.each([
-    { phase: 'idle' },
-    { phase: 'starting' },
-    { phase: 'stopping', retained: null },
-    { phase: 'stopped', retained: null },
-    { phase: 'failed', retained: null, cause: 'No saved state.' },
-  ])(
-    'refuses a configuration update without saved version evidence in $phase',
-    async (publication) => {
-      const outcome: unknown = {
-        ok: true,
-        result: { type: 'configuration-updated', configurationVersion: 2 },
-        state: { ...publication, serverEpoch: 'epoch-a', stateSequence: 99, capturedAt: 99000 },
+        operation: 'set-automation-enabled',
+        subject: { kind: 'automation' },
+        serverEpoch: 'epoch-a',
+        stateSequence: 99,
+        result: { type: 'set-automation-enabled', enabled: true, configurationVersion: 2, commit },
       }
       const { store, sockets } = harness(async () =>
         jsonResponse({ type: 'command-result', outcome }),
       )
       store.start()
-      sockets[0]?.emit('message', wire(state(1)))
+      sockets[0]?.emit('message', wire(state(4)))
       const previous = store.getSnapshot().state
-
       await expect(
         store.execute({
           type: 'set-automation-enabled',
-          expectedConfigurationVersion: configurationVersionSchema.parse(1),
           enabled: true,
-        }),
-      ).rejects.toBeInstanceOf(Error)
-      expect(store.getSnapshot().state).toBe(previous)
-      expect(store.getSnapshot().command).toMatchObject({
-        inFlight: false,
-        error: { code: 'transport-failed' },
-      })
-    },
-  )
-
-  it.each(['epoch-a', 'epoch-b'])(
-    'preserves a valid configuration completion independently of state replacement in %s',
-    async (serverEpoch) => {
-      const outcome: CommandOutcome = {
-        ok: true,
-        result: {
-          type: 'configuration-updated',
-          configurationVersion: configurationVersionSchema.parse(2),
-        },
-        state: {
-          ...state(2, serverEpoch),
-          configurationVersion: configurationVersionSchema.parse(2),
-        },
-      }
-      const { store, sockets } = harness(async () =>
-        jsonResponse({ type: 'command-result', outcome }),
-      )
-      store.start()
-      sockets[0]?.emit(
-        'message',
-        wire({
-          ...state(4),
-          configurationVersion: configurationVersionSchema.parse(3),
-        }),
-      )
-      const previous = store.getSnapshot().state
-
-      await expect(
-        store.execute({
-          type: 'set-automation-enabled',
           expectedConfigurationVersion: configurationVersionSchema.parse(1),
-          enabled: true,
         }),
       ).resolves.toEqual(outcome)
       expect(store.getSnapshot().state).toBe(previous)
-      expect(store.getSnapshot().command).toEqual({ inFlight: false, error: null })
-      expect(store.getSnapshot().synchronization).toBe(
-        serverEpoch === 'epoch-a' ? 'synchronized' : 'retained',
-      )
+      expect(readyStateOf(store)?.automation.enabled).toBe(false)
+      expect(readyStateOf(store)?.configurationVersion).toBe(1)
     },
   )
 
@@ -1581,22 +1533,51 @@ describe('createRoadmapStore', () => {
     expect(store.getSnapshot().state).toBe(retainedState)
   })
 
-  it('decodes query results and reports malformed results as transport failures', async () => {
-    const success: QueryResult = {
-      ok: true,
-      type: 'workspace-selection',
-      path: '/selected/workspace',
+  it('keeps selected, cancelled and rejected folder truth separate from local unknown completion', async () => {
+    const provenance = {
+      operation: 'select-workspace' as const,
+      subject: { kind: 'none' as const },
+      serverEpoch: serverEpochSchema.parse('selector-epoch'),
+      stateSequence: stateSequenceSchema.parse(20),
     }
-    const replies = [
-      jsonResponse({ type: 'query-result', result: success }),
-      jsonResponse({ type: 'query-result', result: { ...success, token: 'secret' } }),
-    ]
-    const { store } = harness((async () => replies.shift() ?? new Response()) as typeof fetch)
-
-    await expect(store.query({ type: 'select-workspace' })).resolves.toEqual(success)
-    await expect(store.query({ type: 'select-workspace' })).resolves.toMatchObject({
+    const selected: QueryResult = {
+      ...provenance,
+      ok: true,
+      result: { kind: 'selected', path: ' /selected/workspace ' },
+    }
+    const cancelled: QueryResult = { ...provenance, ok: true, result: { kind: 'cancelled' } }
+    const failed: QueryResult = {
+      ...provenance,
+      ok: false,
+      error: { code: 'selection-failed', message: 'Selection failed.' },
+    }
+    const lifecycle: QueryResult = {
+      ...provenance,
+      ok: false,
+      error: { code: 'dependency', message: 'Application stopped.' },
+    }
+    const replies = [selected, cancelled, failed, lifecycle, { ...selected, token: 'secret' }]
+    let attempts = 0
+    const { store, sockets } = harness(async () => {
+      attempts += 1
+      return jsonResponse({ type: 'query-result', result: replies.shift() })
+    })
+    store.start()
+    sockets[0]?.emit('message', wire(state(1)))
+    const retained = store.getSnapshot().state
+    for (const expected of [selected, cancelled, failed, lifecycle]) {
+      await expect(store.query({ type: 'select-workspace' })).resolves.toEqual(expected)
+      expect(store.getSnapshot().state).toBe(retained)
+    }
+    const unknown = await store.query({ type: 'select-workspace' })
+    expect(unknown).toMatchObject({
+      kind: 'completion-unknown',
       ok: false,
       error: { code: 'transport-failed' },
     })
+    expect(unknown).not.toHaveProperty('serverEpoch')
+    expect(unknown).not.toHaveProperty('stateSequence')
+    expect(store.getSnapshot().state).toBe(retained)
+    expect(attempts).toBe(5)
   })
 })

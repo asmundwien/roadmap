@@ -201,7 +201,7 @@ async function handleApiRequest(
   lifetime: ApiRequestLifetime,
 ): Promise<void> {
   const requestKind = path === QUERY_PATH ? 'query' : 'command'
-  let requestId: string | null = null
+  let requestId: RequestRejection['requestId'] = null
 
   const reject = async (reason: RequestRejection['reason'], message: string): Promise<void> => {
     const rejection: RequestRejection = {
@@ -256,21 +256,39 @@ async function handleApiRequest(
         await reject('malformed-envelope', 'Malformed query request.')
         return
       }
+      if (requestId !== decoded.value.correlationId) {
+        await reject('malformed-envelope', 'Request header and body correlation must match.')
+        return
+      }
       if (!lifetime.admit()) return
       const result = await options.application.query(decoded.value.query)
-      const envelope: QueryResultEnvelope = { type: 'query-result', result }
-      await lifetime.sendJson(200, envelope, false, decodeQueryResultEnvelope)
+      const envelope: QueryResultEnvelope = {
+        type: 'query-result',
+        correlationId: decoded.value.correlationId,
+        result,
+      }
+      await lifetime.sendJson(200, envelope, false, (input) =>
+        decodeQueryResultEnvelope(input, decoded.value.query, decoded.value.correlationId),
+      )
     } else {
       const decoded = decodeCommandEnvelope(input)
       if (!decoded.ok) {
         await reject('malformed-envelope', 'Malformed command request.')
         return
       }
+      if (requestId !== decoded.value.correlationId) {
+        await reject('malformed-envelope', 'Request header and body correlation must match.')
+        return
+      }
       if (!lifetime.admit()) return
       const outcome = await options.application.execute(decoded.value.command)
-      const envelope: CommandResultEnvelope = { type: 'command-result', outcome }
+      const envelope: CommandResultEnvelope = {
+        type: 'command-result',
+        correlationId: decoded.value.correlationId,
+        outcome,
+      }
       await lifetime.sendJson(200, envelope, false, (input) =>
-        decodeCommandResultEnvelope(input, decoded.value.command),
+        decodeCommandResultEnvelope(input, decoded.value.command, decoded.value.correlationId),
       )
     }
   }

@@ -1,3 +1,16 @@
-import { IDs } from './inputs.ts'
-export const candidate = { ok: true, type: 'action-launched', actionId: IDs.action } as const
-export const invalid = candidate satisfies import('@roadmap/contracts/operations').QueryResult
+import type { Command, CommandOutcomeFor, QueryResult } from '@roadmap/contracts/operations'
+import { IDs, project } from './inputs.ts'
+export const candidate = {
+  operation: 'launch-project-operation',
+  subject: { kind: 'project', project },
+  serverEpoch: IDs.epoch,
+  stateSequence: IDs.sequence,
+  ok: true,
+  result: {
+    type: 'launch-project-operation',
+    project,
+    operation: 'open-workspace',
+    status: 'invoked',
+  },
+} as const satisfies CommandOutcomeFor<Extract<Command, { type: 'launch-project-operation' }>>
+export const invalid = candidate satisfies QueryResult

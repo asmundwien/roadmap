@@ -1,11 +1,15 @@
 import type { ConnectionId } from '@roadmap/contracts/identity'
+import type { CommandResult, SafeError } from '@roadmap/contracts/operations'
 import { Alert } from '@roadmap/ui/alert'
 import { Link as ExternalLink } from '@roadmap/ui/link'
 import { Page, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
 import classNames from 'classnames/bind'
+import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router'
 import { Link } from '@/navigation'
 import { routePaths } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
+import { ErrorText } from '@/views/shared/settings-shared'
 import { AvailabilityLabel } from './availability-label'
 import { DetailsSection } from './details-section'
 import { ManageSection } from './manage-section'
@@ -15,9 +19,65 @@ const cx = classNames.bind(pageStyles)
 
 type ConnectionPageProps = { connectionId: ConnectionId }
 
+type RemovalFeedback =
+  | { kind: 'pending' }
+  | { kind: 'unconfirmed'; result: Extract<CommandResult, { type: 'remove-connection' }> }
+  | { kind: 'error'; error: SafeError | string }
+
 export function ConnectionPage({ connectionId }: ConnectionPageProps) {
-  const { connections, supportedIntegrations, configuration } = useRoadmap()
+  return <ConnectionDetail key={connectionId} connectionId={connectionId} />
+}
+
+function ConnectionDetail({ connectionId }: ConnectionPageProps) {
+  const { connections, supportedIntegrations, configuration, configurationVersion, execute } =
+    useRoadmap()
+  const navigate = useNavigate()
+  const [removal, setRemoval] = useState<RemovalFeedback | null>(null)
+  const active = useRef(true)
+  useEffect(() => {
+    active.current = true
+    return () => {
+      active.current = false
+    }
+  }, [])
   const connection = connections.find((candidate) => candidate.id === connectionId)
+  const remove = async () => {
+    setRemoval({ kind: 'pending' })
+    try {
+      const outcome = await execute({
+        type: 'remove-connection',
+        expectedConfigurationVersion: configurationVersion,
+        connectionId,
+      })
+      if (!active.current) return
+      if (!outcome.ok) {
+        setRemoval({ kind: 'error', error: outcome.error })
+      } else if (outcome.result.commit === 'committed') {
+        setRemoval(null)
+        navigate(routePaths.connections, { replace: true })
+      } else {
+        setRemoval({ kind: 'unconfirmed', result: outcome.result })
+      }
+    } catch {
+      if (active.current)
+        setRemoval({
+          kind: 'error',
+          error: `Connection ${connectionId} removal may have completed. Check the relevant configuration before retrying.`,
+        })
+    }
+  }
+  const feedback =
+    removal?.kind === 'pending' ? (
+      <Alert variant="info">
+        {`Waiting for the removal result for Connection ${connectionId}. Current configuration does not confirm this operation's durability.`}
+      </Alert>
+    ) : removal?.kind === 'unconfirmed' ? (
+      <Alert variant="info">
+        {`Connection ${removal.result.connectionId} removal committed at configuration version ${removal.result.configurationVersion}, but durability is unconfirmed. External GitHub authorization and repositories remain unchanged.`}
+      </Alert>
+    ) : removal?.kind === 'error' ? (
+      <ErrorText error={removal.error} />
+    ) : null
 
   if (!connection) {
     return (
@@ -28,6 +88,7 @@ export function ConnectionPage({ connectionId }: ConnectionPageProps) {
             <PageTitle>Connection not found</PageTitle>
           </div>
         </PageHeader>
+        {feedback}
         <Link href={routePaths.connections}>Back to Connections</Link>
       </Page>
     )
@@ -48,6 +109,7 @@ export function ConnectionPage({ connectionId }: ConnectionPageProps) {
           </ExternalLink>
         )}
       </PageHeader>
+      {feedback}
       {!configuration.valid && (
         <Alert>
           <strong>Configuration needs repair.</strong>
@@ -56,7 +118,12 @@ export function ConnectionPage({ connectionId }: ConnectionPageProps) {
       )}
       <AvailabilityLabel connection={connection} />
       <DetailsSection connection={connection} />
-      <ManageSection connection={connection} />
+      <ManageSection
+        key={connection.id}
+        connection={connection}
+        removing={removal?.kind === 'pending'}
+        onRemove={remove}
+      />
     </Page>
   )
 }

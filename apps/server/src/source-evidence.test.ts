@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { commandSchema } from '@roadmap/contracts/operations'
 import type { ReadyApplicationState } from '@roadmap/contracts/state'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRoadmapApplication, type RoadmapApplication } from './application/application.ts'
@@ -209,7 +210,13 @@ async function controlledEvidenceApplication() {
       async stop() {},
     },
     admissions: fixtureAdmissions,
-    operations: createApplicationOperations(),
+    operations: createApplicationOperations({
+      host: {
+        async execute() {
+          throw new Error('Source refresh must not dispatch a host operation')
+        },
+      },
+    }),
     observers: { local: () => localControl.observer, github: () => remoteControl.observer },
     serverEpoch: 'controlled-source-evidence',
   })
@@ -225,6 +232,7 @@ async function controlledEvidenceApplication() {
     readLocal,
     readGitHub,
     localControl,
+    remoteControl,
     push(integration: 'local' | 'github', batch: ObservationBatch) {
       if (integration === 'local') localControl.push(batch)
       else remoteControl.push(batch, remoteHealth)
@@ -240,6 +248,127 @@ function sourceTime(state: ReadyApplicationState, integration: 'local' | 'github
 }
 
 describe('source evidence through RoadmapApplication', () => {
+  it.each(['local', 'github'] as const)(
+    'acknowledges an identical committed %s observation through the public operation',
+    async (integration) => {
+      const controlled = await controlledEvidenceApplication()
+      const current = readApplicationState(controlled.application.current())
+      const original = current.projects.find((project) => project.ref.integration === integration)
+      if (!original) throw new Error('Missing configured source Project')
+      const fixture = integration === 'local' ? controlled.local : controlled.github
+      const owner = integration === 'local' ? controlled.readLocal : controlled.readGitHub
+      const observer =
+        integration === 'local'
+          ? controlled.localControl.observer
+          : controlled.remoteControl.observer
+      vi.setSystemTime(2_000)
+      const batch = owner([fixture], 1_800, controlled.configuration)
+      vi.spyOn(observer, 'refresh').mockResolvedValueOnce({
+        project: fixture.key,
+        attempts: batch.attempts,
+        health: { status: 'available', observedAt: 1_800 },
+      })
+      const command = commandSchema.parse({
+        type: 'refresh-project',
+        expectedConfigurationVersion: current.configurationVersion,
+        project: original.ref,
+      })
+      const outcome = await controlled.application.execute(command)
+      expect(outcome).toMatchObject({
+        operation: 'refresh-project',
+        subject: { kind: 'project', project: original.ref },
+        ok: true,
+        result: {
+          type: 'refresh-project',
+          project: original.ref,
+          attempt: { kind: 'observed', attemptedAt: 1_800, observedAt: 1_800 },
+        },
+      })
+      expect(outcome).not.toHaveProperty('state')
+      const updated = readApplicationState(controlled.application.current())
+      expect(sourceTime(updated, integration)).toBe(1_800)
+      expect(
+        updated.projects.find((project) => project.ref.integration === integration)?.name,
+      ).toBe(original.name)
+      expect(
+        updated.projects.find((project) => project.ref.integration === integration)?.ref,
+      ).toEqual(original.ref)
+    },
+  )
+
+  it.each(['permission', 'authorization'] as const)(
+    'returns degraded retained evidence after an actual %s refresh failure',
+    async (failure) => {
+      const controlled = await controlledEvidenceApplication()
+      const integration = failure === 'permission' ? 'local' : 'github'
+      const current = readApplicationState(controlled.application.current())
+      const original = current.projects.find((project) => project.ref.integration === integration)
+      if (!original) throw new Error('Missing configured source Project')
+      const fixture = integration === 'local' ? controlled.local : controlled.github
+      const owner = integration === 'local' ? controlled.readLocal : controlled.readGitHub
+      const observer =
+        integration === 'local'
+          ? controlled.localControl.observer
+          : controlled.remoteControl.observer
+      const batch = owner([fixture], 1_900, controlled.configuration)
+      const attempt = batch.attempts.find(
+        (entry) => entry.kind === 'observed' && entry.scope.kind === 'project',
+      )
+      if (!attempt) throw new Error('Missing Project root control')
+      vi.setSystemTime(2_000)
+      vi.spyOn(observer, 'refresh').mockResolvedValueOnce({
+        project: fixture.key,
+        attempts: [
+          {
+            kind: 'failed',
+            readSequence: attempt.readSequence,
+            scope: attempt.scope,
+            attemptedAt: 1_900,
+            provenance: attempt.provenance,
+            failure:
+              failure === 'permission'
+                ? { kind: 'filesystem', operation: 'inspect-root', code: 'EACCES' }
+                : { kind: 'authorization', proof: 'authorization-required' },
+          },
+        ],
+        health:
+          failure === 'permission'
+            ? { status: 'unavailable', cause: 'Read failed.' }
+            : { status: 'authorization-required', cause: 'Authorization is required.' },
+      })
+      const outcome = await controlled.application.execute(
+        commandSchema.parse({
+          type: 'refresh-project',
+          expectedConfigurationVersion: current.configurationVersion,
+          project: original.ref,
+        }),
+      )
+      expect(outcome).toMatchObject({
+        operation: 'refresh-project',
+        subject: { kind: 'project', project: original.ref },
+        ok: true,
+        result: {
+          type: 'refresh-project',
+          project: original.ref,
+          attempt: {
+            kind: 'degraded',
+            attemptedAt: 1_900,
+            observedAt: integration === 'local' ? 800 : 900,
+            cause:
+              failure === 'permission'
+                ? 'Workspace read permission was denied.'
+                : 'GitHub authorization is required.',
+          },
+        },
+      })
+      const updated = readApplicationState(controlled.application.current())
+      expect(sourceTime(updated, integration)).toBe(integration === 'local' ? 800 : 900)
+      expect(
+        updated.projects.find((project) => project.ref.integration === integration)?.resource.kind,
+      ).toBe('retained-unavailable')
+    },
+  )
+
   it('advances only the successfully observed source when unchanged content is read again', async () => {
     const controlled = await controlledEvidenceApplication()
     const { application, local, github, states, configuration } = controlled

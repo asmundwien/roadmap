@@ -1,18 +1,30 @@
-import type { ConfigurationVersion, ConnectionId } from '@roadmap/contracts/identity'
-import type { Command } from '@roadmap/contracts/operations'
+import type { ConfigurationVersion } from '@roadmap/contracts/identity'
+import type { Command, CommandResultFor } from '@roadmap/contracts/operations'
 import type { AuthorizationOperation, Connection, Project } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
 import { ControlGroup } from '@roadmap/ui/control-group'
 import { Link } from '@roadmap/ui/link'
 import { Surface, SurfaceTitle } from '@roadmap/ui/surface'
-import { useState } from 'react'
-import { useNavigate } from 'react-router'
-import { routePaths } from '@/router'
-import { authorizationStatus } from '@/views/settings/connections/connection-details'
+import { useRef, useState } from 'react'
+import {
+  type AuthorizationResultFeedback,
+  authorizationResultPending,
+  authorizationStatus,
+  consumeAuthorizationFeedback,
+} from '@/views/settings/connections/connection-details'
 import { AuthorizationControls, DeviceCode } from '@/views/shared/authorization-presentation'
 
-type RunCommand = (command: Command) => Promise<boolean>
+type RunCommand = <C extends Command>(command: C) => Promise<CommandResultFor<C> | null>
+type AuthorizationCommand = Extract<
+  Command,
+  {
+    type:
+      | 'reauthorize-github-connection'
+      | 'retry-github-authorization'
+      | 'cancel-github-authorization'
+  }
+>
 
 type AuthorizationGroupProps = {
   connection: Connection
@@ -29,47 +41,87 @@ export function AuthorizationGroup({
   blocked,
   run,
 }: AuthorizationGroupProps) {
+  const [feedback, setFeedback] = useState<AuthorizationResultFeedback | null>(null)
+  const currentAuthorization = useRef(authorization)
+  currentAuthorization.current = authorization
+  const reconciledFeedback = feedback ? consumeAuthorizationFeedback(authorization, feedback) : null
+  if (reconciledFeedback !== feedback) setFeedback(reconciledFeedback)
+  const result = authorizationResultPending(authorization, reconciledFeedback)
+    ? reconciledFeedback?.result
+    : null
+  const perform = async <C extends AuthorizationCommand>(command: C) => {
+    const next = await run(command)
+    if (next) {
+      setFeedback(
+        consumeAuthorizationFeedback(currentAuthorization.current, {
+          result: next,
+          previous: authorization,
+          consumed: currentAuthorization.current !== authorization,
+        }),
+      )
+    }
+  }
   const reauthenticate = () => {
-    if (
-      authorization &&
-      authorization.status !== 'granted' &&
-      !(authorization.status === 'terminal' && authorization.outcome === 'cancelled')
-    ) {
-      void run({
+    const operationId = result?.operationId ?? authorization?.id
+    const retry = result
+      ? result.phase !== 'granted' && result.phase !== 'cancelled'
+      : authorization &&
+        authorization.status !== 'granted' &&
+        !(authorization.status === 'terminal' && authorization.outcome === 'cancelled')
+    if (retry && operationId) {
+      void perform({
         type: 'retry-github-authorization',
         expectedConfigurationVersion: configurationVersion,
-        operationId: authorization.id,
+        operationId,
       })
       return
     }
-    void run({
-      type: 'begin-github-authorization',
+    void perform({
+      type: 'reauthorize-github-connection',
       expectedConfigurationVersion: configurationVersion,
       connectionId: connection.id,
-      name: connection.name,
     })
   }
+  const waiting = result
+    ? result.phase === 'waiting'
+      ? result
+      : null
+    : authorization?.status === 'waiting'
+      ? authorization
+      : null
+  const waitingOperationId = result?.operationId ?? authorization?.id
 
   return (
     <Surface variant="subtle">
       <SurfaceTitle>GitHub authorization</SurfaceTitle>
-      {authorization?.status === 'waiting' ? (
+      {result && result.phase !== 'waiting' && (
+        <Alert variant={result.phase === 'granted' ? 'info' : undefined}>
+          {result.phase === 'granted'
+            ? `Connection ${result.connection.connectionId} authorized at configuration version ${result.configurationVersion}.`
+            : result.phase === 'failed' || result.phase === 'denied'
+              ? result.error.message
+              : result.phase === 'expired'
+                ? 'GitHub authorization expired.'
+                : 'GitHub authorization cancelled. Existing credentials and provider authorization remain unchanged.'}
+        </Alert>
+      )}
+      {waiting && waitingOperationId ? (
         <>
           <p>Waiting for GitHub. Authorization progress is live server state.</p>
           <DeviceCode>
-            <small>{authorization.verificationUri}</small>
-            <strong>{authorization.userCode}</strong>
-            <span>{`Expires ${new Date(authorization.expiresAt).toLocaleTimeString()}`}</span>
+            <small>{waiting.verificationUri}</small>
+            <strong>{waiting.userCode}</strong>
+            <span>{`Expires ${new Date(waiting.expiresAt).toLocaleTimeString()}`}</span>
           </DeviceCode>
           <AuthorizationControls>
-            <Link href={authorization.verificationUri} external>
+            <Link href={waiting.verificationUri} external>
               Open GitHub
             </Link>
             <ControlGroup>
               <Button
                 type="button"
                 onClick={() => {
-                  void navigator.clipboard.writeText(authorization.userCode)
+                  void navigator.clipboard.writeText(waiting.userCode)
                 }}
               >
                 Copy code
@@ -78,10 +130,10 @@ export function AuthorizationGroup({
                 type="button"
                 disabled={blocked}
                 onClick={() =>
-                  void run({
+                  void perform({
                     type: 'cancel-github-authorization',
                     expectedConfigurationVersion: configurationVersion,
-                    operationId: authorization.id,
+                    operationId: waitingOperationId,
                   })
                 }
               >
@@ -92,7 +144,8 @@ export function AuthorizationGroup({
         </>
       ) : (
         <>
-          {authorization &&
+          {!result &&
+            authorization &&
             authorization.status !== 'granted' &&
             !(authorization.status === 'terminal' && authorization.outcome === 'cancelled') && (
               <Alert>
@@ -101,9 +154,13 @@ export function AuthorizationGroup({
               </Alert>
             )}
           <Button type="button" disabled={blocked} onClick={reauthenticate}>
-            {authorization &&
-            authorization.status !== 'granted' &&
-            !(authorization.status === 'terminal' && authorization.outcome === 'cancelled')
+            {(
+              result
+                ? result.phase !== 'granted' && result.phase !== 'cancelled'
+                : authorization &&
+                  authorization.status !== 'granted' &&
+                  !(authorization.status === 'terminal' && authorization.outcome === 'cancelled')
+            )
               ? 'Retry authorization'
               : 'Reauthenticate'}
           </Button>
@@ -114,30 +171,17 @@ export function AuthorizationGroup({
 }
 
 type RemoveConnectionGroupProps = {
-  connectionId: ConnectionId
   dependents: Project[]
-  configurationVersion: ConfigurationVersion
   blocked: boolean
-  run: RunCommand
+  onRemove: () => Promise<void>
 }
 
 export function RemoveConnectionGroup({
-  connectionId,
   dependents,
-  configurationVersion,
   blocked,
-  run,
+  onRemove,
 }: RemoveConnectionGroupProps) {
-  const navigate = useNavigate()
   const [confirming, setConfirming] = useState(false)
-  const remove = async () => {
-    const removed = await run({
-      type: 'remove-connection',
-      expectedConfigurationVersion: configurationVersion,
-      connectionId,
-    })
-    if (removed) navigate(routePaths.connections, { replace: true })
-  }
 
   return (
     <Surface variant="danger">
@@ -164,7 +208,7 @@ export function RemoveConnectionGroup({
               appearance="solid"
               type="button"
               disabled={blocked}
-              onClick={() => void remove()}
+              onClick={() => void onRemove()}
             >
               Confirm removal
             </Button>

@@ -80,6 +80,16 @@ export interface AutomationLauncher {
   dispatch(request: AutomationLaunch): Promise<WayfinderProcess>
 }
 
+type AutomationOverrideResult =
+  | {
+      ok: true
+      target: AutomationTarget
+      stage: AutomationOverrideStage
+      admission: 'override'
+      status: 'admitted'
+    }
+  | { ok: false; error: AutomationFailure }
+
 export interface AutomationEngine {
   start(): Promise<void>
   evidence(): readonly AutomationEvidence[]
@@ -91,7 +101,7 @@ export interface AutomationEngine {
   startOverride(
     target: AutomationTarget,
     stage: AutomationOverrideStage,
-  ): Promise<{ ok: true } | { ok: false; error: AutomationFailure }>
+  ): Promise<AutomationOverrideResult>
   reconcile(): void
   stop(): Promise<void>
 }
@@ -121,7 +131,12 @@ interface ActiveWayfinder {
 }
 
 type LaunchResult =
-  | { kind: 'admitted' }
+  | {
+      kind: 'admitted'
+      target: AutomationTarget
+      stage: AutomationOverrideStage
+      admission: AutomationAdmission
+    }
   | { kind: 'rejected'; reason: string }
   | { kind: 'persistence-failed' }
 
@@ -267,7 +282,9 @@ export function createAutomationEngine(options: {
           },
         ],
       })
-      return persisted ? { kind: 'admitted' } : { kind: 'persistence-failed' }
+      return persisted
+        ? { kind: 'admitted', target: candidate.target, stage: 'classification', admission }
+        : { kind: 'persistence-failed' }
     }
 
     const launched: ActiveClassification = {
@@ -286,7 +303,7 @@ export function createAutomationEngine(options: {
           reason: 'The Classification process result was lost.',
         }),
     )
-    return { kind: 'admitted' }
+    return { kind: 'admitted', target: candidate.target, stage: 'classification', admission }
   }
 
   function observeClassificationResult(
@@ -359,7 +376,9 @@ export function createAutomationEngine(options: {
     } catch {
       acquisition.resolve()
       await finishWayfinderLaunchFailure(launched)
-      return persistenceFailure ? { kind: 'persistence-failed' } : { kind: 'admitted' }
+      return persistenceFailure
+        ? { kind: 'persistence-failed' }
+        : { kind: 'admitted', target: record.opportunity.target, stage: 'wayfinder', admission }
     }
     void dispatch
       .then(
@@ -372,7 +391,7 @@ export function createAutomationEngine(options: {
         },
       )
       .then(acquisition.resolve, acquisition.reject)
-    return { kind: 'admitted' }
+    return { kind: 'admitted', target: record.opportunity.target, stage: 'wayfinder', admission }
   }
 
   async function settleNonlaunch(
@@ -752,21 +771,29 @@ export function createAutomationEngine(options: {
   function startOverride(
     target: AutomationTarget,
     stage: AutomationOverrideStage,
-  ): Promise<{ ok: true } | { ok: false; error: AutomationFailure }> {
+  ): Promise<AutomationOverrideResult> {
     return enqueue(() => startOverrideNow(target, stage))
   }
 
   async function startOverrideNow(
     target: AutomationTarget,
     stage: AutomationOverrideStage,
-  ): Promise<{ ok: true } | { ok: false; error: AutomationFailure }> {
+  ): Promise<AutomationOverrideResult> {
     const result =
       stage === 'classification'
         ? await beginClassification(target, 'override')
         : await beginDispatch(target, 'override')
     if (result.kind === 'admitted') {
       await reconcileNow()
-      return { ok: true }
+      if (result.admission !== 'override')
+        throw new Error('Override recorded a different admission.')
+      return {
+        ok: true,
+        target: result.target,
+        stage: result.stage,
+        admission: result.admission,
+        status: 'admitted',
+      }
     }
     return {
       ok: false,

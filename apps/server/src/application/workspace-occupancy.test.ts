@@ -13,6 +13,7 @@ import type {
 import { createConfigurationDocument } from '../configuration/document.ts'
 import { createGitHubProjectAdmission } from '../github/admission.ts'
 import { createGitHubObserverPool } from '../github/observer.ts'
+import type { HostOperation } from '../host/operations.ts'
 import type { SourceProjectKey as ProjectKey } from '../observation/source.ts'
 import type { ProjectConfiguration } from '../projects/registry.ts'
 import {
@@ -37,7 +38,7 @@ async function occupancyFixture(
   denied: DeniedWorkspace,
   run: (fixture: {
     application: ReturnType<typeof createRoadmapApplication>
-    effects: Array<{ executable: string; args: readonly string[] }>
+    effects: HostOperation[]
     workspace: string
     alias: string
   }) => Promise<void>,
@@ -147,7 +148,7 @@ async function occupancyFixture(
       reconcileMs: 1_000_000,
       logger: { warn() {} },
     })
-    const effects: Array<{ executable: string; args: readonly string[] }> = []
+    const effects: HostOperation[] = []
     application = createRoadmapApplication({
       configuration: createConfigurationDocument(filename),
       now: () => 1000,
@@ -214,11 +215,13 @@ async function occupancyFixture(
         }
       },
       operations: createApplicationOperations({
-        async launch(executable, args) {
-          effects.push({ executable, args: [...args] })
-        },
-        async selectWorkspace() {
-          throw new Error('This fixture does not open a folder selector.')
+        host: {
+          async execute(operation) {
+            if (operation.type === 'select-workspace')
+              throw new Error('This fixture does not open a folder selector.')
+            effects.push(operation)
+            return { kind: 'invoked' }
+          },
         },
       }),
       observers: {
@@ -247,8 +250,8 @@ function openWorkspace(
 ) {
   return application.execute(
     commandSchema.parse({
-      type: 'launch-action',
-      actionId: 'open-workspace',
+      type: 'launch-project-operation',
+      operation: 'open-workspace',
       project: fixtureProjectRef(project),
       expectedConfigurationVersion: readApplicationState(application.current())
         .configurationVersion,
@@ -344,7 +347,13 @@ describe('RoadmapApplication GitHub canonical Workspace occupancy', () => {
           ),
         ).toMatchObject({
           ok: true,
-          result: { type: 'project-refreshed', project: { integration: 'github', projectId: 'b' } },
+          operation: 'refresh-project',
+          subject: { kind: 'project', project: fixtureProjectRef(B) },
+          result: {
+            type: 'refresh-project',
+            project: fixtureProjectRef(B),
+            attempt: { kind: 'observed', attemptedAt: 1000, observedAt: 1000 },
+          },
         })
         expect(await openWorkspace(application, B)).toMatchObject({
           ok: false,
@@ -420,7 +429,16 @@ describe('RoadmapApplication GitHub canonical Workspace occupancy', () => {
                 .configurationVersion,
             }),
           ),
-        ).toMatchObject({ ok: false })
+        ).toMatchObject({
+          ok: true,
+          operation: 'refresh-project',
+          subject: { kind: 'project', project: fixtureProjectRef(B) },
+          result: {
+            type: 'refresh-project',
+            project: fixtureProjectRef(B),
+            attempt: { kind: 'failed', attemptedAt: 1000 },
+          },
+        })
         expect(await openWorkspace(application, B)).toMatchObject({
           ok: false,
           error: { code: 'admission-failed', field: 'workspace.path' },
@@ -447,5 +465,87 @@ describe('RoadmapApplication GitHub canonical Workspace occupancy', () => {
         })
       },
     )
+  })
+
+  it('rejects forged host input and unknown Projects before invoking reproved finite operations', async () => {
+    await occupancyFixture('repository-mismatch', async ({ application, effects, workspace }) => {
+      const project = fixtureProjectRef(A)
+      const base = {
+        type: 'launch-project-operation',
+        project,
+        expectedConfigurationVersion: 1,
+      }
+      for (const input of [
+        { ...base, operation: 'run-executable' },
+        { ...base, operation: 'open-workspace', executable: '/bin/sh' },
+        { ...base, operation: 'open-terminal', workspacePath: '/untrusted' },
+        { ...base, operation: 'reveal-source', args: ['/untrusted'] },
+        { type: base.type, operation: 'open-workspace', expectedConfigurationVersion: 1 },
+      ]) {
+        expect(commandSchema.safeParse(input).success).toBe(false)
+      }
+      const unknown = { integration: 'github', id: 'unknown-project' } satisfies ProjectKey
+      expect(
+        await application.execute(
+          commandSchema.parse({
+            ...base,
+            project: fixtureProjectRef(unknown),
+            operation: 'open-workspace',
+          }),
+        ),
+      ).toMatchObject({
+        ok: false,
+        operation: 'launch-project-operation',
+        subject: { kind: 'project', project: fixtureProjectRef(unknown) },
+        error: { code: 'validation', field: 'project' },
+      })
+      expect(effects).toEqual([])
+
+      expect(
+        await application.execute(
+          commandSchema.parse({
+            type: 'remove-project',
+            project: fixtureProjectRef(B),
+            expectedConfigurationVersion: 1,
+          }),
+        ),
+      ).toMatchObject({
+        ok: true,
+        result: {
+          type: 'remove-project',
+          project: fixtureProjectRef(B),
+          configurationVersion: 2,
+          commit: 'committed',
+        },
+      })
+      const canonical = await realpath(workspace)
+      for (const operation of ['open-workspace', 'open-terminal', 'reveal-source']) {
+        expect(
+          await application.execute(
+            commandSchema.parse({
+              type: 'launch-project-operation',
+              project,
+              operation,
+              expectedConfigurationVersion: 2,
+            }),
+          ),
+        ).toMatchObject({
+          ok: true,
+          operation: 'launch-project-operation',
+          subject: { kind: 'project', project },
+          result: {
+            type: 'launch-project-operation',
+            project,
+            operation,
+            status: 'invoked',
+          },
+        })
+      }
+      expect(effects).toEqual([
+        { type: 'open-workspace', project, workspacePath: canonical },
+        { type: 'open-terminal', project, workspacePath: canonical },
+        { type: 'reveal-source', project, workspacePath: canonical },
+      ])
+    })
   })
 })

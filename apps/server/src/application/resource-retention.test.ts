@@ -31,7 +31,6 @@ import {
   fixtureAdmissions,
 } from '../source-test-fixtures.ts'
 import { createRoadmapApplication } from './application.ts'
-import { createApplicationOperations } from './operations.ts'
 
 const filesystemFailures = vi.hoisted(() => new Map<string, Error>())
 
@@ -171,7 +170,6 @@ function controlled(initial: ObservationBatch, projects = [PROJECT]) {
     configuration: document(configuration(projects)),
     admissions: fixtureAdmissions,
     now: () => clock,
-    operations: createApplicationOperations(),
     observers: {
       local(input) {
         const source = sources.find((_, index) => projects[index]?.id === input.ref.projectId)
@@ -1222,7 +1220,6 @@ async function localFixture(withAdmission = false) {
     configuration: configurationDocument,
     admissions: { local: createLocalProjectAdmission() },
     now: () => clock,
-    operations: createApplicationOperations(),
     observers: {
       local: (input) =>
         createLocalObserver(input, {
@@ -1275,19 +1272,28 @@ async function localFixture(withAdmission = false) {
         expect(readApplicationState(application.current()).configurationVersion).toBe(2),
       )
     },
-    async refresh(time: number) {
+    async refresh(time: number, kind: 'observed' | 'degraded' = 'observed') {
       clock = time
-      expect(
-        (
-          await application.execute(
-            commandSchema.parse({
-              type: 'refresh-project',
-              project: fixtureProjectRef(PROJECT),
-              expectedConfigurationVersion: configured.configurationVersion,
-            }),
-          )
-        ).ok,
-      ).toBe(true)
+      const outcome = await application.execute(
+        commandSchema.parse({
+          type: 'refresh-project',
+          project: fixtureProjectRef(PROJECT),
+          expectedConfigurationVersion: configured.configurationVersion,
+        }),
+      )
+      expect(outcome).toMatchObject({
+        operation: 'refresh-project',
+        subject: { kind: 'project', project: fixtureProjectRef(PROJECT) },
+        ok: true,
+        result: {
+          type: 'refresh-project',
+          project: fixtureProjectRef(PROJECT),
+          attempt: { kind, attemptedAt: time },
+        },
+      })
+      expect(outcome).not.toHaveProperty('state')
+      expect(JSON.stringify(outcome)).not.toContain(SECRET)
+      return outcome
     },
     async stop() {
       filesystemFailures.clear()
@@ -1355,7 +1361,7 @@ describe('RoadmapApplication actual Local observer retention', () => {
       expectScopedBlockers('closed', true)
       const target = join(test.root, dirname(FIRST), 'tickets/01-ticket.md')
       filesystemFailures.set(`read:${target}`, Object.assign(new Error(SECRET), { code: 'EACCES' }))
-      await test.refresh(2000)
+      await test.refresh(2000, 'degraded')
       expectScopedBlockers('unknown', false)
       expectProject(readApplicationState(test.application.current()), {
         maps: expect.arrayContaining([
@@ -1378,7 +1384,7 @@ describe('RoadmapApplication actual Local observer retention', () => {
       })
       filesystemFailures.clear()
       await rm(target)
-      await test.refresh(3000)
+      await test.refresh(3000, 'degraded')
       expectScopedBlockers('unknown', false)
       expectProject(readApplicationState(test.application.current()), {
         maps: expect.arrayContaining([
@@ -1557,7 +1563,7 @@ describe('RoadmapApplication actual Local observer retention', () => {
         `read:${mapPath}`,
         Object.assign(new Error(SECRET), { code: 'EACCES' }),
       )
-      await test.refresh(3000)
+      await test.refresh(3000, 'degraded')
       expectProject(readApplicationState(test.application.current()), {
         mapsMembership: {
           kind: 'current-complete',
@@ -1668,7 +1674,7 @@ describe('RoadmapApplication actual Local observer retention', () => {
           `${operation}:${parentPath}`,
           Object.assign(new Error(SECRET), { code: 'EACCES' }),
         )
-        await test.refresh(2000)
+        await test.refresh(2000, 'degraded')
         const childSuccess = {
           attemptedAt: 2000,
           observedAt: 2000,
@@ -1751,7 +1757,7 @@ describe('RoadmapApplication actual Local observer retention', () => {
           `enumerate:${test.root}`,
           Object.assign(new Error(SECRET), { code: 'EACCES' }),
         )
-        await test.refresh(3000)
+        await test.refresh(3000, 'degraded')
         expectProject(readApplicationState(test.application.current()), {
           resource: {
             kind: 'retained-unavailable',
@@ -1839,7 +1845,7 @@ describe('RoadmapApplication actual Local observer retention', () => {
           `${operation}:${path}`,
           Object.assign(new Error(SECRET), { code: 'EACCES' }),
         )
-        await test.refresh(2000)
+        await test.refresh(2000, 'degraded')
         const mapFailed =
           location === 'root' || location === 'maps-directory' || location === 'map-file'
         expectProject(readApplicationState(test.application.current()), {
@@ -1943,7 +1949,7 @@ describe('RoadmapApplication actual Local observer retention', () => {
     try {
       await test.application.start()
       await rm(join(test.root, FIRST))
-      await test.refresh(2000)
+      await test.refresh(2000, 'degraded')
       expectProject(readApplicationState(test.application.current()), {
         activeMap: { kind: 'uncertain' },
         maps: expect.arrayContaining([
@@ -1984,7 +1990,7 @@ describe('RoadmapApplication actual Local observer retention', () => {
       await test.application.start()
       const path = join(test.root, '.wayfinder/first/tickets/01-ticket.md')
       filesystemFailures.set(`read:${path}`, Object.assign(new Error(SECRET), { code: 'ENOENT' }))
-      await test.refresh(2000)
+      await test.refresh(2000, 'degraded')
       expectProject(readApplicationState(test.application.current()), {
         activeMap: { kind: 'uncertain' },
         maps: expect.arrayContaining([
@@ -2055,7 +2061,7 @@ describe('RoadmapApplication actual Local observer retention', () => {
         `enumerate:${join(test.root, '.wayfinder/first/tickets')}`,
         Object.assign(new Error(SECRET), { code: 'EACCES' }),
       )
-      await test.refresh(4000)
+      await test.refresh(4000, 'degraded')
       expectProject(readApplicationState(test.application.current()), {
         activeMap: { kind: 'uncertain' },
         maps: expect.arrayContaining([
@@ -2133,7 +2139,7 @@ describe('RoadmapApplication actual Local observer retention', () => {
       )
       await utimes(path, 1.5, 1.5)
       filesystemFailures.set(`read:${path}`, Object.assign(new Error(SECRET), { code: 'EACCES' }))
-      await test.refresh(3000)
+      await test.refresh(3000, 'degraded')
       expectProject(readApplicationState(test.application.current()), {
         activeMap: { kind: 'uncertain' },
         displayOrder: {

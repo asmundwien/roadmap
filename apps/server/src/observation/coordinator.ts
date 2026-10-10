@@ -181,7 +181,7 @@ export function createObservationCoordinator(
   function recover(
     project?: SourceProjectKey,
     integration?: SourceProjectKey['integration'],
-  ): Promise<void> {
+  ): Promise<boolean> {
     return inActivationLane(async () => {
       if (
         stopped ||
@@ -190,13 +190,15 @@ export function createObservationCoordinator(
         pendingAdmission ||
         !options.revalidateSources
       )
-        return
+        return false
       const connections = recoveryConnections(project, integration)
-      if (connections.length === 0) return
+      if (connections.length === 0) return false
       const before = current.registry
       const candidate = await options.revalidateSources(before, connections)
-      if (stopped || !configurationValid || pendingAdmission || current.registry !== before) return
+      if (stopped || !configurationValid || pendingAdmission || current.registry !== before)
+        return false
       await activate(candidate, before)
+      return true
     })
   }
 
@@ -218,7 +220,9 @@ export function createObservationCoordinator(
         supervisor.timer = null
         supervisor.running = (async () => {
           try {
-            const recovery = () => recover(undefined, supervisor.integration)
+            const recovery = async () => {
+              await recover(undefined, supervisor.integration)
+            }
             if (options.scheduleRecovery) await options.scheduleRecovery(recovery)
             else await recovery()
           } catch {
@@ -550,9 +554,28 @@ export function createObservationCoordinator(
       const key = JSON.stringify([project.integration, project.id])
       let owner = owners.get(key)
       if (!stopped && owner && !owner.observer && !owner.retired) {
-        await recover(project)
+        const recovered = await recover(project)
+        if (stopped || !configurationValid || pendingAdmission || !options.revalidateSources) {
+          throw new Error('The current configuration did not admit a source refresh.')
+        }
         owner = owners.get(key)
-        if (owner?.observer && !owner.retired && owner.contribution) return owner.contribution
+        if (recovered && owner?.observer && !owner.retired && owner.contribution) {
+          return owner.contribution
+        }
+        if (!stopped && owner && !owner.observer && !owner.retired) {
+          const admission = current?.registry.admissions.find(
+            (entry) =>
+              entry.intent.ref.integration === project.integration &&
+              entry.intent.ref.projectId === project.id,
+          )
+          if (!admission) throw new Error('The refreshed Project no longer has source admission.')
+          const contribution = failedContribution(admission, now(), owner.nextReadSequence())
+          owner.contribution = contribution
+          owner.fingerprint = JSON.stringify(contribution)
+          admissionRevision += 1
+          publish()
+          return contribution
+        }
       }
       if (stopped || !owner?.observer || owner.retired)
         throw new Error('No active admitted source observer exists for this Project.')

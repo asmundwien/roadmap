@@ -1,9 +1,17 @@
 import {
+  type CorrelationId,
   configurationVersionSchema,
+  correlationIdSchema,
   projectRefSchema,
   ticketRefSchema,
 } from '@roadmap/contracts/identity'
-import { type Command, commandSchema, type Query } from '@roadmap/contracts/operations'
+import {
+  type Command,
+  type CommandOutcomeFor,
+  type CommandResultFor,
+  commandSchema,
+  type Query,
+} from '@roadmap/contracts/operations'
 import {
   decodeCommandEnvelope,
   decodeQueryEnvelope,
@@ -16,6 +24,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest'
 
 const localProject = projectRefSchema.parse({ integration: 'local', projectId: 'local-project' })
 const githubProject = projectRefSchema.parse({ integration: 'github', projectId: 'github-project' })
+const correlationId = correlationIdSchema.parse('08e1d803-9b25-44e2-b4bb-a2d76c963b72')
 const version = { expectedConfigurationVersion: configurationVersionSchema.parse(0) }
 const target = ticketRefSchema.parse({
   map: { project: githubProject, mapId: 'map-1' },
@@ -30,9 +39,8 @@ function inherited(prototype: object, own: object = {}): unknown {
 const supportedCommands = [
   { type: 'begin-github-authorization', ...version, name: 'GitHub' },
   {
-    type: 'begin-github-authorization',
+    type: 'reauthorize-github-connection',
     ...version,
-    name: 'GitHub',
     connectionId: 'github-connection',
   },
   { type: 'cancel-github-authorization', ...version, operationId: 'authorization-1' },
@@ -92,8 +100,24 @@ const supportedCommands = [
   { type: 'start-automation-override', ...version, target, stage: 'classification' },
   { type: 'start-automation-override', ...version, target, stage: 'wayfinder' },
   { type: 'refresh-project', ...version, project: githubProject },
-  { type: 'launch-action', ...version, actionId: 'open-settings' },
-  { type: 'launch-action', ...version, actionId: 'open-workspace', project: localProject },
+  {
+    type: 'launch-project-operation',
+    ...version,
+    operation: 'open-workspace',
+    project: localProject,
+  },
+  {
+    type: 'launch-project-operation',
+    ...version,
+    operation: 'open-terminal',
+    project: githubProject,
+  },
+  {
+    type: 'launch-project-operation',
+    ...version,
+    operation: 'reveal-source',
+    project: localProject,
+  },
 ].map((command) => commandSchema.parse(command))
 
 const malformedCommands: { name: string; command: unknown }[] = [
@@ -134,8 +158,21 @@ const malformedCommands: { name: string; command: unknown }[] = [
     command: { type: 'begin-github-authorization', ...version },
   },
   {
-    name: 'null optional connection',
-    command: { type: 'begin-github-authorization', ...version, name: 'GitHub', connectionId: null },
+    name: 'new authorization with existing connection',
+    command: {
+      type: 'begin-github-authorization',
+      ...version,
+      name: 'GitHub',
+      connectionId: 'github-connection',
+    },
+  },
+  {
+    name: 'missing reauthorization connection',
+    command: { type: 'reauthorize-github-connection', ...version },
+  },
+  {
+    name: 'null reauthorization connection',
+    command: { type: 'reauthorize-github-connection', ...version, connectionId: null },
   },
   {
     name: 'missing cancellation operation',
@@ -231,7 +268,7 @@ const malformedCommands: { name: string; command: unknown }[] = [
     command: {
       type: 'start-automation-override',
       ...version,
-      target: { project: localProject, ticketId: 'ticket-1' },
+      target: { ticketId: 'ticket-1' },
       stage: 'classification',
     },
   },
@@ -240,7 +277,7 @@ const malformedCommands: { name: string; command: unknown }[] = [
     command: {
       type: 'start-automation-override',
       ...version,
-      target: { project: localProject, mapId: 'map-1' },
+      target: { map: target.map },
       stage: 'classification',
     },
   },
@@ -249,25 +286,48 @@ const malformedCommands: { name: string; command: unknown }[] = [
     command: { type: 'start-automation-override', ...version, target, stage: 'execute' },
   },
   { name: 'missing refresh project', command: { type: 'refresh-project', ...version } },
-  { name: 'missing action id', command: { type: 'launch-action', ...version } },
   {
-    name: 'null optional action project',
-    command: { type: 'launch-action', ...version, actionId: 'open-workspace', project: null },
+    name: 'missing launch operation',
+    command: { type: 'launch-project-operation', ...version, project: localProject },
+  },
+  {
+    name: 'missing launch project',
+    command: { type: 'launch-project-operation', ...version, operation: 'open-workspace' },
+  },
+  {
+    name: 'unsupported finite launch operation',
+    command: {
+      type: 'launch-project-operation',
+      ...version,
+      operation: 'execute-shell',
+      project: localProject,
+    },
+  },
+  {
+    name: 'null launch project',
+    command: {
+      type: 'launch-project-operation',
+      ...version,
+      operation: 'open-workspace',
+      project: null,
+    },
   },
 ]
 
 describe('ingress operation parsing', () => {
   it('decodes the supported query without changing its meaning', () => {
-    expect(decodeQueryEnvelope({ type: 'query', query: { type: 'select-workspace' } })).toEqual({
+    expect(
+      decodeQueryEnvelope({ type: 'query', correlationId, query: { type: 'select-workspace' } }),
+    ).toEqual({
       ok: true,
-      value: { type: 'query', query: { type: 'select-workspace' } },
+      value: { type: 'query', correlationId, query: { type: 'select-workspace' } },
     })
   })
 
   it.each(supportedCommands)('preserves supported command $type %#', (command) => {
-    expect(decodeCommandEnvelope({ type: 'command', command })).toEqual({
+    expect(decodeCommandEnvelope({ type: 'command', correlationId, command })).toEqual({
       ok: true,
-      value: { type: 'command', command },
+      value: { type: 'command', correlationId, command },
     })
   })
 
@@ -277,51 +337,72 @@ describe('ingress operation parsing', () => {
   })
 
   it.each([
-    { type: 'command', query: { type: 'select-workspace' } },
-    { type: 'query' },
-    { type: 'query', query: null },
-    { type: 'query', query: [] },
-    { type: 'query', query: {} },
-    { type: 'query', query: { type: 'refresh-project' } },
+    { type: 'command', correlationId, query: { type: 'select-workspace' } },
+    { type: 'query', correlationId },
+    { type: 'query', correlationId, query: null },
+    { type: 'query', correlationId, query: [] },
+    { type: 'query', correlationId, query: {} },
+    { type: 'query', correlationId, query: { type: 'refresh-project' } },
   ])('rejects malformed query envelope %j', (input) => {
     expect(decodeQueryEnvelope(input).ok).toBe(false)
   })
 
   it.each([
-    { type: 'query', command: { type: 'set-automation-enabled', ...version, enabled: true } },
-    { type: 'command' },
-    { type: 'command', command: null },
-    { type: 'command', command: [] },
+    {
+      type: 'query',
+      correlationId,
+      command: { type: 'set-automation-enabled', ...version, enabled: true },
+    },
+    { type: 'command', correlationId },
+    { type: 'command', correlationId, command: null },
+    { type: 'command', correlationId, command: [] },
   ])('rejects malformed command envelope %j', (input) => {
     expect(decodeCommandEnvelope(input).ok).toBe(false)
   })
 
+  it.each([null, '', 'call-1', 1])('rejects invalid operation correlation %j', (invalid) => {
+    const query = { type: 'query', correlationId, query: { type: 'select-workspace' } }
+    const command = {
+      type: 'command',
+      correlationId,
+      command: { type: 'set-automation-enabled', ...version, enabled: true },
+    }
+    expect(decodeQueryEnvelope(query).ok).toBe(true)
+    expect(decodeCommandEnvelope(command).ok).toBe(true)
+    expect(decodeQueryEnvelope({ ...query, correlationId: invalid }).ok).toBe(false)
+    expect(decodeCommandEnvelope({ ...command, correlationId: invalid }).ok).toBe(false)
+  })
+
   it.each(malformedCommands)('rejects $name', ({ command }) => {
-    expect(decodeCommandEnvelope({ type: 'command', command }).ok).toBe(false)
+    expect(decodeCommandEnvelope({ type: 'command', correlationId, command }).ok).toBe(false)
   })
 
   it.each(['constructor', 'toString', '__proto__'])(
     'rejects unsupported discriminator %s without throwing',
     (type) => {
-      expect(decodeQueryEnvelope({ type: 'query', query: { type } }).ok).toBe(false)
-      expect(decodeCommandEnvelope({ type: 'command', command: { type, ...version } }).ok).toBe(
-        false,
-      )
+      expect(decodeQueryEnvelope({ type: 'query', correlationId, query: { type } }).ok).toBe(false)
+      expect(
+        decodeCommandEnvelope({ type: 'command', correlationId, command: { type, ...version } }).ok,
+      ).toBe(false)
     },
   )
 
   it.each([
     {
       name: 'envelope type',
-      input: inherited({ type: 'query' }, { query: { type: 'select-workspace' } }),
+      input: inherited({ type: 'query' }, { correlationId, query: { type: 'select-workspace' } }),
     },
     {
       name: 'envelope query',
-      input: inherited({ query: { type: 'select-workspace' } }, { type: 'query' }),
+      input: inherited({ query: { type: 'select-workspace' } }, { type: 'query', correlationId }),
+    },
+    {
+      name: 'envelope correlation',
+      input: inherited({ correlationId }, { type: 'query', query: { type: 'select-workspace' } }),
     },
     {
       name: 'query discriminator',
-      input: { type: 'query', query: inherited({ type: 'select-workspace' }) },
+      input: { type: 'query', correlationId, query: inherited({ type: 'select-workspace' }) },
     },
   ])('rejects inherited $name', ({ input }) => {
     expect(decodeQueryEnvelope(input).ok).toBe(false)
@@ -332,20 +413,28 @@ describe('ingress operation parsing', () => {
       name: 'envelope type',
       input: inherited(
         { type: 'command' },
-        { command: { type: 'set-automation-enabled', ...version, enabled: true } },
+        { correlationId, command: { type: 'set-automation-enabled', ...version, enabled: true } },
       ),
     },
     {
       name: 'envelope command',
       input: inherited(
         { command: { type: 'set-automation-enabled', ...version, enabled: true } },
-        { type: 'command' },
+        { type: 'command', correlationId },
+      ),
+    },
+    {
+      name: 'envelope correlation',
+      input: inherited(
+        { correlationId },
+        { type: 'command', command: { type: 'set-automation-enabled', ...version, enabled: true } },
       ),
     },
     {
       name: 'command discriminator',
       input: {
         type: 'command',
+        correlationId,
         command: inherited({ type: 'set-automation-enabled' }, { ...version, enabled: true }),
       },
     },
@@ -353,6 +442,7 @@ describe('ingress operation parsing', () => {
       name: 'configuration version',
       input: {
         type: 'command',
+        correlationId,
         command: inherited(version, { type: 'set-automation-enabled', enabled: true }),
       },
     },
@@ -360,6 +450,7 @@ describe('ingress operation parsing', () => {
       name: 'enabled field',
       input: {
         type: 'command',
+        correlationId,
         command: inherited({ enabled: true }, { type: 'set-automation-enabled', ...version }),
       },
     },
@@ -367,10 +458,11 @@ describe('ingress operation parsing', () => {
       name: 'project integration',
       input: {
         type: 'command',
+        correlationId,
         command: {
           type: 'remove-project',
           ...version,
-          project: inherited({ integration: 'local' }, { id: 'local-project' }),
+          project: inherited({ integration: 'local' }, { projectId: 'local-project' }),
         },
       },
     },
@@ -378,10 +470,11 @@ describe('ingress operation parsing', () => {
       name: 'project id',
       input: {
         type: 'command',
+        correlationId,
         command: {
           type: 'remove-project',
           ...version,
-          project: inherited({ id: 'local-project' }, { integration: 'local' }),
+          project: inherited({ projectId: 'local-project' }, { integration: 'local' }),
         },
       },
     },
@@ -389,6 +482,7 @@ describe('ingress operation parsing', () => {
       name: 'candidate integration',
       input: {
         type: 'command',
+        correlationId,
         command: {
           type: 'register-project',
           ...version,
@@ -403,6 +497,7 @@ describe('ingress operation parsing', () => {
       name: 'candidate workspace',
       input: {
         type: 'command',
+        correlationId,
         command: {
           type: 'register-project',
           ...version,
@@ -417,6 +512,7 @@ describe('ingress operation parsing', () => {
       name: 'candidate workspace path',
       input: {
         type: 'command',
+        correlationId,
         command: {
           type: 'register-project',
           ...version,
@@ -432,6 +528,7 @@ describe('ingress operation parsing', () => {
       name: 'repair workspace path',
       input: {
         type: 'command',
+        correlationId,
         command: {
           type: 'repair-project-workspace',
           ...version,
@@ -444,11 +541,12 @@ describe('ingress operation parsing', () => {
       name: 'override ticket',
       input: {
         type: 'command',
+        correlationId,
         command: {
           type: 'start-automation-override',
           ...version,
           stage: 'classification',
-          target: inherited({ ticketId: 'ticket-1' }, { project: localProject, mapId: 'map-1' }),
+          target: inherited({ ticketId: 'ticket-1' }, { map: target.map }),
         },
       },
     },
@@ -457,9 +555,9 @@ describe('ingress operation parsing', () => {
   })
 
   it.each([
-    { type: 'query', query: { type: 'select-workspace' }, token: secret },
-    { type: 'query', query: { type: 'select-workspace', token: secret } },
-    { type: 'query', query: { type: secret } },
+    { type: 'query', correlationId, query: { type: 'select-workspace' }, token: secret },
+    { type: 'query', correlationId, query: { type: 'select-workspace', token: secret } },
+    { type: 'query', correlationId, query: { type: secret } },
   ])('refuses query secrets without including their values in diagnostics %#', (input) => {
     const result = decodeQueryEnvelope(input)
     expect(result.ok).toBe(false)
@@ -469,19 +567,34 @@ describe('ingress operation parsing', () => {
   it.each([
     {
       type: 'command',
-      command: { type: 'launch-action', ...version, actionId: 'open-settings' },
+      correlationId,
+      command: {
+        type: 'launch-project-operation',
+        ...version,
+        operation: 'open-workspace',
+        project: localProject,
+      },
       token: secret,
     },
     {
       type: 'command',
-      command: { type: 'launch-action', ...version, actionId: 'open-settings', executable: secret },
+      correlationId,
+      command: {
+        type: 'launch-project-operation',
+        ...version,
+        operation: 'open-workspace',
+        project: localProject,
+        executable: secret,
+      },
     },
     {
       type: 'command',
+      correlationId,
       command: { type: 'remove-project', ...version, project: { ...localProject, token: secret } },
     },
     {
       type: 'command',
+      correlationId,
       command: {
         type: 'register-project',
         ...version,
@@ -495,6 +608,7 @@ describe('ingress operation parsing', () => {
     },
     {
       type: 'command',
+      correlationId,
       command: {
         type: 'register-project',
         ...version,
@@ -507,6 +621,7 @@ describe('ingress operation parsing', () => {
     },
     {
       type: 'command',
+      correlationId,
       command: {
         type: 'repair-project-workspace',
         ...version,
@@ -516,6 +631,7 @@ describe('ingress operation parsing', () => {
     },
     {
       type: 'command',
+      correlationId,
       command: {
         type: 'start-automation-override',
         ...version,
@@ -523,9 +639,10 @@ describe('ingress operation parsing', () => {
         stage: 'classification',
       },
     },
-    { type: 'command', command: { type: secret, ...version } },
+    { type: 'command', correlationId, command: { type: secret, ...version } },
     {
       type: 'command',
+      correlationId,
       command: {
         type: 'set-automation-enabled',
         expectedConfigurationVersion: secret,
@@ -545,50 +662,83 @@ describe('operation construction proofs', () => {
     expectTypeOf<Record<string, never>>().not.toExtend<Query>()
   })
 
-  it('requires the version and the payload of each command variant', () => {
-    expectTypeOf<{
-      type: 'set-automation-enabled'
-      enabled: boolean
-    }>().not.toExtend<Command>()
-    expectTypeOf<{
-      type: 'set-automation-enabled'
-      expectedConfigurationVersion: string
-      enabled: boolean
-    }>().not.toExtend<Command>()
-    expectTypeOf<{
-      type: 'set-automation-enabled'
-      expectedConfigurationVersion: number
-      enabled: string
-    }>().not.toExtend<Command>()
-    expectTypeOf<{
-      type: 'begin-github-authorization'
-      expectedConfigurationVersion: number
-    }>().not.toExtend<Command>()
-    expectTypeOf<{
-      type: 'register-project'
-      expectedConfigurationVersion: number
-      candidate: { integration: 'local'; connectionId: string }
-    }>().not.toExtend<Command>()
-    expectTypeOf<{
-      type: 'remove-project'
-      expectedConfigurationVersion: number
-      project: { integration: 'remote'; id: string }
-    }>().not.toExtend<Command>()
-    expectTypeOf<{
-      type: 'start-automation-override'
-      expectedConfigurationVersion: number
-      target: { project: typeof localProject; mapId: string; ticketId: string }
-      stage: 'execute'
-    }>().not.toExtend<Command>()
-    expectTypeOf<{
-      type: 'launch-action'
-      expectedConfigurationVersion: number
-    }>().not.toExtend<Command>()
-    expectTypeOf<{
-      type: 'execute-shell'
-      expectedConfigurationVersion: number
-      executable: string
-    }>().not.toExtend<Command>()
+  it('requires branded authority and complete command payloads', () => {
+    type Automation = Extract<Command, { type: 'set-automation-enabled' }>
+    type Begin = Extract<Command, { type: 'begin-github-authorization' }>
+    type Reauthorize = Extract<Command, { type: 'reauthorize-github-connection' }>
+    type Register = Extract<Command, { type: 'register-project' }>
+    type Remove = Extract<Command, { type: 'remove-project' }>
+    type Override = Extract<Command, { type: 'start-automation-override' }>
+    type Launch = Extract<Command, { type: 'launch-project-operation' }>
+
+    expectTypeOf<Omit<Automation, 'expectedConfigurationVersion'>>().not.toExtend<Command>()
+    expectTypeOf<
+      Omit<Automation, 'expectedConfigurationVersion'> & { expectedConfigurationVersion: number }
+    >().not.toExtend<Command>()
+    expectTypeOf<Omit<Automation, 'enabled'> & { enabled: string }>().not.toExtend<Command>()
+    expectTypeOf<Omit<Begin, 'name'>>().not.toExtend<Command>()
+    expectTypeOf<Omit<Reauthorize, 'connectionId'>>().not.toExtend<Command>()
+    expectTypeOf<
+      Omit<Reauthorize, 'connectionId'> & { connectionId: typeof correlationId }
+    >().not.toExtend<Command>()
+    expectTypeOf<
+      Omit<Register, 'candidate'> & {
+        candidate: Omit<Register['candidate'], 'workspace'>
+      }
+    >().not.toExtend<Command>()
+    expectTypeOf<
+      Omit<Remove, 'project'> & {
+        project: { integration: 'remote'; projectId: typeof localProject.projectId }
+      }
+    >().not.toExtend<Command>()
+    expectTypeOf<Omit<Override, 'stage'> & { stage: 'execute' }>().not.toExtend<Command>()
+    expectTypeOf<Omit<Launch, 'project'>>().not.toExtend<Command>()
+    expectTypeOf<Omit<Launch, 'operation'>>().not.toExtend<Command>()
+    expectTypeOf<
+      Omit<Launch, 'operation'> & { operation: 'execute-shell' }
+    >().not.toExtend<Command>()
+  })
+
+  it('pairs outcomes with the initiating operation and its subject', () => {
+    type Launch = Extract<Command, { type: 'launch-project-operation' }>
+    type Rename = Extract<Command, { type: 'rename-project' }>
+    type Reauthorize = Extract<Command, { type: 'reauthorize-github-connection' }>
+    type LaunchOutcome = CommandOutcomeFor<Launch>
+    type Success = Extract<LaunchOutcome, { ok: true }>
+
+    expectTypeOf<Success['result']>().toEqualTypeOf<CommandResultFor<Launch>>()
+    expectTypeOf<
+      Omit<Success, 'result'> & {
+        result: CommandResultFor<Rename>
+      }
+    >().not.toExtend<LaunchOutcome>()
+    expectTypeOf<
+      Omit<Success, 'operation'> & {
+        operation: Rename['type']
+      }
+    >().not.toExtend<LaunchOutcome>()
+    expectTypeOf<
+      Omit<Success, 'subject'> & {
+        subject: { kind: 'connection'; connectionId: Reauthorize['connectionId'] }
+      }
+    >().not.toExtend<LaunchOutcome>()
+  })
+
+  it('requires the payload of the actual authorization result phase', () => {
+    type Begin = Extract<Command, { type: 'begin-github-authorization' }>
+    type Result = CommandResultFor<Begin>
+    type Waiting = Extract<Result, { phase: 'waiting' }>
+    type Granted = Extract<Result, { phase: 'granted' }>
+    type Failed = Extract<Result, { phase: 'failed' }>
+    type Denied = Extract<Result, { phase: 'denied' }>
+
+    expectTypeOf<Omit<Waiting, 'verificationUri'>>().not.toExtend<Result>()
+    expectTypeOf<Omit<Waiting, 'userCode'>>().not.toExtend<Result>()
+    expectTypeOf<Omit<Waiting, 'expiresAt'>>().not.toExtend<Result>()
+    expectTypeOf<Omit<Granted, 'connection'>>().not.toExtend<Result>()
+    expectTypeOf<Omit<Granted, 'configurationVersion'>>().not.toExtend<Result>()
+    expectTypeOf<Omit<Failed, 'error'>>().not.toExtend<Result>()
+    expectTypeOf<Omit<Denied, 'error'>>().not.toExtend<Result>()
   })
 })
 
@@ -707,6 +857,16 @@ describe('schema-derived construction proofs', () => {
     >['value']['query']
     expectTypeOf<ParsedCommand>().toEqualTypeOf<Command>()
     expectTypeOf<ParsedQuery>().toEqualTypeOf<Query>()
+    type ParsedCommandCorrelation = Extract<
+      ReturnType<typeof decodeCommandEnvelope>,
+      { ok: true }
+    >['value']['correlationId']
+    type ParsedQueryCorrelation = Extract<
+      ReturnType<typeof decodeQueryEnvelope>,
+      { ok: true }
+    >['value']['correlationId']
+    expectTypeOf<ParsedCommandCorrelation>().toEqualTypeOf<CorrelationId>()
+    expectTypeOf<ParsedQueryCorrelation>().toEqualTypeOf<CorrelationId>()
   })
 
   it('rejects malformed typed construction at compile time and runtime', () => {
@@ -721,8 +881,10 @@ describe('schema-derived construction proofs', () => {
       reason: 'origin',
       message: 'The origin is not allowed.',
     }
-    expect(decodeQueryEnvelope({ type: 'query', query: badQuery }).ok).toBe(false)
-    expect(decodeCommandEnvelope({ type: 'command', command: badCommand }).ok).toBe(false)
+    expect(decodeQueryEnvelope({ type: 'query', correlationId, query: badQuery }).ok).toBe(false)
+    expect(decodeCommandEnvelope({ type: 'command', correlationId, command: badCommand }).ok).toBe(
+      false,
+    )
     expect(decodeRequestRejection(badRejection).ok).toBe(false)
   })
 })
@@ -737,7 +899,7 @@ describe('own data request boundaries', () => {
         throw new Error(secret)
       },
     })
-    const result = decodeQueryEnvelope({ type: 'query', query })
+    const result = decodeQueryEnvelope({ type: 'query', correlationId, query })
     expect(result.ok).toBe(false)
     expect(reads).toBe(0)
     expect(JSON.stringify(result)).not.toContain(secret)
@@ -746,8 +908,15 @@ describe('own data request boundaries', () => {
   it.each([
     {
       name: 'envelope',
-      data: { type: 'query', query: { type: 'select-workspace' } },
+      data: { type: 'query', correlationId, query: { type: 'select-workspace' } },
       field: 'query',
+      decode: decodeQueryEnvelope,
+      envelope: (data: object) => data,
+    },
+    {
+      name: 'envelope correlation',
+      data: { type: 'query', correlationId, query: { type: 'select-workspace' } },
+      field: 'correlationId',
       decode: decodeQueryEnvelope,
       envelope: (data: object) => data,
     },
@@ -756,7 +925,7 @@ describe('own data request boundaries', () => {
       data: { type: 'set-automation-enabled', ...version, enabled: true },
       field: 'enabled',
       decode: decodeCommandEnvelope,
-      envelope: (data: object) => ({ type: 'command', command: data }),
+      envelope: (data: object) => ({ type: 'command', correlationId, command: data }),
     },
     {
       name: 'project',
@@ -765,6 +934,7 @@ describe('own data request boundaries', () => {
       decode: decodeCommandEnvelope,
       envelope: (data: object) => ({
         type: 'command',
+        correlationId,
         command: { type: 'remove-project', ...version, project: data },
       }),
     },
@@ -775,6 +945,7 @@ describe('own data request boundaries', () => {
       decode: decodeCommandEnvelope,
       envelope: (data: object) => ({
         type: 'command',
+        correlationId,
         command: { type: 'register-project', ...version, candidate: data },
       }),
     },
@@ -785,6 +956,7 @@ describe('own data request boundaries', () => {
       decode: decodeCommandEnvelope,
       envelope: (data: object) => ({
         type: 'command',
+        correlationId,
         command: {
           type: 'register-project',
           ...version,
@@ -799,6 +971,7 @@ describe('own data request boundaries', () => {
       decode: decodeCommandEnvelope,
       envelope: (data: object) => ({
         type: 'command',
+        correlationId,
         command: {
           type: 'repair-project-workspace',
           ...version,
@@ -814,6 +987,7 @@ describe('own data request boundaries', () => {
       decode: decodeCommandEnvelope,
       envelope: (data: object) => ({
         type: 'command',
+        correlationId,
         command: {
           type: 'start-automation-override',
           ...version,
@@ -833,6 +1007,7 @@ describe('own data request boundaries', () => {
     'rejects an accessor at the $name boundary without reading it',
     ({ data, field, decode, envelope }) => {
       let reads = 0
+      expect(decode(envelope(data)).ok).toBe(true)
       Object.defineProperty(data, field, {
         enumerable: true,
         get() {

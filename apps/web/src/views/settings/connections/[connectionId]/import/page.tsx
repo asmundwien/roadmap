@@ -1,4 +1,5 @@
-import type { ConnectionId, ProjectRef } from '@roadmap/contracts/identity'
+import type { ConnectionId } from '@roadmap/contracts/identity'
+import type { CommandResult } from '@roadmap/contracts/operations'
 import type { Connection } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
@@ -12,7 +13,6 @@ import { projectSettingsPath, routePaths } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
 import {
-  admittedProjectRef,
   projectRegistrationDraft,
   projectRegistrationError,
 } from '@/views/shared/project-registration'
@@ -71,7 +71,9 @@ function ProjectImportForm({
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [generalError, setGeneralError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState<{ project: ProjectRef | null } | null>(null)
+  const [saved, setSaved] = useState<Extract<CommandResult, { type: 'register-project' }> | null>(
+    null,
+  )
   const blocked = saving || command.inFlight || !configurationValid
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -93,19 +95,7 @@ function ProjectImportForm({
         candidate: draft.candidate,
       })
       if (outcome.ok) {
-        setSaved({
-          project:
-            admittedProjectRef(
-              outcome.state.phase === 'ready'
-                ? outcome.state.projects
-                : outcome.state.phase === 'failed' ||
-                    outcome.state.phase === 'stopping' ||
-                    outcome.state.phase === 'stopped'
-                  ? (outcome.state.retained?.projects ?? [])
-                  : [],
-              draft.candidate,
-            ) ?? null,
-        })
+        setSaved(outcome.result)
         return
       }
       const { fields, general } = projectRegistrationError(outcome.error)
@@ -113,7 +103,7 @@ function ProjectImportForm({
       setGeneralError(general)
     } catch {
       setGeneralError(
-        'Registration may have completed. Check the canonical Project configuration before retrying.',
+        'Registration completion is unknown. No Project identity or saved version was confirmed. Check the configuration before submitting another registration.',
       )
     } finally {
       setSaving(false)
@@ -146,10 +136,18 @@ function ProjectImportForm({
         </SectionHeader>
         <SectionBody>
           {saved ? (
-            <Alert variant="info">
-              <strong>Project validated and registered.</strong>
-              <span>Roadmap queued it for reconciliation.</span>
-              {saved.project && (
+            <Alert variant={saved.commit === 'committed' ? 'info' : 'error'}>
+              <strong>
+                {saved.commit === 'committed'
+                  ? 'Project registered.'
+                  : 'Project registration committed, but durability is unconfirmed.'}
+              </strong>
+              <span>
+                {saved.project.integration}/{saved.project.projectId} through Connection{' '}
+                {saved.connectionId}, configuration version {saved.configurationVersion}.
+              </span>
+              <span>Workspace: {saved.workspacePath}</span>
+              {saved.commit === 'committed' && (
                 <Link href={projectSettingsPath(saved.project)}>View project registration</Link>
               )}
             </Alert>

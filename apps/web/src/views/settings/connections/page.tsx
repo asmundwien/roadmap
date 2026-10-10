@@ -4,10 +4,15 @@ import { Button } from '@roadmap/ui/button'
 import { Icon, icon } from '@roadmap/ui/icon'
 import { Page, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
 import classNames from 'classnames/bind'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { AutomationSection } from './automation-section'
-import type { ConnectionOperation } from './connection-details'
+import {
+  type AuthorizationResultFeedback,
+  authorizationResultPending,
+  type ConnectionOperation,
+  consumeAuthorizationFeedback,
+} from './connection-details'
 import { AddConnectionPane, AuthorizationPane } from './connection-panes'
 import { ConnectionSetupSection } from './connection-sections'
 import { ConnectionStride } from './connection-stride'
@@ -32,6 +37,37 @@ export function ConnectionSettings() {
   } = useRoadmap()
   const [pane, setPane] = useState<ConnectionPane | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [authorizationFeedback, setAuthorizationFeedback] = useState<AuthorizationResultFeedback[]>(
+    [],
+  )
+  const currentAuthorizations = useRef(authorizationOperations)
+  currentAuthorizations.current = authorizationOperations
+  const reconciledFeedback = authorizationFeedback.map((feedback) =>
+    consumeAuthorizationFeedback(
+      authorizationOperations.find((candidate) => candidate.id === feedback.result.operationId),
+      feedback,
+    ),
+  )
+  if (reconciledFeedback.some((feedback, index) => feedback !== authorizationFeedback[index])) {
+    setAuthorizationFeedback(reconciledFeedback)
+  }
+  const rememberResult = (feedback: AuthorizationResultFeedback) => {
+    setAuthorizationFeedback((current) => [
+      ...current.filter((item) => item.result.operationId !== feedback.result.operationId),
+      consumeAuthorizationFeedback(
+        currentAuthorizations.current.find(
+          (candidate) => candidate.id === feedback.result.operationId,
+        ),
+        feedback,
+      ),
+    ])
+  }
+  const unpublishedFeedback = reconciledFeedback.filter((feedback) =>
+    authorizationResultPending(
+      authorizationOperations.find((candidate) => candidate.id === feedback.result.operationId),
+      feedback,
+    ),
+  )
   const github = supportedIntegrations.find(
     (integration): integration is Extract<SupportedIntegration, { integration: 'github' }> =>
       integration.integration === 'github',
@@ -68,6 +104,7 @@ export function ConnectionSettings() {
         configuration.notices.length > 0 ||
         notice ||
         looseOperations.length > 0 ||
+        unpublishedFeedback.length > 0 ||
         connections.length === 0) && (
         <ConnectionSetupSection
           githubAvailable={Boolean(github)}
@@ -75,6 +112,7 @@ export function ConnectionSettings() {
           configurationNotices={configuration.notices}
           notice={notice}
           authorizations={looseOperations}
+          feedback={unpublishedFeedback}
           hasConnections={connections.length > 0}
           onOpenAuthorization={(operationId) => setPane({ kind: 'authorization', operationId })}
         />
@@ -92,7 +130,10 @@ export function ConnectionSettings() {
           operation={operation}
           configurationVersion={configurationVersion}
           onClose={() => setPane(null)}
-          onStarted={(operationId) => setPane({ kind: 'authorization', operationId })}
+          onResult={(result) => {
+            rememberResult({ result, previous: undefined, consumed: false })
+            setPane({ kind: 'authorization', operationId: result.operationId })
+          }}
         />
       )}
       {pane?.kind === 'authorization' &&
@@ -100,13 +141,18 @@ export function ConnectionSettings() {
           const authorization = authorizationOperations.find(
             (candidate) => candidate.id === pane.operationId,
           )
-          if (!authorization) return null
           return (
             <AuthorizationPane
+              key={pane.operationId}
               authorization={authorization}
+              feedback={
+                reconciledFeedback.find((item) => item.result.operationId === pane.operationId) ??
+                null
+              }
               operation={operation}
               configurationVersion={configurationVersion}
               onClose={() => setPane(null)}
+              onResult={rememberResult}
               onFinished={(message) => {
                 setPane(null)
                 setNotice(message)

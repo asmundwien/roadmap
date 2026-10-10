@@ -3,7 +3,8 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { type Command, commandSchema } from '@roadmap/contracts/operations'
+import { correlationIdSchema } from '@roadmap/contracts/identity'
+import { type Command, commandSchema, querySchema } from '@roadmap/contracts/operations'
 import type { ApplicationState } from '@roadmap/contracts/state'
 import {
   decodeCommandResultEnvelope,
@@ -27,7 +28,12 @@ import { readLocalProject } from './wayfinder/from-local.ts'
 
 const ORIGIN = 'http://localhost:5173'
 const PROJECT = { integration: 'local', id: 'fixture' } as const
-const QUERY = { type: 'query', query: { type: 'select-workspace' } }
+const CORRELATION_ID = correlationIdSchema.parse('27cc82a7-2fef-4f63-b5d4-842d12f3afc4')
+const QUERY = {
+  type: 'query',
+  correlationId: CORRELATION_ID,
+  query: querySchema.parse({ type: 'select-workspace' }),
+}
 const RAW_SECRET = 'lifecycle-private-error-token'
 
 function gate() {
@@ -66,7 +72,12 @@ interface Fixture {
   launchEntered: Gate
   effects: (
     | { kind: 'selector' }
-    | { kind: 'launch'; executable: string; args: readonly string[] }
+    | {
+        kind: 'launch'
+        operation: 'open-workspace' | 'open-terminal' | 'reveal-source'
+        project: { integration: 'local' | 'github'; projectId: string }
+        workspacePath: string
+      }
   )[]
   releases: Gate[]
 }
@@ -136,16 +147,24 @@ async function fixture(options: FixtureOptions = {}): Promise<Fixture> {
       },
     },
     operations: createApplicationOperations({
-      async selectWorkspace() {
-        effects.push({ kind: 'selector' })
-        selectorEntered.resolve()
-        await options.selectorGate?.promise
-        return null
-      },
-      async launch(executable, args) {
-        effects.push({ kind: 'launch', executable, args: [...args] })
-        launchEntered.resolve()
-        await options.launchGate?.promise
+      host: {
+        async execute(operation) {
+          if (operation.type === 'select-workspace') {
+            effects.push({ kind: 'selector' })
+            selectorEntered.resolve()
+            await options.selectorGate?.promise
+            return { kind: 'cancelled' }
+          }
+          effects.push({
+            kind: 'launch',
+            operation: operation.type,
+            project: operation.project,
+            workspacePath: operation.workspacePath,
+          })
+          launchEntered.resolve()
+          await options.launchGate?.promise
+          return { kind: 'invoked' }
+        },
       },
     }),
   })
@@ -225,19 +244,24 @@ function post(
 ): Promise<Response> {
   return fetch(`${current.url}/api/${family}`, {
     method: 'POST',
-    headers: { Origin: ORIGIN, 'Content-Type': 'application/json' },
+    headers: {
+      Origin: ORIGIN,
+      'Content-Type': 'application/json',
+      'X-Roadmap-Request-Id': CORRELATION_ID,
+    },
     body: JSON.stringify(operation),
   })
 }
 
-function launch(): { type: 'command'; command: Command } {
+function launch(): { type: 'command'; correlationId: typeof CORRELATION_ID; command: Command } {
   return {
     type: 'command',
+    correlationId: CORRELATION_ID,
     command: commandSchema.parse({
-      type: 'launch-action',
+      type: 'launch-project-operation',
       expectedConfigurationVersion: 1,
       project: fixtureProjectRef(PROJECT),
-      actionId: 'open-workspace',
+      operation: 'open-workspace',
     }),
   }
 }
@@ -330,13 +354,17 @@ describe('real application HTTP and WebSocket lifecycle', () => {
     try {
       const query = await bounded(post(current, 'query', QUERY))
       expect(query.status).toBe(200)
-      expect(decodeQueryResultEnvelope(await query.json())).toMatchObject({
+      expect(
+        decodeQueryResultEnvelope(await query.json(), QUERY.query, CORRELATION_ID),
+      ).toMatchObject({
         ok: true,
         value: { result: { ok: false, error: { code: 'not-supported' } } },
       })
       const command = await bounded(post(current, 'command', launch()))
       expect(command.status).toBe(200)
-      expect(decodeCommandResultEnvelope(await command.json())).toMatchObject({
+      expect(
+        decodeCommandResultEnvelope(await command.json(), launch().command, CORRELATION_ID),
+      ).toMatchObject({
         ok: true,
         value: { outcome: { ok: false, error: { code: 'not-supported' } } },
       })
@@ -439,9 +467,13 @@ describe('real application HTTP and WebSocket lifecycle', () => {
       }),
     ]
     for (const command of commands) {
-      const response = await bounded(post(current, 'command', { type: 'command', command }))
+      const response = await bounded(
+        post(current, 'command', { type: 'command', correlationId: CORRELATION_ID, command }),
+      )
       expect(response.status).toBe(200)
-      expect(decodeCommandResultEnvelope(await response.json())).toMatchObject({
+      expect(
+        decodeCommandResultEnvelope(await response.json(), command, CORRELATION_ID),
+      ).toMatchObject({
         ok: true,
         value: { outcome: { ok: false } },
       })
@@ -449,9 +481,11 @@ describe('real application HTTP and WebSocket lifecycle', () => {
     expect(await readFile(join(current.root, 'roadmap.config.json'), 'utf8')).toBe(before)
     expect(current.effects).toEqual([])
     const query = await bounded(post(current, 'query', QUERY))
-    expect(decodeQueryResultEnvelope(await query.json())).toMatchObject({
+    expect(
+      decodeQueryResultEnvelope(await query.json(), QUERY.query, CORRELATION_ID),
+    ).toMatchObject({
       ok: true,
-      value: { result: { ok: true, type: 'workspace-selection' } },
+      value: { result: { ok: true, operation: 'select-workspace', result: { kind: 'cancelled' } } },
     })
     expect(current.effects).toEqual([{ kind: 'selector' }])
   })
@@ -565,17 +599,47 @@ describe('real application HTTP and WebSocket lifecycle', () => {
         expect(reply.headers.get('connection')).toBe('close')
         const decoded =
           kind === 'selector'
-            ? decodeQueryResultEnvelope(await reply.json())
-            : decodeCommandResultEnvelope(await reply.json())
+            ? decodeQueryResultEnvelope(await reply.json(), QUERY.query, CORRELATION_ID)
+            : decodeCommandResultEnvelope(await reply.json(), launch().command, CORRELATION_ID)
         expect(decoded).toMatchObject({ ok: true })
         if (kind === 'selector')
           expect(decoded).toMatchObject({
-            value: { result: { ok: true, type: 'workspace-selection' } },
+            value: { result: { ok: true, result: { kind: 'cancelled' } } },
           })
         else
           expect(decoded).toMatchObject({
-            value: { outcome: { ok: true, result: { type: 'action-launched' } } },
+            value: {
+              outcome: {
+                ok: true,
+                result: { type: 'launch-project-operation', status: 'invoked' },
+              },
+            },
           })
+        if (kind === 'launch') {
+          expect(current.effects).toEqual([
+            {
+              kind: 'launch',
+              operation: 'open-workspace',
+              project: fixtureProjectRef(PROJECT),
+              workspacePath: current.workspace,
+            },
+          ])
+          expect(decoded).toMatchObject({
+            value: {
+              correlationId: CORRELATION_ID,
+              outcome: {
+                operation: 'launch-project-operation',
+                subject: { kind: 'project', project: fixtureProjectRef(PROJECT) },
+                result: {
+                  project: fixtureProjectRef(PROJECT),
+                  operation: 'open-workspace',
+                  status: 'invoked',
+                },
+              },
+            },
+          })
+          expect(decoded).not.toHaveProperty('value.outcome.state')
+        }
         await Promise.all([
           bounded(transportDone, 'Transport request drain'),
           bounded(stopped, 'Application drain'),
@@ -604,12 +668,16 @@ describe('real application HTTP and WebSocket lifecycle', () => {
       await health(current, 'stopping')
       await readiness(current, 503, { phase: 'stopping' })
       const rejected = await bounded(post(current, 'query', QUERY))
-      expect(decodeQueryResultEnvelope(await rejected.json())).toMatchObject({
+      expect(
+        decodeQueryResultEnvelope(await rejected.json(), QUERY.query, CORRELATION_ID),
+      ).toMatchObject({
         ok: true,
         value: { result: { ok: false, error: { code: 'not-supported' } } },
       })
       const rejectedCommand = await bounded(post(current, 'command', launch()))
-      expect(decodeCommandResultEnvelope(await rejectedCommand.json())).toMatchObject({
+      expect(
+        decodeCommandResultEnvelope(await rejectedCommand.json(), launch().command, CORRELATION_ID),
+      ).toMatchObject({
         ok: true,
         value: { outcome: { ok: false, error: { code: 'not-supported' } } },
       })

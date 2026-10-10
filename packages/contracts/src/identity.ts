@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { requestDataSchema } from './internal/request-data.ts'
+import { strictDataObject } from './internal/request-data.ts'
 
 export const integrationSchema = z.enum(['local', 'github'])
 export const connectionIdSchema = z.string().brand<'ConnectionId'>()
@@ -16,23 +16,22 @@ export const configurationVersionSchema = z
   .nonnegative()
   .safe()
   .brand<'ConfigurationVersion'>()
-export const correlationIdSchema = z.string().brand<'CorrelationId'>()
+export const correlationIdSchema = z.uuid().brand<'CorrelationId'>()
 
-export const localProjectRefSchema = requestDataSchema.pipe(
-  z.strictObject({ integration: z.literal('local'), projectId: projectIdSchema }),
-)
-export const githubProjectRefSchema = requestDataSchema.pipe(
-  z.strictObject({ integration: z.literal('github'), projectId: projectIdSchema }),
-)
-export const projectRefSchema = requestDataSchema.pipe(
-  z.strictObject({ integration: integrationSchema, projectId: projectIdSchema }),
-)
-export const mapRefSchema = requestDataSchema.pipe(
-  z.strictObject({ project: projectRefSchema, mapId: mapIdSchema }),
-)
-export const ticketRefSchema = requestDataSchema.pipe(
-  z.strictObject({ map: mapRefSchema, ticketId: ticketIdSchema }),
-)
+export const localProjectRefSchema = strictDataObject({
+  integration: z.literal('local'),
+  projectId: projectIdSchema,
+})
+export const githubProjectRefSchema = strictDataObject({
+  integration: z.literal('github'),
+  projectId: projectIdSchema,
+})
+export const projectRefSchema = strictDataObject({
+  integration: integrationSchema,
+  projectId: projectIdSchema,
+})
+export const mapRefSchema = strictDataObject({ project: projectRefSchema, mapId: mapIdSchema })
+export const ticketRefSchema = strictDataObject({ map: mapRefSchema, ticketId: ticketIdSchema })
 
 export type Integration = z.output<typeof integrationSchema>
 export type ConnectionId = z.output<typeof connectionIdSchema>

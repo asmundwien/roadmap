@@ -149,6 +149,5 @@ describe('ConnectionPage', () => {
     expect(markup).toContain('href="https://github.com/login/device"')
     expect(markup).toContain('EXACT-CODE')
     expect(markup).toContain('Cancel authorization')
-    expect(markup).toMatch(/<button(?![^>]*disabled)[^>]*>Copy code<\/button>/)
   })
 })

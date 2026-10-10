@@ -9,7 +9,9 @@ import {
   stateSequenceSchema,
   ticketIdSchema,
 } from '@roadmap/contracts/identity'
+import { commandResultSchema } from '@roadmap/contracts/operations'
 import {
+  authorizationOperationSchema,
   type Connection,
   connectionSchema,
   type ReadyApplicationState,
@@ -22,6 +24,7 @@ import { describe, expect, it } from 'vitest'
 import { RoadmapProvider } from '@/store/roadmap-provider'
 import type { RoadmapStore } from '@/store/roadmap-store'
 import { neverReadProject } from '@/views/overview/test-fixtures'
+import { AuthorizationPane } from './connection-panes'
 import { ConnectionSettings } from './page'
 
 const github = {
@@ -85,6 +88,64 @@ function state(connections: Connection[]): ReadyApplicationState {
 }
 
 describe('ConnectionSettings', () => {
+  it('omits roadmap navigation when the projection has no roadmap capability', () => {
+    const initial = state([
+      {
+        id: connectionIdSchema.parse('local'),
+        integration: 'local',
+        name: 'Local files',
+        builtIn: true,
+        availability: { status: 'available' },
+      },
+    ])
+    const markup = renderConnections({
+      ...initial,
+      projects: [
+        neverReadProject(
+          { integration: 'local', projectId: projectIdSchema.parse('no-roadmap') },
+          'No roadmap',
+        ),
+      ],
+    })
+    expect(markup).not.toContain('Go to roadmap')
+    expect(markup).not.toContain('href="/projects/local/no-roadmap"')
+    expect(markup).toContain('href="/projects/local/no-roadmap/settings"')
+  })
+
+  it('uses the projected roadmap destination without reconstructing it from the Project', () => {
+    const initial = state([
+      {
+        id: connectionIdSchema.parse('local'),
+        integration: 'local',
+        name: 'Local files',
+        builtIn: true,
+        availability: { status: 'available' },
+      },
+    ])
+    const markup = renderConnections({
+      ...initial,
+      projects: [
+        {
+          ...neverReadProject(
+            { integration: 'local', projectId: projectIdSchema.parse('pinned') },
+            'Pinned',
+          ),
+          actions: [
+            {
+              id: actionIdSchema.parse('display-only'),
+              label: 'Open selected map',
+              kind: 'roadmap',
+              href: '/projects/local/pinned/maps/selected',
+            },
+          ],
+        },
+      ],
+    })
+    expect(markup).toContain('href="/projects/local/pinned/maps/selected"')
+    expect(markup).toContain('Open selected map')
+    expect(markup).not.toContain('display-only')
+  })
+
   it.each([false, true])(
     'allows shutdown but not enablement when Automation is unavailable, enabled=%s',
     (enabled) => {
@@ -239,22 +300,31 @@ describe('ConnectionSettings', () => {
           ),
           actions: [
             {
+              id: actionIdSchema.parse('roadmap'),
+              label: 'Go to roadmap',
+              kind: 'roadmap',
+              href: '/projects/local/my%20workspace',
+            },
+            {
               id: actionIdSchema.parse('open-workspace'),
               label: 'Open in VS Code',
               kind: 'server-launch',
               operation: 'open-workspace',
+              project: { integration: 'local', projectId: projectIdSchema.parse('my workspace') },
             },
             {
               id: actionIdSchema.parse('reveal-source'),
               label: 'View source folder',
               kind: 'server-launch',
               operation: 'reveal-source',
+              project: { integration: 'local', projectId: projectIdSchema.parse('my workspace') },
             },
             {
               id: actionIdSchema.parse('open-terminal'),
               label: 'Open Terminal',
               kind: 'server-launch',
               operation: 'open-terminal',
+              project: { integration: 'local', projectId: projectIdSchema.parse('my workspace') },
             },
           ],
         },
@@ -292,18 +362,21 @@ describe('ConnectionSettings', () => {
               label: 'Open in VS Code',
               kind: 'server-launch',
               operation: 'open-workspace',
+              project: { integration: 'github', projectId: projectIdSchema.parse('acme/app') },
             },
             {
               id: actionIdSchema.parse('reveal-source'),
               label: 'View source folder',
               kind: 'server-launch',
               operation: 'reveal-source',
+              project: { integration: 'github', projectId: projectIdSchema.parse('acme/app') },
             },
             {
               id: actionIdSchema.parse('open-terminal'),
               label: 'Open Terminal',
               kind: 'server-launch',
               operation: 'open-terminal',
+              project: { integration: 'github', projectId: projectIdSchema.parse('acme/app') },
             },
             {
               id: actionIdSchema.parse('open-source'),
@@ -321,4 +394,53 @@ describe('ConnectionSettings', () => {
     expect(markup).toContain('href="https://github.com/acme/app"')
     expect(markup).toContain('Open on GitHub')
   })
+})
+
+describe('authorization grant navigation', () => {
+  it.each(['current', 'historical'] as const)(
+    'uses the published %s grant identity after a waiting operation outcome',
+    (kind) => {
+      const authorization = authorizationOperationSchema.parse({
+        id: 'grant-operation',
+        status: 'granted',
+        connection: { kind, id: 'github/canonical', accountId: 'account-42' },
+      })
+      const result = commandResultSchema.parse({
+        type: 'begin-github-authorization',
+        operationId: 'grant-operation',
+        phase: 'waiting',
+        verificationUri: 'https://github.com/login/device',
+        userCode: 'PREVIOUS-CODE',
+        expiresAt: 60_000,
+      })
+      if (result.type !== 'begin-github-authorization')
+        throw new Error('Expected authorization result')
+      const markup = renderToStaticMarkup(
+        createElement(
+          MemoryRouter,
+          null,
+          createElement(AuthorizationPane, {
+            authorization,
+            feedback: { result, previous: undefined, consumed: false },
+            configurationVersion: configurationVersionSchema.parse(99),
+            operation: {
+              execute: async () => {
+                throw new Error('Unexpected authorization effect')
+              },
+            },
+            onClose() {},
+            onResult() {},
+            onFinished() {},
+          }),
+        ),
+      )
+      if (kind === 'current') {
+        expect(markup).toContain('href="/connections/github%2Fcanonical"')
+        expect(markup).toContain('account-42')
+        expect(markup).not.toContain('configuration version 99')
+      } else {
+        expect(markup).not.toContain('href="/connections/github%2Fcanonical"')
+      }
+    },
+  )
 })

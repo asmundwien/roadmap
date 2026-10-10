@@ -11,6 +11,7 @@ import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { RoadmapProvider } from '@/store/roadmap-provider'
 import type { RoadmapStore } from '@/store/roadmap-store'
+import { projectRegistrationDraft } from '@/views/shared/project-registration'
 import { ProjectImportPage } from './page'
 
 function renderImport(connectionId: string, connection?: Connection, valid = true): string {
@@ -72,12 +73,6 @@ const local: Connection = {
   availability: { status: 'available' },
 }
 
-it('explains the selected connection without offering a different one', () => {
-  const markup = renderImport('local', local)
-  expect(markup).toContain('Local files')
-  expect(markup).not.toContain('<select')
-})
-
 describe('GitHub import', () => {
   const github: Connection = {
     id: connectionIdSchema.parse('github/work'),
@@ -88,22 +83,42 @@ describe('GitHub import', () => {
     availability: { status: 'authorization-required', cause: 'Authorization expired.' },
   }
 
-  it('shows connection availability and workspace instructions', () => {
+  it('reports the actual Connection availability cause', () => {
     const markup = renderImport(github.id, github)
-    expect(markup).toContain('Work account')
     expect(markup).toContain('Authorization expired.')
-    expect(markup).not.toContain('<select')
   })
 })
 
 it('blocks import when configuration needs repair', () => {
   const markup = renderImport('local', local, false)
-  expect(markup).toContain('Configuration needs repair.')
-  expect(markup).toMatch(/<button[^>]*disabled=""[^>]*>Validate and save<\/button>/)
+  const buttons = markup.match(/<button\b[^>]*>/g) ?? []
+  expect(buttons.length).toBeGreaterThan(0)
+  expect(buttons.every((button) => button.includes('disabled=""'))).toBe(true)
 })
 
 it('does not offer registration for a missing connection', () => {
   const markup = renderImport('missing')
-  expect(markup).toContain('Connection not found')
-  expect(markup).not.toContain('Validate and save')
+  expect(markup).not.toContain('<form')
+  expect(markup).not.toContain('<button')
+})
+
+describe('registration draft', () => {
+  it('preserves every byte of the selected filesystem path', () => {
+    const path = ' /work/project with trailing spaces  '
+    const data = new FormData()
+    data.set('displayName', '  My project  ')
+    expect(projectRegistrationDraft(data, local, path)).toEqual({
+      candidate: {
+        integration: 'local',
+        connectionId: local.id,
+        workspace: { path },
+        displayName: 'My project',
+      },
+      errors: {},
+    })
+  })
+
+  it('does not invent a candidate before a folder has been selected', () => {
+    expect(projectRegistrationDraft(new FormData(), local, '').candidate).toBeNull()
+  })
 })

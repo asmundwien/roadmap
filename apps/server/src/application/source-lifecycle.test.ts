@@ -55,8 +55,10 @@ async function fixture(disposalFailure?: Error) {
     configuration: document,
     admissions: { local: createLocalProjectAdmission() },
     operations: createApplicationOperations({
-      async launch() {
-        throw new Error('No host launch belongs to this schedule.')
+      host: {
+        async execute() {
+          throw new Error('No host operation belongs to this schedule.')
+        },
       },
     }),
     observers: {

@@ -481,6 +481,18 @@
     {
       "name": "ticketTypeOf",
       "type": false
+    },
+    {
+      "name": "provenanceSchema",
+      "type": false
+    },
+    {
+      "name": "timeSchema",
+      "type": false
+    },
+    {
+      "name": "SourceProvenance",
+      "type": true
     }
   ],
   "operations": [
@@ -537,8 +549,68 @@
       "type": true
     },
     {
+      "name": "CommandOutcomeFor",
+      "type": true
+    },
+    {
       "name": "commandResultFor",
       "type": false
+    },
+    {
+      "name": "projectOperationSchema",
+      "type": false
+    },
+    {
+      "name": "operationSubjectSchema",
+      "type": false
+    },
+    {
+      "name": "configurationCommitSchema",
+      "type": false
+    },
+    {
+      "name": "refreshCauseSchema",
+      "type": false
+    },
+    {
+      "name": "refreshAttemptSchema",
+      "type": false
+    },
+    {
+      "name": "commandSubject",
+      "type": false
+    },
+    {
+      "name": "commandOutcomeFor",
+      "type": false
+    },
+    {
+      "name": "parseCommandOutcomeFor",
+      "type": false
+    },
+    {
+      "name": "ProjectOperation",
+      "type": true
+    },
+    {
+      "name": "OperationSubject",
+      "type": true
+    },
+    {
+      "name": "ConfigurationCommit",
+      "type": true
+    },
+    {
+      "name": "RefreshCause",
+      "type": true
+    },
+    {
+      "name": "RefreshAttempt",
+      "type": true
+    },
+    {
+      "name": "CommandSubjectFor",
+      "type": true
     }
   ],
   "wire": [
@@ -637,6 +709,10 @@
     {
       "name": "requestRejectionStatus",
       "type": false
+    },
+    {
+      "name": "CommandResultEnvelopeFor",
+      "type": true
     }
   ]
 }

@@ -10,11 +10,16 @@ import {
 } from 'node:http'
 import { createConnection, type Socket } from 'node:net'
 import { inspect } from 'node:util'
+import { correlationIdSchema } from '@roadmap/contracts/identity'
 import {
   type Command,
   type CommandOutcome,
+  type CommandOutcomeFor,
+  commandOutcomeFor,
   commandOutcomeSchema,
   commandResultSchema,
+  commandSchema,
+  commandSubject,
   type Query,
   type QueryResult,
   queryResultSchema,
@@ -44,15 +49,20 @@ import {
 import { createRoadmapTransport, type RoadmapTransport } from './transport.ts'
 
 const ALLOWED_ORIGIN = 'http://localhost:5173'
-const REQUEST_ID = '27cc82a7-2fef-4f63-b5d4-842d12f3afc4'
-const VALID_QUERY = { type: 'query', query: { type: 'select-workspace' } }
+const REQUEST_ID = correlationIdSchema.parse('27cc82a7-2fef-4f63-b5d4-842d12f3afc4')
+const VALID_QUERY = {
+  type: 'query',
+  correlationId: REQUEST_ID,
+  query: { type: 'select-workspace' },
+} as const
 const VALID_COMMAND = {
   type: 'command',
-  command: {
+  correlationId: REQUEST_ID,
+  command: commandSchema.parse({
     type: 'remove-connection',
     expectedConfigurationVersion: 1,
     connectionId: 'one',
-  },
+  }),
 }
 
 function state(stateSequence: number, serverEpoch = 'epoch-a'): ReadyApplicationState {
@@ -286,6 +296,117 @@ function unsafeResourceState(scope: string): ReadyApplicationState {
   return snapshot
 }
 
+function workspaceSelection(current = state(0)): QueryResult {
+  return queryResultSchema.parse({
+    operation: 'select-workspace',
+    subject: { kind: 'none' },
+    serverEpoch: current.serverEpoch,
+    stateSequence: current.stateSequence,
+    ok: true,
+    result: { kind: 'cancelled' },
+  })
+}
+
+function successfulOutcome(command: Command, current = state(1)): CommandOutcome {
+  const commit = { configurationVersion: current.configurationVersion, commit: 'committed' }
+  let result: unknown
+  switch (command.type) {
+    case 'rename-connection':
+    case 'remove-connection':
+      result = { type: command.type, connectionId: command.connectionId, ...commit }
+      break
+    case 'rename-project':
+    case 'remove-project':
+      result = { type: command.type, project: command.project, ...commit }
+      break
+    case 'repair-project-workspace':
+      result = {
+        type: command.type,
+        project: command.project,
+        workspacePath: command.workspace.path,
+        ...commit,
+      }
+      break
+    case 'register-project':
+      result = {
+        type: command.type,
+        project: { integration: command.candidate.integration, projectId: 'canonical-project' },
+        connectionId: command.candidate.connectionId,
+        workspacePath: '/canonical-workspace',
+        ...commit,
+      }
+      break
+    case 'set-automation-enabled':
+      result = { type: command.type, enabled: command.enabled, ...commit }
+      break
+    case 'set-project-automation-enabled':
+      result = { type: command.type, project: command.project, enabled: command.enabled, ...commit }
+      break
+    case 'launch-project-operation':
+      result = {
+        type: command.type,
+        project: command.project,
+        operation: command.operation,
+        status: 'invoked',
+      }
+      break
+    case 'start-automation-override':
+      result = {
+        type: command.type,
+        target: command.target,
+        stage: command.stage,
+        admission: 'override',
+        status: 'admitted',
+      }
+      break
+    case 'refresh-project':
+      result = {
+        type: command.type,
+        project: command.project,
+        attempt:
+          command.project.integration === 'local'
+            ? {
+                kind: 'failed',
+                attemptedAt: 1000,
+                provenance: { integration: 'local', path: '/fixture', operation: 'inspect-root' },
+                cause: 'Workspace cannot be read.',
+              }
+            : {
+                kind: 'failed',
+                attemptedAt: 1000,
+                provenance: {
+                  integration: 'github',
+                  connectionId: 'fixture-connection',
+                  repositoryId: command.project.projectId,
+                  stage: 'repository',
+                },
+                cause: 'GitHub access is currently unavailable.',
+              },
+      }
+      break
+    case 'begin-github-authorization':
+    case 'reauthorize-github-connection':
+      result = { type: command.type, operationId: 'fixture-authorization', phase: 'cancelled' }
+      break
+    case 'retry-github-authorization':
+    case 'cancel-github-authorization':
+      result = { type: command.type, operationId: command.operationId, phase: 'cancelled' }
+      break
+    default: {
+      const exhaustive: never = command
+      throw new Error(`Unsupported fixture command ${exhaustive}`)
+    }
+  }
+  return commandOutcomeSchema.parse({
+    operation: command.type,
+    subject: commandSubject(command),
+    serverEpoch: current.serverEpoch,
+    stateSequence: current.stateSequence,
+    ok: true,
+    result: commandResultSchema.parse(result),
+  })
+}
+
 interface ApplicationHarness {
   application: RoadmapApplication
   publish(next: ReadyApplicationState): void
@@ -296,13 +417,7 @@ interface ApplicationHarness {
 function applicationHarness(initial = state(0)): ApplicationHarness {
   let current = initial
   const listeners = new Set<(value: ApplicationState) => void>()
-  const query = vi.fn(
-    async (_request: Query): Promise<QueryResult> =>
-      queryResultSchema.parse({
-        ok: true,
-        type: 'workspace-selection',
-      }),
-  )
+  const query = vi.fn(async (_request: Query): Promise<QueryResult> => workspaceSelection(current))
   const execute = vi.fn(async (_command: Command): Promise<CommandOutcome> => {
     const next = readyApplicationStateSchema.parse({
       ...current,
@@ -311,25 +426,7 @@ function applicationHarness(initial = state(0)): ApplicationHarness {
     })
     current = next
     for (const listener of listeners) listener(next)
-    const result = commandResultSchema.parse(
-      _command.type === 'begin-github-authorization' ||
-        _command.type === 'retry-github-authorization'
-        ? { type: 'authorization-started', operationId: 'fixture-authorization' }
-        : _command.type === 'cancel-github-authorization'
-          ? { type: 'authorization-cancelled', operationId: _command.operationId }
-          : _command.type === 'refresh-project'
-            ? { type: 'project-refreshed', project: _command.project }
-            : _command.type === 'launch-action'
-              ? { type: 'action-launched', actionId: _command.actionId }
-              : _command.type === 'start-automation-override'
-                ? {
-                    type: 'automation-override-started',
-                    target: _command.target,
-                    stage: _command.stage,
-                  }
-                : { type: 'configuration-updated', configurationVersion: 1 },
-    )
-    return commandOutcomeSchema.parse({ ok: true, result, state: next })
+    return successfulOutcome(_command, next)
   })
   return {
     application: {
@@ -347,7 +444,12 @@ function applicationHarness(initial = state(0)): ApplicationHarness {
         return () => listeners.delete(listener)
       },
       query,
-      execute,
+      async execute<C extends Command>(command: C): Promise<CommandOutcomeFor<C>> {
+        const outcome = await execute(command)
+        if (!commandOutcomeFor(command, outcome))
+          throw new Error('Fixture outcome does not match the initiating command')
+        return outcome
+      },
       stop: async () => undefined,
     },
     publish(next) {
@@ -505,7 +607,15 @@ async function expectRecovery(harness: TransportHarness): Promise<void> {
   expect(response.status).toBe(200)
   expect(await response.json()).toEqual({
     type: 'query-result',
-    result: { ok: true, type: 'workspace-selection' },
+    correlationId: REQUEST_ID,
+    result: {
+      operation: 'select-workspace',
+      subject: { kind: 'none' },
+      serverEpoch: 'epoch-a',
+      stateSequence: expect.any(Number),
+      ok: true,
+      result: { kind: 'cancelled' },
+    },
   })
 }
 
@@ -534,26 +644,72 @@ describe('transport codecs', () => {
     expect(
       decodeQueryEnvelope({
         type: 'query',
+        correlationId: REQUEST_ID,
         query: { type: 'select-workspace', token: 'secret' },
       }).ok,
     ).toBe(false)
     expect(
       decodeCommandEnvelope({
         type: 'command',
+        correlationId: REQUEST_ID,
         command: {
-          type: 'launch-action',
+          type: 'launch-project-operation',
           expectedConfigurationVersion: 1,
           project: { integration: 'local', projectId: 'fixture' },
-          actionId: 'open-workspace',
+          operation: 'open-workspace',
           executable: '/bin/sh',
         },
       }).ok,
     ).toBe(false)
     expect(
-      decodeCommandResultEnvelope({
-        type: 'command-result',
-        outcome: { ok: true, result: { type: 'action-launched', actionId: 'open' } },
-      }).ok,
+      decodeCommandResultEnvelope(
+        {
+          type: 'command-result',
+          correlationId: REQUEST_ID,
+          outcome: { ...successfulOutcome(VALID_COMMAND.command), state: state(1) },
+        },
+        VALID_COMMAND.command,
+        REQUEST_ID,
+      ).ok,
+    ).toBe(false)
+  })
+
+  it('refuses otherwise-valid wrong operation, correlation and subject outcomes', () => {
+    const command = VALID_COMMAND.command
+    const outcome = successfulOutcome(command)
+    const envelope = { type: 'command-result', correlationId: REQUEST_ID, outcome }
+    expect(decodeCommandResultEnvelope(envelope, command, REQUEST_ID).ok).toBe(true)
+    expect(
+      decodeCommandResultEnvelope(
+        envelope,
+        command,
+        correlationIdSchema.parse('dc8275cd-9a12-4f9c-a149-d1c697e0973a'),
+      ).ok,
+    ).toBe(false)
+    const other = commandSchema.parse({
+      type: 'remove-connection',
+      expectedConfigurationVersion: 1,
+      connectionId: 'other',
+    })
+    expect(
+      decodeCommandResultEnvelope(
+        { ...envelope, outcome: successfulOutcome(other) },
+        command,
+        REQUEST_ID,
+      ).ok,
+    ).toBe(false)
+    const rename = commandSchema.parse({
+      type: 'rename-connection',
+      expectedConfigurationVersion: 1,
+      connectionId: 'one',
+      name: 'Renamed',
+    })
+    expect(
+      decodeCommandResultEnvelope(
+        { ...envelope, outcome: successfulOutcome(rename) },
+        command,
+        REQUEST_ID,
+      ).ok,
     ).toBe(false)
   })
 })
@@ -563,26 +719,38 @@ describe('Automation override transport', () => {
       map: { project: { integration: 'github', projectId: 'example/project' }, mapId: '1' },
       ticketId: '2',
     }
+    const command = commandSchema.parse({
+      type: 'start-automation-override',
+      expectedConfigurationVersion: 1,
+      target,
+      stage: 'classification',
+    })
     expect(
-      decodeCommandEnvelope({
-        type: 'command',
-        command: {
-          type: 'start-automation-override',
-          expectedConfigurationVersion: 1,
-          target,
-          stage: 'classification',
-        },
-      }),
+      decodeCommandEnvelope({ type: 'command', correlationId: REQUEST_ID, command }),
     ).toMatchObject({ ok: true })
     expect(
-      decodeCommandResultEnvelope({
-        type: 'command-result',
-        outcome: {
-          ok: true,
-          result: { type: 'automation-override-started', target, stage: 'classification' },
-          state: state(1),
+      decodeCommandResultEnvelope(
+        {
+          type: 'command-result',
+          correlationId: REQUEST_ID,
+          outcome: {
+            operation: 'start-automation-override',
+            subject: { kind: 'ticket', target, stage: 'classification' },
+            serverEpoch: 'epoch-a',
+            stateSequence: 1,
+            ok: true,
+            result: {
+              type: 'start-automation-override',
+              target,
+              stage: 'classification',
+              admission: 'override',
+              status: 'admitted',
+            },
+          },
         },
-      }),
+        command,
+        REQUEST_ID,
+      ),
     ).toMatchObject({ ok: true })
   })
 })
@@ -684,7 +852,7 @@ describe('createRoadmapTransport', () => {
     const harness = await transportHarness()
     const response = await post(
       `${harness.httpUrl}/api/query`,
-      { type: 'query', query: { type: 'select-workspace' } },
+      VALID_QUERY,
       'http://attacker.example',
     )
     expect(response.status).toBe(403)
@@ -709,19 +877,28 @@ describe('createRoadmapTransport', () => {
 
     const response = await post(`${harness.httpUrl}/api/query`, {
       type: 'query',
+      correlationId: REQUEST_ID,
       query: { type: 'select-workspace' },
     })
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({
       type: 'query-result',
-      result: { ok: true, type: 'workspace-selection' },
+      correlationId: REQUEST_ID,
+      result: {
+        operation: 'select-workspace',
+        subject: { kind: 'none' },
+        serverEpoch: 'epoch-a',
+        stateSequence: 0,
+        ok: true,
+        result: { kind: 'cancelled' },
+      },
     })
     expect(harness.application.query).toHaveBeenCalledOnce()
     expect(messages).toBe(0)
     connected.socket.close()
   })
 
-  it('publishes command state before returning the exact same authoritative state', async () => {
+  it('publishes read facts separately before returning a state-free command acknowledgement', async () => {
     const harness = await transportHarness(applicationHarness(resourceState(0)))
     const connected = await openSocket(harness.wsUrl)
     const events: string[] = []
@@ -734,6 +911,7 @@ describe('createRoadmapTransport', () => {
 
     const responsePromise = post(`${harness.httpUrl}/api/command`, {
       type: 'command',
+      correlationId: REQUEST_ID,
       command: {
         type: 'rename-connection',
         expectedConfigurationVersion: 1,
@@ -747,35 +925,56 @@ describe('createRoadmapTransport', () => {
 
     await published
     const response = await responsePromise
-    const decoded = decodeCommandResultEnvelope(response)
-    expect(decoded.ok && decoded.value.outcome.state.stateSequence).toBe(1)
-    if (!decoded.ok) throw new Error('Invalid command resource state on the wire.')
-    expectResourcePayload(decoded.value.outcome.state, 1, 0)
+    const decoded = decodeCommandResultEnvelope(
+      response,
+      commandSchema.parse({
+        type: 'rename-connection',
+        expectedConfigurationVersion: 1,
+        connectionId: 'one',
+        name: 'Renamed',
+      }),
+      REQUEST_ID,
+    )
+    expect(decoded.ok && decoded.value.outcome.stateSequence).toBe(1)
+    expect(response).not.toHaveProperty('outcome.state')
+    expectResourcePayload(harness.application.application.current(), 1, 0)
     expect(events).toEqual(['published', 'responded'])
     connected.socket.close()
   })
 
-  it('preserves typed stale-configuration conflicts with authoritative state', async () => {
+  it('preserves typed stale-configuration conflicts with producer provenance and no state', async () => {
     const application = applicationHarness(state(7))
-    application.execute.mockResolvedValue({
-      ok: false,
-      error: { code: 'conflict', message: 'Configuration changed.' },
-      state: state(7),
-    })
+    application.execute.mockResolvedValue(
+      commandOutcomeSchema.parse({
+        ok: false,
+        error: { code: 'conflict', message: 'Configuration changed.' },
+        operation: 'remove-connection',
+        subject: commandSubject(VALID_COMMAND.command),
+        serverEpoch: 'epoch-a',
+        stateSequence: 7,
+      }),
+    )
     const harness = await transportHarness(application)
     const response = await post(`${harness.httpUrl}/api/command`, {
       type: 'command',
+      correlationId: REQUEST_ID,
       command: {
         type: 'remove-connection',
         expectedConfigurationVersion: 0,
         connectionId: 'one',
       },
     })
-    const decoded = decodeCommandResultEnvelope(await response.json())
+    const decoded = decodeCommandResultEnvelope(
+      await response.json(),
+      commandSchema.parse({ ...VALID_COMMAND.command, expectedConfigurationVersion: 0 }),
+      REQUEST_ID,
+    )
     expect(decoded.ok && decoded.value.outcome).toMatchObject({
       ok: false,
       error: { code: 'conflict' },
-      state: { stateSequence: 7 },
+      operation: 'remove-connection',
+      subject: { kind: 'connection', connectionId: 'one' },
+      stateSequence: 7,
     })
   })
 
@@ -873,13 +1072,28 @@ describe('createRoadmapTransport', () => {
   )
 
   it.each([
+    {
+      request: 'query',
+      body: { type: 'query', query: VALID_QUERY.query },
+      reason: 'malformed-envelope',
+    },
+    {
+      request: 'command',
+      body: { type: 'command', command: VALID_COMMAND.command },
+      reason: 'malformed-envelope',
+    },
+    {
+      request: 'query',
+      body: { ...VALID_QUERY, correlationId: 'not-a-uuid' },
+      reason: 'malformed-envelope',
+    },
     { request: 'query', body: '{', reason: 'malformed-json' },
     { request: 'query', body: 'null', reason: 'malformed-envelope' },
     { request: 'query', body: '[]', reason: 'malformed-envelope' },
     { request: 'query', body: '{}', reason: 'malformed-envelope' },
     {
       request: 'query',
-      body: { type: 'command', command: VALID_COMMAND.command },
+      body: { type: 'command', correlationId: REQUEST_ID, command: VALID_COMMAND.command },
       reason: 'malformed-envelope',
     },
     {
@@ -889,14 +1103,22 @@ describe('createRoadmapTransport', () => {
     },
     {
       request: 'query',
-      body: { type: 'query', query: { type: 'select-workspace', token: 'input-must-not-leak' } },
+      body: {
+        type: 'query',
+        correlationId: REQUEST_ID,
+        query: { type: 'select-workspace', token: 'input-must-not-leak' },
+      },
       reason: 'malformed-envelope',
     },
-    { request: 'query', body: { type: 'query', query: {} }, reason: 'malformed-envelope' },
+    {
+      request: 'query',
+      body: { type: 'query', correlationId: REQUEST_ID, query: {} },
+      reason: 'malformed-envelope',
+    },
     { request: 'command', body: 'null', reason: 'malformed-envelope' },
     {
       request: 'command',
-      body: { type: 'query', query: VALID_QUERY.query },
+      body: { type: 'query', correlationId: REQUEST_ID, query: VALID_QUERY.query },
       reason: 'malformed-envelope',
     },
     {
@@ -908,19 +1130,25 @@ describe('createRoadmapTransport', () => {
       request: 'command',
       body: {
         type: 'command',
+        correlationId: REQUEST_ID,
         command: { ...VALID_COMMAND.command, token: 'input-must-not-leak' },
       },
       reason: 'malformed-envelope',
     },
     {
       request: 'command',
-      body: { type: 'command', command: { type: 'remove-connection', connectionId: 'one' } },
+      body: {
+        type: 'command',
+        correlationId: REQUEST_ID,
+        command: { type: 'remove-connection', connectionId: 'one' },
+      },
       reason: 'malformed-envelope',
     },
     {
       request: 'command',
       body: {
         type: 'command',
+        correlationId: REQUEST_ID,
         command: { ...VALID_COMMAND.command, expectedConfigurationVersion: '1' },
       },
       reason: 'malformed-envelope',
@@ -929,6 +1157,7 @@ describe('createRoadmapTransport', () => {
       request: 'command',
       body: {
         type: 'command',
+        correlationId: REQUEST_ID,
         command: { ...VALID_COMMAND.command, expectedConfigurationVersion: -1 },
       },
       reason: 'malformed-envelope',
@@ -937,6 +1166,7 @@ describe('createRoadmapTransport', () => {
       request: 'command',
       body: {
         type: 'command',
+        correlationId: REQUEST_ID,
         command: {
           type: 'register-project',
           expectedConfigurationVersion: 1,
@@ -954,6 +1184,7 @@ describe('createRoadmapTransport', () => {
       request: 'command',
       body: {
         type: 'command',
+        correlationId: REQUEST_ID,
         command: {
           type: 'register-project',
           expectedConfigurationVersion: 1,
@@ -970,6 +1201,7 @@ describe('createRoadmapTransport', () => {
       request: 'command',
       body: {
         type: 'command',
+        correlationId: REQUEST_ID,
         command: {
           type: 'repair-project-workspace',
           expectedConfigurationVersion: 1,
@@ -1019,25 +1251,28 @@ describe('createRoadmapTransport', () => {
     },
   )
 
-  it('admits supported nonbrowser requests without correlation', async () => {
-    const harness = await transportHarness()
-    const query = await post(`${harness.httpUrl}/api/query`, VALID_QUERY, ALLOWED_ORIGIN, null)
-    expect(query.status).toBe(200)
-    expect(await query.json()).toEqual({
-      type: 'query-result',
-      result: { ok: true, type: 'workspace-selection' },
-    })
-    const command = await post(
-      `${harness.httpUrl}/api/command`,
-      VALID_COMMAND,
-      ALLOWED_ORIGIN,
-      null,
-    )
-    expect(command.status).toBe(200)
-    expect(decodeCommandResultEnvelope(await command.json()).ok).toBe(true)
-    expect(harness.application.query).toHaveBeenCalledOnce()
-    expect(harness.application.execute).toHaveBeenCalledOnce()
-  })
+  it.each(['query', 'command'] as const)(
+    'rejects a %s with missing or mismatched header correlation before admission',
+    async (family) => {
+      const harness = await transportHarness()
+      for (const header of [null, 'dc8275cd-9a12-4f9c-a149-d1c697e0973a']) {
+        const response = await post(
+          `${harness.httpUrl}/api/${family}`,
+          family === 'query' ? VALID_QUERY : VALID_COMMAND,
+          ALLOWED_ORIGIN,
+          header,
+        )
+        expect(response.status).toBe(400)
+        expect(await response.json()).toMatchObject({
+          type: 'request-rejected',
+          request: family,
+          requestId: header,
+          reason: 'malformed-envelope',
+        })
+        expectNoAdmission(harness)
+      }
+    },
+  )
 
   it.each(['query', 'command'])(
     'allows the correlation header in %s CORS preflight without admission',
@@ -1106,7 +1341,9 @@ describe('bounded ingress lifecycle regressions after repair', () => {
       const response = await bounded(
         post(`${harness.httpUrl}/api/${request}`, {
           type: request,
-          [request]: { type: variant },
+          correlationId: REQUEST_ID,
+          [request]:
+            request === 'command' ? { ...VALID_COMMAND.command, type: variant } : { type: variant },
         }),
       )
       expect(response.status).toBe(400)
@@ -1224,7 +1461,15 @@ describe('bounded ingress lifecycle regressions after repair', () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({
       type: 'query-result',
-      result: { ok: true, type: 'workspace-selection' },
+      correlationId: REQUEST_ID,
+      result: {
+        operation: 'select-workspace',
+        subject: { kind: 'none' },
+        serverEpoch: 'epoch-a',
+        stateSequence: 0,
+        ok: true,
+        result: { kind: 'cancelled' },
+      },
     })
     expect(harness.application.query).toHaveBeenCalledOnce()
     expect(harness.application.execute).not.toHaveBeenCalled()
@@ -1305,19 +1550,74 @@ describe('bounded ingress lifecycle regressions after repair', () => {
     },
   )
 
-  it.each(['state', 'project', 'map', 'ticket', 'membership', 'automation'])(
+  it('refuses credential and Harness fields attached to an actual selected-folder result', async () => {
+    const diagnostics = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const application = applicationHarness()
+    const reply = queryResultSchema.parse({
+      operation: 'select-workspace',
+      subject: { kind: 'none' },
+      serverEpoch: 'epoch-a',
+      stateSequence: 0,
+      ok: true,
+      result: { kind: 'selected', path: ' /selected workspace ' },
+    })
+    if (!reply.ok) throw new Error('Expected selection fixture')
+    Object.assign(reply.result, {
+      accessToken: 'private-selection-token',
+      harness: { args: ['private-selection-token'] },
+    })
+    application.query.mockResolvedValueOnce(reply)
+    const harness = await transportHarness(application)
+    const response = await bounded(post(`${harness.httpUrl}/api/query`, VALID_QUERY))
+    expect(response.status).toBe(500)
+    expect(await response.text()).not.toContain('private-selection-token')
+    expect(inspect(diagnostics.mock.calls)).not.toContain('private-selection-token')
+    await expectRecovery(harness)
+  })
+
+  it.each(['query', 'command'] as const)(
+    'refuses accessor-backed %s result fields without evaluating them',
+    async (family) => {
+      const diagnostics = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+      const application = applicationHarness()
+      const queryReply = workspaceSelection()
+      const commandReply = successfulOutcome(VALID_COMMAND.command)
+      const reply = family === 'query' ? queryReply : commandReply
+      if (!reply.ok) throw new Error('Expected successful fixture')
+      let accessed = false
+      Object.defineProperty(reply.result, family === 'query' ? 'kind' : 'configurationVersion', {
+        enumerable: true,
+        get() {
+          accessed = true
+          throw new Error('accessor-private-token')
+        },
+      })
+      if (family === 'query') application.query.mockResolvedValueOnce(queryReply)
+      else application.execute.mockResolvedValueOnce(commandReply)
+      const harness = await transportHarness(application)
+      const response = await bounded(
+        post(`${harness.httpUrl}/api/${family}`, family === 'query' ? VALID_QUERY : VALID_COMMAND),
+      )
+      expect(response.status).toBe(500)
+      expect(await response.text()).not.toContain('accessor-private-token')
+      expect(accessed).toBe(false)
+      expect(inspect(diagnostics.mock.calls)).not.toContain('accessor-private-token')
+      await expectRecovery(harness)
+    },
+  )
+
+  it.each(['state', 'result', 'subject'])(
     'refuses unsafe %s output from an admitted command without exposing credentials',
     async (scope) => {
       const diagnostics = vi.spyOn(console, 'error').mockImplementation(() => undefined)
       const application = applicationHarness()
-      expect(decodeStateEnvelope({ type: 'state', state: resourceState(1) }).ok).toBe(true)
-      const unsafe = unsafeResourceState(scope)
-      const outcome = commandOutcomeSchema.parse({
-        ok: true,
-        result: { type: 'configuration-updated', configurationVersion: 1 },
-        state: resourceState(1),
-      })
-      outcome.state = unsafe
+      const outcome = successfulOutcome(VALID_COMMAND.command)
+      if (scope === 'state') Object.assign(outcome, { state: unsafeResourceState('state') })
+      else
+        Object.assign(scope === 'result' && outcome.ok ? outcome.result : outcome.subject, {
+          token: 'never-cross-the-wire',
+          harness: { executable: '/bin/sh' },
+        })
       application.execute.mockResolvedValueOnce(outcome)
       const harness = await transportHarness(application)
       const response = await bounded(post(`${harness.httpUrl}/api/command`, VALID_COMMAND))
@@ -1338,11 +1638,10 @@ describe('bounded ingress lifecycle regressions after repair', () => {
     async (variant) => {
       const diagnostics = vi.spyOn(console, 'error').mockImplementation(() => undefined)
       const application = applicationHarness()
-      application.query.mockResolvedValueOnce(
-        Object.assign({ ok: true, type: 'workspace-selection' } satisfies QueryResult, {
-          type: variant,
-        }),
-      )
+      const reply = workspaceSelection()
+      if (!reply.ok) throw new Error('Expected selected interaction fixture')
+      Object.assign(reply.result, { kind: variant })
+      application.query.mockResolvedValueOnce(reply)
       const harness = await transportHarness(application)
       const response = await bounded(post(`${harness.httpUrl}/api/query`, VALID_QUERY))
       expect(response.status).toBe(500)
@@ -1436,13 +1735,7 @@ describe('bounded ingress lifecycle regressions after repair', () => {
     await bounded(upload.closed)
     expect(await bounded(disconnected)).toBeNull()
     if (complete === undefined) throw new Error('application was not admitted')
-    complete(
-      commandOutcomeSchema.parse({
-        ok: true,
-        result: { type: 'configuration-updated', configurationVersion: 1 },
-        state: state(1),
-      }),
-    )
+    complete(successfulOutcome(VALID_COMMAND.command))
     await expectRecovery(harness)
     expect(application.execute).toHaveBeenCalledOnce()
     expect(application.query).toHaveBeenCalledOnce()
@@ -1474,7 +1767,9 @@ describe('bounded ingress lifecycle regressions after repair', () => {
       )
       const response = await bounded(post(`${harness.httpUrl}/api/command`, VALID_COMMAND))
       expect(response.status).toBe(200)
-      expect(decodeCommandResultEnvelope(await response.json()).ok).toBe(true)
+      expect(
+        decodeCommandResultEnvelope(await response.json(), VALID_COMMAND.command, REQUEST_ID).ok,
+      ).toBe(true)
       await bounded(emitted)
       expect(harness.application.execute).toHaveBeenCalledOnce()
       expect(diagnostics).toHaveBeenCalled()
@@ -1523,17 +1818,14 @@ describe('bounded ingress lifecycle regressions after repair', () => {
     async ({ request, serialization }) => {
       const diagnostics = vi.spyOn(console, 'error').mockImplementation(() => undefined)
       const application = applicationHarness()
-      const queryReply: QueryResult = { ok: true, type: 'workspace-selection' }
-      const commandReply = commandOutcomeSchema.parse({
-        ok: true,
-        result: { type: 'configuration-updated', configurationVersion: 1 },
-        state: state(1),
-      })
+      const queryReply = workspaceSelection()
+      const commandReply = successfulOutcome(VALID_COMMAND.command)
       const reply = request === 'query' ? queryReply : commandReply
-      Object.defineProperty(reply, 'toJSON', {
+      const result = reply.ok ? reply.result : reply.error
+      Object.defineProperty(result, 'toJSON', {
         value: () => {
           if (serialization === 'throw') throw new Error('serialize-only-secret')
-          return { ...reply, token: 'serialize-only-secret' }
+          return { ...result, token: 'serialize-only-secret' }
         },
       })
       if (request === 'query') application.query.mockResolvedValueOnce(queryReply)

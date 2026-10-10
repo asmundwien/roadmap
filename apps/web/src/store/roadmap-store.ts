@@ -1,6 +1,11 @@
+import {
+  type CorrelationId,
+  correlationIdSchema,
+  type ServerEpoch,
+} from '@roadmap/contracts/identity'
 import type {
   Command,
-  CommandOutcome,
+  CommandOutcomeFor,
   Query,
   QueryResult,
   SafeError,
@@ -23,8 +28,14 @@ interface RequestNotAdmitted {
   error: SafeError
 }
 
-type CommandDelivery = CommandOutcome | RequestNotAdmitted
-type QueryDelivery = QueryResult | RequestNotAdmitted
+type CommandDelivery<C extends Command> = CommandOutcomeFor<C> | RequestNotAdmitted
+interface QueryCompletionUnknown {
+  kind: 'completion-unknown'
+  reason: 'protocol' | 'delivery'
+  ok: false
+  error: SafeError
+}
+type QueryDelivery = QueryResult | RequestNotAdmitted | QueryCompletionUnknown
 const RECONNECT_BASE_MS = 1_000
 const RECONNECT_MAX_MS = 30_000
 
@@ -58,7 +69,7 @@ export interface RoadmapStore {
   getSnapshot(): RoadmapStoreSnapshot
   query(query: Query): Promise<QueryDelivery>
   /** Rejects only when HTTP failure makes command completion unknowable. */
-  execute(command: Command): Promise<CommandDelivery>
+  execute<C extends Command>(command: C): Promise<CommandDelivery<C>>
   /** Opens the socket. Ref-counted, so React StrictMode's double-subscribe is harmless. */
   start(): () => void
 }
@@ -85,7 +96,7 @@ const EMPTY_SNAPSHOT: RoadmapStoreSnapshot = {
 }
 
 /**
- * The SPA's whole data Module. It orders full state from both wires, keeps stale state during
+ * The SPA's whole data Module. It orders socket state, keeps retained facts during
  * reconnects, and makes command ambiguity explicit instead of inventing an optimistic result.
  */
 export function createRoadmapStore(
@@ -223,66 +234,79 @@ export function createRoadmapStore(
     })
   }
 
-  function applyCommandState(authority: EstablishedAuthority | null, next: ApplicationState): void {
+  function observeOutcomeEpoch(
+    authority: EstablishedAuthority | null,
+    serverEpoch: ServerEpoch,
+  ): void {
     if (
       authority === null ||
       watchers === 0 ||
       generation?.authority !== authority ||
-      snapshot.synchronization !== 'synchronized'
+      snapshot.synchronization !== 'synchronized' ||
+      serverEpoch === authority.baseline.serverEpoch
     )
       return
-    if (next.serverEpoch !== authority.baseline.serverEpoch) {
-      const retired = generation
-      generation = null
-      clearReconnect()
-      retainState('connecting')
-      closeRetired(retired)
-      connect()
-      return
-    }
-    if (next.stateSequence > snapshot.state.stateSequence) publishState(next)
+    const retired = generation
+    generation = null
+    clearReconnect()
+    retainState('connecting')
+    closeRetired(retired)
+    connect()
   }
 
   async function query(queryValue: Query): Promise<QueryDelivery> {
+    const authority = generation?.authority ?? null
+    const correlationId = correlationIdSchema.parse(crypto.randomUUID())
     try {
-      const requestId = crypto.randomUUID()
       const response = await fetchRequest(new URL('/api/query', httpUrl), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', [REQUEST_ID_HEADER]: requestId },
+        headers: { 'Content-Type': 'application/json', [REQUEST_ID_HEADER]: correlationId },
         redirect: 'error',
-        body: JSON.stringify({ type: 'query', query: queryValue }),
+        body: JSON.stringify({ type: 'query', correlationId, query: queryValue }),
       })
-      const body: unknown = await response.json()
-      const rejection = attributableRejection(body, response.status, 'query', requestId)
+      let body: unknown
+      try {
+        body = await response.json()
+      } catch {
+        return transportQueryFailure(
+          'delivery',
+          'The query completion is unknown because its response was unreadable.',
+        )
+      }
+      const rejection = attributableRejection(body, response.status, 'query', correlationId)
       if (rejection !== null) return rejection
       if (response.status !== 200) {
-        return transportQueryFailure('The query did not receive a valid server response.')
+        return transportQueryFailure(
+          'protocol',
+          'The query did not receive a valid server response.',
+        )
       }
-      const decoded = decodeQueryResultEnvelope(body)
+      const decoded = decodeQueryResultEnvelope(body, queryValue, correlationId)
       if (!decoded.ok) {
-        return transportQueryFailure('Server returned an invalid query result.')
+        return transportQueryFailure('protocol', 'Server returned an invalid query result.')
       }
+      observeOutcomeEpoch(authority, decoded.value.result.serverEpoch)
       return decoded.value.result
     } catch {
-      return transportQueryFailure('The query did not receive a valid server response.')
+      return transportQueryFailure('delivery', 'The query completion is unknown.')
     }
   }
 
-  async function execute(command: Command): Promise<CommandDelivery> {
+  async function execute<C extends Command>(command: C): Promise<CommandDelivery<C>> {
     const authority = generation?.authority ?? null
+    const correlationId = correlationIdSchema.parse(crypto.randomUUID())
     activeCommands += 1
     let completionError: SafeError | null = null
     try {
       publishCommand(null)
-      const requestId = crypto.randomUUID()
       const response = await fetchRequest(new URL('/api/command', httpUrl), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', [REQUEST_ID_HEADER]: requestId },
+        headers: { 'Content-Type': 'application/json', [REQUEST_ID_HEADER]: correlationId },
         redirect: 'error',
-        body: JSON.stringify({ type: 'command', command }),
+        body: JSON.stringify({ type: 'command', correlationId, command }),
       })
       const body: unknown = await response.json()
-      const rejection = attributableRejection(body, response.status, 'command', requestId)
+      const rejection = attributableRejection(body, response.status, 'command', correlationId)
       if (rejection !== null) {
         completionError = rejection.error
         return rejection
@@ -290,12 +314,12 @@ export function createRoadmapStore(
       if (response.status !== 200) {
         throw new Error('The command did not receive a valid server response.')
       }
-      const decoded = decodeCommandResultEnvelope(body, command)
+      const decoded = decodeCommandResultEnvelope(body, command, correlationId)
       if (!decoded.ok) {
         throw new Error('Server returned an invalid command result.')
       }
       completionError = decoded.value.outcome.ok ? null : decoded.value.outcome.error
-      applyCommandState(authority, decoded.value.outcome.state)
+      observeOutcomeEpoch(authority, decoded.value.outcome.serverEpoch)
       return decoded.value.outcome
     } catch {
       completionError = {
@@ -366,15 +390,23 @@ function parseJson(data: unknown): unknown | null {
   }
 }
 
-function transportQueryFailure(message: string): QueryResult {
-  return { ok: false, error: { code: 'transport-failed', message } }
+function transportQueryFailure(
+  reason: QueryCompletionUnknown['reason'],
+  message: string,
+): QueryCompletionUnknown {
+  return {
+    kind: 'completion-unknown',
+    reason,
+    ok: false,
+    error: { code: 'transport-failed', message },
+  }
 }
 
 function attributableRejection(
   body: unknown,
   status: number,
   request: RequestRejection['request'],
-  requestId: string,
+  requestId: CorrelationId,
 ): RequestNotAdmitted | null {
   const decoded = decodeRequestRejection(body)
   if (

@@ -1,12 +1,15 @@
 import type { ProjectRef } from '@roadmap/contracts/identity'
+import type { CommandResult, SafeError } from '@roadmap/contracts/operations'
 import { Alert } from '@roadmap/ui/alert'
 import { Page, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
 import classNames from 'classnames/bind'
+import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router'
 import { Link } from '@/navigation'
-import { routePaths } from '@/router'
+import { connectionPath, routePaths } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { resourceMessage, resourceObservation } from '@/views/shared/resource-results'
-import { sameProject } from '@/views/shared/settings-shared'
+import { ErrorText, projectIdentity, sameProject } from '@/views/shared/settings-shared'
 import { AutomationSection } from './automation-section'
 import { DetailsSection } from './details-section'
 import { ManageSection } from './manage-section'
@@ -16,9 +19,73 @@ const cx = classNames.bind(pageStyles)
 
 type ProjectSettingsPageProps = { projectRef: ProjectRef }
 
+type RemovalFeedback =
+  | { kind: 'pending' }
+  | { kind: 'unconfirmed'; result: Extract<CommandResult, { type: 'remove-project' }> }
+  | { kind: 'error'; error: SafeError | string }
+
 export function ProjectSettingsPage({ projectRef }: ProjectSettingsPageProps) {
-  const { projects, connections, configuration } = useRoadmap()
+  return (
+    <ProjectSettingsDetail
+      key={JSON.stringify([projectRef.integration, projectRef.projectId])}
+      projectRef={projectRef}
+    />
+  )
+}
+
+function ProjectSettingsDetail({ projectRef }: ProjectSettingsPageProps) {
+  const { projects, connections, configuration, configurationVersion, execute } = useRoadmap()
+  const navigate = useNavigate()
+  const [removal, setRemoval] = useState<RemovalFeedback | null>(null)
+  const active = useRef(true)
+  useEffect(() => {
+    active.current = true
+    return () => {
+      active.current = false
+    }
+  }, [])
   const project = projects.find((candidate) => sameProject(candidate.ref, projectRef))
+  const remove = async () => {
+    if (!project) return
+    const destination = connections.some((candidate) => candidate.id === project.connectionId)
+      ? connectionPath(project.connectionId)
+      : routePaths.connections
+    setRemoval({ kind: 'pending' })
+    try {
+      const outcome = await execute({
+        type: 'remove-project',
+        expectedConfigurationVersion: configurationVersion,
+        project: projectRef,
+      })
+      if (!active.current) return
+      if (!outcome.ok) {
+        setRemoval({ kind: 'error', error: outcome.error })
+      } else if (outcome.result.commit === 'committed') {
+        setRemoval(null)
+        navigate(destination, { replace: true })
+      } else {
+        setRemoval({ kind: 'unconfirmed', result: outcome.result })
+      }
+    } catch {
+      if (active.current)
+        setRemoval({
+          kind: 'error',
+          error: `Registration removal for ${projectIdentity({ ref: projectRef })} may have completed. Check the relevant configuration before retrying.`,
+        })
+    }
+  }
+  const feedback =
+    removal?.kind === 'pending' ? (
+      <Alert variant="info">
+        {`Waiting for the registration removal result for ${projectIdentity({ ref: projectRef })}. Current configuration does not confirm this operation's durability.`}
+      </Alert>
+    ) : removal?.kind === 'unconfirmed' ? (
+      <Alert variant="info">
+        {`Registration removal committed for ${projectIdentity({ ref: removal.result.project })} at configuration version ${removal.result.configurationVersion}, but durability is unconfirmed. Check configuration before leaving this page or making another change. The source repository, Wayfinder state, and Workspace remain unchanged.`}
+      </Alert>
+    ) : removal?.kind === 'error' ? (
+      <ErrorText error={removal.error} />
+    ) : null
 
   if (!project) {
     return (
@@ -29,6 +96,7 @@ export function ProjectSettingsPage({ projectRef }: ProjectSettingsPageProps) {
             <PageTitle>Project not found</PageTitle>
           </div>
         </PageHeader>
+        {feedback}
         <Link href={routePaths.connections}>Back to Connections</Link>
       </Page>
     )
@@ -44,6 +112,7 @@ export function ProjectSettingsPage({ projectRef }: ProjectSettingsPageProps) {
           <PageTitle>{project.name}</PageTitle>
         </div>
       </PageHeader>
+      {feedback}
       {!configuration.valid && (
         <Alert>
           <strong>Configuration needs repair.</strong>
@@ -94,7 +163,8 @@ export function ProjectSettingsPage({ projectRef }: ProjectSettingsPageProps) {
       <ManageSection
         key={`manage:${project.ref.integration}:${project.ref.projectId}`}
         project={project}
-        connectionExists={connection !== undefined}
+        removing={removal?.kind === 'pending'}
+        onRemove={remove}
       />
     </Page>
   )

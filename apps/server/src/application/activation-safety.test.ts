@@ -7,7 +7,6 @@ import { promisify } from 'node:util'
 import type { CommandOutcome } from '@roadmap/contracts/operations'
 import { commandSchema } from '@roadmap/contracts/operations'
 import type { ReadyApplicationState } from '@roadmap/contracts/state'
-import { decodeApplicationState } from '@roadmap/contracts/wire'
 import { describe, expect, it, vi } from 'vitest'
 import type {
   CredentialBundle,
@@ -35,6 +34,7 @@ import {
 } from '../configuration/document.ts'
 import { createGitHubProjectAdmission } from '../github/admission.ts'
 import { createGitHubObserverPool } from '../github/observer.ts'
+import type { HostOperation } from '../host/operations.ts'
 import { createLocalProjectAdmission } from '../local/admission.ts'
 import { inspectLocalWorkspace } from '../local/workspace.ts'
 import type { SourceObserver } from '../observation/source.ts'
@@ -217,8 +217,10 @@ function recordingLauncher(current: () => ReadyApplicationState, effects: Effect
 
 function harmlessHost() {
   return createApplicationOperations({
-    async launch() {
-      throw new Error('This schedule must not launch a host process.')
+    host: {
+      async execute() {
+        throw new Error('This schedule must not invoke a host operation.')
+      },
     },
   })
 }
@@ -256,11 +258,7 @@ async function hostAdmissionBoundarySchedule(
     automation: { enabled: false, enabledProjects: [] },
   }
   const configuration = memoryConfiguration(saved)
-  const effects: Array<{
-    executable: string
-    args: readonly string[]
-    state: ReadyApplicationState
-  }> = []
+  const effects: HostOperation[] = []
   let atActivationBoundary: (() => void) | undefined
   let received = false
   let receivedState: ReadyApplicationState | undefined
@@ -268,13 +266,14 @@ async function hostAdmissionBoundarySchedule(
     configuration: configuration.document,
     admissions: { local: createLocalProjectAdmission() },
     operations: createApplicationOperations({
-      async launch(executable, args) {
-        if (receipt === 'host-failure') throw new Error('Private host launcher detail.')
-        effects.push({
-          executable,
-          args,
-          state: structuredClone(readApplicationState(application.current())),
-        })
+      host: {
+        async execute(operation) {
+          if (operation.type === 'select-workspace')
+            throw new Error('This schedule must not open a selector.')
+          if (receipt === 'host-failure') throw new Error('Private host launcher detail.')
+          effects.push(operation)
+          return { kind: 'invoked' }
+        },
       },
     }),
     observers: {
@@ -365,27 +364,40 @@ async function hostAdmissionBoundarySchedule(
     if (receipt === 'workspace-unavailable') await rm(workspacePath, { recursive: true })
     const outcome = await application.execute(
       commandSchema.parse({
-        type: 'launch-action',
-        actionId: 'open-workspace',
+        type: 'launch-project-operation',
+        operation: 'open-workspace',
         project: fixtureProjectRef({ integration: 'local', id: 'host-target' }),
         expectedConfigurationVersion: 1,
       }),
     )
+    const settledRead = structuredClone(readApplicationState(application.current()))
     let collisionOutcome: typeof outcome | undefined
+    let collisionRead: ReadyApplicationState | undefined
     if (receipt === 'add-alias-project' || receipt === 'move-other-workspace-to-alias') {
       await vi.waitFor(() =>
         expect(readApplicationState(application.current()).configurationVersion).toBe(2),
       )
       collisionOutcome = await application.execute(
         commandSchema.parse({
-          type: 'launch-action',
-          actionId: 'open-workspace',
+          type: 'launch-project-operation',
+          operation: 'open-workspace',
           project: fixtureProjectRef({ integration: 'local', id: 'host-target' }),
           expectedConfigurationVersion: 2,
         }),
       )
+      collisionRead = structuredClone(readApplicationState(application.current()))
     }
-    return { received, receivedState, initial, outcome, collisionOutcome, effects, workspacePath }
+    return {
+      received,
+      receivedState,
+      initial,
+      outcome,
+      settledRead,
+      collisionOutcome,
+      collisionRead,
+      effects,
+      workspacePath,
+    }
   } finally {
     await application.stop()
     await rm(root, { recursive: true, force: true })
@@ -665,7 +677,7 @@ describe('RoadmapApplication queued activation safety', () => {
       })
       if (receipt === 'invalid') {
         expect(result.receivedState?.configuration.valid).toBe(false)
-        expect(readApplicationState(result.outcome.state).projects).toEqual(result.initial.projects)
+        expect(result.settledRead.projects).toEqual(result.initial.projects)
       }
       if (receipt === 'workspace')
         expect(
@@ -696,9 +708,7 @@ describe('RoadmapApplication queued activation safety', () => {
         resource: { kind: 'current-readable' },
       })
       expect(
-        readApplicationState(result.outcome.state).projects.find(
-          (project) => project.ref.projectId === 'host-target',
-        ),
+        result.settledRead.projects.find((project) => project.ref.projectId === 'host-target'),
       ).toMatchObject({
         ref: fixtureResourceRef({ integration: 'local', id: 'host-target' }),
         source: { integration: 'local', path: result.workspacePath },
@@ -713,12 +723,10 @@ describe('RoadmapApplication queued activation safety', () => {
       expect(collisionOutcome).toMatchObject({
         ok: false,
         error: { code: 'admission-failed', field: 'workspace.path' },
-        state: { phase: 'ready', configurationVersion: 2 },
       })
+      expect(result.collisionRead).toMatchObject({ phase: 'ready', configurationVersion: 2 })
       expect(
-        readApplicationState(collisionOutcome.state).projects.find(
-          (project) => project.ref.projectId === 'other-project',
-        ),
+        result.collisionRead?.projects.find((project) => project.ref.projectId === 'other-project'),
       ).toMatchObject({
         ref: fixtureResourceRef({ integration: 'local', id: 'other-project' }),
         resource: {
@@ -728,9 +736,7 @@ describe('RoadmapApplication queued activation safety', () => {
         maps: [],
       })
       expect(
-        readApplicationState(collisionOutcome.state).projects.find(
-          (project) => project.ref.projectId === 'host-target',
-        ),
+        result.collisionRead?.projects.find((project) => project.ref.projectId === 'host-target'),
       ).toMatchObject({
         ref: fixtureResourceRef({ integration: 'local', id: 'host-target' }),
         source: { integration: 'local', path: result.workspacePath },
@@ -746,14 +752,24 @@ describe('RoadmapApplication queued activation safety', () => {
     expect(result.receivedState?.configurationVersion).toBe(1)
     expect(result.effects).toEqual([
       {
-        executable: '/usr/bin/open',
-        args: ['-a', 'Visual Studio Code', result.workspacePath],
-        state: result.outcome.state,
+        type: 'open-workspace',
+        project: { integration: 'local', projectId: 'host-target' },
+        workspacePath: result.workspacePath,
       },
     ])
     expect(result.outcome).toMatchObject({
+      operation: 'launch-project-operation',
+      subject: {
+        kind: 'project',
+        project: { integration: 'local', projectId: 'host-target' },
+      },
       ok: true,
-      result: { type: 'action-launched', actionId: 'open-workspace' },
+      result: {
+        type: 'launch-project-operation',
+        project: { integration: 'local', projectId: 'host-target' },
+        operation: 'open-workspace',
+        status: 'invoked',
+      },
     })
   })
 
@@ -765,7 +781,7 @@ describe('RoadmapApplication queued activation safety', () => {
       ok: false,
       error: { code: 'admission-failed', field: 'workspace.path' },
     })
-    const project = readApplicationState(result.outcome.state).projects[0]
+    const project = result.settledRead.projects[0]
     expect(project).toMatchObject({
       ref: { integration: 'local', projectId: 'host-target' },
       source: { integration: 'local', path: result.workspacePath },
@@ -785,9 +801,9 @@ describe('RoadmapApplication queued activation safety', () => {
     expect(result.effects).toEqual([])
     expect(result.outcome).toMatchObject({
       ok: false,
-      error: { code: 'launch-failed', field: 'actionId' },
+      error: { code: 'launch-failed', field: 'operation' },
     })
-    expect(readApplicationState(result.outcome.state).projects).toEqual(result.initial.projects)
+    expect(result.settledRead.projects).toEqual(result.initial.projects)
     expect(JSON.stringify(result.outcome)).not.toContain('Private host launcher detail.')
   })
 
@@ -1150,26 +1166,27 @@ describe('RoadmapApplication queued activation safety', () => {
         const publicationsAtStop = states.length
         await setImmediate()
         expect(stopped).toBe(false)
+        expect(application.current().phase).toBe('stopping')
         writeGate.resolve()
         const settled = (await writing)[0]
         expect(settled?.status).toBe('fulfilled')
         if (settled?.status !== 'fulfilled')
           throw new Error('An admitted write must return its persistence outcome.')
         expect(settled.value).toMatchObject(
-          completion === 'confirmed'
-            ? { ok: true, result: { type: 'configuration-updated', configurationVersion: 2 } }
-            : { ok: false, error: { code: 'persistence-failed' } },
+          completion === 'failed'
+            ? { ok: false, error: { code: 'persistence-failed' } }
+            : {
+                operation: 'rename-connection',
+                subject: { kind: 'connection', connectionId: 'local' },
+                ok: true,
+                result: {
+                  type: 'rename-connection',
+                  connectionId: 'local',
+                  configurationVersion: 2,
+                  commit: completion === 'confirmed' ? 'committed' : 'committed-unconfirmed',
+                },
+              },
         )
-        expect(settled.value.state).toMatchObject({
-          phase: 'stopping',
-          retained: {
-            phase: 'ready',
-            configurationVersion: completion === 'failed' ? 1 : 2,
-            connections: [
-              { id: 'local', name: completion === 'failed' ? 'Local' : 'Saved during shutdown' },
-            ],
-          },
-        })
         expect(await stopping).toEqual([{ status: 'fulfilled', value: undefined }])
         expect(JSON.parse(await readFile(filename, 'utf8'))).toMatchObject({
           configurationVersion: completion === 'failed' ? 1 : 2,
@@ -1187,10 +1204,9 @@ describe('RoadmapApplication queued activation safety', () => {
             ],
           },
         })
-        if (settled.value.ok && settled.value.result.type === 'configuration-updated')
-          expect(settled.value.result.configurationVersion).toBe(
-            readApplicationState(settled.value.state).configurationVersion,
-          )
+        expect(readApplicationState(application.current()).automation.availability.status).toBe(
+          'unavailable',
+        )
         expect(writes).toHaveLength(1)
         expect(states).toHaveLength(publicationsAtStop)
       } finally {
@@ -1327,28 +1343,40 @@ describe('RoadmapApplication queued activation safety', () => {
         gate.resolve()
         const outcome = await command
         expect(outcome).toMatchObject({
+          operation: type,
+          subject:
+            type === 'register-project'
+              ? { kind: 'registration', integration: 'local', connectionId: 'local' }
+              : { kind: 'project', project: fixtureProjectRef(project) },
           ok: true,
-          result: { type: 'configuration-updated', configurationVersion: 2 },
-          state: { phase: 'stopping', retained: { phase: 'ready', configurationVersion: 2 } },
+          result: {
+            type,
+            project: fixtureProjectRef(
+              type === 'register-project' ? { integration: 'local', id: 'additional' } : project,
+            ),
+            configurationVersion: 2,
+            commit: 'committed',
+            ...(type === 'register-project' ? { connectionId: 'local' } : {}),
+            ...(type === 'register-project' || type === 'repair-project-workspace'
+              ? { workspacePath: additionalPath }
+              : {}),
+          },
         })
-        expect(decodeApplicationState(outcome.state).ok).toBe(true)
-        if (outcome.ok && outcome.result.type === 'configuration-updated')
-          expect(outcome.result.configurationVersion).toBe(
-            readApplicationState(outcome.state).configurationVersion,
-          )
+        const settledRead = structuredClone(readApplicationState(application.current()))
+        expect(settledRead.configurationVersion).toBe(2)
         const persisted: unknown = JSON.parse(await readFile(filename, 'utf8'))
         if (type === 'rename-project') {
           expect(persisted).toMatchObject({ projects: [{ displayName: 'Saved after retirement' }] })
-          expect(readApplicationState(outcome.state).projects).toMatchObject([
+          expect(settledRead.projects).toMatchObject([
             { management: { displayName: 'Saved after retirement' } },
           ])
-          expect(readApplicationState(outcome.state).projects[0]).toMatchObject({
+          expect(settledRead.projects[0]).toMatchObject({
             name: 'Saved after retirement',
             resource: observed,
           })
         } else if (type === 'remove-project') {
           expect(persisted).toMatchObject({ projects: [] })
-          expect(readApplicationState(outcome.state).projects).toEqual([])
+          expect(settledRead.projects).toEqual([])
         } else if (type === 'register-project') {
           expect(persisted).toMatchObject({
             projects: [
@@ -1356,8 +1384,8 @@ describe('RoadmapApplication queued activation safety', () => {
               { ref: { projectId: 'additional' }, workspace: { path: additionalPath } },
             ],
           })
-          expect(readApplicationState(outcome.state).projects[0]?.resource).toEqual(observed)
-          expect(readApplicationState(outcome.state).projects[1]).toMatchObject({
+          expect(settledRead.projects[0]?.resource).toEqual(observed)
+          expect(settledRead.projects[1]).toMatchObject({
             ref: fixtureResourceRef({ integration: 'local', id: 'additional' }),
             source: { integration: 'local', path: additionalPath },
             resource: { kind: 'never-observed', current: null },
@@ -1367,10 +1395,8 @@ describe('RoadmapApplication queued activation safety', () => {
           })
         } else {
           expect(persisted).toMatchObject({ projects: [{ workspace: { path: additionalPath } }] })
-          expect(fixtureWorkspacePath(readApplicationState(outcome.state).projects[0])).toBe(
-            additionalPath,
-          )
-          const retained = readApplicationState(outcome.state).projects[0]
+          expect(fixtureWorkspacePath(settledRead.projects[0])).toBe(additionalPath)
+          const retained = settledRead.projects[0]
           expect(retained).toMatchObject({
             resource: {
               kind: 'retained-unavailable',
@@ -1395,9 +1421,7 @@ describe('RoadmapApplication queued activation safety', () => {
           phase: 'stopped',
           retained: { phase: 'ready', configurationVersion: 2 },
         })
-        expect(readApplicationState(application.current()).projects).toEqual(
-          readApplicationState(outcome.state).projects,
-        )
+        expect(readApplicationState(application.current()).projects).toEqual(settledRead.projects)
         expect(readApplicationState(application.current()).automation.availability.status).toBe(
           'unavailable',
         )
@@ -1408,9 +1432,7 @@ describe('RoadmapApplication queued activation safety', () => {
         ).toBe(false)
         expect(application.diagnostics().lifecycle.phase).toBe('stopped')
         source.push(read([localContent('fixture', root)], 2_000))
-        expect(readApplicationState(application.current()).projects).toEqual(
-          readApplicationState(outcome.state).projects,
-        )
+        expect(readApplicationState(application.current()).projects).toEqual(settledRead.projects)
         expect(publications).toHaveLength(publicationsAtStop)
         expect(source.stopped).toBe(true)
         expect(owners).toBe(1)
@@ -1482,7 +1504,17 @@ describe('RoadmapApplication queued activation safety', () => {
       const admitted = (await firstResult)[0]
       expect(admitted).toMatchObject({
         status: 'fulfilled',
-        value: { ok: true, result: { type: 'configuration-updated', configurationVersion: 2 } },
+        value: {
+          operation: 'rename-connection',
+          subject: { kind: 'connection', connectionId: 'local' },
+          ok: true,
+          result: {
+            type: 'rename-connection',
+            connectionId: 'local',
+            configurationVersion: 2,
+            commit: 'committed',
+          },
+        },
       })
       expect((await queuedResult)[0]).toMatchObject({
         status: 'fulfilled',
@@ -1503,7 +1535,7 @@ describe('RoadmapApplication queued activation safety', () => {
       const root = await realpath(await mkdtemp(join(tmpdir(), 'roadmap-host-drain-')))
       const entered = Promise.withResolvers<void>()
       const host = Promise.withResolvers<void>()
-      const effects: Array<{ executable: string; args: readonly string[] }> = []
+      const effects: HostOperation[] = []
       const saved: ProjectConfiguration = {
         schemaVersion: 6,
         configurationVersion: 1,
@@ -1532,13 +1564,15 @@ describe('RoadmapApplication queued activation safety', () => {
           },
         },
         operations: createApplicationOperations({
-          async launch(executable, args) {
-            effects.push({ executable, args })
-            entered.resolve()
-            await host.promise
-          },
-          async selectWorkspace() {
-            throw new Error('The host drain must not open a selector.')
+          host: {
+            async execute(operation) {
+              if (operation.type === 'select-workspace')
+                throw new Error('The host drain must not open a selector.')
+              effects.push(operation)
+              entered.resolve()
+              await host.promise
+              return { kind: 'invoked' }
+            },
           },
         }),
       })
@@ -1550,8 +1584,8 @@ describe('RoadmapApplication queued activation safety', () => {
         launched = Promise.allSettled([
           application.execute(
             commandSchema.parse({
-              type: 'launch-action',
-              actionId: 'open-workspace',
+              type: 'launch-project-operation',
+              operation: 'open-workspace',
               project: fixtureProjectRef({ integration: 'local', id: 'host' }),
               expectedConfigurationVersion: 1,
             }),
@@ -1561,8 +1595,8 @@ describe('RoadmapApplication queued activation safety', () => {
         queued = Promise.allSettled([
           application.execute(
             commandSchema.parse({
-              type: 'launch-action',
-              actionId: 'open-terminal',
+              type: 'launch-project-operation',
+              operation: 'open-terminal',
               project: fixtureProjectRef({ integration: 'local', id: 'host' }),
               expectedConfigurationVersion: 1,
             }),
@@ -1577,7 +1611,11 @@ describe('RoadmapApplication queued activation safety', () => {
         await setImmediate()
         expect(stopped).toBe(false)
         expect(effects).toEqual([
-          { executable: '/usr/bin/open', args: ['-a', 'Visual Studio Code', root] },
+          {
+            type: 'open-workspace',
+            project: { integration: 'local', projectId: 'host' },
+            workspacePath: root,
+          },
         ])
         if (completion === 'failure') host.reject(new Error('Private admitted host detail.'))
         else host.resolve()
@@ -1587,7 +1625,12 @@ describe('RoadmapApplication queued activation safety', () => {
                 status: 'fulfilled',
                 value: {
                   ok: true,
-                  result: { type: 'action-launched', actionId: 'open-workspace' },
+                  result: {
+                    type: 'launch-project-operation',
+                    project: { integration: 'local', projectId: 'host' },
+                    operation: 'open-workspace',
+                    status: 'invoked',
+                  },
                 },
               }
             : { status: 'fulfilled', value: { ok: false, error: { code: 'launch-failed' } } },

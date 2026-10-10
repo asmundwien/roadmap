@@ -115,7 +115,12 @@ function stateWithRepositoryDestination(url: string) {
 describe('public link action destinations', () => {
   const kind = 'external-link'
   test.each(safeDestinations)('preserves usable destination %s', (href) => {
-    const action = { id: 'destination', label: 'Open', kind, href }
+    const action = {
+      id: 'destination',
+      label: 'Open',
+      kind: href.startsWith('/') ? 'roadmap' : kind,
+      href,
+    }
     expect(projectActionSchema.safeParse(action)).toMatchObject({ success: true, data: action })
   })
   test.each(malformedDestinations)('refuses malformed HTTP URL %s', (href) => {

@@ -155,8 +155,12 @@ async function fixture() {
     admissions: { local: createLocalProjectAdmission() },
     now: () => clock,
     operations: createApplicationOperations({
-      async launch() {
-        effects.push('host')
+      host: {
+        async execute(operation) {
+          if (operation.type === 'select-workspace') return { kind: 'cancelled' }
+          effects.push('host')
+          return { kind: 'invoked' }
+        },
       },
     }),
     observers: {
@@ -251,7 +255,7 @@ async function fixture() {
         if (!batch) throw new Error('No actual Local reader invocation was recorded')
         return batch
       },
-      async refresh(at = T) {
+      async refresh(at = T, kind: 'observed' | 'degraded' = 'observed') {
         clock = at
         const outcome = await application.execute(
           commandSchema.parse({
@@ -260,7 +264,18 @@ async function fixture() {
             expectedConfigurationVersion: configured.configurationVersion,
           }),
         )
-        expect(outcome.ok).toBe(true)
+        expect(outcome).toMatchObject({
+          operation: 'refresh-project',
+          subject: { kind: 'project', project: fixtureProjectRef(PROJECT) },
+          ok: true,
+          result: {
+            type: 'refresh-project',
+            project: fixtureProjectRef(PROJECT),
+            attempt: { kind, attemptedAt: at, observedAt: T },
+          },
+        })
+        expect(outcome).not.toHaveProperty('state')
+        expect(JSON.stringify(outcome)).not.toContain(SECRET)
         return outgoing(readApplicationState(application.current()))
       },
       async enable() {
@@ -356,7 +371,7 @@ describe('RoadmapApplication actual source read identity at one clock value', ()
         `read:${mapPath}`,
         Object.assign(new Error(SECRET), { code: 'EACCES' }),
       )
-      const state = await test.refresh()
+      const state = await test.refresh(T, 'degraded')
       const actualRead = ownTicketRead(test.latestBatch())
       expect(test.batches).toHaveLength(2)
       expect(actualRead).not.toBe(initial)
@@ -516,7 +531,7 @@ describe('RoadmapApplication actual source read identity at one clock value', ()
         `enumerate:${test.root}`,
         Object.assign(new Error(SECRET), { code: 'EACCES' }),
       )
-      const state = await test.refresh(2000)
+      const state = await test.refresh(2000, 'degraded')
       expect(test.latestBatch().attempts).toMatchObject([
         { kind: 'failed', scope: { kind: 'project', project: PROJECT }, attemptedAt: 2000 },
       ])

@@ -46,7 +46,12 @@ export function DetailsSection({ connection }: DetailsSectionProps) {
       if (!outcome.ok) {
         setError(outcome.error)
       } else {
-        setNotice(`${connection.name} renamed.`)
+        const result = outcome.result
+        setNotice(
+          result.commit === 'committed'
+            ? `Connection ${result.connectionId} renamed at configuration version ${result.configurationVersion}.`
+            : `Connection ${result.connectionId} rename committed at configuration version ${result.configurationVersion}, but durability is unconfirmed.`,
+        )
       }
     } catch {
       setError('The change may have completed. Check the relevant configuration before retrying.')

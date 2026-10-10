@@ -409,14 +409,30 @@ describe('ProjectSettingsPage', () => {
       },
       actions: [
         {
-          id: actionIdSchema.parse('open-workspace'),
+          id: actionIdSchema.parse('workspace-capability'),
           label: 'Open workspace',
           kind: 'server-launch',
           operation: 'open-workspace',
+          project: project.ref,
         },
       ],
     }
     expect(renderPage([unavailable])).not.toContain('New Workspace')
+  })
+
+  it('offers Workspace repair when an action id does not prove a host capability', () => {
+    const withoutWorkspaceLaunch: Project = {
+      ...project,
+      actions: [
+        {
+          id: actionIdSchema.parse('open-workspace'),
+          label: 'View source',
+          kind: 'external-link',
+          href: 'https://example.test/project',
+        },
+      ],
+    }
+    expect(renderPage([withoutWorkspaceLaunch])).toContain('New Workspace')
   })
 
   it('blocks changes when configuration needs repair', () => {

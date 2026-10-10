@@ -2275,12 +2275,20 @@ describe('RoadmapApplication Automation', () => {
     )
     expect(classification).toMatchObject({
       ok: true,
+      operation: 'start-automation-override',
+      subject: { kind: 'ticket', target: fixtureTicketRef(target), stage: 'classification' },
       result: {
-        type: 'automation-override-started',
+        type: 'start-automation-override',
         target: fixtureTicketRef(target),
         stage: 'classification',
+        admission: 'override',
+        status: 'admitted',
       },
-      state: { automation: { enabled: false, enabledProjects: [] } },
+    })
+    expect(classification).not.toHaveProperty('state')
+    expect(readApplicationState(current.application.current()).automation).toMatchObject({
+      enabled: false,
+      enabledProjects: [],
     })
     expect(launches.classifications).toHaveLength(1)
     expect(current.database.evidence()[0]?.classification).toEqual({
@@ -2319,12 +2327,17 @@ describe('RoadmapApplication Automation', () => {
     )
     expect(wayfinder).toMatchObject({
       ok: true,
+      operation: 'start-automation-override',
+      subject: { kind: 'ticket', target: fixtureTicketRef(target), stage: 'wayfinder' },
       result: {
-        type: 'automation-override-started',
+        type: 'start-automation-override',
         target: fixtureTicketRef(target),
         stage: 'wayfinder',
+        admission: 'override',
+        status: 'admitted',
       },
     })
+    expect(wayfinder).not.toHaveProperty('state')
     await vi.waitFor(() =>
       expect(current.database.evidence()[0]?.wayfinder).toEqual({
         status: 'running',

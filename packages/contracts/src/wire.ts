@@ -1,10 +1,13 @@
 import { z } from 'zod'
-import { requestDataSchema } from './internal/request-data.ts'
+import { type CorrelationId, correlationIdSchema } from './identity.ts'
+import { requestDataSchema, strictDataObject } from './internal/request-data.ts'
 import {
   type Command,
+  type CommandOutcomeFor,
+  commandOutcomeFor,
   commandOutcomeSchema,
-  commandResultFor,
   commandSchema,
+  type Query,
   queryResultSchema,
   querySchema,
 } from './operations.ts'
@@ -13,21 +16,29 @@ import { applicationStateSchema } from './state.ts'
 export const REQUEST_ID_HEADER = 'X-Roadmap-Request-Id'
 export const requestIdSchema = z.uuid()
 
-export const queryEnvelopeSchema = requestDataSchema.pipe(
-  z.strictObject({ type: z.literal('query'), query: querySchema }),
-)
-export const commandEnvelopeSchema = requestDataSchema.pipe(
-  z.strictObject({ type: z.literal('command'), command: commandSchema }),
-)
+export const queryEnvelopeSchema = strictDataObject({
+  type: z.literal('query'),
+  correlationId: correlationIdSchema,
+  query: querySchema,
+})
+export const commandEnvelopeSchema = strictDataObject({
+  type: z.literal('command'),
+  correlationId: correlationIdSchema,
+  command: commandSchema,
+})
 export const stateEnvelopeSchema = requestDataSchema.pipe(
   z.strictObject({ type: z.literal('state'), state: applicationStateSchema }),
 )
-export const queryResultEnvelopeSchema = requestDataSchema.pipe(
-  z.strictObject({ type: z.literal('query-result'), result: queryResultSchema }),
-)
-export const commandResultEnvelopeSchema = requestDataSchema.pipe(
-  z.strictObject({ type: z.literal('command-result'), outcome: commandOutcomeSchema }),
-)
+export const queryResultEnvelopeSchema = strictDataObject({
+  type: z.literal('query-result'),
+  correlationId: correlationIdSchema,
+  result: queryResultSchema,
+})
+export const commandResultEnvelopeSchema = strictDataObject({
+  type: z.literal('command-result'),
+  correlationId: correlationIdSchema,
+  outcome: commandOutcomeSchema,
+})
 
 export const requestRejectionSchema = requestDataSchema.pipe(
   z.strictObject({
@@ -54,6 +65,9 @@ export type RequestRejection = z.output<typeof requestRejectionSchema>
 export type StateEnvelope = z.output<typeof stateEnvelopeSchema>
 export type QueryResultEnvelope = z.output<typeof queryResultEnvelopeSchema>
 export type CommandResultEnvelope = z.output<typeof commandResultEnvelopeSchema>
+export type CommandResultEnvelopeFor<C extends Command> = Omit<CommandResultEnvelope, 'outcome'> & {
+  outcome: CommandOutcomeFor<C>
+}
 
 export interface DecodeIssue {
   path: string
@@ -87,6 +101,9 @@ const safeFields = new Set([
   'actionId',
   'request',
   'requestId',
+  'correlationId',
+  'subject',
+  'commit',
   'reason',
   'message',
   'state',
@@ -219,22 +236,41 @@ export function decodeApplicationState(
 export function decodeStateEnvelope(input: unknown): DecodeResult<StateEnvelope> {
   return decode(stateEnvelopeSchema, input)
 }
-export function decodeQueryResultEnvelope(input: unknown): DecodeResult<QueryResultEnvelope> {
-  return decode(queryResultEnvelopeSchema, input)
-}
-export function decodeCommandResultEnvelope(
+export function decodeQueryResultEnvelope(
   input: unknown,
-  expectedCommand?: Command,
-): DecodeResult<CommandResultEnvelope> {
-  const result = decode(commandResultEnvelopeSchema, input)
+  expectedQuery: Query,
+  expectedCorrelationId: CorrelationId,
+): DecodeResult<QueryResultEnvelope> {
+  const result = decode(queryResultEnvelopeSchema, input)
+  if (!result.ok) return result
   if (
-    result.ok &&
-    expectedCommand &&
-    result.value.outcome.ok &&
-    !commandResultFor(expectedCommand, result.value.outcome.result)
+    !expectedQuery ||
+    result.value.correlationId !== expectedCorrelationId ||
+    result.value.result.operation !== expectedQuery.type
   )
-    return { ok: false, issues: [{ path: '$.outcome.result', message: 'invalid_result' }] }
+    return { ok: false, issues: [{ path: '$.result', message: 'invalid_result' }] }
   return result
+}
+function commandEnvelopeFor<C extends Command>(
+  command: C,
+  envelope: CommandResultEnvelope,
+): envelope is CommandResultEnvelopeFor<C> {
+  return commandOutcomeFor(command, envelope.outcome)
+}
+export function decodeCommandResultEnvelope<C extends Command>(
+  input: unknown,
+  expectedCommand: C,
+  expectedCorrelationId: CorrelationId,
+): DecodeResult<CommandResultEnvelopeFor<C>> {
+  const result = decode(commandResultEnvelopeSchema, input)
+  if (!result.ok) return result
+  if (
+    expectedCommand &&
+    result.value.correlationId === expectedCorrelationId &&
+    commandEnvelopeFor(expectedCommand, result.value)
+  )
+    return { ok: true, value: result.value }
+  return { ok: false, issues: [{ path: '$.outcome', message: 'invalid_result' }] }
 }
 
 export function requestRejectionStatus(

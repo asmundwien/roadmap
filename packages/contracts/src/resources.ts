@@ -9,9 +9,9 @@ import {
   ticketRefSchema,
 } from './identity.ts'
 import { hrefSchema, projectActionSchema } from './internal/actions.ts'
-import { arrayDataSchema, requestDataSchema } from './internal/request-data.ts'
+import { arrayDataSchema, requestDataSchema, strictDataObject } from './internal/request-data.ts'
 
-const timeSchema = z.number().nonnegative().max(8_640_000_000_000_000)
+export const timeSchema = z.number().nonnegative().max(8_640_000_000_000_000)
 // Keep raw options for Zod's discriminator lookup; guard each standalone boundary.
 const projectScopeObjectSchema = z.strictObject({
   kind: z.literal('project'),
@@ -44,21 +44,19 @@ const scopeSchema = requestDataSchema.pipe(
     ticketsScopeObjectSchema,
   ]),
 )
-const provenanceSchema = requestDataSchema.pipe(
-  z.discriminatedUnion('integration', [
-    z.strictObject({
-      integration: z.literal('local'),
-      path: z.string(),
-      operation: z.enum(['inspect-root', 'enumerate', 'read']),
-    }),
-    z.strictObject({
-      integration: z.literal('github'),
-      connectionId: connectionIdSchema,
-      repositoryId: z.string(),
-      stage: z.enum(['credentials', 'repository', 'map-list', 'map-read']),
-    }),
-  ]),
-)
+export const provenanceSchema = z.union([
+  strictDataObject({
+    integration: z.literal('local'),
+    path: z.string(),
+    operation: z.enum(['inspect-root', 'enumerate', 'read']),
+  }),
+  strictDataObject({
+    integration: z.literal('github'),
+    connectionId: connectionIdSchema,
+    repositoryId: z.string(),
+    stage: z.enum(['credentials', 'repository', 'map-list', 'map-read']),
+  }),
+])
 const completeObjectSchema = z.strictObject({ kind: z.literal('complete') })
 const incompleteObjectSchema = z.strictObject({
   kind: z.literal('incomplete'),
@@ -104,7 +102,8 @@ const failureSchema = requestDataSchema.pipe(
 )
 
 type Scope = z.output<typeof scopeSchema>
-type Provenance = z.output<typeof provenanceSchema>
+export type SourceProvenance = z.output<typeof provenanceSchema>
+type Provenance = SourceProvenance
 type ProjectKey = z.output<typeof projectRefSchema>
 type MapKey = z.output<typeof mapRefSchema>
 type TicketKey = z.output<typeof ticketRefSchema>
@@ -1272,6 +1271,12 @@ export const projectSchema = requestDataSchema
       if (actions.has(action.id))
         issue(ctx, ['actions', index, 'id'], 'Action identities must be unique in their Project.')
       actions.add(action.id)
+      if (action.kind === 'server-launch' && !sameProject(action.project, project.ref))
+        issue(
+          ctx,
+          ['actions', index, 'project'],
+          'Launch action must identify its containing Project.',
+        )
     }
     for (const evidence of currentEvidence(project)) {
       const provenance = evidence.provenance

@@ -8,6 +8,7 @@ import type {
   ConfigurationRead,
   ConfigurationWrite,
 } from '../configuration/document.ts'
+import type { HostOperation } from '../host/operations.ts'
 import type { ObservationBatch, SourceObservationHealth } from '../observation/source.ts'
 import type { ProjectConfiguration } from '../projects/registry.ts'
 import {
@@ -293,7 +294,20 @@ describe('RoadmapApplication', () => {
                   enabled: true,
                   expectedConfigurationVersion: 1,
                 }
-      expect((await application.execute(commandSchema.parse(command))).ok).toBe(true)
+      expect(await application.execute(commandSchema.parse(command))).toMatchObject({
+        ok: true,
+        operation: type,
+        result: {
+          type,
+          configurationVersion: 2,
+          commit: 'committed',
+          ...(type === 'rename-connection'
+            ? { connectionId: 'local' }
+            : type === 'set-automation-enabled'
+              ? { enabled: true }
+              : { project: fixtureProjectRef(project.key) }),
+        },
+      })
       expect(readApplicationState(application.current()).configurationVersion).toBe(2)
       if (type === 'rename-connection') {
         expect(readApplicationState(application.current()).connections[0]?.name).toBe('On this Mac')
@@ -696,11 +710,11 @@ describe('RoadmapApplication', () => {
     const configuration = memoryConfiguration({ ok: true, document: registered })
     const read = createSourceFixtureOwner()
     const adapter = immediateObserver(read([localProject('demo')], 25))
-    const launch = vi.fn(async () => {})
+    const launch = vi.fn(async (_operation: HostOperation) => ({ kind: 'invoked' as const }))
     const application = createRoadmapApplication({
       configuration: configuration.document,
       admissions: fixtureAdmissions,
-      operations: createApplicationOperations({ launch }),
+      operations: createApplicationOperations({ host: { execute: launch } }),
       observers: {
         local: () => adapter.observer,
         github: (input) =>
@@ -734,21 +748,43 @@ describe('RoadmapApplication', () => {
       const action = retained.actions.find(
         (action) => action.kind === 'server-launch' && action.operation === operation,
       )
-      if (!action) throw new Error(`Missing ${operation} action`)
+      if (!action || action.kind !== 'server-launch') throw new Error(`Missing ${operation} action`)
       expect(
         await application.execute(
           commandSchema.parse({
-            type: 'launch-action',
-            actionId: action.id,
-            project: retained.ref,
+            type: 'launch-project-operation',
+            operation: action.operation,
+            project: action.project,
             expectedConfigurationVersion: 1,
           }),
         ),
-      ).toMatchObject({ ok: true })
+      ).toMatchObject({
+        ok: true,
+        operation: 'launch-project-operation',
+        subject: { kind: 'project', project: retained.ref },
+        result: {
+          type: 'launch-project-operation',
+          project: retained.ref,
+          operation,
+          status: 'invoked',
+        },
+      })
     }
     expect(launch.mock.calls).toEqual([
-      ['/usr/bin/open', ['-a', 'Visual Studio Code', '/tmp/demo']],
-      ['/usr/bin/open', ['-R', '/tmp/demo']],
+      [
+        {
+          type: 'open-workspace',
+          project: { integration: 'local', projectId: 'demo' },
+          workspacePath: '/tmp/demo',
+        },
+      ],
+      [
+        {
+          type: 'reveal-source',
+          project: { integration: 'local', projectId: 'demo' },
+          workspacePath: '/tmp/demo',
+        },
+      ],
     ])
     await application.stop()
   })
@@ -963,7 +999,7 @@ describe('RoadmapApplication', () => {
         ],
       },
     })
-    const launch = vi.fn(async () => {})
+    const launch = vi.fn(async (_operation: HostOperation) => ({ kind: 'invoked' as const }))
     const application = createRoadmapApplication({
       configuration: configuration.document,
       admissions: fixtureAdmissions,
@@ -975,7 +1011,7 @@ describe('RoadmapApplication', () => {
           controlledSourceFixture({ integration: 'github', id: input.ref.projectId }, EMPTY_BATCH)
             .observer,
       },
-      operations: createApplicationOperations({ launch }),
+      operations: createApplicationOperations({ host: { execute: launch } }),
       serverEpoch: 'test',
     })
     await application.start()
@@ -993,18 +1029,32 @@ describe('RoadmapApplication', () => {
     const action = project?.actions.find(
       (action) => action.kind === 'server-launch' && action.operation === 'reveal-source',
     )
-    if (!project || !action) throw new Error('Missing reveal-source action')
+    if (!project || !action || action.kind !== 'server-launch')
+      throw new Error('Missing reveal-source action')
     const result = await application.execute(
       commandSchema.parse({
-        type: 'launch-action',
+        type: 'launch-project-operation',
         expectedConfigurationVersion: readApplicationState(application.current())
           .configurationVersion,
-        actionId: action.id,
-        project: project.ref,
+        operation: action.operation,
+        project: action.project,
       }),
     )
-    expect(result).toMatchObject({ ok: true })
-    expect(launch).toHaveBeenCalledWith('/usr/bin/open', ['-R', '/committed/source'])
+    expect(result).toMatchObject({
+      ok: true,
+      subject: { kind: 'project', project: project.ref },
+      result: {
+        type: 'launch-project-operation',
+        project: project.ref,
+        operation: 'reveal-source',
+        status: 'invoked',
+      },
+    })
+    expect(launch).toHaveBeenCalledWith({
+      type: 'reveal-source',
+      project: { integration: 'github', projectId: key.id },
+      workspacePath: '/committed/source',
+    })
     await application.stop()
   })
 
@@ -1043,7 +1093,7 @@ describe('RoadmapApplication', () => {
         ],
       },
     })
-    const launch = vi.fn(async () => {})
+    const launch = vi.fn(async (_operation: HostOperation) => ({ kind: 'invoked' as const }))
     const application = createRoadmapApplication({
       configuration: configuration.document,
       admissions: fixtureAdmissions,
@@ -1055,7 +1105,7 @@ describe('RoadmapApplication', () => {
           controlledSourceFixture({ integration: 'github', id: input.ref.projectId }, EMPTY_BATCH)
             .observer,
       },
-      operations: createApplicationOperations({ launch }),
+      operations: createApplicationOperations({ host: { execute: launch } }),
       serverEpoch: 'test',
     })
     await application.start()
@@ -1064,21 +1114,34 @@ describe('RoadmapApplication', () => {
       const action = project.actions.find(
         (action) => action.kind === 'server-launch' && action.operation === 'open-terminal',
       )
-      if (!action) throw new Error('Missing open-terminal action')
+      if (!action || action.kind !== 'server-launch')
+        throw new Error('Missing open-terminal action')
       const result = await application.execute(
         commandSchema.parse({
-          type: 'launch-action',
+          type: 'launch-project-operation',
           expectedConfigurationVersion: readApplicationState(application.current())
             .configurationVersion,
-          actionId: action.id,
-          project: project.ref,
+          operation: action.operation,
+          project: action.project,
         }),
       )
       expect(result).toMatchObject({ ok: true })
     }
     expect(launch.mock.calls).toEqual([
-      ['/usr/bin/open', ['-a', 'Terminal', '/committed/local-workspace']],
-      ['/usr/bin/open', ['-a', 'Terminal', '/committed/github-workspace']],
+      [
+        {
+          type: 'open-terminal',
+          project: { integration: 'local', projectId: localKey.id },
+          workspacePath: '/committed/local-workspace',
+        },
+      ],
+      [
+        {
+          type: 'open-terminal',
+          project: { integration: 'github', projectId: githubKey.id },
+          workspacePath: '/committed/github-workspace',
+        },
+      ],
     ])
     await application.stop()
   })
@@ -1161,7 +1224,17 @@ describe('RoadmapApplication', () => {
         expectedConfigurationVersion: 1,
       }),
     )
-    expect(projectOn).toMatchObject({ ok: true, state: { configurationVersion: 2 } })
+    expect(projectOn).toMatchObject({
+      ok: true,
+      result: {
+        type: 'set-project-automation-enabled',
+        project: fixtureProjectRef(project.ref),
+        enabled: true,
+        configurationVersion: 2,
+        commit: 'committed',
+      },
+    })
+    expect(readApplicationState(application.current()).configurationVersion).toBe(2)
     const globalOn = await application.execute(
       commandSchema.parse({
         type: 'set-automation-enabled',
@@ -1171,13 +1244,16 @@ describe('RoadmapApplication', () => {
     )
     expect(globalOn).toMatchObject({
       ok: true,
-      state: {
-        automation: {
-          enabled: true,
-          enabledProjects: [{ integration: 'local', projectId: 'demo' }],
-        },
+      result: {
+        type: 'set-automation-enabled',
+        enabled: true,
         configurationVersion: 3,
+        commit: 'committed',
       },
+    })
+    expect(readApplicationState(application.current())).toMatchObject({
+      automation: { enabled: true, enabledProjects: [fixtureProjectRef(project.ref)] },
+      configurationVersion: 3,
     })
     const globalOff = await application.execute(
       commandSchema.parse({
@@ -1188,12 +1264,16 @@ describe('RoadmapApplication', () => {
     )
     expect(globalOff).toMatchObject({
       ok: true,
-      state: {
-        automation: {
-          enabled: false,
-          enabledProjects: [{ integration: 'local', projectId: 'demo' }],
-        },
+      result: {
+        type: 'set-automation-enabled',
+        enabled: false,
+        configurationVersion: 4,
+        commit: 'committed',
       },
+    })
+    expect(readApplicationState(application.current())).toMatchObject({
+      automation: { enabled: false, enabledProjects: [fixtureProjectRef(project.ref)] },
+      configurationVersion: 4,
     })
     await application.stop()
   })
@@ -1273,8 +1353,72 @@ describe('RoadmapApplication', () => {
     expect(outcome).toMatchObject({
       ok: false,
       error: { code: 'persistence-failed', message: 'Disk is read-only.' },
-      state: { automation: { enabled: false }, configurationVersion: 1 },
     })
+    expect(readApplicationState(application.current())).toMatchObject({
+      automation: { enabled: false },
+      configurationVersion: 1,
+    })
+    await application.stop()
+  })
+
+  it('reports a live unconfirmed commit and inhibits otherwise available Automation', async () => {
+    const configured: ProjectConfiguration = {
+      ...BASE_CONFIGURATION,
+      automation: {
+        enabled: false,
+        classificationCommand: CLASSIFICATION_HARNESS_COMMAND,
+        wayfinderCommand: HARNESS_COMMAND,
+        enabledProjects: [{ integration: 'local', id: 'demo' }],
+      },
+    }
+    const configuration = memoryConfiguration(
+      { ok: true, document: configured },
+      { ok: true, durability: 'unconfirmed', message: 'Directory sync failed.' },
+    )
+    const read = createSourceFixtureOwner()
+    const adapter = immediateObserver(read([localProject('demo')], 25))
+    const application = createRoadmapApplication({
+      configuration: configuration.document,
+      admissions: fixtureAdmissions,
+      observers: {
+        local: () => adapter.observer,
+        github: (input) =>
+          controlledSourceFixture({ integration: 'github', id: input.ref.projectId }, EMPTY_BATCH)
+            .observer,
+      },
+      serverEpoch: 'test',
+    })
+    await application.start()
+    expect(readApplicationState(application.current()).automation.availability).toEqual({
+      status: 'ready',
+    })
+    expect(readApplicationState(application.current()).projects[0]?.resource.kind).toBe(
+      'current-readable',
+    )
+    const outcome = await application.execute(
+      commandSchema.parse({
+        type: 'set-automation-enabled',
+        enabled: true,
+        expectedConfigurationVersion: 1,
+      }),
+    )
+    expect(outcome).toMatchObject({
+      ok: true,
+      operation: 'set-automation-enabled',
+      subject: { kind: 'automation' },
+      result: {
+        type: 'set-automation-enabled',
+        enabled: true,
+        configurationVersion: 2,
+        commit: 'committed-unconfirmed',
+      },
+    })
+    expect(outcome).not.toHaveProperty('state')
+    expect(readApplicationState(application.current())).toMatchObject({
+      configurationVersion: 2,
+      automation: { enabled: true, availability: { status: 'unavailable' } },
+    })
+    expect(configuration.writes).toHaveLength(1)
     await application.stop()
   })
 
@@ -1455,9 +1599,21 @@ describe('RoadmapApplication', () => {
       }),
     )
 
-    expect(outcome.ok).toBe(true)
-    expect(readApplicationState(outcome.state).configurationVersion).toBe(2)
-    expect(readApplicationState(outcome.state).projects).toContainEqual(
+    expect(outcome).toMatchObject({
+      ok: true,
+      operation: 'register-project',
+      subject: { kind: 'registration', integration: 'local', connectionId: 'local' },
+      result: {
+        type: 'register-project',
+        project: fixtureProjectRef({ integration: 'local', projectId: 'microsoft-risiko' }),
+        connectionId: 'local',
+        workspacePath: '/tmp/microsoft-risiko',
+        configurationVersion: 2,
+        commit: 'committed',
+      },
+    })
+    expect(readApplicationState(application.current()).configurationVersion).toBe(2)
+    expect(readApplicationState(application.current()).projects).toContainEqual(
       expect.objectContaining({
         ref: fixtureResourceRef({ integration: 'local', id: 'microsoft-risiko' }),
         resource: expect.objectContaining({ kind: 'never-observed' }),

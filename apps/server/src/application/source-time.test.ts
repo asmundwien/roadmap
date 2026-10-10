@@ -24,7 +24,6 @@ import {
   publicProjectObservation,
 } from '../source-test-fixtures.ts'
 import { createRoadmapApplication } from './application.ts'
-import { createApplicationOperations } from './operations.ts'
 
 const REMOTE: ProjectKey = { integration: 'github', id: 'managed-remote' }
 const LOCAL: ProjectKey = { integration: 'local', id: 'managed-local' }
@@ -234,7 +233,6 @@ function fixture(initialMode: ProviderMode) {
         },
       }
     },
-    operations: createApplicationOperations(),
     observers: {
       local: () => local.observer,
       github: (input) => pool.create(input),
@@ -258,8 +256,8 @@ function fixture(initialMode: ProviderMode) {
         observedAt: 5000,
       })
     },
-    async refresh() {
-      return application.execute(
+    async refresh(kind: 'observed' | 'degraded' | 'failed', observedAt?: number) {
+      const outcome = await application.execute(
         commandSchema.parse({
           type: 'refresh-project',
           project: fixtureProjectRef(REMOTE),
@@ -267,6 +265,26 @@ function fixture(initialMode: ProviderMode) {
             .configurationVersion,
         }),
       )
+      expect(outcome).toMatchObject({
+        operation: 'refresh-project',
+        subject: { kind: 'project', project: fixtureProjectRef(REMOTE) },
+        ok: true,
+        result: {
+          type: 'refresh-project',
+          project: fixtureProjectRef(REMOTE),
+          attempt: {
+            kind,
+            attemptedAt: clock,
+            ...(observedAt === undefined ? {} : { observedAt }),
+          },
+        },
+      })
+      expect(outcome).not.toHaveProperty('state')
+      if (!outcome.ok || outcome.result.type !== 'refresh-project') {
+        throw new Error('Refresh attempt was not acknowledged')
+      }
+      if (kind === 'failed') expect(outcome.result.attempt).not.toHaveProperty('observedAt')
+      return outcome
     },
   }
 }
@@ -332,7 +350,7 @@ describe('public successful source observation time', () => {
       for (const time of [1000, 2000, 3000, 4000]) {
         if (time !== 1000) {
           test.at(time, 'transient')
-          expect((await test.refresh()).ok).toBe(true)
+          await test.refresh('failed')
         }
         const state = readApplicationState(test.application.current())
         const { connection, project } = remoteState(state)
@@ -346,7 +364,7 @@ describe('public successful source observation time', () => {
       expect(test.credentials()).toEqual(REFRESHED_CREDENTIALS)
 
       test.at(5000, 'complete')
-      expect((await test.refresh()).ok).toBe(true)
+      await test.refresh('observed', 5000)
       const recovered = remoteState(readApplicationState(test.application.current()))
       expect(recovered.connection.availability).toEqual({ status: 'available', observedAt: 5000 })
       expect(recovered.project.resource).toMatchObject({
@@ -356,7 +374,7 @@ describe('public successful source observation time', () => {
 
       for (const time of [6000, 7000]) {
         test.at(time, 'transient')
-        expect((await test.refresh()).ok).toBe(true)
+        await test.refresh('degraded', 5000)
       }
       const retained = remoteState(readApplicationState(test.application.current()))
       expect(retained.connection.availability).toMatchObject({
@@ -401,7 +419,7 @@ describe('public successful source observation time', () => {
         const afterSuccess = test.states.length
 
         test.at(2000, mode)
-        expect((await test.refresh()).ok).toBe(true)
+        await test.refresh('degraded', 1000)
         const failed = remoteState(readApplicationState(test.application.current()))
         expect(failed.connection.availability.observedAt).toBe(1000)
         expect(failed.project.resource).toMatchObject({
@@ -414,7 +432,7 @@ describe('public successful source observation time', () => {
         expectConfiguredFacts(readApplicationState(test.application.current()))
 
         test.at(3000, mode)
-        expect((await test.refresh()).ok).toBe(true)
+        await test.refresh('degraded', 1000)
         expect(test.credentials()).toEqual(REFRESHED_CREDENTIALS)
         expect(test.providerReads.at(-1)).toEqual({
           path: '/repositories/42',
@@ -432,7 +450,7 @@ describe('public successful source observation time', () => {
         }
 
         test.at(4000, 'complete')
-        expect((await test.refresh()).ok).toBe(true)
+        await test.refresh('observed', 4000)
         const recovered = remoteState(readApplicationState(test.application.current()))
         expect(recovered.connection.availability).toEqual({ status: 'available', observedAt: 4000 })
         expect(recovered.project.resource).toMatchObject({
@@ -487,6 +505,8 @@ describe('public successful source observation time', () => {
       })
       expect(project.activeMap).toMatchObject({ kind: 'uncertain', reason: 'map-incomplete' })
       expectConfiguredFacts(state)
+      test.at(2000, 'incomplete')
+      await test.refresh('degraded', 1000)
     } finally {
       await test.application.stop()
     }
@@ -499,7 +519,7 @@ describe('public successful source observation time', () => {
       await test.application.start()
       for (const time of [2000, 3000, 4000]) {
         test.at(time, 'complete')
-        expect((await test.refresh()).ok).toBe(true)
+        await test.refresh('observed', time)
         expect(remoteState(readApplicationState(test.application.current())).project).toMatchObject(
           {
             resource: {
@@ -548,7 +568,7 @@ describe('public successful source observation time', () => {
         )
       }
       test.at(5000, 'transient')
-      expect((await test.refresh()).ok).toBe(true)
+      await test.refresh('degraded', 4000)
       expect(remoteState(readApplicationState(test.application.current())).project).toMatchObject({
         resource: {
           kind: 'retained-unavailable',

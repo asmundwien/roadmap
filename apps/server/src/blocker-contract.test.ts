@@ -1,5 +1,5 @@
 import { type CorrelationId, correlationIdSchema } from '@roadmap/contracts/identity'
-import { commandSchema } from '@roadmap/contracts/operations'
+import { queryResultSchema, querySchema } from '@roadmap/contracts/operations'
 import {
   authorizationOperationSchema,
   automationEvidenceSchema,
@@ -10,7 +10,6 @@ import {
 } from '@roadmap/contracts/state'
 import {
   decodeApplicationState,
-  decodeCommandResultEnvelope,
   decodeQueryResultEnvelope,
   decodeStateEnvelope,
   requestIdSchema,
@@ -534,18 +533,26 @@ describe('Automation replay correspondence', () => {
 })
 
 describe('strict public variants and own data', () => {
-  test.each(['call-1', ''])(
-    'accepts opaque semantic correlation without relaxing ingress request identity %#',
-    (input) => {
-      const correlationId: CorrelationId = correlationIdSchema.parse(input)
-      expect(correlationId).toBe(input)
-      expect(requestIdSchema.safeParse(input).success).toBe(false)
-    },
-  )
+  test('requires a branded UUID for call-local operation correlation', () => {
+    const input = '1a82c8e3-70de-4165-a243-78dfce0d90a2'
+    const correlationId: CorrelationId = correlationIdSchema.parse(input)
+    expect(correlationId).toBe(input)
+    expect(requestIdSchema.safeParse(input).success).toBe(true)
+    for (const invalid of ['call-1', '']) {
+      expect(correlationIdSchema.safeParse(invalid).success).toBe(false)
+      expect(requestIdSchema.safeParse(invalid).success).toBe(false)
+    }
+  })
   test.each([
     { id: 'link', label: 'Link', kind: 'external-link' },
     { id: 'launch', label: 'Launch', kind: 'server-launch' },
-    { id: 'launch', label: 'Launch', kind: 'server-launch', operation: 'execute-shell' },
+    {
+      id: 'launch',
+      label: 'Launch',
+      kind: 'server-launch',
+      project: projectRef,
+      operation: 'execute-shell',
+    },
   ])('rejects missing or unsupported action payload %#', (input) =>
     expect(projectActionSchema.safeParse(input).success).toBe(false),
   )
@@ -581,7 +588,13 @@ describe('strict public variants and own data', () => {
   test.each([
     { id: 'link', label: 'Link', kind: 'external-link', href: 'https://github.com/owner/repo' },
     { id: 'route', label: 'Roadmap', kind: 'roadmap', href: '/projects/github/opaque%2Fproject' },
-    { id: 'launch', label: 'Launch', kind: 'server-launch', operation: 'open-workspace' },
+    {
+      id: 'launch',
+      label: 'Launch',
+      kind: 'server-launch',
+      project: projectRef,
+      operation: 'open-workspace',
+    },
   ])('accepts actual usable action variants %#', (input) =>
     expect(projectActionSchema.safeParse(input).success).toBe(true),
   )
@@ -891,152 +904,48 @@ describe('strict public variants and own data', () => {
   })
 })
 
-describe('staged operation result families', () => {
-  test('rejects state and query envelopes used as command replies', () => {
-    expect(decodeCommandResultEnvelope({ type: 'state', state: applicationWithBlocker() }).ok).toBe(
-      false,
-    )
-    expect(decodeQueryResultEnvelope({ type: 'command-result', outcome: {} }).ok).toBe(false)
-    expect(
-      decodeStateEnvelope({
-        type: 'query-result',
-        result: { ok: true, type: 'workspace-selection' },
-      }).ok,
-    ).toBe(false)
-  })
-  test.each([
-    {
-      command: { type: 'set-automation-enabled', expectedConfigurationVersion: 0, enabled: true },
-      result: { type: 'action-launched', actionId: 'open-workspace' },
-    },
-    {
-      command: {
-        type: 'begin-github-authorization',
-        expectedConfigurationVersion: 0,
-        name: 'GitHub',
-      },
-      result: { type: 'authorization-cancelled', operationId: 'auth' },
-    },
-    {
-      command: {
-        type: 'cancel-github-authorization',
-        expectedConfigurationVersion: 0,
-        operationId: 'auth',
-      },
-      result: { type: 'authorization-started', operationId: 'auth' },
-    },
-    {
-      command: { type: 'refresh-project', expectedConfigurationVersion: 0, project: projectRef },
-      result: { type: 'configuration-updated', configurationVersion: 1 },
-    },
-    {
-      command: {
-        type: 'launch-action',
-        expectedConfigurationVersion: 0,
-        actionId: 'open-workspace',
-      },
-      result: { type: 'project-refreshed', project: projectRef },
-    },
-    {
-      command: {
-        type: 'start-automation-override',
-        expectedConfigurationVersion: 0,
-        target: ticketRef,
-        stage: 'classification',
-      },
-      result: { type: 'configuration-updated', configurationVersion: 1 },
-    },
-  ])('refuses current wrong result family %#', ({ command, result }) => {
-    const envelope = {
-      type: 'command-result',
-      outcome: { ok: true, result, state: applicationWithBlocker() },
-    }
-    expect(decodeCommandResultEnvelope(envelope).ok).toBe(true)
-    expect(decodeCommandResultEnvelope(envelope, commandSchema.parse(command)).ok).toBe(false)
-  })
-  test.each([
-    {
-      command: { type: 'set-automation-enabled', expectedConfigurationVersion: 0, enabled: true },
-      result: { type: 'configuration-updated', configurationVersion: 1 },
-    },
-    {
-      command: {
-        type: 'begin-github-authorization',
-        expectedConfigurationVersion: 0,
-        name: 'GitHub',
-      },
-      result: { type: 'authorization-started', operationId: 'auth' },
-    },
-    {
-      command: {
-        type: 'cancel-github-authorization',
-        expectedConfigurationVersion: 0,
-        operationId: 'auth',
-      },
-      result: { type: 'authorization-cancelled', operationId: 'auth' },
-    },
-    {
-      command: { type: 'refresh-project', expectedConfigurationVersion: 0, project: projectRef },
-      result: { type: 'project-refreshed', project: projectRef },
-    },
-    {
-      command: {
-        type: 'launch-action',
-        expectedConfigurationVersion: 0,
-        actionId: 'open-workspace',
-      },
-      result: { type: 'action-launched', actionId: 'open-workspace' },
-    },
-    {
-      command: {
-        type: 'start-automation-override',
-        expectedConfigurationVersion: 0,
-        target: ticketRef,
-        stage: 'classification',
-      },
-      result: { type: 'automation-override-started', target: ticketRef, stage: 'classification' },
-    },
-  ])('accepts current legal result family %#', ({ command, result }) => {
-    expect(
-      decodeCommandResultEnvelope(
-        { type: 'command-result', outcome: { ok: true, result, state: applicationWithBlocker() } },
-        commandSchema.parse(command),
-      ).ok,
-    ).toBe(true)
-  })
+describe('own data operation replies', () => {
+  const correlationId = correlationIdSchema.parse('1a82c8e3-70de-4165-a243-78dfce0d90a2')
+  const query = querySchema.parse({ type: 'select-workspace' })
+  const selection = {
+    operation: 'select-workspace',
+    subject: { kind: 'none' },
+    serverEpoch: 'blocker-contract-server',
+    stateSequence: 1,
+    ok: true,
+    result: { kind: 'selected', path: '/fixture' },
+  }
+
   test('rejects result accessors without reading them', () => {
     let reads = 0
-    const result = Object.defineProperty({}, 'ok', {
+    expect(queryResultSchema.safeParse(selection).success).toBe(true)
+    const result = Object.defineProperty({ ...selection }, 'ok', {
       enumerable: true,
       get() {
         reads++
         throw new Error('private-value')
       },
     })
-    const decoded = decodeQueryResultEnvelope({ type: 'query-result', result })
+    const decoded = decodeQueryResultEnvelope(
+      { type: 'query-result', correlationId, result },
+      query,
+      correlationId,
+    )
     expect(decoded.ok).toBe(false)
     expect(reads).toBe(0)
     expect(JSON.stringify(decoded)).not.toContain('private-value')
   })
   test('rejects inherited result discriminants', () => {
-    const result = Object.assign(Object.create({ ok: true }), {
-      type: 'workspace-selection',
-      path: '/fixture',
-    })
-    expect(decodeQueryResultEnvelope({ type: 'query-result', result }).ok).toBe(false)
-  })
-  test('accepts the shipped query selection and cancellation meanings', () => {
+    expect(queryResultSchema.safeParse(selection).success).toBe(true)
+    const own = { ...selection }
+    Reflect.deleteProperty(own, 'ok')
+    const result = Object.assign(Object.create({ ok: true }), own)
     expect(
-      decodeQueryResultEnvelope({
-        type: 'query-result',
-        result: { ok: true, type: 'workspace-selection', path: '/fixture' },
-      }).ok,
-    ).toBe(true)
-    expect(
-      decodeQueryResultEnvelope({
-        type: 'query-result',
-        result: { ok: true, type: 'workspace-selection' },
-      }).ok,
-    ).toBe(true)
+      decodeQueryResultEnvelope(
+        { type: 'query-result', correlationId, result },
+        query,
+        correlationId,
+      ).ok,
+    ).toBe(false)
   })
 })

@@ -52,7 +52,15 @@ export function DetailsSection({ project, connection }: DetailsSectionProps) {
         name,
       })
       if (!outcome.ok) setError(outcome.error)
-      else setNotice(`${project.name} renamed.`)
+      else {
+        const result = outcome.result
+        const identity = projectIdentity({ ref: result.project })
+        setNotice(
+          result.commit === 'committed'
+            ? `Display name change committed for ${identity} at configuration version ${result.configurationVersion}.`
+            : `Display name change committed for ${identity} at configuration version ${result.configurationVersion}, but durability is unconfirmed. Check configuration before another change.`,
+        )
+      }
     } catch {
       setError('The change may have completed. Check the relevant configuration before retrying.')
     } finally {
