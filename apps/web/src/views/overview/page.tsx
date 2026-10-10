@@ -4,7 +4,14 @@ import { OverviewHeader, ProjectOverviewSections } from './project-list'
 import { presentProjects } from './project-presentation'
 
 export function OverviewPage() {
-  const { projects, connections, configuration, capturedAt } = useRoadmap()
+  const { projects, connections, configuration, capturedAt } = useRoadmap(
+    ({ projects, connections, configuration, capturedAt }) => ({
+      projects,
+      connections,
+      configuration,
+      capturedAt,
+    }),
+  )
   const portfolio = presentProjects({ projects, connections, configuration })
 
   return (

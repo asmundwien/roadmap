@@ -212,6 +212,60 @@ describe('state-free operation delivery through the public store', () => {
     }
   })
 
+  it('command activity publishes immutable cached snapshots without replacing accepted read content', async () => {
+    const h = harness()
+    const stop = h.store.start()
+    h.baseline()
+    const idle = h.store.getSnapshot()
+    const accepted = idle.state
+    try {
+      const execution = h.store.execute(command)
+      const active = h.store.getSnapshot()
+      expect(active).not.toBe(idle)
+      expect(h.store.getSnapshot()).toBe(active)
+      expect(active.state).toBe(accepted)
+      expect(active.command.inFlight).toBe(true)
+      expect(idle.command.inFlight).toBe(false)
+      expect(Reflect.set(active.command, 'inFlight', false)).toBe(false)
+      await h.reply(0)
+      await expect(execution).resolves.toEqual(outcome())
+      const settled = h.store.getSnapshot()
+      expect(settled).not.toBe(active)
+      expect(h.store.getSnapshot()).toBe(settled)
+      expect(settled.state).toBe(accepted)
+      expect(settled.command.inFlight).toBe(false)
+      expect(active.command.inFlight).toBe(true)
+      expect(settled.state).toMatchObject({ projects: [{ name: 'Accepted read facts' }] })
+    } finally {
+      stop()
+    }
+  })
+
+  it('settles a disposed owner command without reviving observation or changing retained read facts', async () => {
+    const h = harness()
+    const stop = h.store.start()
+    h.baseline()
+    const accepted = h.store.getSnapshot().state
+    const execution = h.store.execute(command)
+    await h.captured()
+    stop()
+    stop()
+    await h.reply(0, outcome('epoch-b', 900))
+    await expect(execution).resolves.toEqual(outcome('epoch-b', 900))
+    expect(h.store.getSnapshot()).toMatchObject({
+      transport: 'disconnected',
+      synchronization: 'retained',
+      command: { inFlight: false, error: null },
+    })
+    expect(h.store.getSnapshot().state).toBe(accepted)
+    expect(h.store.getSnapshot().state).toMatchObject({
+      projects: [{ name: 'Accepted read facts' }],
+    })
+    expect(h.sockets).toHaveLength(1)
+    expect(h.socket(0).closed).toBe(true)
+    expect(h.requests).toHaveLength(1)
+  })
+
   it.each(['matching', 'wrong-subject'])(
     'keeps %s application rejection distinct from transport uncertainty',
     async (subject) => {

@@ -28,8 +28,9 @@ type MapPageProps = {
 
 export function MapPage({ projectRef, mapId, ticketId }: MapPageProps) {
   const navigate = useNavigate()
-  const { projects } = useRoadmap()
-  const project = projects.find((candidate) => sameProject(candidate.ref, projectRef))
+  const project = useRoadmap(({ projects }) =>
+    projects.find((candidate) => sameProject(candidate.ref, projectRef)),
+  )
   const selectedId =
     mapId ??
     (project?.activeMap.kind === 'known-current'

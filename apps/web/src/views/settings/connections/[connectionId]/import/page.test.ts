@@ -11,6 +11,7 @@ import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { RoadmapProvider } from '@/store/roadmap-provider'
 import type { RoadmapStore } from '@/store/roadmap-store'
+import { makeRoadmapSnapshot } from '@/views/map/test-fixtures'
 import { projectRegistrationDraft } from '@/views/shared/project-registration'
 import { ProjectImportPage } from './page'
 
@@ -36,14 +37,10 @@ function renderImport(connectionId: string, connection?: Connection, valid = tru
     },
     capturedAt: 1,
   })
+  const snapshot = makeRoadmapSnapshot(state)
   const store: RoadmapStore = {
     subscribe: () => () => undefined,
-    getSnapshot: () => ({
-      transport: 'live',
-      synchronization: 'synchronized',
-      state,
-      command: { inFlight: false, error: null },
-    }),
+    getSnapshot: () => snapshot,
     start: () => () => undefined,
     query: async () => {
       throw new Error('Unexpected query')

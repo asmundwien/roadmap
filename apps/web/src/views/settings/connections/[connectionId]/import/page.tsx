@@ -24,8 +24,13 @@ import { WorkspaceFolderSelector } from '@/views/shared/workspace-folder-selecto
 type ProjectImportPageProps = { connectionId: ConnectionId }
 
 export function ProjectImportPage({ connectionId }: ProjectImportPageProps) {
-  const { connections, supportedIntegrations, configuration } = useRoadmap()
-  const connection = connections.find((candidate) => candidate.id === connectionId)
+  const { connection, githubInstallationUrl, configurationValid } = useRoadmap((roadmap) => ({
+    connection: roadmap.connections.find((candidate) => candidate.id === connectionId),
+    githubInstallationUrl: roadmap.supportedIntegrations.find(
+      (integration) => integration.integration === 'github',
+    )?.newInstallationUrl,
+    configurationValid: roadmap.configuration.valid,
+  }))
 
   if (!connection) {
     return (
@@ -41,16 +46,12 @@ export function ProjectImportPage({ connectionId }: ProjectImportPageProps) {
     )
   }
 
-  const githubInstallationUrl = supportedIntegrations.find(
-    (integration) => integration.integration === 'github',
-  )?.newInstallationUrl
-
   return (
     <ProjectImportForm
       key={connection.id}
       connection={connection}
       githubInstallationUrl={githubInstallationUrl}
-      configurationValid={configuration.valid}
+      configurationValid={configurationValid}
     />
   )
 }
@@ -66,7 +67,12 @@ function ProjectImportForm({
   githubInstallationUrl,
   configurationValid,
 }: ProjectImportFormProps) {
-  const { configurationVersion, command, query, execute } = useRoadmap()
+  const { configurationVersion, command, query, execute } = useRoadmap((roadmap) => ({
+    configurationVersion: roadmap.configurationVersion,
+    command: { inFlight: roadmap.command.inFlight },
+    query: roadmap.query,
+    execute: roadmap.execute,
+  }))
   const [workspacePath, setWorkspacePath] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [generalError, setGeneralError] = useState<string | null>(null)

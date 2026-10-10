@@ -19,7 +19,15 @@ type ManageSectionProps = {
 }
 
 export function ManageSection({ project, removing, onRemove }: ManageSectionProps) {
-  const { configuration, configurationVersion, command, execute, query } = useRoadmap()
+  const { configuration, configurationVersion, command, execute, query } = useRoadmap(
+    (roadmap) => ({
+      configuration: roadmap.configuration,
+      configurationVersion: roadmap.configurationVersion,
+      command: roadmap.command,
+      execute: roadmap.execute,
+      query: roadmap.query,
+    }),
+  )
   const [error, setError] = useState<SafeError | string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [workspaceError, setWorkspaceError] = useState<string | null>(null)

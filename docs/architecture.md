@@ -14,21 +14,113 @@ WebSocket carries full state replacements. HTTP carries `query` and `execute` re
 
 ## Web application
 
-`apps/web/src/store` is the SPA data layer. It accepts complete state replacements under current-generation authority, sends HTTP queries and commands, and owns synchronization, socket liveness, retained facts, command status and errors, and capped reconnect backoff.
+`createRoadmapStore` in `apps/web/src/store` is the single authoritative SPA read owner. It accepts coherent full-state replacements under current-generation authority, sends state-free HTTP queries and commands, and owns transport synchronization, socket liveness, retained accepted facts, aggregate command activity, and capped reconnect backoff. It does not own server admission or source evidence.
 
-`RoadmapProvider` owns the store start effect and subscribes even while initial children are gated. Before any authoritative state exists it renders an explicit waiting status, not empty Projects, default configuration, or a fabricated capture time. Once real state exists, children remain mounted through disconnect and reconnect. `useRoadmap` exposes the actual state fields, a real `capturedAt`, existing query and execute methods, and `synchronization: 'synchronized' | 'retained'`. Views never fetch directly.
+`RoadmapProvider` owns observation acquisition in its effect, independently of data readers and routes. It subscribes only to the readable-content gate and readiness/status selection, not whole application content or command activity. Before any readable authoritative state exists it renders explicit lifecycle/waiting status, not empty Projects, default configuration, version zero, or a fabricated capture time. Once readable state exists, consumers remain mounted through disconnect, reconnect, and later lifecycle messages without readable content.
+
+Views read through the required `useRoadmap(selector)` facade and never fetch directly. The selector receives `RoadmapViewState`, including actual read fields, real `capturedAt`, lifecycle, effective synchronization, and stable query/execute methods. There is no no-argument overload or broad-hook compatibility wrapper.
+
+### Client owner and subscription decision
+
+The [Who owns client state and observation, and does a library earn its place?](https://github.com/asmundwien/roadmap/issues/114) cutover deepens the external store and uses the maintained `use-sync-external-store/with-selector` React binding. The decision consumes the immutable [Data-layer client-state guarantees](https://github.com/asmundwien/roadmap/blob/b347a37b2308ab31ab0be8ec93db4426508ad0bd/docs/research/data-layer-client-state-guarantees.md) from [What do React selection, Redux Toolkit, TanStack Query and SSR actually guarantee here?](https://github.com/asmundwien/roadmap/issues/106), whose primary sources were accessed on 2026-10-08. That research establishes mechanisms, not the application owner or a speedup.
+
+| Candidate | Responsibility it can own | Decision and remaining application obligations |
+| --- | --- | --- |
+| Deepened external store with maintained selector binding | One immutable accepted read root, transport authority/lifetime, and selected subscriptions at the existing public seam. The binding owns concurrent selection memoization and reuse under supplied equality. | Chosen. Authority and lifecycle branching stay local to the store; views do not repeat them. Application code still owns semantic equality, decoding, session provenance, and acquisition/release. |
+| Redux Toolkit with React Redux | Toolkit can own an immutable root and reducer transitions; React Redux supplies pure selectors and custom equality. | Not adopted. There is no repeated reducer/action branching here that this pair removes. Returning a separately decoded full replacement is valid, but Immer does not deep-deduplicate it. Socket generations, observation lifetime, lifecycle retention, and outcome authority still require application policy. Redux remains a viable alternative if cohesive reducer-owned transitions become a concrete need. |
+| TanStack Query, including a single streaming cache entry | Query owns keyed repeatable fetch resources, structural sharing of JSON-compatible data, and observer selection. Streaming setup and cleanup can be application-owned. | Not adopted. There is no independent fetch resource to own alongside the coherent full-state stream. Splitting that stream introduces cross-key coherence rules; mirroring it creates a second authority. A single entry would still need the same epoch/lifetime policy. Mount/focus/reconnect refetch and query retry defaults do not fit the native folder-selection interaction. Mutations do not retry by default, but that default does not establish command completion. |
+| Direct React state/Context or base `useSyncExternalStore` | Context can distribute a stable owner; base external-store subscriptions compare cached snapshots with `Object.is`. | Context carries the store instance, not mutable application state. Context state updates notify all consumers. Selecting after a base broad subscription is not selected notification, and allocating derived snapshots on each read violates snapshot caching. Bespoke concurrent selector memoization would duplicate the maintained binding's responsibility. |
+
+The choice is about ownership, transition locality, public-interface testing, and enforceable dependencies. Avoided imports, migration size, and production line count do not decide it. The handwritten transport/authority owner remains necessary under every candidate. Semantic comparison adds work for selected values; no payload, selector-cost, rendering, or scaling bottleneck has been measured, and no performance gain is claimed.
+
+`RoadmapStore.getSnapshot` and `subscribe` remain the transport test seam. Publications are cached immutable snapshots: repeated reads without publication return the same object, and neither callers nor later transitions mutate an earlier publication. Command-only publications preserve the accepted `ApplicationState` identity. Complete validated replacements remain atomic; selection does not split the authoritative root into writable slices.
+
+The binding computes a selection before comparing the snapshot React observes. Default selected semantic equality compares JSON-compatible records and arrays by value and methods by reference. It retains the last selected result reference across independently decoded full replacements when the selected facts are equal, including newly allocated derived records. A changed selected fact invalidates that reference; selecting publication time, lifecycle, or synchronization includes those facts in equality. Selectors must be pure and must not omit facts their consumer needs. This guarantee concerns store-driven selected updates, not parent-driven renders or elimination of selector computation. Reference equality alone and shallow comparison cannot preserve nested selections across separately decoded equal payloads.
+
+### Client ownership and lifetime
+
+| Fact or work | Owner | Constraint |
+| --- | --- | --- |
+| Public `ApplicationState` and source/resource truth | Server application and its committed private owners | Browser adopts schema-validated replacements atomically; it cannot reconstruct private admission or invent source success. |
+| Accepted read publication and retained readable state | `RoadmapStore` | Current-generation epoch/sequence authority controls adoption. Retention preserves real trace, not current readiness or permission. |
+| Transport liveness, synchronization, socket generations, reconnect resources | `RoadmapStore`, acquired by provider effect | Subscriptions only observe. The application owner stays active when routes have no readers. |
+| Aggregate command activity | `RoadmapStore` | Current shared activity remains until the later per-attempt workflow cutover; it is not read authority or universal feedback for every attempt. |
+| Operation attempts, feedback, notices, and form drafts | Actual view-local or page-level operation owner | Removal feedback survives disappearance of its target. Drafts and presentation stay local unless a concrete workflow lifetime requires retention elsewhere. |
+| Resource selection | URL pathname, search, and fragment | No store or workflow mirror silently substitutes another Project, map, or ticket. |
+| Derived lookup indexes and pure resource results | Pure consumers of the accepted read state and scoped URL identity | Memoization caches calculations, not independently writable facts or a second resource authority. |
+
+`start()` acquires observation and returns an idempotent release. Multiple acquisitions share the active observation; releasing one does not dispose another's ownership. Repeating a release cannot decrement ownership twice. Adding/removing subscribers neither acquires nor releases observation. Last-owner cleanup retires authority, reports disconnected, retains actual accepted facts, closes the socket, and clears reconnect timers. React StrictMode setup/cleanup/setup may retire one generation and acquire another, but must not leave duplicate active sockets or reconnect timers. Retired callbacks cannot affect their successor. Navigating through `/components` or an unknown route does not end provider ownership.
+
+The interface to future shared pure resource results is immutable `RoadmapViewState` plus scoped resource identity. Results derive lifecycle, reachability, content, absence, and durable evidence from the sole public collection, without joining removed authorities. Future per-attempt workflow policy can own attempt state and interpret state-free operation evidence; it cannot mutate server read facts, infer a receipt from unrelated publication, mirror URL selection, or automatically replay commands. This decision does not implement that later policy.
+
+The clean cutover removes the no-argument broad `useRoadmap` subscription and every affected caller, test/prototype use, and compatibility path. It replaces provider whole-content/command subscriptions with gate/status selection and removes mutable publication exposure and disposal that can invalidate another acquisition. It retains the already-shipped deletion of reader-owned observation and fabricated initial defaults. There is no parallel authoritative cache, duplicated writable Project collection, mirrored URL selection, obsolete owner alias, or automatic interaction replay. State-free HTTP outcomes and the existing session-authority rules remain intact.
+
+SSR has no established product requirement and is out of scope. The client-only SPA uses no query cache or hydration authority. A future SSR decision would require separately agreed hosting, request-isolated state serialization, and matching server/client hydration snapshots. Folder selection remains explicit user interaction, never a cache entry subject to automatic mount, focus, reconnect, retry, or replay.
+
+The proof obligation crosses both the store interface and the actual mounted provider/App/router/public-application/HTTP/WebSocket seam. It includes subscription churn, repeated ownership, StrictMode and disposal, equal selected results during command-only and full-replacement publications, truthful initial/lifecycle/source states, pinned graph/Modal/prose DOM identity and local draft retention, successor content, and successor configuration-conflict feedback without rollback. The permanent portable browser fixture uses temporary configuration and Local Markdown with harmless host substitutes; selected-consumer probes belong only in its fixture entry. The common proof matrix in [What public read model is sufficient and has one authority for each fact?](https://github.com/asmundwien/roadmap/issues/112) still applies, including supported browser-safe leaves, positive/negative import and type checks, actual production graph/output inspection, and independent UI/docs. Current scoped evidence follows; historical verification records below remain historical.
+
+The permanent runner is `scripts/client-owner-browser.mjs`, invoked from the repository root with Playwright:
+
+```sh
+pnpm install
+pnpm exec playwright install chromium
+pnpm test:client-owner-browser
+```
+
+The root script runs `node scripts/client-owner-browser.mjs`. Vite uses the actual `apps/web` root with fixture-only entry/dependency resolution, not a substitute application root. The server canonicalizes its temporary root with `realpath`, so filesystem identity checks also work on platforms whose temporary directory is a symlink. `--serve-only` emits the fixture URL and control endpoint for an interactive browser visual proof. `--executable-path` or `CHROMIUM_EXECUTABLE_PATH` can select an already installed browser without a machine-specific fixture path. The fixture owns temporary configuration/source storage and harmless host substitutes, not production configuration, credentials, native effects, or Automation launches.
+
+### Exercised client-owner evidence
+
+The complete permanent browser runner passed all eight schedule groups on Node 26.8.1 and Chromium 156 from the current Playwright installation. It observed three harmless host invocations and zero folder-selector invocations. The schedules cover mounted selected-result stability, initial waiting and malformed/withheld state, unavailable sources, subscriber churn and StrictMode, retained pinned graph/prose/open Modal and local draft identity, successor content and conflict feedback without rollback, reader-free routes, and disposal. The default runner completed cleanup. Separately, direct `node scripts/client-owner-browser.mjs --serve-only` exited with code 0 on SIGINT and left its owned port without a listener. This does not claim package-manager-wrapper signal-exit guarantees.
+
+Disposable visual proof also inspected actual waiting, graph, open Modal, retained display, and successor content with the local draft preserved. When the browser helper's screenshot call timed out, a raw page screenshot supplied the visual evidence. Fixture setup failures were corrected without weakening the actual assertions; the full permanent run, not those failed setups or screenshots alone, supplies the regression result.
+
+| Verification | Observed result |
+| --- | --- |
+| Source tests | Passed 1,447 server, 264 web, and 27 UI tests. |
+| Typecheck and public consumer proofs | Passed both browser/server consumers with 177 exports, seven decoders, 122 invalid constructions, and six new client cases. |
+| Architecture gate | Passed five production graphs, two positive consumer graphs, 45 intended-diagnostic refusals, 47 detector/options tests, and six actual-config build fixtures. |
+| Unused-code gate | `pnpm knip` passed. |
+| Actual web production build | Passed with 716 resolved modules before tree shaking and 717 transformed modules. The 865,768-byte JavaScript chunk retains the large-chunk warning. |
+| Actual emitted JavaScript | Matched the final chunk and inspected 488 module entries. No forbidden Node/private-server/credential/host implementation code appeared; the maintained selector package is included. |
+| Changed-file language-service diagnostics | No errors; Biome warnings remain. Reference-service requests repeatedly timed out despite reload, so no completed reference-service result is claimed. |
+
+The semantic deletions are the broad no-argument hook and its compatibility paths, provider whole-content/command subscriptions, and mutable publication exposure. Idempotent shared acquisition remains intact; final cleanup now reports disconnected rather than connecting. The earlier removal of reader-owned observation and fabricated initial defaults remains intact. The cutover adds no second authoritative cache, URL mirror, or automatic replay. Generic UI and standalone docs remain independent. Selected-result identity is an observed correctness contract, not a render-speed claim.
+
+Counts include all new or relocated handwritten application source within the original server/web/contracts boundary. They exclude declarations, tests/specs, explicit test fixtures, styles, generated output, and dependencies. Nonblank physical lines and UTF-8 bytes use the existing comparison method without changed exclusions or minification.
+
+| Application production comparison | Files | Nonblank lines | UTF-8 bytes |
+| --- | ---: | ---: | ---: |
+| Original map baseline `7e70e897` | 85 | 13,616 | 489,864 |
+| Before client-owner cutover `e465d347` | 100 | 23,936 | 876,921 |
+| Current client-owner implementation | 100 | 24,183 | 885,723 |
+
+Application production increased by 247 lines and 8,802 bytes, with no file-count change. Immutable publication, lifecycle/high-water separation, shared observation ownership, and semantic selection justify the added responsibility; no net production-code reduction is claimed.
+
+| Separate evidence/build responsibility | Before files / lines / bytes | Current files / lines / bytes |
+| --- | --- | --- |
+| Source tests and fixtures | 69 / 45,544 / 1,681,194 | 69 / 45,951 / 1,697,059 |
+| Build/gate owners outside original source roots | 16 / 1,333 / 51,759 | 16 / 1,401 / 54,753 |
+| Outside-source proof tests and fixtures | 134 / 4,569 / 140,243 | 138 / 6,127 / 200,344 |
+
+The outside-source proof increase includes the permanent runner and three fixtures. Documentation is a separate resolution-report category; this section does not pin a final aggregate while evidence documents are still changing. Protected real configuration and Automation files changed externally during this task, so completion makes no byte-unchanged claim about them. The fixture did not use those files or re-enable Automation. This evidence resolves only the scoped client-owner implementation, not later workflow or final-integration tickets.
+
 
 ### Browser authority and synchronization
 
 The contract for [What establishes the authoritative server session across HTTP and WebSocket?](https://github.com/asmundwien/roadmap/issues/107) separates state authority from operation delivery. Each new socket has a distinct generation. Only the first validated state from the current generation establishes its authoritative server session. Socket open alone proves no application synchronization. Epoch identifiers are opaque identities, not clocks; sequence numbers are comparable only within the same established epoch.
 
-`RoadmapStore.getSnapshot` retains transport and command activity and represents application synchronization as a discriminated union:
+`RoadmapStore.getSnapshot` retains transport and command activity. Its readonly `state` is a real readable `ApplicationState` or `null`, independently of the latest accepted lifecycle and authority high-water sequence. Effective synchronization is a discriminated union:
 
-- `synchronization: 'not-ready'` requires `state: null`.
-- `synchronization: 'synchronized'` requires a real `ApplicationState` accepted under the current generation.
-- `synchronization: 'retained'` requires a previously accepted `ApplicationState` without current-generation synchronization.
+- `synchronization: 'not-ready'` requires `state: null`, even if a validated lifecycle publication has established current-generation authority.
+- `synchronization: 'synchronized'` requires readable state, established current-generation authority, and the latest accepted lifecycle to be `ready`.
+- `synchronization: 'retained'` requires readable state when current-generation authority is absent or the latest accepted lifecycle is not `ready`.
 
-Socket liveness is independently `connecting`, `live`, or `disconnected`. A live socket can still be not-ready or retained while awaiting a valid baseline. The provider exposes a global retained-state status even in that case. Browser synchronization says nothing about server Connection degradation or Project reachability; a synchronized snapshot can contain either.
+Effective synchronization is separate from socket liveness and the consumer's readable-content gate. A validated lifecycle-only `idle`, `starting`, or terminal publication can establish transport authority without providing readable application resources. With no prior readable state, the provider reports that lifecycle and waits. After readable content has been accepted, such a publication preserves the last readable state and mounted consumers, exposes the actual latest lifecycle, and reports retained synchronization. A successor with no payload keeps the predecessor's trace only as historical resource facts, not successor readiness or current source evidence. A ready `mutable` or `read-only` publication supplies actual configuration and resource evidence; unavailable sources can still be a truthful ready baseline.
+
+The store snapshot records lifecycle as a correlated object or `null` before any accepted publication. Ready requires `{ phase: 'ready', mode }`; failed requires `{ phase: 'failed', cause }`; other variants carry their actual phase. Only an accepted current-generation publication changes this lifecycle fact. The readable `useRoadmap` view exposes non-null lifecycle, independently of the retained content it renders. The accepted authority high-water sequence is tracked separately from that older readable content: an older ready publication cannot undo a newer accepted lifecycle publication. Disconnect, command activity, and obsolete socket or HTTP callbacks cannot fabricate a lifecycle transition.
+
+Socket liveness is independently `connecting`, `live`, or `disconnected`. A live socket can still be not-ready or retained while awaiting a valid baseline. The provider exposes global lifecycle/retained-state status even in that case. Server readiness, transport synchronization, Connection health, and Project/resource reachability are different facts. Neither ready lifecycle nor a synchronized socket proves that every source is available, complete, fresh, or known empty. Retained display grants no server interaction admission.
 
 Every HTTP request captures its authority before publication or awaiting delivery. It records the current socket generation and its established baseline identity, or no authority if that generation has no baseline. Settlement never supplies missing request-start provenance. Query and command outcomes are state-free. An independently valid operation outcome remains usable even when its producer epoch differs from accepted read authority. HTTP never establishes or replaces read facts.
 
@@ -36,14 +128,14 @@ Every HTTP request captures its authority before publication or awaiting deliver
 | --- | --- | --- |
 | Startup with no accepted state | No epoch or state is established. HTTP cannot seed either. | Not-ready. |
 | Current socket opens, or sends an invalid or withheld baseline | Opening and invalid input establish no authority. | Not-ready, or retained if prior facts exist. |
-| First valid state on the current socket generation | Establish its epoch. A different epoch may replace prior facts without comparing sequence numbers across epochs. | Synchronized. |
-| Later state on the established current socket, same epoch | Accept only a strictly greater sequence; equal or older state leaves the accepted maximum intact. | Synchronized. |
+| First valid state on the current socket generation | Establish its epoch and accept its lifecycle/high-water sequence. A different epoch replaces authority without comparing sequences across epochs; absent readable payload preserves only historical read facts. | Synchronized if and only if the latest accepted lifecycle is ready and state is readable; otherwise retained with readable state, or not-ready without it. |
+| Later state on the established current socket, same epoch | Accept only a strictly greater sequence; equal or older input leaves accepted lifecycle and high-water sequence intact. | Synchronized if and only if the latest accepted lifecycle is ready and state is readable; otherwise retained with readable state, or not-ready without it. |
 | Later state on the established current socket, different epoch | Ignore it; the same socket cannot establish a successor epoch. | Unchanged. |
-| Reconnect baseline, same epoch, equal or older sequence | Establish the new generation's authority but retain the previous maximum state. | Synchronized after that valid baseline. |
-| Reconnect baseline, same epoch, newer sequence | Establish the new generation's authority and advance the state. | Synchronized. |
-| Reconnect baseline, different epoch | Establish the new generation's epoch and accept its baseline; no epoch chronology is inferred. | Synchronized. |
+| Reconnect baseline, same epoch, equal or older sequence | Establish the new generation's authority but retain the previous accepted lifecycle/high-water maximum and readable state. | Synchronized if and only if the retained latest lifecycle is ready and state is readable; otherwise retained with readable state, or not-ready without it. |
+| Reconnect baseline, same epoch, newer sequence | Establish the new generation's authority and advance accepted lifecycle/high-water sequence; adopt readable payload if supplied. | Synchronized if and only if the latest accepted lifecycle is ready and state is readable; otherwise retained with readable state, or not-ready without it. |
+| Reconnect baseline, different epoch | Establish the new generation's epoch and accept its lifecycle/high-water baseline; no epoch chronology is inferred. Without readable payload, older trace remains historical. | Synchronized if and only if the latest accepted lifecycle is ready and state is readable; otherwise retained with readable state, or not-ready without it. |
 | HTTP outcome started under still-current established authority, same epoch | Return its operation truth without adopting state or advancing the accepted sequence, even when its producer sequence is higher. | Unchanged. |
-| HTTP outcome started under still-current established authority, different epoch | Return the valid outcome. Retire the socket generation and start a fresh one to obtain a validated authoritative baseline; retain existing facts meanwhile. | Retained until the fresh baseline. |
+| HTTP outcome started under still-current established authority, different epoch | Return the valid outcome. Retire the socket generation and start a fresh one to obtain a validated authoritative baseline; retain existing facts meanwhile. | Retained with readable state, otherwise not-ready, until a fresh baseline determines effective synchronization. |
 | HTTP outcome started before a baseline, under retired authority, before stop/restart, or under otherwise obsolete authority | Return the independently valid outcome without changing state or triggering synchronization. | Unchanged. |
 | Callback from a retired socket generation | Ignore it; it cannot establish authority, replace state, or change current transport status. | Unchanged. |
 | Current socket disconnects, store stops, or reconnect begins | Retire current authority and retain any accepted facts. | Retained with state, otherwise not-ready. |

@@ -43,20 +43,29 @@ const RECONNECT_MAX_MS = 30_000
 export type TransportLiveness = 'connecting' | 'live' | 'disconnected'
 
 export interface CommandActivity {
-  inFlight: boolean
-  error: SafeError | null
+  readonly inFlight: boolean
+  readonly error: Readonly<SafeError> | null
 }
 
+export type RoadmapLifecycle =
+  | Readonly<Pick<Extract<ApplicationState, { phase: 'ready' }>, 'phase' | 'mode'>>
+  | Readonly<Pick<Extract<ApplicationState, { phase: 'failed' }>, 'phase' | 'cause'>>
+  | Readonly<Pick<Exclude<ApplicationState, { phase: 'ready' | 'failed' }>, 'phase'>>
+
 export type RoadmapStoreSnapshot = {
-  transport: TransportLiveness
-  command: CommandActivity
+  readonly transport: TransportLiveness
+  readonly lifecycle: RoadmapLifecycle | null
+  readonly command: CommandActivity
 } & (
-  | { synchronization: 'not-ready'; state: null }
-  | { synchronization: 'synchronized' | 'retained'; state: ApplicationState }
+  | { readonly synchronization: 'not-ready'; readonly state: null }
+  | {
+      readonly synchronization: 'synchronized' | 'retained'
+      readonly state: Readonly<ApplicationState>
+    }
 )
 
 interface EstablishedAuthority {
-  readonly baseline: ApplicationState
+  readonly serverEpoch: ApplicationState['serverEpoch']
 }
 
 interface SocketGeneration {
@@ -70,7 +79,7 @@ export interface RoadmapStore {
   query(query: Query): Promise<QueryDelivery>
   /** Rejects only when HTTP failure makes command completion unknowable. */
   execute<C extends Command>(command: C): Promise<CommandDelivery<C>>
-  /** Opens the socket. Ref-counted, so React StrictMode's double-subscribe is harmless. */
+  /** Acquires one observation owner. Each release is idempotent. */
   start(): () => void
 }
 
@@ -88,17 +97,15 @@ export interface RoadmapStoreOptions {
   reconnectDelayMs?: (attempt: number) => number
 }
 
-const EMPTY_SNAPSHOT: RoadmapStoreSnapshot = {
+const EMPTY_SNAPSHOT: RoadmapStoreSnapshot = freezePublished<RoadmapStoreSnapshot>({
   transport: 'connecting',
   synchronization: 'not-ready',
+  lifecycle: null,
   state: null,
   command: { inFlight: false, error: null },
-}
+})
 
-/**
- * The SPA's whole data Module. It orders socket state, keeps retained facts during
- * reconnects, and makes command ambiguity explicit instead of inventing an optimistic result.
- */
+/** Owns accepted socket facts, read retention, and aggregate command activity. */
 export function createRoadmapStore(
   serverUrl: string,
   options: RoadmapStoreOptions = {},
@@ -114,35 +121,47 @@ export function createRoadmapStore(
   const listeners = new Set<() => void>()
   let activeCommands = 0
   let generation: SocketGeneration | null = null
+  let acceptedPublication: Readonly<
+    Pick<ApplicationState, 'serverEpoch' | 'stateSequence'>
+  > | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let attempts = 0
-  let watchers = 0
+  let owners = 0
 
   function publish(next: RoadmapStoreSnapshot): void {
-    snapshot = next
+    snapshot = freezePublished(next)
     for (const listener of listeners) listener()
   }
 
   function retainState(transport: TransportLiveness): void {
     if (snapshot.state === null) {
-      publish({ transport, synchronization: 'not-ready', state: null, command: snapshot.command })
+      publish({ ...snapshot, transport, synchronization: 'not-ready', state: null })
     } else {
-      publish({
-        transport,
-        synchronization: 'retained',
-        state: snapshot.state,
-        command: snapshot.command,
-      })
+      publish({ ...snapshot, transport, synchronization: 'retained', state: snapshot.state })
     }
   }
 
   function publishState(state: ApplicationState): void {
-    publish({
-      transport: 'live',
-      synchronization: 'synchronized',
-      state,
-      command: snapshot.command,
-    })
+    const lifecycle = lifecycleOf(state)
+    const readable = state.phase === 'ready' || ('retained' in state && state.retained !== null)
+    const content = readable ? state : snapshot.state
+    if (content === null) {
+      publish({
+        ...snapshot,
+        transport: 'live',
+        synchronization: 'not-ready',
+        lifecycle,
+        state: null,
+      })
+    } else {
+      publish({
+        ...snapshot,
+        transport: 'live',
+        synchronization: lifecycle.phase === 'ready' ? 'synchronized' : 'retained',
+        lifecycle,
+        state: content,
+      })
+    }
   }
 
   function publishCommand(error: SafeError | null): void {
@@ -165,40 +184,48 @@ export function createRoadmapStore(
   }
 
   function scheduleReconnect(): void {
-    if (watchers === 0 || generation !== null || reconnectTimer !== null) return
+    if (owners === 0 || generation !== null || reconnectTimer !== null) return
     const timer = setTimeout(() => {
       if (reconnectTimer !== timer) return
       reconnectTimer = null
-      if (watchers > 0) connect()
+      if (owners > 0) connect()
     }, reconnectDelayMs(attempts++))
     reconnectTimer = timer
   }
 
   function acceptSocketState(current: SocketGeneration, next: ApplicationState): void {
-    if (generation !== current || watchers === 0) return
+    if (generation !== current || owners === 0) return
     if (current.authority === null) {
-      current.authority = { baseline: next }
-      const previous = snapshot.state
-      const state =
-        previous !== null &&
-        previous.serverEpoch === next.serverEpoch &&
-        previous.stateSequence >= next.stateSequence
-          ? previous
-          : next
-      publishState(state)
+      current.authority = { serverEpoch: next.serverEpoch }
+      if (
+        acceptedPublication !== null &&
+        acceptedPublication.serverEpoch === next.serverEpoch &&
+        acceptedPublication.stateSequence >= next.stateSequence
+      ) {
+        if (snapshot.state === null) {
+          publish({ ...snapshot, transport: 'live', synchronization: 'not-ready', state: null })
+        } else {
+          publish({
+            ...snapshot,
+            transport: 'live',
+            synchronization: snapshot.lifecycle?.phase === 'ready' ? 'synchronized' : 'retained',
+            state: snapshot.state,
+          })
+        }
+        return
+      }
+    } else if (
+      next.serverEpoch !== current.authority.serverEpoch ||
+      (acceptedPublication !== null && next.stateSequence <= acceptedPublication.stateSequence)
+    ) {
       return
     }
-    if (
-      next.serverEpoch !== current.authority.baseline.serverEpoch ||
-      snapshot.synchronization !== 'synchronized' ||
-      next.stateSequence <= snapshot.state.stateSequence
-    )
-      return
+    acceptedPublication = { serverEpoch: next.serverEpoch, stateSequence: next.stateSequence }
     publishState(next)
   }
 
   function connect(): void {
-    if (watchers === 0 || generation !== null || reconnectTimer !== null) return
+    if (owners === 0 || generation !== null || reconnectTimer !== null) return
     let socket: SocketLike
     try {
       socket = createSocket(socketUrl.href)
@@ -212,13 +239,13 @@ export function createRoadmapStore(
     retainState('connecting')
 
     socket.addEventListener('open', () => {
-      if (generation !== current || watchers === 0) return
+      if (generation !== current || owners === 0) return
       attempts = 0
       publish({ ...snapshot, transport: 'live' })
     })
 
     socket.addEventListener('message', (event) => {
-      if (generation !== current || watchers === 0) return
+      if (generation !== current || owners === 0) return
       const message = parseJson(event.data)
       if (message === null) return
       const decoded = decodeStateEnvelope(message)
@@ -227,7 +254,7 @@ export function createRoadmapStore(
     })
 
     socket.addEventListener('close', () => {
-      if (generation !== current || watchers === 0) return
+      if (generation !== current || owners === 0) return
       generation = null
       retainState('disconnected')
       scheduleReconnect()
@@ -240,17 +267,16 @@ export function createRoadmapStore(
   ): void {
     if (
       authority === null ||
-      watchers === 0 ||
+      owners === 0 ||
       generation?.authority !== authority ||
-      snapshot.synchronization !== 'synchronized' ||
-      serverEpoch === authority.baseline.serverEpoch
+      serverEpoch === authority.serverEpoch
     )
       return
     const retired = generation
     generation = null
     clearReconnect()
-    retainState('connecting')
     closeRetired(retired)
+    retainState('connecting')
     connect()
   }
 
@@ -334,19 +360,19 @@ export function createRoadmapStore(
   }
 
   function start(): () => void {
-    watchers += 1
-    if (watchers === 1) connect()
+    owners += 1
+    if (owners === 1) connect()
     let stopped = false
     return () => {
       if (stopped) return
       stopped = true
-      watchers -= 1
-      if (watchers > 0) return
+      owners -= 1
+      if (owners > 0) return
       clearReconnect()
       const retired = generation
       generation = null
-      retainState('connecting')
       closeRetired(retired)
+      retainState('disconnected')
     }
   }
 
@@ -360,6 +386,33 @@ export function createRoadmapStore(
     execute,
     start,
   }
+}
+
+function lifecycleOf(state: ApplicationState): RoadmapLifecycle {
+  switch (state.phase) {
+    case 'ready':
+      return { phase: state.phase, mode: state.mode }
+    case 'failed':
+      return { phase: state.phase, cause: state.cause }
+    case 'idle':
+    case 'starting':
+    case 'stopping':
+    case 'stopped':
+      return { phase: state.phase }
+    default: {
+      const exhaustive: never = state
+      return exhaustive
+    }
+  }
+}
+
+function freezePublished<T>(value: T): T {
+  if (typeof value !== 'object' || value === null || Object.isFrozen(value)) return value
+  for (const key in value) {
+    if (Object.hasOwn(value, key)) freezePublished(value[key])
+  }
+  Object.freeze(value)
+  return value
 }
 
 function normalizedHttpUrl(value: string): URL {

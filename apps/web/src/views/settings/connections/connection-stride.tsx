@@ -29,7 +29,7 @@ type ConnectionStrideProps = {
 }
 
 export function ConnectionStride({ connection, dependents }: ConnectionStrideProps) {
-  const { automation } = useRoadmap()
+  const automation = useRoadmap((roadmap) => roadmap.automation)
   return (
     <Section>
       <SectionHeader>

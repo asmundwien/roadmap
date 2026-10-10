@@ -17,7 +17,13 @@ import { RoadmapProvider } from '@/store/roadmap-provider'
 import type { RoadmapStore } from '@/store/roadmap-store'
 import { resourceObservation } from '@/views/shared/resource-results'
 import { mapGraph } from './graph'
-import { makeMap, makeRoadmapSnapshot, makeRoadmapStore, ticket } from './test-fixtures'
+import {
+  makeApplicationState,
+  makeMap,
+  makeRoadmapSnapshot,
+  makeRoadmapStore,
+  ticket,
+} from './test-fixtures'
 
 function project(maps: MapResource[]): Project {
   const key = githubProjectRefSchema.parse({
@@ -385,15 +391,12 @@ describe('URL-selected ticket Automation evidence', () => {
   it('keeps durable stage history without source content and honors server override denial', () => {
     const map = makeMap([])
     const registered = project([map])
-    const store = makeRoadmapStore([registered])
-    const snapshot = store.getSnapshot()
-    if (snapshot.synchronization === 'not-ready' || snapshot.state.phase !== 'ready')
-      throw new Error('Expected authoritative fixture state')
+    const state = makeApplicationState([registered])
     const target = ticketRefSchema.parse({
       map: map.ref,
       ticketId: ticketIdSchema.parse('historical-ticket'),
     })
-    snapshot.state.automation.evidence = [
+    state.automation.evidence = [
       {
         target,
         classification: {
@@ -405,13 +408,18 @@ describe('URL-selected ticket Automation evidence', () => {
         wayfinder: { status: 'queued' },
       },
     ]
-    snapshot.state.automation.overrides = [
+    state.automation.overrides = [
       {
         target,
         classification: { status: 'ineligible', reason: 'Current source evidence is unavailable.' },
         wayfinder: { status: 'ineligible', reason: 'Current source evidence is unavailable.' },
       },
     ]
+    const snapshot = makeRoadmapSnapshot(state)
+    const store: RoadmapStore = {
+      ...makeRoadmapStore([registered]),
+      getSnapshot: () => snapshot,
+    }
 
     const markup = renderProject(
       registered,
@@ -433,15 +441,12 @@ describe('URL-selected ticket Automation evidence', () => {
   })
 
   it('keeps durable Automation evidence addressable when the selected Project and map are absent', () => {
-    const store = makeRoadmapStore()
-    const snapshot = store.getSnapshot()
-    if (snapshot.synchronization === 'not-ready' || snapshot.state.phase !== 'ready')
-      throw new Error('Expected ready fixture')
+    const state = makeApplicationState()
     const target = ticketRefSchema.parse({
       map: { project: { integration: 'local', projectId: 'absent-project' }, mapId: 'absent-map' },
       ticketId: 'absent-ticket',
     })
-    snapshot.state.automation.evidence = [
+    state.automation.evidence = [
       {
         target,
         classification: {
@@ -458,6 +463,8 @@ describe('URL-selected ticket Automation evidence', () => {
         },
       },
     ]
+    const snapshot = makeRoadmapSnapshot(state)
+    const store: RoadmapStore = { ...makeRoadmapStore(), getSnapshot: () => snapshot }
     const markup = renderToStaticMarkup(
       createElement(
         MemoryRouter,
@@ -549,7 +556,8 @@ describe('application lifecycle consumer admission', () => {
       capturedAt: accepted.state.capturedAt,
       retained: accepted.state,
     }
-    const store: RoadmapStore = { ...base, getSnapshot: () => makeRoadmapSnapshot(terminal) }
+    const snapshot = makeRoadmapSnapshot(terminal)
+    const store: RoadmapStore = { ...base, getSnapshot: () => snapshot }
     const markup = renderProject(
       configured,
       ticketPath(map.tickets[0]?.ref ?? ticketRefSchema.parse({ map: map.ref, ticketId: '8' })),

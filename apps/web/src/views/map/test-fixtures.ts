@@ -279,24 +279,53 @@ export function makeApplicationState(
   })
 }
 
-export function makeRoadmapSnapshot(state: ApplicationState): RoadmapStoreSnapshot {
-  return {
-    transport: 'live',
-    synchronization: 'synchronized',
-    command: { inFlight: false, error: null },
-    state: applicationStateSchema.parse(state),
+function freezeFixture<T>(value: T): T {
+  if (typeof value === 'object' && value !== null && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) freezeFixture(child)
+    Object.freeze(value)
   }
+  return value
+}
+
+function lifecycle(state: ApplicationState): RoadmapStoreSnapshot['lifecycle'] {
+  switch (state.phase) {
+    case 'ready':
+      return { phase: state.phase, mode: state.mode }
+    case 'failed':
+      return { phase: state.phase, cause: state.cause }
+    default:
+      return { phase: state.phase }
+  }
+}
+
+export function makeRoadmapSnapshot(state: ApplicationState): RoadmapStoreSnapshot {
+  const validatedState = applicationStateSchema.parse(state)
+  if (
+    validatedState.phase !== 'ready' &&
+    !('retained' in validatedState && validatedState.retained !== null)
+  ) {
+    return freezeFixture({
+      transport: 'live',
+      synchronization: 'not-ready',
+      lifecycle: lifecycle(validatedState),
+      command: { inFlight: false, error: null },
+      state: null,
+    } satisfies RoadmapStoreSnapshot)
+  }
+  return freezeFixture({
+    transport: 'live',
+    synchronization: validatedState.phase === 'ready' ? 'synchronized' : 'retained',
+    lifecycle: lifecycle(validatedState),
+    command: { inFlight: false, error: null },
+    state: validatedState,
+  } satisfies RoadmapStoreSnapshot)
 }
 
 export function makeRoadmapStore(projects: Project[] = []): RoadmapStore {
   const snapshot = makeRoadmapSnapshot(makeApplicationState(projects))
   return {
     subscribe: () => () => undefined,
-    getSnapshot: () => {
-      if (snapshot.synchronization !== 'not-ready')
-        snapshot.state = applicationStateSchema.parse(snapshot.state)
-      return snapshot
-    },
+    getSnapshot: () => snapshot,
     start: () => () => undefined,
     query: async () => {
       throw new Error('Unexpected query')

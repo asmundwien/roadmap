@@ -34,7 +34,19 @@ export function ConnectionSettings() {
     configurationVersion,
     command,
     execute,
-  } = useRoadmap()
+  } = useRoadmap((roadmap) => ({
+    connections: roadmap.connections,
+    projects: roadmap.projects,
+    supportedIntegrations: roadmap.supportedIntegrations,
+    authorizationOperations: roadmap.authorizationOperations,
+    configuration: {
+      valid: roadmap.configuration.valid,
+      notices: roadmap.configuration.notices,
+    },
+    configurationVersion: roadmap.configurationVersion,
+    command: { inFlight: roadmap.command.inFlight },
+    execute: roadmap.execute,
+  }))
   const [pane, setPane] = useState<ConnectionPane | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [authorizationFeedback, setAuthorizationFeedback] = useState<AuthorizationResultFeedback[]>(

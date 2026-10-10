@@ -28,7 +28,12 @@ type DetailsSectionProps = {
 }
 
 export function DetailsSection({ project, connection }: DetailsSectionProps) {
-  const { configuration, configurationVersion, command, execute } = useRoadmap()
+  const { configuration, configurationVersion, command, execute } = useRoadmap((roadmap) => ({
+    configuration: roadmap.configuration,
+    configurationVersion: roadmap.configurationVersion,
+    command: roadmap.command,
+    execute: roadmap.execute,
+  }))
   const [error, setError] = useState<SafeError | string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)

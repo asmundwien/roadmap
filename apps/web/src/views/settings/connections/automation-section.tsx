@@ -8,7 +8,15 @@ import { useRoadmap } from '@/store/roadmap-provider'
 import { ErrorText } from '@/views/shared/settings-shared'
 
 export function AutomationSection() {
-  const { automation, configuration, configurationVersion, command, execute } = useRoadmap()
+  const { automation, configuration, configurationVersion, command, execute } = useRoadmap(
+    (roadmap) => ({
+      automation: roadmap.automation,
+      configuration: { valid: roadmap.configuration.valid },
+      configurationVersion: roadmap.configurationVersion,
+      command: { inFlight: roadmap.command.inFlight },
+      execute: roadmap.execute,
+    }),
+  )
   const [error, setError] = useState<SafeError | string | null>(null)
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)

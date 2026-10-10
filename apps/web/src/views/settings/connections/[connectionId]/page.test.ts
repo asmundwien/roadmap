@@ -16,6 +16,7 @@ import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { RoadmapProvider } from '@/store/roadmap-provider'
 import type { RoadmapStore } from '@/store/roadmap-store'
+import { makeRoadmapSnapshot } from '@/views/map/test-fixtures'
 import { ConnectionPage } from './page'
 
 const connection: Connection = {
@@ -54,22 +55,18 @@ function renderDetail(
     },
     capturedAt: 0,
   })
+  const snapshot = initial
+    ? makeRoadmapSnapshot(state)
+    : Object.freeze({
+        transport: 'live',
+        synchronization: 'not-ready',
+        lifecycle: null,
+        state: null,
+        command: Object.freeze({ inFlight: false, error: null }),
+      } satisfies ReturnType<RoadmapStore['getSnapshot']>)
   const store: RoadmapStore = {
     subscribe: () => () => undefined,
-    getSnapshot: () =>
-      initial
-        ? {
-            transport: 'live',
-            synchronization: 'synchronized',
-            state,
-            command: { inFlight: false, error: null },
-          }
-        : {
-            transport: 'live',
-            synchronization: 'not-ready',
-            state: null,
-            command: { inFlight: false, error: null },
-          },
+    getSnapshot: () => snapshot,
     start: () => () => undefined,
     query: async () => {
       throw new Error('Unexpected query')

@@ -15,12 +15,19 @@ import {
   type QueryResult,
 } from '@roadmap/contracts/operations'
 import {
+  type ApplicationState,
+  applicationStateSchema,
   connectionSchema,
   type Project,
   type ReadyApplicationState,
 } from '@roadmap/contracts/state'
 import { describe, expect, it } from 'vitest'
-import { neverReadProject } from '@/views/overview/test-fixtures'
+import {
+  currentProject,
+  neverReadProject,
+  readableMap,
+  readableTicket,
+} from '@/views/overview/test-fixtures'
 import { createRoadmapStore, type SocketLike } from './roadmap-store'
 
 type SocketEvent = 'open' | 'message' | 'close'
@@ -102,12 +109,47 @@ function state(
   }
 }
 
+function readableState(sequence = 4, epoch = 'epoch-a'): ReadyApplicationState {
+  const ref = projectRefSchema.parse({ integration: 'local', projectId: 'readable' })
+  const map = readableMap(ref, 'pinned')
+  const ticket = readableTicket(map, 'selected')
+  if (
+    map.resource.kind !== 'current-readable' ||
+    map.ticketsMembership.kind !== 'current-complete' ||
+    ticket.resource.kind !== 'current-readable'
+  )
+    throw new Error('Expected current-readable fixtures.')
+  map.resource.observation.value.body.raw = '# Pinned map\n\nPreviously accepted prose.'
+  ticket.resource.observation.value.body = 'Previously accepted ticket body.'
+  map.tickets = [ticket]
+  map.ticketsMembership.observation.value.members = [ticket.ref]
+  map.frontier = [ticket.ref]
+  return state(sequence, epoch, [currentProject('readable', [map])])
+}
+
+function lifecycleState(
+  phase: 'idle' | 'starting' | 'stopping' | 'stopped' | 'failed',
+  sequence: number,
+  epoch = 'epoch-a',
+): ApplicationState {
+  return applicationStateSchema.parse({
+    phase,
+    serverEpoch: epoch,
+    stateSequence: sequence,
+    capturedAt: sequence * 1000,
+    ...(phase === 'stopping' || phase === 'stopped' || phase === 'failed'
+      ? { retained: null }
+      : {}),
+    ...(phase === 'failed' ? { cause: 'Startup could not complete.' } : {}),
+  })
+}
+
 function readyStateOf(store: ReturnType<typeof createRoadmapStore>): ReadyApplicationState | null {
   const state = store.getSnapshot().state
   return state?.phase === 'ready' ? state : null
 }
 
-function wire(value: ReadyApplicationState): string {
+function wire(value: ApplicationState): string {
   return JSON.stringify({ type: 'state', state: value })
 }
 
@@ -562,6 +604,7 @@ describe('createRoadmapStore', () => {
     expect(store.getSnapshot()).toEqual({
       transport: 'connecting',
       synchronization: 'not-ready',
+      lifecycle: null,
       state: null,
       command: { inFlight: false, error: null },
     })
@@ -606,6 +649,219 @@ describe('createRoadmapStore', () => {
       state: null,
     })
     stop()
+  })
+
+  it.each(['idle', 'starting', 'stopping', 'stopped', 'failed'] as const)(
+    'retains readable map and ticket content when accepted lifecycle becomes %s without retained server content',
+    (phase) => {
+      const { store, sockets } = harness()
+      const stop = store.start()
+      try {
+        sockets[0]?.emit('message', wire(readableState()))
+        const accepted = store.getSnapshot().state
+        sockets[0]?.emit('message', wire(lifecycleState(phase, 5)))
+        expect(store.getSnapshot()).toMatchObject({
+          transport: 'live',
+          synchronization: 'retained',
+          lifecycle:
+            phase === 'failed' ? { phase, cause: 'Startup could not complete.' } : { phase },
+        })
+        expect(store.getSnapshot().state).toBe(accepted)
+        const map = readyStateOf(store)?.projects[0]?.maps[0]
+        expect(map?.resource).toMatchObject({
+          kind: 'current-readable',
+          observation: { value: { body: { raw: '# Pinned map\n\nPreviously accepted prose.' } } },
+        })
+        expect(map?.tickets[0]?.resource).toMatchObject({
+          kind: 'current-readable',
+          observation: { value: { body: 'Previously accepted ticket body.' } },
+        })
+        sockets[0]?.emit('message', wire(readableState(4)))
+        sockets[0]?.emit('message', wire(readableState(5)))
+        expect(store.getSnapshot()).toMatchObject({
+          lifecycle: { phase },
+          synchronization: 'retained',
+        })
+        sockets[0]?.emit('message', wire(readableState(6)))
+        expect(store.getSnapshot()).toMatchObject({
+          lifecycle: { phase: 'ready', mode: 'mutable' },
+          synchronization: 'synchronized',
+        })
+        expect(readyStateOf(store)?.stateSequence).toBe(6)
+      } finally {
+        stop()
+      }
+    },
+  )
+
+  it.each(['idle', 'starting', 'stopping', 'stopped', 'failed'] as const)(
+    'does not fabricate readable content from a first %s lifecycle baseline',
+    (phase) => {
+      const { store, sockets } = harness()
+      const stop = store.start()
+      try {
+        sockets[0]?.emit('message', wire(lifecycleState(phase, 1)))
+        expect(store.getSnapshot()).toMatchObject({
+          transport: 'live',
+          lifecycle:
+            phase === 'failed' ? { phase, cause: 'Startup could not complete.' } : { phase },
+          synchronization: 'not-ready',
+          state: null,
+        })
+      } finally {
+        stop()
+      }
+    },
+  )
+
+  it('keeps the previous readable epoch through a successor starting baseline until its readable replacement', () => {
+    const { store, sockets } = harness()
+    let stop = store.start()
+    try {
+      sockets[0]?.emit('message', wire(readableState(40)))
+      const accepted = store.getSnapshot().state
+      stop()
+      stop = store.start()
+      sockets[1]?.emit('message', wire(lifecycleState('starting', 1, 'epoch-b')))
+      expect(store.getSnapshot()).toMatchObject({
+        lifecycle: { phase: 'starting' },
+        synchronization: 'retained',
+      })
+      expect(store.getSnapshot().state).toBe(accepted)
+      sockets[0]?.emit('message', wire(readableState(999)))
+      sockets[1]?.emit('message', wire(readableState(2, 'epoch-b')))
+      expect(store.getSnapshot()).toMatchObject({
+        lifecycle: { phase: 'ready', mode: 'mutable' },
+        synchronization: 'synchronized',
+      })
+      expect(readyStateOf(store)?.serverEpoch).toBe('epoch-b')
+      expect(readyStateOf(store)?.stateSequence).toBe(2)
+    } finally {
+      stop()
+    }
+  })
+
+  it.each([4, 5])(
+    'keeps later lifecycle authority across a same-epoch reconnect ready baseline at sequence %s',
+    (sequence) => {
+      const { store, sockets } = harness()
+      let stop = store.start()
+      try {
+        sockets[0]?.emit('message', wire(readableState(4)))
+        const accepted = store.getSnapshot().state
+        sockets[0]?.emit('message', wire(lifecycleState('starting', 5)))
+        stop()
+        stop = store.start()
+        sockets[1]?.emit('message', wire(readableState(sequence)))
+        expect(store.getSnapshot()).toMatchObject({
+          lifecycle: { phase: 'starting' },
+          synchronization: 'retained',
+        })
+        expect(store.getSnapshot().state).toBe(accepted)
+        sockets[1]?.emit('message', wire(readableState(6)))
+        expect(store.getSnapshot()).toMatchObject({
+          lifecycle: { phase: 'ready' },
+          synchronization: 'synchronized',
+        })
+        expect(readyStateOf(store)?.stateSequence).toBe(6)
+      } finally {
+        stop()
+      }
+    },
+  )
+
+  it.each(['stopping', 'stopped', 'failed'] as const)(
+    'adopts a first %s baseline with actual retained content without claiming readiness',
+    (phase) => {
+      const { store, sockets } = harness()
+      const stop = store.start()
+      const terminal = applicationStateSchema.parse({
+        ...lifecycleState(phase, 5),
+        retained: readableState(4),
+      })
+      try {
+        sockets[0]?.emit('message', wire(terminal))
+        expect(store.getSnapshot()).toMatchObject({
+          lifecycle: { phase },
+          synchronization: 'retained',
+        })
+        expect(store.getSnapshot().state).toEqual(terminal)
+        const accepted = store.getSnapshot().state
+        if (!accepted || !('retained' in accepted) || !accepted.retained)
+          throw new Error('Expected actual terminal retained content.')
+        expect(accepted.retained.projects[0]?.maps[0]?.resource).toMatchObject({
+          observation: { value: { body: { raw: '# Pinned map\n\nPreviously accepted prose.' } } },
+        })
+        expect(accepted.retained.projects[0]?.maps[0]?.tickets[0]?.resource).toMatchObject({
+          observation: { value: { body: 'Previously accepted ticket body.' } },
+        })
+      } finally {
+        stop()
+      }
+    },
+  )
+
+  it('a lifecycle-only baseline grants request-start epoch authority without granting readable state', async () => {
+    const result: QueryResult = {
+      ok: false,
+      operation: 'select-workspace',
+      subject: { kind: 'none' },
+      serverEpoch: serverEpochSchema.parse('epoch-b'),
+      stateSequence: stateSequenceSchema.parse(1),
+      error: { code: 'dependency', message: 'Application is not ready.' },
+    }
+    const { store, sockets } = harness(async () => jsonResponse({ type: 'query-result', result }))
+    const stop = store.start()
+    try {
+      sockets[0]?.emit('message', wire(lifecycleState('starting', 4)))
+      await expect(store.query({ type: 'select-workspace' })).resolves.toEqual(result)
+      expect(sockets).toHaveLength(2)
+      expect(sockets[0]?.closed).toBe(true)
+      expect(store.getSnapshot()).toMatchObject({
+        lifecycle: { phase: 'starting' },
+        synchronization: 'not-ready',
+        state: null,
+      })
+      sockets[1]?.emit('message', wire(readableState(1, 'epoch-b')))
+      expect(store.getSnapshot()).toMatchObject({
+        lifecycle: { phase: 'ready' },
+        synchronization: 'synchronized',
+      })
+      expect(readyStateOf(store)?.serverEpoch).toBe('epoch-b')
+    } finally {
+      stop()
+    }
+  })
+
+  it('publishes cached immutable snapshots that consumers cannot mutate', () => {
+    const { store, sockets } = harness()
+    const stop = store.start()
+    try {
+      sockets[0]?.emit('message', wire(readableState()))
+      const accepted = store.getSnapshot()
+      expect(store.getSnapshot()).toBe(accepted)
+      expect(Reflect.set(accepted, 'transport', 'disconnected')).toBe(false)
+      expect(Reflect.set(accepted.command, 'inFlight', true)).toBe(false)
+      const content = readyStateOf(store)
+      if (!content) throw new Error('Expected readable accepted state.')
+      const map = content.projects[0]?.maps[0]
+      if (!map || map.resource.kind !== 'current-readable')
+        throw new Error('Expected readable map.')
+      expect(Reflect.set(content.projects, '0', project('replacement'))).toBe(false)
+      expect(Reflect.set(map.resource.observation.value.body, 'raw', 'Consumer overwrite')).toBe(
+        false,
+      )
+      expect(store.getSnapshot()).toBe(accepted)
+      expect(map.resource.observation.value.body.raw).toBe(
+        '# Pinned map\n\nPreviously accepted prose.',
+      )
+      sockets[0]?.emit('message', wire(readableState(5)))
+      expect(store.getSnapshot()).not.toBe(accepted)
+      expect(content.stateSequence).toBe(4)
+      expect(readyStateOf(store)?.stateSequence).toBe(5)
+    } finally {
+      stop()
+    }
   })
 
   it('does not let a malformed message choose the baseline epoch', () => {
@@ -1068,7 +1324,92 @@ describe('createRoadmapStore', () => {
     sockets[0]?.emit('close')
     await flushTimers()
     expect(sockets).toHaveLength(1)
-    expect(store.getSnapshot().transport).toBe('connecting')
+    expect(store.getSnapshot().transport).toBe('disconnected')
+  })
+
+  it('keeps another owner observing after duplicate releases and removal of every subscriber', async () => {
+    const { store, sockets } = harness()
+    const stopFirst = store.start()
+    const stopLast = store.start()
+    const observed: number[] = []
+    const unsubscribe = store.subscribe(() => {
+      const accepted = readyStateOf(store)
+      if (accepted) observed.push(accepted.stateSequence)
+    })
+    try {
+      sockets[0]?.emit('message', wire(state(1, 'epoch-a', [project('first')])))
+      expect(observed).toEqual([1])
+      stopFirst()
+      stopFirst()
+      unsubscribe()
+      unsubscribe()
+      sockets[0]?.emit(
+        'message',
+        wire(state(2, 'epoch-a', [{ ...project('first'), name: 'unsubscribed update' }])),
+      )
+      expect(readyStateOf(store)?.projects[0]?.name).toBe('unsubscribed update')
+      expect(observed).toEqual([1])
+      expect(sockets[0]?.closed).toBe(false)
+      sockets[0]?.emit('close')
+      await flushTimers()
+      expect(sockets).toHaveLength(2)
+      sockets[1]?.emit(
+        'message',
+        wire(state(3, 'epoch-a', [{ ...project('first'), name: 'reconnected owner' }])),
+      )
+      expect(readyStateOf(store)?.projects[0]?.name).toBe('reconnected owner')
+    } finally {
+      unsubscribe()
+      stopFirst()
+      stopLast()
+    }
+  })
+
+  it('last owner disposal cancels pending reconnect and reports disconnected retained facts', async () => {
+    const { store, sockets } = harness()
+    const stop = store.start()
+    sockets[0]?.emit('message', wire(readableState()))
+    const accepted = store.getSnapshot().state
+    sockets[0]?.emit('close')
+    stop()
+    stop()
+    await flushTimers()
+    expect(sockets).toHaveLength(1)
+    expect(store.getSnapshot()).toMatchObject({
+      transport: 'disconnected',
+      synchronization: 'retained',
+    })
+    expect(store.getSnapshot().state).toBe(accepted)
+    sockets[0]?.emit('open')
+    sockets[0]?.emit('message', wire(readableState(999)))
+    expect(store.getSnapshot()).toMatchObject({
+      transport: 'disconnected',
+      synchronization: 'retained',
+    })
+    expect(readyStateOf(store)?.stateSequence).toBe(4)
+  })
+
+  it('subscriber churn never acquires observation or revives a disposed owner', async () => {
+    const { store, sockets } = harness()
+    let publications = 0
+    const unsubscribe = store.subscribe(() => {
+      publications += 1
+    })
+    unsubscribe()
+    expect(sockets).toHaveLength(0)
+    const stop = store.start()
+    sockets[0]?.emit('message', wire(readableState()))
+    stop()
+    const before = publications
+    const remove = store.subscribe(() => {
+      publications += 1
+    })
+    sockets[0]?.emit('close')
+    await flushTimers()
+    expect(sockets).toHaveLength(1)
+    expect(publications).toBe(before)
+    expect(store.getSnapshot().transport).toBe('disconnected')
+    remove()
   })
 
   it('records application rejection without adopting its producer sequence', async () => {

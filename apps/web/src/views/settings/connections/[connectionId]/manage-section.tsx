@@ -25,7 +25,14 @@ export function ManageSection({ connection, removing, onRemove }: ManageSectionP
     configurationVersion,
     command,
     execute,
-  } = useRoadmap()
+  } = useRoadmap((roadmap) => ({
+    projects: roadmap.projects,
+    authorizationOperations: roadmap.authorizationOperations,
+    configuration: { valid: roadmap.configuration.valid },
+    configurationVersion: roadmap.configurationVersion,
+    command: { inFlight: roadmap.command.inFlight },
+    execute: roadmap.execute,
+  }))
   const [error, setError] = useState<SafeError | string | null>(null)
   const [busy, setBusy] = useState(false)
   const dependents = projects.filter((project) => project.connectionId === connection.id)

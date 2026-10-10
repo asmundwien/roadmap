@@ -2,7 +2,7 @@ import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
 import classNames from 'classnames/bind'
 import { useState } from 'react'
-import type { useRoadmap } from '@/store/roadmap-provider'
+import type { RoadmapViewState } from '@/store/roadmap-provider'
 import { ErrorText } from './settings-shared'
 import styles from './workspace-folder-selector.module.css'
 
@@ -14,7 +14,7 @@ type WorkspaceFolderSelectorProps = {
   path: string
   error?: string
   disabled: boolean
-  query: ReturnType<typeof useRoadmap>['query']
+  query: RoadmapViewState['query']
   onChange: (path: string) => void
 }
 

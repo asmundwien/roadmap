@@ -14,7 +14,12 @@ type ProjectLaunchButtonsProps = { project: Project }
 type LaunchAction = Extract<Project['actions'][number], { kind: 'server-launch' }>
 
 export function ProjectLaunchButtons({ project }: ProjectLaunchButtonsProps) {
-  const { configuration, configurationVersion, command, execute } = useRoadmap()
+  const { configuration, configurationVersion, command, execute } = useRoadmap((roadmap) => ({
+    configuration: { valid: roadmap.configuration.valid },
+    configurationVersion: roadmap.configurationVersion,
+    command: { inFlight: roadmap.command.inFlight },
+    execute: roadmap.execute,
+  }))
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
 

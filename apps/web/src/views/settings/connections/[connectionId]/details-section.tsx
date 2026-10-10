@@ -19,7 +19,15 @@ const cx = classNames.bind(styles)
 type DetailsSectionProps = { connection: Connection }
 
 export function DetailsSection({ connection }: DetailsSectionProps) {
-  const { projects, configuration, configurationVersion, command, execute } = useRoadmap()
+  const { projects, configuration, configurationVersion, command, execute } = useRoadmap(
+    (roadmap) => ({
+      projects: roadmap.projects,
+      configuration: { valid: roadmap.configuration.valid },
+      configurationVersion: roadmap.configurationVersion,
+      command: { inFlight: roadmap.command.inFlight },
+      execute: roadmap.execute,
+    }),
+  )
   const [error, setError] = useState<SafeError | string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)

@@ -16,7 +16,15 @@ import { ErrorText, projectIdentity, sameProject } from '@/views/shared/settings
 type AutomationSectionProps = { project: Project }
 
 export function AutomationSection({ project }: AutomationSectionProps) {
-  const { automation, configuration, configurationVersion, command, execute } = useRoadmap()
+  const { automation, configuration, configurationVersion, command, execute } = useRoadmap(
+    (roadmap) => ({
+      automation: roadmap.automation,
+      configuration: roadmap.configuration,
+      configurationVersion: roadmap.configurationVersion,
+      command: roadmap.command,
+      execute: roadmap.execute,
+    }),
+  )
   const [error, setError] = useState<SafeError | string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)

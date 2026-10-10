@@ -125,6 +125,74 @@ for (const [consumer, tsconfig, owner] of [
     )
     assert.ok(!leaf.options.types?.includes('node'), 'Web must not select Node ambient types')
   } else assert.ok(leaf.options.types.includes('node'), 'Private server must select its Node graph')
+  if (consumer === 'browser') {
+    const clientFixture = await readFile(
+      new URL('./fixtures/types/browser/client-owner.ts', import.meta.url),
+      'utf8',
+    )
+    const clientDirectory = await mkdtemp(join(root, 'apps/web/.architecture-client-owner-'))
+    try {
+      const clientPath = join(clientDirectory, 'client-owner.ts')
+      const marker = '// Invalid constructions.'
+      assert.equal(clientFixture.split(marker).length, 2, 'Client proof needs one invalid boundary')
+      if (!negativeOnly) {
+        await writeFile(clientPath, clientFixture.split(marker)[0])
+        requireClean(
+          program([...leaf.fileNames, clientPath], leaf.options),
+          'Browser client owner selected facade and lifecycle',
+        )
+      }
+      await writeFile(clientPath, clientFixture)
+      const clientProgram = program([...leaf.fileNames, clientPath], leaf.options)
+      const source = clientProgram.getSourceFile(clientPath)
+      assert.ok(source)
+      const expected = [
+        ['invalidMissingSelector', 2554, 'Expected 1 arguments'],
+        ['invalidReadyLifecycle', 2322, 'mode'],
+        ['invalidFailedLifecycle', 2322, 'cause'],
+        ['invalidReadyCause', 2353, 'cause'],
+        ['invalidNotReady', 2322, 'state'],
+        ['invalidSynchronized', 2322, 'state'],
+      ]
+      const diagnostics = ts.getPreEmitDiagnostics(clientProgram)
+      assert.equal(
+        diagnostics.length,
+        expected.length,
+        `Browser client owner: expected exactly ${expected.length} diagnostics\n${format(diagnostics)}`,
+      )
+      for (const [name, code, detail] of expected) {
+        const declaration = source.statements.find(
+          (statement) =>
+            ts.isVariableStatement(statement) &&
+            statement.declarationList.declarations.some(
+              (declaration) => ts.isIdentifier(declaration.name) && declaration.name.text === name,
+            ),
+        )
+        assert.ok(declaration, `Missing client owner invalid construction ${name}`)
+        const errors = diagnostics.filter(
+          (diagnostic) =>
+            diagnostic.file &&
+            normalize(diagnostic.file.fileName) === normalize(clientPath) &&
+            diagnostic.start >= declaration.getStart() &&
+            diagnostic.start < declaration.getEnd(),
+        )
+        assert.equal(
+          errors.length,
+          1,
+          `${name}: expected one intended diagnostic\n${format(errors)}`,
+        )
+        assert.equal(errors[0].code, code, `${name}: wrong diagnostic\n${format(errors)}`)
+        assert.equal(errors[0].category, ts.DiagnosticCategory.Error)
+        assert.ok(
+          ts.flattenDiagnosticMessageText(errors[0].messageText, '\n').includes(detail),
+          `${name}: diagnostic must name ${detail}\n${format(errors)}`,
+        )
+      }
+      console.log(JSON.stringify({ proof: 'client-owner', consumer, cases: expected.length }))
+    } finally {
+      await rm(clientDirectory, { recursive: true, force: true })
+    }
+  }
   const directory = await mkdtemp(join(root, '.architecture-fixtures-'))
   try {
     const workspace = join(directory, owner)

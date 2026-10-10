@@ -23,6 +23,7 @@ import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { RoadmapProvider } from '@/store/roadmap-provider'
 import type { RoadmapStore } from '@/store/roadmap-store'
+import { makeRoadmapSnapshot } from '@/views/map/test-fixtures'
 import { neverReadProject } from '@/views/overview/test-fixtures'
 import { AuthorizationPane } from './connection-panes'
 import { ConnectionSettings } from './page'
@@ -38,14 +39,10 @@ const github = {
 
 function renderConnections(state: ReadyApplicationState): string {
   const validatedState = readyApplicationStateSchema.parse(state)
+  const snapshot = makeRoadmapSnapshot(validatedState)
   const store: RoadmapStore = {
     subscribe: () => () => undefined,
-    getSnapshot: () => ({
-      transport: 'live',
-      synchronization: 'synchronized',
-      state: validatedState,
-      command: { inFlight: false, error: null },
-    }),
+    getSnapshot: () => snapshot,
     start: () => () => undefined,
     query: async () => {
       throw new Error('Unexpected query')

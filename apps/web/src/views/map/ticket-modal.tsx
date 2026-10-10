@@ -58,7 +58,14 @@ export type TicketModalProps = {
 }
 
 export function TicketModal({ map, selected, onClose, onOpenTicket, onOpenMap }: TicketModalProps) {
-  const roadmap = useRoadmap()
+  const roadmap = useRoadmap<AutomationViewState>(
+    ({ automation, configurationVersion, command, execute }) => ({
+      automation,
+      configurationVersion,
+      command,
+      execute,
+    }),
+  )
   const ticket = map?.tickets.find((item) => item.ref.ticketId === selected?.ticketId)
   const content = ticket === undefined ? null : resourceObservation(ticket.resource)?.value
 

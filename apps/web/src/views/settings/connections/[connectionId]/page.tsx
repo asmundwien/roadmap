@@ -29,8 +29,17 @@ export function ConnectionPage({ connectionId }: ConnectionPageProps) {
 }
 
 function ConnectionDetail({ connectionId }: ConnectionPageProps) {
-  const { connections, supportedIntegrations, configuration, configurationVersion, execute } =
-    useRoadmap()
+  const { connection, github, configuration, configurationVersion, execute } = useRoadmap(
+    (roadmap) => ({
+      connection: roadmap.connections.find((candidate) => candidate.id === connectionId),
+      github: roadmap.supportedIntegrations.find(
+        (integration) => integration.integration === 'github',
+      ),
+      configuration: roadmap.configuration,
+      configurationVersion: roadmap.configurationVersion,
+      execute: roadmap.execute,
+    }),
+  )
   const navigate = useNavigate()
   const [removal, setRemoval] = useState<RemovalFeedback | null>(null)
   const active = useRef(true)
@@ -40,7 +49,6 @@ function ConnectionDetail({ connectionId }: ConnectionPageProps) {
       active.current = false
     }
   }, [])
-  const connection = connections.find((candidate) => candidate.id === connectionId)
   const remove = async () => {
     setRemoval({ kind: 'pending' })
     try {
@@ -93,8 +101,6 @@ function ConnectionDetail({ connectionId }: ConnectionPageProps) {
       </Page>
     )
   }
-
-  const github = supportedIntegrations.find((integration) => integration.integration === 'github')
 
   return (
     <Page>

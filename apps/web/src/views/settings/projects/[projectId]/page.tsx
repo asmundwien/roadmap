@@ -34,7 +34,20 @@ export function ProjectSettingsPage({ projectRef }: ProjectSettingsPageProps) {
 }
 
 function ProjectSettingsDetail({ projectRef }: ProjectSettingsPageProps) {
-  const { projects, connections, configuration, configurationVersion, execute } = useRoadmap()
+  const { project, connection, configuration, configurationVersion, execute } = useRoadmap(
+    (roadmap) => {
+      const project = roadmap.projects.find((candidate) => sameProject(candidate.ref, projectRef))
+      return {
+        project,
+        connection: project
+          ? roadmap.connections.find((candidate) => candidate.id === project.connectionId)
+          : undefined,
+        configuration: roadmap.configuration,
+        configurationVersion: roadmap.configurationVersion,
+        execute: roadmap.execute,
+      }
+    },
+  )
   const navigate = useNavigate()
   const [removal, setRemoval] = useState<RemovalFeedback | null>(null)
   const active = useRef(true)
@@ -44,12 +57,9 @@ function ProjectSettingsDetail({ projectRef }: ProjectSettingsPageProps) {
       active.current = false
     }
   }, [])
-  const project = projects.find((candidate) => sameProject(candidate.ref, projectRef))
   const remove = async () => {
     if (!project) return
-    const destination = connections.some((candidate) => candidate.id === project.connectionId)
-      ? connectionPath(project.connectionId)
-      : routePaths.connections
+    const destination = connection ? connectionPath(project.connectionId) : routePaths.connections
     setRemoval({ kind: 'pending' })
     try {
       const outcome = await execute({
@@ -101,8 +111,6 @@ function ProjectSettingsDetail({ projectRef }: ProjectSettingsPageProps) {
       </Page>
     )
   }
-
-  const connection = connections.find((candidate) => candidate.id === project.connectionId)
 
   return (
     <Page>
