@@ -1,4 +1,4 @@
-import { commandSchema } from '@roadmap/contracts/operations'
+import { operationSubjectSchema } from '@roadmap/contracts/operations'
 import { StrictMode, useLayoutEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, useNavigate } from 'react-router'
@@ -28,19 +28,10 @@ const api = {
     if (navigateTo === null) throw new Error('The real router is not mounted.')
     navigateTo(path)
   },
-  executeOverride(target: unknown, stage: unknown) {
-    const state = store.getSnapshot().state
-    const readable =
-      state?.phase === 'ready' ? state : state && 'retained' in state ? state.retained : null
-    if (!readable) throw new Error('An override probe requires accepted application state.')
-    return store.execute(
-      commandSchema.parse({
-        type: 'start-automation-override',
-        expectedConfigurationVersion: readable.configurationVersion,
-        target,
-        stage,
-      }),
-    )
+  startOverride({ target, stage }: { target: unknown; stage: unknown }) {
+    const subject = operationSubjectSchema.parse({ kind: 'ticket', target, stage })
+    if (subject.kind !== 'ticket') throw new Error('An override requires a ticket subject.')
+    return store.workflows.startOverride({ target: subject.target, stage: subject.stage })
   },
 }
 declare global {

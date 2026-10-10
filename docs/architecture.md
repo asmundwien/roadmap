@@ -14,11 +14,11 @@ WebSocket carries full state replacements. HTTP carries `query` and `execute` re
 
 ## Web application
 
-`createRoadmapStore` in `apps/web/src/store` is the single authoritative SPA read owner. It accepts coherent full-state replacements under current-generation authority, sends state-free HTTP queries and commands, and owns transport synchronization, socket liveness, retained accepted facts, aggregate command activity, and capped reconnect backoff. It does not own server admission or source evidence.
+`createRoadmapStore` in `apps/web/src/store` is the single authoritative SPA read owner. It accepts coherent full-state replacements under current-generation authority, sends state-free HTTP queries and commands, and owns transport synchronization, socket liveness, retained accepted facts, and capped reconnect backoff. It integrates the shared workflow owner without granting that owner server admission or source authority.
 
 `RoadmapProvider` owns observation acquisition in its effect, independently of data readers and routes. It subscribes only to the readable-content gate and readiness/status selection, not whole application content or command activity. Before any readable authoritative state exists it renders explicit lifecycle/waiting status, not empty Projects, default configuration, version zero, or a fabricated capture time. Once readable state exists, consumers remain mounted through disconnect, reconnect, and later lifecycle messages without readable content.
 
-Views read through the required `useRoadmap(selector)` facade and never fetch directly. The selector receives `RoadmapViewState`, including actual read fields, real `capturedAt`, lifecycle, effective synchronization, and stable query/execute methods. There is no no-argument overload or broad-hook compatibility wrapper.
+Views read through the required `useRoadmap(selector)` facade and never fetch directly. The selector receives `RoadmapViewState`, including actual read fields, real `capturedAt`, lifecycle, effective synchronization, stable named `workflows`, and immutable `workflowState`. Raw query/execute methods remain a transport test interface on `RoadmapStore`, not view capabilities. There is no no-argument overload or broad-hook compatibility wrapper.
 
 ### Client owner and subscription decision
 
@@ -44,14 +44,14 @@ The binding computes a selection before comparing the snapshot React observes. D
 | Public `ApplicationState` and source/resource truth | Server application and its committed private owners | Browser adopts schema-validated replacements atomically; it cannot reconstruct private admission or invent source success. |
 | Accepted read publication and retained readable state | `RoadmapStore` | Current-generation epoch/sequence authority controls adoption. Retention preserves real trace, not current readiness or permission. |
 | Transport liveness, synchronization, socket generations, reconnect resources | `RoadmapStore`, acquired by provider effect | Subscriptions only observe. The application owner stays active when routes have no readers. |
-| Aggregate command activity | `RoadmapStore` | Current shared activity remains until the later per-attempt workflow cutover; it is not read authority or universal feedback for every attempt. |
-| Operation attempts, feedback, notices, and form drafts | Actual view-local or page-level operation owner | Removal feedback survives disappearance of its target. Drafts and presentation stay local unless a concrete workflow lifetime requires retention elsewhere. |
+| Command construction, conflict policy, attempt transitions, and operation feedback | `apps/web/src/workflows/workflows.ts`, integrated by `RoadmapStore` | Named workflows capture current accepted policy before dispatch. Attempts cannot modify server read facts or establish effect completion from unrelated state. |
+| Form drafts, pane visibility, confirmation, and copy state | Actual view-local presentation | Folder cancellation and failures preserve the draft. Pane closure does not dispose shared attempts. |
 | Resource selection | URL pathname, search, and fragment | No store or workflow mirror silently substitutes another Project, map, or ticket. |
 | Derived lookup indexes and pure resource results | `apps/web/src/resources/results.ts`, consuming accepted read facts and scoped URL identity | Pure calculations have no independently writable facts, resource cache, or second authority. |
 
 `start()` acquires observation and returns an idempotent release. Multiple acquisitions share the active observation; releasing one does not dispose another's ownership. Repeating a release cannot decrement ownership twice. Adding/removing subscribers neither acquires nor releases observation. Last-owner cleanup retires authority, reports disconnected, retains actual accepted facts, closes the socket, and clears reconnect timers. React StrictMode setup/cleanup/setup may retire one generation and acquire another, but must not leave duplicate active sockets or reconnect timers. Retired callbacks cannot affect their successor. Navigating through `/components` or an unknown route does not end provider ownership.
 
-`apps/web/src/resources/results.ts` now owns shared pure resource lookup and presentation over the accepted read fields. It does not interpret lifecycle or transport synchronization; the provider and store own those facts. Future per-attempt workflow policy can own attempt state and interpret state-free operation evidence; it cannot mutate server read facts, infer a receipt from unrelated publication, mirror URL selection, or automatically replay commands. This resource cutover does not implement that later policy.
+`apps/web/src/resources/results.ts` owns shared pure resource lookup and presentation over the accepted read fields. It does not interpret lifecycle or transport synchronization; the provider and store own those facts. The shared workflow owner interprets state-free operation evidence without mutating server read facts, inferring a receipt from unrelated publication, mirroring URL selection, or automatically replaying commands.
 
 The clean cutover removes the no-argument broad `useRoadmap` subscription and every affected caller, test/prototype use, and compatibility path. It replaces provider whole-content/command subscriptions with gate/status selection and removes mutable publication exposure and disposal that can invalidate another acquisition. It retains the already-shipped deletion of reader-owned observation and fabricated initial defaults. There is no parallel authoritative cache, duplicated writable Project collection, mirrored URL selection, obsolete owner alias, or automatic interaction replay. State-free HTTP outcomes and the existing session-authority rules remain intact.
 
@@ -106,11 +106,72 @@ Application production increased by 247 lines and 8,802 bytes, with no file-coun
 The outside-source proof increase includes the permanent runner and three fixtures. Documentation is a separate resolution-report category; this section does not pin a final aggregate while evidence documents are still changing. Protected real configuration and Automation files changed externally during this task, so completion makes no byte-unchanged claim about them. The fixture did not use those files or re-enable Automation. This evidence resolves only the scoped client-owner implementation, not later workflow or final-integration tickets.
 
 
+### Shared workflow policy
+
+The [What command policy simplifies concurrency, feedback and canonical results?](https://github.com/asmundwien/roadmap/issues/116) cutover puts command construction, dispatch-time policy, attempt transitions, canonical destinations, and authorization reconciliation in `apps/web/src/workflows/workflows.ts`. The store supplies current accepted facts and delivery through its existing transport interface. The owner has no socket, fetch, React, view, persistence, or host implementation dependency.
+
+| Pending scope | Contending workflows | Independent work |
+| --- | --- | --- |
+| Shared configuration revision | Connection authorization, rename/removal; Project registration, rename/removal/Workspace repair; global and Project Automation preferences | Refresh, native actions, selectors, and eligible overrides do not share this client lock. |
+| Canonical Project | Refresh and native actions on the same scoped Project | Other Projects may overlap, including a configuration write targeting another Project. |
+| Folder interaction | All Workspace selections | Configuration and resource workflows may overlap. Selection requires synchronized ready state, but read-only configuration does not prevent it. |
+| Classification process | Classification overrides across Projects | Wayfinder overrides use their own scope. |
+| Wayfinder Project | Wayfinder overrides for the same Project | Other eligible Projects may overlap. |
+
+Pending attempts hold their scope until delivery settles. A conflict creates a `not-dispatched` attempt rather than a queue entry. The actual server still serializes Commands other than refresh and rechecks admission at its queue turn. Client overlap is not a promise of parallel server execution or independent Project configuration versions.
+
+Every named Command captures the latest accepted configuration version and synchronized ready/mutable policy immediately before dispatch. Views neither manufacture a version nor close over a pane-opening version. Current public actions, authorization, Automation eligibility, and enablement guide client gates; the server may still reject an external revision or policy change after capture. There is no automatic rebase, replay, or resubmission.
+
+Attempts distinguish `pending`, local `not-dispatched`, attributable `not-admitted`, decoded application `rejected`, operation-specific `acknowledged`, and `completion-unknown`. Acknowledgement can mean a failed authorization phase or degraded refresh; it does not mean source success or durable process completion. Returned mutation results retain `committed` versus `committed-unconfirmed` durability. Field feedback maps canonical validation fields to the relevant form without discarding general errors.
+
+The latest created attempt owns ordinary feedback for its operation and canonical scope. Late settlement cannot replace a newer attempt. Every earlier unknown remains recorded and visible through its scoped uncertainty list. Dismissal changes visibility only, not the unknown result. Closing a pane, unrelated success or rejection, newer snapshots, and reconnect do not settle uncertainty. An explicit user attempt may run again after pending ends; the previous unknown remains unknown and server admission still applies.
+
+Authorization command result phases and accepted authorization state are distinct. Accepted state uses waiting, granted, or terminal with a specific terminal outcome. The owner consumes acknowledged phase replacement when accepted evidence matches or supersedes it, including waiting-to-denied cycles and unchanged terminal receipts. A locally refused retry/cancel cannot consume the previous phase. Current grants link the canonical Connection/account; historical grants cannot authorize a replacement account.
+
+Registration and Workspace repair use the committed result's canonical Project and Workspace, not a submitted-path lookup. Only a valid correlated result for the initiating operation and subject can provide a confirmed destination. Rejected, lost, unreadable, or mismatched responses cannot navigate as committed success. Folder selection returns selected/cancelled interaction truth; cancellation and failure preserve local drafts. Native actions send only a scoped Project and finite operation, never executable or trusted path authority. Durable Automation admission, Verdict, Process result, Session report, and acknowledged-unknown evidence remain independent.
+
+The clean cutover deletes aggregate `CommandActivity`/`activeCommands` and single-error overwrite, eleven local executors, eight repeated settings gates, view-owned Command/version construction and catch-based uncertainty policy. The shared owner replaces `connection-details.ts` authorization reconciliation and `project-registration.ts` field translation, then deletes both helpers. It retains the earlier deletion of submitted-Workspace identity guessing. Drafts and URL navigation stay with their existing owners; no compatibility facade or second read cache remains.
+
+Dependency gates enforce `web-workflows-pure`, `web-views-through-workflows`, and resource-results independence from workflow policy. Source inspection refuses view-owned versioned Commands, raw facade execute/query selection, and browser transport outside the store, including static aliases. Runtime-computed object flow remains outside that static proof. Generic UI and standalone docs have no workflow dependency.
+
+### Workflow browser proof
+
+```sh
+pnpm test:workflows-browser
+pnpm test:workflows-browser --screenshots /tmp/roadmap-workflow-proof
+node scripts/workflows-browser.mjs --serve-only
+```
+
+The permanent runner uses the actual mounted App/provider/router/store, public `RoadmapApplication`, HTTP, and native WebSocket. Its disposable fixture owns temporary configuration, Local Git/source files, Automation history, and harmless provider/vault/host/process substitutes. The complete run passed all 19 manifest rows, including cleanup, and saved 18 scenario screenshots. `--essential-only` exercises only the first concurrency regression. Direct-node serve-only SIGINT and SIGTERM both exited 0 after reported cleanup; package-manager-wrapper signal behavior is not promised.
+
+The full schedules exercise both settlement orders, shared-revision contention, independent scopes, current open-pane policy, stale rejection, retained drafts, canonical Local/GitHub registration and moved-Workspace repair, all unusable response classes, unknown lifetime, older feedback, state-free epoch authority, refresh variants, authorization phases, finite native launches, and durable Automation evidence. Native/relay generation instrumentation proves the request-start baseline and physical close cause, rather than treating live/retained flags as a fresh-generation barrier. Earlier harness failures used wrong terminal-status predicates and a nonzero Classification success exit; those fixtures were corrected against the existing producer contract without changing server policy.
+
+The original mounted concurrency regression failed when Alpha's pending rename disabled independent Beta refresh. Initial workflow tests failed before the owner existed. Refused authorization retry/cancel regressions failed before correction; pending denied/waiting reconciliation also has a retained regression. The pending-cycle fix preceded its regression, so no failing-before result is claimed for that case. Real configuration and Automation documents were not used by the fixture. Their initial checksums were not recorded in this continuation, so there is no before/after byte-identity claim.
+
+### Workflow cutover verification and comparison
+
+`pnpm check`, `pnpm typecheck`, `pnpm test`, and `pnpm knip` passed. The complete suites passed 1,447 server tests, 365 web tests, and 27 UI tests. Astro checked 41 files without errors, warnings, or hints. Both public compiler consumers checked 177 exports, seven decoders, and 122 invalid constructions; the browser also checked 56 workflow cases. The architecture gate passed 85 intended-diagnostic import refusals, 69 detector/options tests, six actual-config build fixtures, and resolved production/positive-consumer graphs. Biome reported 186 warnings and eight informational diagnostics, with no suppressions added to obtain the pass.
+
+The actual web build inspected 713 resolved modules before tree shaking and transformed 714. Emitted-output inspection matched the 895,672-byte `index-D7PuDztm.js` chunk byte-for-byte, checked 485 module entries, included the workflow owner, and found no forbidden Node, private-server, credential, or host implementation. The existing large-chunk warning remains. Changed-file language-service diagnostics reported warnings but no errors. The complete client-owner and resource-results browser runners also passed after caller migration.
+
+The complete workflow browser run observed 15 harmless host invocations, 17 selectors, one Classification process substitute, and one Wayfinder process substitute. Successful Classification used exit 0 and a decoded AFK Verdict; Wayfinder exited 9 with an independently received completed report. Seeded acknowledged-unknown history remained unchanged and visible. Cleanup removed the fixture root. This is not evidence of a production native launch, real credential use, managed process completion, or a performance improvement.
+
+Counts use the original source boundary and nonblank-line/UTF-8-byte method. All added or relocated handwritten server/web/contracts production owners remain included; source declarations, styles, generated output, tests, and explicit fixtures remain excluded from production. Build/gate owners outside those roots and proof fixtures have separate complete manifests. Documentation counts use the actual tracked Git snapshots of `README.md`, `CONTEXT.md`, and this file rather than prior narrative totals.
+
+| Application responsibility | Original map baseline `7e70e897` | Before workflow cutover `655423d6` | Completed workflow cutover |
+| --- | --- | --- | --- |
+| Production files / lines / bytes | 85 / 13,616 / 489,864 | 97 / 24,952 / 914,184 | 97 / 25,917 / 954,432 |
+| Source tests and fixtures | 41 / 8,396 / 303,730 | 70 / 47,488 / 1,753,787 | 72 / 49,453 / 1,828,818 |
+| Build/gate owners outside source roots | 1 / 17 / 568 | 14 / 1,279 / 51,251 | 14 / 1,715 / 71,315 |
+| Outside-source proof tests and fixtures | 0 / 0 / 0 | 145 / 8,462 / 294,226 | 150 / 13,335 / 492,334 |
+
+Production increases by 965 lines and 40,248 bytes in this cutover, with no file-count increase. Against the original map baseline, production increases by 12 files, 12,301 lines, and 464,568 bytes. Named conflict/attempt policy, typed result correlation, surviving uncertainty, current authorization-phase reconciliation, and enforceable caller separation justify the added responsibility. The two deleted helpers become the cohesive workflow owner and domain feedback renderer, not uncounted relocations. No net code reduction or formatting/test deletion saving is claimed. `CONTEXT.md` is unchanged because its existing admission and completion-unknown terms still describe the behavior; no new domain glossary term is required.
+
 ### Browser authority and synchronization
 
 The contract for [What establishes the authoritative server session across HTTP and WebSocket?](https://github.com/asmundwien/roadmap/issues/107) separates state authority from operation delivery. Each new socket has a distinct generation. Only the first validated state from the current generation establishes its authoritative server session. Socket open alone proves no application synchronization. Epoch identifiers are opaque identities, not clocks; sequence numbers are comparable only within the same established epoch.
 
-`RoadmapStore.getSnapshot` retains transport and command activity. Its readonly `state` is a real readable `ApplicationState` or `null`, independently of the latest accepted lifecycle and authority high-water sequence. Effective synchronization is a discriminated union:
+`RoadmapStore.getSnapshot` retains transport, accepted read facts, and immutable workflow attempts. Its readonly `state` is a real readable `ApplicationState` or `null`, independently of the latest accepted lifecycle and authority high-water sequence. Effective synchronization is a discriminated union:
 
 - `synchronization: 'not-ready'` requires `state: null`, even if a validated lifecycle publication has established current-generation authority.
 - `synchronization: 'synchronized'` requires readable state, established current-generation authority, and the latest accepted lifecycle to be `ready`.
@@ -245,7 +306,7 @@ Documentation remains a separate category. Its final aggregate belongs to the co
 
 Application component styles use CSS Modules. Components resolve local class names with `classnames/bind`. Reusable styling belongs to shared components, not shared stylesheet imports. React Flow also imports its required vendor stylesheet for graph rendering and viewport controls.
 
-Each routable area under `apps/web/src/views` has a `page.tsx` entry point. `App` routes the Connections list, `settings/connections/[connectionId]/page.tsx`, and its connection-scoped `import/page.tsx` independently. The detail page selects the Connection and composes sibling Details and Manage connection sections. Each section reads its own live state and owns its own commands, busy state, and errors. The import page registers a Project through the selected Connection. `shared/` and `shell/` are support areas, not pages.
+Each routable area under `apps/web/src/views` has a `page.tsx` entry point. `App` routes the Connections list, `settings/connections/[connectionId]/page.tsx`, and its connection-scoped `import/page.tsx` independently. The detail page selects the Connection and composes sibling Details and Manage connection sections. Sections select current scoped workflow feedback and invoke named actions through `useRoadmap`; they retain only local drafts and presentation state. The import page registers a Project through the selected Connection. `shared/` and `shell/` are support areas, not pages.
 
 The web catalog at `/components` documents components that are tightly coupled to the domain. These components map domain state to presentational props, and builds on agnostic content from `@roadmap/ui`.
 

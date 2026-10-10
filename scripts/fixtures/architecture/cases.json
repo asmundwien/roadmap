@@ -414,5 +414,231 @@
     "companions": {
       "apps/web/src/resources/results.ts": "export type ConsumerRead = { readonly projects: readonly unknown[] }\n"
     }
+  },
+  {
+    "name": "workflows-react-dom",
+    "leaf": "web",
+    "file": "apps/web/src/workflows/workflows.ts",
+    "rule": "web-workflows-pure",
+    "source": "export { createPortal } from 'react-dom'\n"
+  },
+  {
+    "name": "workflows-provider-dynamic",
+    "leaf": "web",
+    "file": "apps/web/src/workflows/workflows.ts",
+    "rule": "web-workflows-pure",
+    "source": "export const provider = () => import('../store/roadmap-provider.tsx')\n",
+    "companions": { "apps/web/src/store/roadmap-provider.tsx": "export const provider = null\n" }
+  },
+  {
+    "name": "views-wire-dynamic",
+    "leaf": "web",
+    "file": "apps/web/src/views/fixture.ts",
+    "rule": "web-views-through-workflows",
+    "source": "export const wire = () => import('@roadmap/contracts/wire')\n"
+  },
+  {
+    "name": "workflows-react-type",
+    "leaf": "web",
+    "file": "apps/web/src/workflows/workflows.ts",
+    "rule": "web-workflows-pure",
+    "source": "import type { ReactNode } from 'react'\nexport type Feedback = ReactNode\n"
+  },
+  {
+    "name": "workflows-react-reexport",
+    "leaf": "web",
+    "file": "apps/web/src/workflows/workflows.ts",
+    "rule": "web-workflows-pure",
+    "source": "export { useState as pending } from 'react'\n"
+  },
+  {
+    "name": "workflows-ui",
+    "leaf": "web",
+    "file": "apps/web/src/workflows/workflows.ts",
+    "rule": "web-workflows-pure",
+    "source": "export { Alert as Feedback } from '@roadmap/ui/alert'\n"
+  },
+  {
+    "name": "workflows-store-relative-type",
+    "leaf": "web",
+    "file": "apps/web/src/workflows/workflows.ts",
+    "rule": "web-workflows-pure",
+    "source": "import type { RoadmapStore } from '../store/roadmap-store.ts'\nexport type Owner = RoadmapStore\n",
+    "companions": {
+      "apps/web/src/store/roadmap-store.ts": "export interface RoadmapStore { readonly state: unknown }\n"
+    }
+  },
+  {
+    "name": "workflows-store-alias",
+    "leaf": "web",
+    "file": "apps/web/src/workflows/workflows.ts",
+    "rule": "web-workflows-pure",
+    "source": "export type { RoadmapStore } from '@/store/roadmap-store'\n"
+  },
+  {
+    "name": "workflows-provider-relative",
+    "leaf": "web",
+    "file": "apps/web/src/workflows/workflows.ts",
+    "rule": "web-workflows-pure",
+    "source": "export * from '../store/roadmap-provider.tsx'\n",
+    "companions": { "apps/web/src/store/roadmap-provider.tsx": "export const provider = null\n" }
+  },
+  {
+    "name": "workflows-provider-alias-type",
+    "leaf": "web",
+    "file": "apps/web/src/workflows/workflows.ts",
+    "rule": "web-workflows-pure",
+    "source": "export type { RoadmapViewState } from '@/store/roadmap-provider'\n"
+  },
+  {
+    "name": "workflows-view-relative",
+    "leaf": "web",
+    "file": "apps/web/src/workflows/workflows.ts",
+    "rule": "web-workflows-pure",
+    "source": "export * from '../views/shared/workflow-feedback.ts'\n",
+    "companions": {
+      "apps/web/src/views/shared/workflow-feedback.ts": "export const feedback = null\n"
+    }
+  },
+  {
+    "name": "workflows-internal-view",
+    "leaf": "web",
+    "file": "apps/web/src/workflows/internal/fixture.ts",
+    "rule": "web-workflows-pure",
+    "source": "export * from '../../views/fixture.ts'\n",
+    "companions": { "apps/web/src/views/fixture.ts": "export const view = null\n" }
+  },
+  {
+    "name": "workflows-wire",
+    "leaf": "web",
+    "file": "apps/web/src/workflows/workflows.ts",
+    "rule": "web-workflows-pure",
+    "source": "export { decodeCommandResultEnvelope } from '@roadmap/contracts/wire'\n"
+  },
+  {
+    "name": "workflows-wire-relative",
+    "leaf": "web",
+    "file": "apps/web/src/workflows/workflows.ts",
+    "rule": "web-workflows-pure",
+    "source": "export { decodeCommandResultEnvelope } from '../../../../../packages/contracts/src/wire.ts'\n"
+  },
+  {
+    "name": "workflows-server-private",
+    "leaf": "web",
+    "file": "apps/web/src/workflows/workflows.ts",
+    "rule": "web-not-to-server-private",
+    "source": "export type { ConfigurationDocument } from '../../../../../apps/server/src/configuration/document.ts'\n"
+  },
+  {
+    "name": "workflows-host-capability",
+    "leaf": "web",
+    "file": "apps/web/src/workflows/workflows.ts",
+    "rule": "host-capabilities-only-in-adapters",
+    "source": "export { readFile } from 'node:fs/promises'\n"
+  },
+  {
+    "name": "resource-results-workflows-type",
+    "leaf": "web",
+    "file": "apps/web/src/resources/fixture.ts",
+    "rule": "web-resource-results-pure",
+    "source": "import type { WorkflowSnapshot } from '../workflows/workflows.ts'\nexport type Policy = WorkflowSnapshot\n",
+    "companions": {
+      "apps/web/src/workflows/workflows.ts": "export interface WorkflowSnapshot { readonly attempts: readonly unknown[] }\n"
+    }
+  },
+  {
+    "name": "resource-results-workflows-reexport",
+    "leaf": "web",
+    "file": "apps/web/src/resources/fixture.ts",
+    "rule": "web-resource-results-pure",
+    "source": "export * from '../workflows/workflows.ts'\n",
+    "companions": {
+      "apps/web/src/workflows/workflows.ts": "export const workflowFeedback = () => null\n"
+    }
+  },
+  {
+    "name": "resource-results-workflows-alias",
+    "leaf": "web",
+    "file": "apps/web/src/resources/fixture.ts",
+    "rule": "web-resource-results-pure",
+    "source": "export type { WorkflowSnapshot } from '@/workflows/workflows'\n"
+  },
+  {
+    "name": "resource-results-internal-workflows",
+    "leaf": "web",
+    "file": "apps/web/src/resources/internal/fixture.ts",
+    "rule": "web-resource-results-pure",
+    "source": "export * from '../../workflows/workflows.ts'\n",
+    "companions": {
+      "apps/web/src/workflows/workflows.ts": "export const workflowFeedback = () => null\n"
+    }
+  },
+  {
+    "name": "views-wire",
+    "leaf": "web",
+    "file": "apps/web/src/views/fixture.ts",
+    "rule": "web-views-through-workflows",
+    "source": "export { decodeCommandResultEnvelope } from '@roadmap/contracts/wire'\n"
+  },
+  {
+    "name": "views-wire-relative-type",
+    "leaf": "web",
+    "file": "apps/web/src/views/shared/fixture.ts",
+    "rule": "web-views-through-workflows",
+    "source": "export type { RequestRejection } from '../../../../../../packages/contracts/src/wire.ts'\n"
+  },
+  {
+    "name": "views-wire-alias",
+    "leaf": "web",
+    "file": "apps/web/src/views/fixture.ts",
+    "rule": "web-views-through-workflows",
+    "source": "export * from '@/../../../packages/contracts/src/wire'\n"
+  },
+  {
+    "name": "ui-workflows-type",
+    "leaf": "ui",
+    "file": "packages/ui/src/fixture.ts",
+    "rule": "ui-not-to-roadmap-domain",
+    "source": "export type { WorkflowSnapshot } from '../../../../apps/web/src/workflows/workflows.ts'\n",
+    "companions": {
+      "apps/web/src/workflows/workflows.ts": "export interface WorkflowSnapshot { readonly attempts: readonly unknown[] }\n"
+    }
+  },
+  {
+    "name": "ui-workflows-reexport",
+    "leaf": "ui",
+    "file": "packages/ui/src/fixture.ts",
+    "rule": "ui-not-to-roadmap-domain",
+    "source": "export * from '../../../../apps/web/src/workflows/workflows.ts'\n",
+    "companions": {
+      "apps/web/src/workflows/workflows.ts": "export const workflowFeedback = () => null\n"
+    }
+  },
+  {
+    "name": "docs-workflows-type",
+    "leaf": "docs",
+    "file": "apps/docs/src/fixture.ts",
+    "rule": "docs-only-to-ui",
+    "source": "export type { WorkflowSnapshot } from '../../../../apps/web/src/workflows/workflows.ts'\n",
+    "companions": {
+      "apps/web/src/workflows/workflows.ts": "export interface WorkflowSnapshot { readonly attempts: readonly unknown[] }\n"
+    }
+  },
+  {
+    "name": "docs-workflows-reexport",
+    "leaf": "docs",
+    "file": "apps/docs/src/fixture.ts",
+    "rule": "docs-only-to-ui",
+    "source": "export * from '../../../../apps/web/src/workflows/workflows.ts'\n",
+    "companions": {
+      "apps/web/src/workflows/workflows.ts": "export const workflowFeedback = () => null\n"
+    }
+  },
+  {
+    "name": "docs-workflows-alias",
+    "leaf": "docs",
+    "file": "apps/docs/src/fixture.ts",
+    "rule": "docs-only-to-ui",
+    "source": "export type { WorkflowSnapshot } from '@/../../web/src/workflows/workflows'\n"
   }
 ]

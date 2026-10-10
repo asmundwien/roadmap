@@ -1,5 +1,5 @@
 import type { TicketId, TicketRef } from '@roadmap/contracts/identity'
-import type { AutomationOverrideStage, MapResource } from '@roadmap/contracts/state'
+import type { MapResource } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 import { Badge } from '@roadmap/ui/badge'
 import { Button } from '@roadmap/ui/button'
@@ -7,7 +7,6 @@ import { Link } from '@roadmap/ui/link'
 import { Modal } from '@roadmap/ui/modal'
 import { Surface, SurfaceTitle } from '@roadmap/ui/surface'
 import classNames from 'classnames/bind'
-import { useState } from 'react'
 import { Link as NavigationLink } from '@/navigation'
 import {
   type AutomationControlResult,
@@ -16,8 +15,10 @@ import {
   type TicketResult,
 } from '@/resources/results'
 import { ticketPath } from '@/router'
-import { type RoadmapViewState, useRoadmap } from '@/store/roadmap-provider'
+import { useRoadmap } from '@/store/roadmap-provider'
 import { TicketMark } from '@/views/shared/ticket-mark'
+import { WorkflowFeedback } from '@/views/shared/workflow-feedback'
+import { type WorkflowFeedbackResult, workflowFeedback } from '@/workflows/workflows'
 import { Prose } from './prose'
 import styles from './ticket-modal.module.css'
 
@@ -40,9 +41,6 @@ export function TicketModal({ selected, onClose, onOpenTicket, onOpenMap }: Tick
             map: selected.map,
             ticket: selected,
           }),
-    configurationVersion: read.configurationVersion,
-    command: read.command,
-    execute: read.execute,
   }))
   const ticket = view.result?.ticket
   const map = view.result?.map
@@ -63,7 +61,6 @@ export function TicketModal({ selected, onClose, onOpenTicket, onOpenMap }: Tick
             key={ticket.key}
             ticket={ticket}
             map={map?.kind === 'known' ? map.resource : null}
-            roadmap={view}
             onOpenTicket={onOpenTicket}
             onOpenMap={onOpenMap}
           />
@@ -73,16 +70,14 @@ export function TicketModal({ selected, onClose, onOpenTicket, onOpenMap }: Tick
   )
 }
 
-type AutomationViewState = Pick<RoadmapViewState, 'configurationVersion' | 'command' | 'execute'>
 type TicketContentProps = {
   ticket: TicketResult
   map: MapResource | null
-  roadmap: AutomationViewState
   onOpenTicket: (id: TicketId) => void
   onOpenMap: () => void
 }
 
-function TicketContent({ ticket, map, roadmap, onOpenTicket, onOpenMap }: TicketContentProps) {
+function TicketContent({ ticket, map, onOpenTicket, onOpenMap }: TicketContentProps) {
   const content = ticket.content
   const tracker = ticket.tracker
   const proseProps =
@@ -183,7 +178,7 @@ function TicketContent({ ticket, map, roadmap, onOpenTicket, onOpenMap }: Ticket
         </>
       )}
       {ticket.membershipMessage && <Alert variant="info">{ticket.membershipMessage}</Alert>}
-      <AutomationSection roadmap={roadmap} ticket={ticket} />
+      <AutomationSection ticket={ticket} />
     </div>
   )
 }
@@ -247,38 +242,25 @@ function BlockerItem({ blocker, onOpenTicket }: BlockerItemProps) {
   )
 }
 
-type AutomationSectionProps = { roadmap: AutomationViewState; ticket: TicketResult }
+type AutomationSectionProps = { ticket: TicketResult }
 
-function AutomationSection({ roadmap, ticket: result }: AutomationSectionProps) {
-  const ticket = result.ref
+function AutomationSection({ ticket: result }: AutomationSectionProps) {
+  const target = result.ref
   const automation = result.automation
   const evidence = automation.evidence
-  const [feedback, setFeedback] = useState<{ kind: 'notice' | 'error'; text: string } | null>(null)
-  const run = async (stage: AutomationOverrideStage) => {
-    setFeedback(null)
-    try {
-      const outcome = await roadmap.execute({
-        type: 'start-automation-override',
-        expectedConfigurationVersion: roadmap.configurationVersion,
-        target: ticket,
-        stage,
-      })
-      if (!outcome.ok) {
-        setFeedback({ kind: 'error', text: outcome.error.message })
-      } else if (outcome.result.admission === 'override' && outcome.result.status === 'admitted') {
-        const result = outcome.result
-        setFeedback({
-          kind: 'notice',
-          text: `${result.stage === 'classification' ? 'Classification' : 'Wayfinder'} override durably admitted for ticket ${result.target.ticketId}. Admission does not confirm process start or completion.`,
-        })
-      }
-    } catch {
-      setFeedback({
-        kind: 'error',
-        text: 'The Automation override admission outcome is unknown because its reply was lost. Roadmap will not retry it.',
-      })
-    }
-  }
+  const { workflows, classification, wayfinder } = useRoadmap((read) => ({
+    workflows: read.workflows,
+    classification: workflowFeedback(read.workflowState, 'start-automation-override', {
+      kind: 'ticket',
+      target,
+      stage: 'classification',
+    }),
+    wayfinder: workflowFeedback(read.workflowState, 'start-automation-override', {
+      kind: 'ticket',
+      target,
+      stage: 'wayfinder',
+    }),
+  }))
 
   return (
     <Surface>
@@ -317,23 +299,17 @@ function AutomationSection({ roadmap, ticket: result }: AutomationSectionProps) 
       <div className={cx('override-actions')}>
         <OverrideButton
           control={automation.controls.classification}
-          commandInFlight={roadmap.command.inFlight}
-          onClick={() => void run('classification')}
+          feedback={classification}
+          onClick={() => void workflows.startOverride({ target, stage: 'classification' })}
         />
         <OverrideButton
           control={automation.controls.wayfinder}
-          commandInFlight={roadmap.command.inFlight}
-          onClick={() => void run('wayfinder')}
+          feedback={wayfinder}
+          onClick={() => void workflows.startOverride({ target, stage: 'wayfinder' })}
         />
       </div>
-      {feedback !== null &&
-        (feedback.kind === 'error' ? (
-          <Alert>{feedback.text}</Alert>
-        ) : (
-          <div role="status">
-            <Alert variant="info">{feedback.text}</Alert>
-          </div>
-        ))}
+      <WorkflowFeedback feedback={classification} workflows={workflows} />
+      <WorkflowFeedback feedback={wayfinder} workflows={workflows} />
     </Surface>
   )
 }
@@ -354,21 +330,18 @@ function EvidenceFact({ term, value, detail }: EvidenceFactProps) {
 
 type OverrideButtonProps = {
   control: AutomationControlResult
-  commandInFlight: boolean
+  feedback: WorkflowFeedbackResult
   onClick: () => void
 }
 
-function OverrideButton({ control, commandInFlight, onClick }: OverrideButtonProps) {
-  const reason = commandInFlight
-    ? 'Another operation is in progress.'
-    : control.status === 'eligible'
-      ? control.hint
-      : control.reason
+function OverrideButton({ control, feedback, onClick }: OverrideButtonProps) {
+  const reason = control.status === 'eligible' ? control.hint : control.reason
   return (
     <div className={cx('override-action')}>
       <Button
         size="small"
-        disabled={commandInFlight || control.status !== 'eligible'}
+        disabled={feedback.blocked}
+        aria-busy={feedback.pending || undefined}
         title={reason}
         onClick={onClick}
       >

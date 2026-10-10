@@ -68,9 +68,11 @@ export async function createClientOwnerServer(middleware: Middleware, entryPath:
   let socketConnections = 0
   let held = true
   let holdNextResponse = false
+  let holdNextRequest = false
   let dropNextResponse = false
   let closing = false
   const replies: HeldReply[] = []
+  const requests: (() => void)[] = []
   const backends: Backend[] = []
   const clients = new Set<{ browser: WebSocket; upstream: WebSocket; latest: string | null }>()
   let backend: Backend | null = null
@@ -152,6 +154,34 @@ export async function createClientOwnerServer(middleware: Middleware, entryPath:
     const result = { application, server, transport, url: '' }
     backends.push(result)
     await application.start()
+    const accepted = application.current()
+    if (accepted.phase !== 'ready') throw new Error('Fixture application did not become ready.')
+    const repair = await application.execute(
+      commandSchema.parse({
+        type: 'repair-project-workspace',
+        expectedConfigurationVersion: accepted.configurationVersion,
+        project: { integration: 'local', projectId: 'fixture' },
+        workspace: { path: workspace },
+      }),
+    )
+    if (
+      !repair.ok ||
+      repair.result.type !== 'repair-project-workspace' ||
+      repair.result.commit !== 'committed'
+    )
+      throw new Error('Fixture Workspace admission did not commit.')
+    const admitted = application.current()
+    if (
+      admitted.phase !== 'ready' ||
+      !admitted.projects.some(
+        (project) =>
+          project.ref.projectId === 'fixture' &&
+          project.actions.some(
+            (action) => action.kind === 'server-launch' && action.operation === 'open-workspace',
+          ),
+      )
+    )
+      throw new Error('Fixture did not publish an actual admitted launch capability.')
     const port = await listen(server)
     result.url = `http://127.0.0.1:${port}`
     return result
@@ -172,6 +202,7 @@ export async function createClientOwnerServer(middleware: Middleware, entryPath:
       activeSockets: clients.size,
       upstreamSockets: backends.reduce((count, item) => count + item.transport.clientCount(), 0),
       pendingResponses: replies.length,
+      pendingRequests: requests.length,
       commandRequests,
       acceptedCommandResponses,
       hostInvocations,
@@ -221,6 +252,12 @@ export async function createClientOwnerServer(middleware: Middleware, entryPath:
         backend = await makeBackend('HTTP successor', state.configurationVersion + 1)
         break
       }
+      case 'hold-next-request':
+        holdNextRequest = true
+        break
+      case 'release-requests':
+        for (const forward of requests.splice(0)) forward()
+        break
       case 'hold-next-response':
         holdNextResponse = true
         break
@@ -230,6 +267,16 @@ export async function createClientOwnerServer(middleware: Middleware, entryPath:
       case 'release-responses':
         for (const reply of replies.splice(0)) flush(reply)
         break
+      case 'release-first-response': {
+        const reply = replies.shift()
+        if (reply !== undefined) flush(reply)
+        break
+      }
+      case 'release-last-response': {
+        const reply = replies.pop()
+        if (reply !== undefined) flush(reply)
+        break
+      }
       case 'equal-projects': {
         if (backend === null) throw new Error('Missing backend.')
         const state = backend.application.current()
@@ -296,52 +343,62 @@ export async function createClientOwnerServer(middleware: Middleware, entryPath:
         return
       }
       const shouldHold = url.pathname === '/api/command' && holdNextResponse
+      const shouldHoldRequest = url.pathname === '/api/command' && holdNextRequest
       const shouldDrop = url.pathname === '/api/command' && dropNextResponse
       if (url.pathname === '/api/command') {
         commandRequests += 1
+        holdNextRequest = false
         holdNextResponse = false
         dropNextResponse = false
       }
-      const proxy = httpRequest(
-        new URL(request.url ?? '/', backend.url),
-        {
-          method: request.method,
-          headers: { ...request.headers, host: new URL(backend.url).host, origin },
-        },
-        (upstream) => {
-          const chunks: Buffer[] = []
-          upstream.on('data', (chunk: Buffer) => chunks.push(chunk))
-          upstream.on('end', () => {
-            const body = Buffer.concat(chunks)
-            if (url.pathname === '/api/command' && upstream.statusCode === 200) {
-              const decoded = commandResultEnvelopeSchema.safeParse(JSON.parse(body.toString()))
-              if (!decoded.success) {
-                response.destroy(new Error('Real transport sent an invalid outcome.'))
-                return
+      const forward = () => {
+        if (backend === null) {
+          response.writeHead(503).end()
+          return
+        }
+        const proxy = httpRequest(
+          new URL(request.url ?? '/', backend.url),
+          {
+            method: request.method,
+            headers: { ...request.headers, host: new URL(backend.url).host, origin },
+          },
+          (upstream) => {
+            const chunks: Buffer[] = []
+            upstream.on('data', (chunk: Buffer) => chunks.push(chunk))
+            upstream.on('end', () => {
+              const body = Buffer.concat(chunks)
+              if (url.pathname === '/api/command' && upstream.statusCode === 200) {
+                const decoded = commandResultEnvelopeSchema.safeParse(JSON.parse(body.toString()))
+                if (!decoded.success) {
+                  response.destroy(new Error('Real transport sent an invalid outcome.'))
+                  return
+                }
+                acceptedCommandResponses += 1
               }
-              acceptedCommandResponses += 1
-            }
-            const reply = {
-              response,
-              status: upstream.statusCode ?? 502,
-              headers: { 'Content-Type': 'application/json' },
-              body,
-            }
-            if (shouldDrop) {
-              response.writeHead(reply.status, {
-                ...reply.headers,
-                'Content-Length': body.length,
-                Connection: 'close',
-              })
-              response.flushHeaders()
-              response.end(body.subarray(0, Math.max(1, body.length - 1)))
-            } else if (shouldHold) replies.push(reply)
-            else flush(reply)
-          })
-        },
-      )
-      proxy.on('error', () => response.destroy())
-      request.pipe(proxy)
+              const reply = {
+                response,
+                status: upstream.statusCode ?? 502,
+                headers: { 'Content-Type': 'application/json' },
+                body,
+              }
+              if (shouldDrop) {
+                response.writeHead(reply.status, {
+                  ...reply.headers,
+                  'Content-Length': body.length,
+                  Connection: 'close',
+                })
+                response.flushHeaders()
+                response.end(body.subarray(0, Math.max(1, body.length - 1)))
+              } else if (shouldHold) replies.push(reply)
+              else flush(reply)
+            })
+          },
+        )
+        proxy.on('error', () => response.destroy())
+        request.pipe(proxy)
+      }
+      if (shouldHoldRequest) requests.push(forward)
+      else forward()
       return
     }
     if (
@@ -408,6 +465,7 @@ export async function createClientOwnerServer(middleware: Middleware, entryPath:
       }
     }
     try {
+      for (const forward of requests.splice(0)) await attempt(forward)
       for (const reply of replies.splice(0)) await attempt(() => flush(reply))
       for (const client of clients) {
         await attempt(() => client.browser.terminate())

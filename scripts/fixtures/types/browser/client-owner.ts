@@ -1,6 +1,7 @@
 import type { ApplicationState, ReadyApplicationState } from '@roadmap/contracts/state'
 import { useRoadmap } from '@/store/roadmap-provider'
 import type { RoadmapLifecycle, RoadmapStoreSnapshot } from '@/store/roadmap-store'
+import type { RoadmapWorkflows, WorkflowSnapshot } from '@/workflows/workflows'
 
 export function selectedProjects(): ReadyApplicationState['projects'] {
   return useRoadmap((roadmap) => roadmap.projects)
@@ -10,12 +11,15 @@ export function derivedSelection() {
   const selected = useRoadmap((roadmap) => ({
     projects: roadmap.projects,
     projectCount: roadmap.projects.length,
-    execute: roadmap.execute,
+    workflows: roadmap.workflows,
+    workflowState: roadmap.workflowState,
     lifecycle: roadmap.lifecycle,
   }))
   const projects: ReadyApplicationState['projects'] = selected.projects
   const projectCount: number = selected.projectCount
-  return { projects, projectCount, execute: selected.execute, lifecycle: selected.lifecycle }
+  const workflows: RoadmapWorkflows = selected.workflows
+  const workflowState: WorkflowSnapshot = selected.workflowState
+  return { projects, projectCount, workflows, workflowState, lifecycle: selected.lifecycle }
 }
 
 export function selectedLifecycle(): RoadmapLifecycle {
@@ -52,7 +56,10 @@ export const initialSnapshot: RoadmapStoreSnapshot = {
   lifecycle: null,
   synchronization: 'not-ready',
   state: null,
-  command: { inFlight: false, error: null },
+  workflows: {
+    attempts: [],
+    policy: { synchronization: 'not-ready', lifecycle: null, state: null },
+  },
 }
 
 // Invalid constructions.

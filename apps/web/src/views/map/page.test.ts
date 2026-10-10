@@ -434,10 +434,7 @@ describe('URL-selected ticket Automation evidence', () => {
       },
     ]
     const snapshot = makeRoadmapSnapshot(state)
-    const store: RoadmapStore = {
-      ...makeRoadmapStore([registered]),
-      getSnapshot: () => snapshot,
-    }
+    const store = makeRoadmapStore([registered], snapshot)
 
     const markup = renderProject(registered, ticketPath(target), store)
     const session = markup.match(/<h4>Wayfinder Session<\/h4>([\s\S]*?)<\/section>/)?.[1]
@@ -451,6 +448,48 @@ describe('URL-selected ticket Automation evidence', () => {
     expect(markup).toContain('<dt>Verdict</dt><dd><strong>AFK</strong>')
     expect(markup).toContain('<dt>Process result</dt><dd><strong>Exited 0</strong>')
   })
+
+  it.each<{ mode: 'mutable' | 'read-only'; blocked: boolean }>([
+    { mode: 'mutable', blocked: false },
+    { mode: 'read-only', blocked: true },
+  ])(
+    'uses current $mode admission and exact stage controls without automatic enablement',
+    ({ mode, blocked }) => {
+      const map = makeMap([ticket('8', 'frontier')])
+      const registered = project([map])
+      const target = ticketRefSchema.parse({ map: map.ref, ticketId: '8' })
+      const state = makeApplicationState([registered], {
+        mode,
+        configuration:
+          mode === 'read-only'
+            ? {
+                valid: false,
+                issues: [{ path: 'projects', message: 'Configuration requires repair.' }],
+                notices: [],
+              }
+            : { valid: true, issues: [], notices: [] },
+      })
+      state.automation.overrides = [
+        {
+          target,
+          classification: { status: 'eligible' },
+          wayfinder: { status: 'ineligible', reason: 'A recorded AFK verdict is required.' },
+        },
+      ]
+      const store = makeRoadmapStore([], makeRoadmapSnapshot(state))
+
+      const markup = renderProject(registered, ticketPath(target), store)
+      const classificationButton = markup.match(/<button[^>]*>Run Classification<\/button>/)?.[0]
+
+      expect(state.automation.enabled).toBe(false)
+      expect(state.automation.enabledProjects).toEqual([])
+
+      expect(classificationButton).toBeDefined()
+      if (blocked) expect(classificationButton).toContain('disabled')
+      else expect(classificationButton).not.toContain('disabled')
+      expect(markup).toMatch(/<button[^>]*disabled[^>]*>Start Wayfinder Session<\/button>/)
+    },
+  )
 
   it('keeps durable stage history without source content and honors server override denial', () => {
     const map = makeMap([])
@@ -480,10 +519,7 @@ describe('URL-selected ticket Automation evidence', () => {
       },
     ]
     const snapshot = makeRoadmapSnapshot(state)
-    const store: RoadmapStore = {
-      ...makeRoadmapStore([registered]),
-      getSnapshot: () => snapshot,
-    }
+    const store = makeRoadmapStore([registered], snapshot)
 
     const markup = renderProject(
       registered,
@@ -500,8 +536,6 @@ describe('URL-selected ticket Automation evidence', () => {
     expect(markup).toContain('Current source evidence is unavailable.')
     expect(markup).toMatch(/<button[^>]*disabled[^>]*>Run Classification<\/button>/)
     expect(markup).toMatch(/<button[^>]*disabled[^>]*>Start Wayfinder Session<\/button>/)
-    expect(markup).not.toContain('Classification Run started.')
-    expect(markup).not.toContain('Wayfinder Session started.')
   })
 
   it('keeps durable Automation evidence addressable when the selected Project and map are absent', () => {
@@ -528,7 +562,7 @@ describe('URL-selected ticket Automation evidence', () => {
       },
     ]
     const snapshot = makeRoadmapSnapshot(state)
-    const store: RoadmapStore = { ...makeRoadmapStore(), getSnapshot: () => snapshot }
+    const store = makeRoadmapStore([], snapshot)
     const markup = renderToStaticMarkup(
       createElement(
         MemoryRouter,
@@ -616,7 +650,7 @@ describe('application lifecycle consumer admission', () => {
       stateSequence: accepted.state.stateSequence,
       capturedAt: accepted.state.capturedAt,
     })
-    const store: RoadmapStore = { ...base, getSnapshot: () => snapshot }
+    const store = makeRoadmapStore([], snapshot)
     const markup = renderToStaticMarkup(
       createElement(
         MemoryRouter,
@@ -661,7 +695,7 @@ describe('application lifecycle consumer admission', () => {
       retained: accepted.state,
     }
     const snapshot = makeRoadmapSnapshot(terminal)
-    const store: RoadmapStore = { ...base, getSnapshot: () => snapshot }
+    const store = makeRoadmapStore([configured], snapshot)
     const markup = renderProject(
       configured,
       ticketPath(map.tickets[0]?.ref ?? ticketRefSchema.parse({ map: map.ref, ticketId: '8' })),

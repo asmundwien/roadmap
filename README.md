@@ -16,11 +16,11 @@ The server sends full state replacements over WebSocket. HTTP carries queries an
 
 Before the first authoritative state, the provider shows an explicit waiting status rather than a fabricated empty roadmap. Previously accepted facts remain visible through disconnect and reconnect, with a retained-state status until a valid baseline establishes synchronization. An open socket alone is not synchronization. Server Connection degradation and Project reachability remain separate facts.
 
-The browser distinguishes attributable pre-admission rejection, decoded application outcome, and completion unknown after response loss. A newer snapshot is not a universal receipt. A lost host-launch reply without durable operation-specific evidence stays unknown. There is no automatic completion reconciliation, HTTP retry, replay, or receipt mechanism.
+The shared browser workflow owner captures current accepted readiness, policy, and configuration version when dispatch starts. Configuration mutations share one pending revision scope; refresh and native actions contend only on the same canonical Project. Views keep local drafts, not duplicate command or transport-error policy. Feedback distinguishes local refusal, attributable pre-admission rejection, decoded application outcome, and completion unknown. Closing a pane or dismissing feedback does not settle uncertainty. A newer snapshot is not a universal receipt. There is no automatic HTTP retry, replay, or native completion inference.
 
 `state.projects` is the sole public Project and read-resource collection. Each Project carries its scoped identity, Connection association, management facts, source metadata, maps, tickets, reachability, and provenance. Map and Project views do not join registrations or raw roadmap Projects. Retained content keeps its actual graph, prose, and source links; incomplete readable content, never-observed resources, unavailability, proven absence, and known-empty membership remain distinct.
 
-See [docs/architecture.md](docs/architecture.md) for private-to-public translation, variants, export and import rules, compiler projects, verification commands, and proof limits. [CONTEXT.md](CONTEXT.md) defines the domain language. Issue #113 retains ownership of final operation semantics and state-free HTTP outcomes; the current state-bearing command outcomes use only the new state schema.
+See [docs/architecture.md](docs/architecture.md) for private-to-public translation, shared workflow policy, variants, export and import rules, compiler projects, verification commands, and proof limits. [CONTEXT.md](CONTEXT.md) defines the domain language. HTTP outcomes are state-free; correlated committed registration and repair results supply canonical resource destinations rather than submitted-path identity guesses.
 
 ## Development
 
@@ -72,6 +72,16 @@ node scripts/resource-results-browser.mjs --screenshots /tmp/roadmap-resource-re
 ```
 
 `--serve-only` prints the fixture URL and control endpoint for interactive inspection. `--screenshots` captures scenario PNGs during the complete run and cannot be combined with `--serve-only`. `--executable-path` or `CHROMIUM_EXECUTABLE_PATH` selects an installed Chromium. See the resource browser proof section in [docs/architecture.md](docs/architecture.md) for scenario contracts and proof limits. These commands do not claim an observed test result or native effect completion.
+
+The workflow browser regression exercises current open-pane gates, both settlement orders, canonical navigation, retained drafts, per-attempt uncertainty, authorization phases, and independent durable Automation evidence:
+
+```sh
+pnpm test:workflows-browser
+pnpm test:workflows-browser --screenshots /tmp/roadmap-workflow-proof
+node scripts/workflows-browser.mjs --serve-only
+```
+
+The complete runner uses temporary files and harmless host/provider/process substitutes. `--essential-only` runs just the first concurrency regression; it is not the complete workflow proof. Direct-node serve-only handles SIGINT and SIGTERM and reports cleanup before exit.
 
 
 ## Navigation

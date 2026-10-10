@@ -1,5 +1,3 @@
-import type { SafeError } from '@roadmap/contracts/operations'
-import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
 import { ControlGroup } from '@roadmap/ui/control-group'
 import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
@@ -13,56 +11,26 @@ import { useRoadmap } from '@/store/roadmap-provider'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
 import { SettingsFacts } from '@/views/shared/settings-facts'
 import { SettingsForm } from '@/views/shared/settings-form'
-import { ErrorText, observedLabel, projectIdentity } from '@/views/shared/settings-shared'
+import { observedLabel, projectIdentity } from '@/views/shared/settings-shared'
+import { WorkflowFeedback } from '@/views/shared/workflow-feedback'
+import { workflowFeedback } from '@/workflows/workflows'
 
 type DetailsSectionProps = {
   project: KnownProjectResult
 }
 
 export function DetailsSection({ project }: DetailsSectionProps) {
-  const { configuration, configurationVersion, command, execute } = useRoadmap((roadmap) => ({
-    configuration: roadmap.configuration,
-    configurationVersion: roadmap.configurationVersion,
-    command: roadmap.command,
-    execute: roadmap.execute,
+  const { workflows, feedback } = useRoadmap((roadmap) => ({
+    workflows: roadmap.workflows,
+    feedback: workflowFeedback(roadmap.workflowState, 'rename-project', {
+      kind: 'project',
+      project: project.ref,
+    }),
   }))
-  const [error, setError] = useState<SafeError | string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  const blocked = busy || command.inFlight || !configuration.valid
-
-  const rename = async (event: FormEvent<HTMLFormElement>) => {
+  const [name, setName] = useState(project.name)
+  const rename = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const name = String(new FormData(event.currentTarget).get('name') ?? '').trim()
-    if (!name) {
-      setError('Enter a display name.')
-      return
-    }
-    setBusy(true)
-    setError(null)
-    setNotice(null)
-    try {
-      const outcome = await execute({
-        type: 'rename-project',
-        expectedConfigurationVersion: configurationVersion,
-        project: project.ref,
-        name,
-      })
-      if (!outcome.ok) setError(outcome.error)
-      else {
-        const result = outcome.result
-        const identity = projectIdentity({ ref: result.project })
-        setNotice(
-          result.commit === 'committed'
-            ? `Display name change committed for ${identity} at configuration version ${result.configurationVersion}.`
-            : `Display name change committed for ${identity} at configuration version ${result.configurationVersion}, but durability is unconfirmed. Check configuration before another change.`,
-        )
-      }
-    } catch {
-      setError('The change may have completed. Check the relevant configuration before retrying.')
-    } finally {
-      setBusy(false)
-    }
+    void workflows.renameProject({ project: project.ref, name })
   }
 
   return (
@@ -71,8 +39,7 @@ export function DetailsSection({ project }: DetailsSectionProps) {
         <SectionTitle>Details</SectionTitle>
       </SectionHeader>
       <SectionBody>
-        {notice && <Alert variant="info">{notice}</Alert>}
-        <ErrorText error={error} />
+        <WorkflowFeedback feedback={feedback} workflows={workflows} />
         <SettingsFacts>
           <dt>Integration</dt>
           <dd>
@@ -117,14 +84,20 @@ export function DetailsSection({ project }: DetailsSectionProps) {
             Set a display name for the project. This name will be shown in the Roadmap interface.
           </p>
 
-          <SettingsForm onSubmit={(event) => void rename(event)} key={project.name}>
+          <SettingsForm onSubmit={rename}>
             <ControlGroup>
-              <TextInput id="project-name" name="name" defaultValue={project.name} />
-              <Button type="submit" disabled={blocked}>
+              <TextInput
+                id="project-name"
+                name="name"
+                value={name}
+                onChange={(event) => setName(event.currentTarget.value)}
+              />
+              <Button type="submit" disabled={feedback.blocked || feedback.pending}>
                 Save name
               </Button>
             </ControlGroup>
           </SettingsForm>
+          {feedback.fields.name && <p role="alert">{feedback.fields.name}</p>}
         </Surface>
       </SectionBody>
     </Section>

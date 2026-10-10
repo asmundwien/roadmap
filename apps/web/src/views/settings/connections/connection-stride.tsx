@@ -71,7 +71,7 @@ export function ConnectionStride({ connection }: ConnectionStrideProps) {
             <div className={cx('connection-project-links')}>
               <Link href={projectSettingsPath(project.ref)}>Project settings</Link>
             </div>
-            <ProjectLaunchButtons actions={project.capabilities.actions} />
+            <ProjectLaunchButtons project={project.ref} actions={project.capabilities.actions} />
           </Surface>
         ))}
         {connection.projectCount === 0 && <p>No registered Projects use this Connection.</p>}

@@ -178,11 +178,36 @@ export const forbidden = [
     'Views read through useRoadmap, never the transport/store implementation.',
   ),
   refuse(
+    'web-views-through-workflows',
+    { path: `${web}views/`, pathNot: tests },
+    { path: `${contracts}wire[.]ts$` },
+    'Views use named workflows rather than public transport envelopes.',
+  ),
+  refuse(
+    'web-workflows-pure',
+    { path: `${web}workflows/`, pathNot: tests },
+    {
+      path: [
+        `${web}(?:store/|views/|navigation[.]tsx$|App[.]tsx$|main[.]tsx$)`,
+        ui,
+        '(?:^|/)node_modules/(?:react|react-dom)(?:/|$)',
+        '(?:^|/)node_modules/[.]pnpm/[^/]+/node_modules/(?:react|react-dom)(?:/|$)',
+      ],
+    },
+    'Workflow policy depends directly on public facts and pure helpers, never rendering or store.',
+  ),
+  refuse(
+    'web-workflows-pure',
+    { path: `${web}workflows/`, pathNot: tests },
+    { path: `${contracts}wire[.]ts$`, dependencyTypesNot: ['type-only'] },
+    'Workflow policy may reuse erased rejection types but never transport schemas or decoding.',
+  ),
+  refuse(
     'web-resource-results-pure',
     { path: `${web}resources/`, pathNot: tests },
     {
       path: [
-        `${web}(?:views/|store/|router[.]ts$|navigation[.]tsx$|App[.]tsx$|main[.]tsx$)`,
+        `${web}(?:views/|store/|workflows/|router[.]ts$|navigation[.]tsx$|App[.]tsx$|main[.]tsx$)`,
         `${contracts}(?:operations|wire)[.]ts$`,
         ui,
         '(?:^|/)node_modules/(?:react|react-dom|react-router)(?:/|$)',

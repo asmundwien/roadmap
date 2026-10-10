@@ -10,7 +10,7 @@ import {
 } from '@roadmap/ui/section'
 import classNames from 'classnames/bind'
 import type { AuthorizationResult } from '@/resources/results'
-import { type AuthorizationResultFeedback, authorizationPhaseStatus } from './connection-details'
+import { type AuthorizationResultFeedback, authorizationPhaseStatus } from '@/workflows/workflows'
 import connectionStyles from './connection-sections.module.css'
 
 const cx = classNames.bind(connectionStyles)
@@ -19,9 +19,8 @@ type ConnectionSetupSectionProps = {
   githubAvailable: boolean
   configurationValid: boolean
   configurationNotices: string[]
-  notice: string | null
   authorizations: AuthorizationResult[]
-  feedback: AuthorizationResultFeedback[]
+  feedback: readonly AuthorizationResultFeedback[]
   hasConnections: boolean
   onOpenAuthorization: (operationId: AuthorizationOperationId) => void
 }
@@ -30,7 +29,6 @@ export function ConnectionSetupSection({
   githubAvailable,
   configurationValid,
   configurationNotices,
-  notice,
   authorizations,
   feedback,
   hasConnections,
@@ -62,7 +60,6 @@ export function ConnectionSetupSection({
             {message}
           </Alert>
         ))}
-        {notice && <Alert variant="info">{notice}</Alert>}
         {authorizations
           .filter(
             (authorization) =>

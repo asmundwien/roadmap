@@ -12,6 +12,7 @@ import {
   type SessionResult,
   type SourceDestination,
 } from '@/resources/results'
+import { useRoadmap } from '@/store/roadmap-provider'
 
 declare const read: ConsumerRead
 declare const project: ProjectRef
@@ -44,6 +45,25 @@ export const fileDestination: SourceDestination = { kind: 'file', path: '/worksp
 export const absentDestination: SourceDestination = { kind: 'absent' }
 export const knownProjectName =
   projectResult.kind === 'known' ? projectResult.name : projectResult.message
+
+export function selectedResourceResults() {
+  const selected = useRoadmap((roadmap) => ({
+    project: resolveProject(roadmap, project),
+    connection: resolveConnection(roadmap, connection),
+    selection: resolveSelection(roadmap, { project, map, ticket }),
+    automation: presentAutomation(roadmap),
+    workflows: roadmap.workflows,
+  }))
+  const result: ProjectResult = selected.project
+  const rename = selected.workflows.renameProject({ project, name: 'Selected project' })
+  return {
+    result,
+    rename,
+    connection: selected.connection,
+    selection: selected.selection,
+    automation: selected.automation,
+  }
+}
 
 // Invalid constructions.
 export const invalidUnscopedSelection = resolveSelection(read, {

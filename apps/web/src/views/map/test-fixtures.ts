@@ -26,6 +26,7 @@ import {
   type TicketType,
 } from '@roadmap/contracts/state'
 import type { RoadmapStore, RoadmapStoreSnapshot } from '@/store/roadmap-store'
+import { createRoadmapWorkflows, type WorkflowPolicy } from '@/workflows/workflows'
 
 type TicketValue = Extract<
   TicketResourceResult,
@@ -299,40 +300,93 @@ function lifecycle(state: ApplicationState): RoadmapStoreSnapshot['lifecycle'] {
   }
 }
 
-export function makeRoadmapSnapshot(state: ApplicationState): RoadmapStoreSnapshot {
-  const validatedState = applicationStateSchema.parse(state)
-  if (
-    validatedState.phase !== 'ready' &&
-    !('retained' in validatedState && validatedState.retained !== null)
-  ) {
-    return freezeFixture({
-      transport: 'live',
-      synchronization: 'not-ready',
-      lifecycle: lifecycle(validatedState),
-      command: { inFlight: false, error: null },
-      state: null,
-    } satisfies RoadmapStoreSnapshot)
-  }
-  return freezeFixture({
-    transport: 'live',
-    synchronization: validatedState.phase === 'ready' ? 'synchronized' : 'retained',
-    lifecycle: lifecycle(validatedState),
-    command: { inFlight: false, error: null },
-    state: validatedState,
-  } satisfies RoadmapStoreSnapshot)
+export function makeRoadmapSnapshot(state: ApplicationState | null): RoadmapStoreSnapshot {
+  const validatedState = state === null ? null : applicationStateSchema.parse(state)
+  const readable =
+    validatedState !== null &&
+    (validatedState.phase === 'ready' ||
+      ('retained' in validatedState && validatedState.retained !== null))
+  const acceptedLifecycle = validatedState === null ? null : lifecycle(validatedState)
+  const policy: WorkflowPolicy = freezeFixture({
+    synchronization: readable
+      ? validatedState?.phase === 'ready'
+        ? 'synchronized'
+        : 'retained'
+      : 'not-ready',
+    lifecycle: acceptedLifecycle,
+    state: readable ? validatedState : null,
+  })
+  const owner = createRoadmapWorkflows({
+    read: () => policy,
+    dispatch: async (_command, onDispatch) => {
+      onDispatch()
+      throw new Error('Unexpected fixture command transport')
+    },
+    query: async (onDispatch) => {
+      onDispatch()
+      throw new Error('Unexpected fixture query transport')
+    },
+    publish: () => undefined,
+  })
+  const workflows = owner.getSnapshot()
+  return policy.synchronization === 'not-ready' || policy.state === null
+    ? freezeFixture({
+        transport: 'live',
+        synchronization: 'not-ready',
+        lifecycle: acceptedLifecycle,
+        state: null,
+        workflows,
+      } satisfies RoadmapStoreSnapshot)
+    : freezeFixture({
+        transport: 'live',
+        synchronization: policy.synchronization,
+        lifecycle: acceptedLifecycle,
+        state: policy.state,
+        workflows,
+      } satisfies RoadmapStoreSnapshot)
 }
 
-export function makeRoadmapStore(projects: Project[] = []): RoadmapStore {
-  const snapshot = makeRoadmapSnapshot(makeApplicationState(projects))
+export function makeRoadmapStore(
+  projects: Project[] = [],
+  initial: RoadmapStoreSnapshot = makeRoadmapSnapshot(makeApplicationState(projects)),
+): RoadmapStore {
+  let snapshot = initial
+  const listeners = new Set<() => void>()
+  const owner = createRoadmapWorkflows({
+    read: () => ({
+      synchronization: snapshot.synchronization,
+      lifecycle: snapshot.lifecycle,
+      state: snapshot.state,
+    }),
+    dispatch: async (_command, onDispatch) => {
+      onDispatch()
+      throw new Error('Unexpected fixture command transport')
+    },
+    query: async (onDispatch) => {
+      onDispatch()
+      throw new Error('Unexpected fixture query transport')
+    },
+    publish: (workflows) => {
+      snapshot = freezeFixture({ ...snapshot, workflows })
+      for (const listener of listeners) listener()
+    },
+  })
+  snapshot = freezeFixture({ ...snapshot, workflows: owner.getSnapshot() })
   return {
-    subscribe: () => () => undefined,
+    workflows: owner.workflows,
+    subscribe(listener) {
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
+      }
+    },
     getSnapshot: () => snapshot,
     start: () => () => undefined,
     query: async () => {
-      throw new Error('Unexpected query')
+      throw new Error('Unexpected fixture query transport')
     },
     execute: async () => {
-      throw new Error('Unexpected command')
+      throw new Error('Unexpected fixture command transport')
     },
   }
 }

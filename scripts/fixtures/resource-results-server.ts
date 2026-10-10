@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import {
   createServer,
@@ -8,8 +9,15 @@ import {
 } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { commandSchema } from '@roadmap/contracts/operations'
-import { commandResultEnvelopeSchema, decodeStateEnvelope } from '@roadmap/contracts/wire'
+import { correlationIdSchema } from '@roadmap/contracts/identity'
+import { type Command, commandSchema } from '@roadmap/contracts/operations'
+import {
+  commandEnvelopeSchema,
+  commandResultEnvelopeSchema,
+  decodeCommandResultEnvelope,
+  decodeStateEnvelope,
+  REQUEST_ID_HEADER,
+} from '@roadmap/contracts/wire'
 import { WebSocket, WebSocketServer } from 'ws'
 import {
   createRoadmapApplication,
@@ -377,6 +385,45 @@ export async function createResourceResultsServer(middleware: Middleware, entryP
       }),
     )
     if (!outcome.ok) throw new Error(`Fixture refresh failed: ${outcome.error.message}`)
+  }
+  async function denyOverride({
+    stage,
+  }: Pick<Extract<Command, { type: 'start-automation-override' }>, 'stage'>) {
+    const state = readyApplication().current()
+    if (state.phase !== 'ready') throw new Error('Fixture application is not ready.')
+    const control = state.automation.overrides.find(
+      (item) =>
+        item.target.map.project.projectId === ids.githubProject && item.target.ticketId === '72',
+    )
+    if (!control || control[stage].status !== 'ineligible')
+      throw new Error('The transport denial control requires a server-ineligible target.')
+    const command = commandSchema.parse({
+      type: 'start-automation-override',
+      expectedConfigurationVersion: state.configurationVersion,
+      target: control.target,
+      stage,
+    })
+    if (command.type !== 'start-automation-override')
+      throw new Error('The transport denial control requires an override command.')
+    const correlationId = correlationIdSchema.parse(randomUUID())
+    const response = await fetch(new URL('/api/command', origin), {
+      method: 'POST',
+      redirect: 'error',
+      headers: {
+        Origin: origin,
+        'Content-Type': 'application/json',
+        [REQUEST_ID_HEADER]: correlationId,
+      },
+      body: JSON.stringify(
+        commandEnvelopeSchema.parse({ type: 'command', correlationId, command }),
+      ),
+    })
+    const decoded = decodeCommandResultEnvelope(await response.json(), command, correlationId)
+    if (response.status !== 200 || !decoded.ok)
+      throw new Error('The real transport did not return an attributable application outcome.')
+    if (decoded.value.outcome.ok)
+      throw new Error('The server unexpectedly admitted an ineligible override.')
+    return { httpStatus: response.status, outcome: decoded.value.outcome }
   }
   async function status() {
     return {
@@ -779,5 +826,5 @@ export async function createResourceResultsServer(middleware: Middleware, entryP
     }
     throw error
   }
-  return { origin, paths, ids, control, close }
+  return { origin, paths, ids, control, denyOverride, close }
 }

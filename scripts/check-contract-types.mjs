@@ -263,6 +263,152 @@ for (const [consumer, tsconfig, owner] of [
     } finally {
       await rm(resourceDirectory, { recursive: true, force: true })
     }
+    const workflowFixture = await readFile(
+      new URL('./fixtures/types/browser/workflows.ts', import.meta.url),
+      'utf8',
+    )
+    const workflowDirectory = await mkdtemp(join(root, 'apps/web/.architecture-workflows-'))
+    try {
+      const workflowPath = join(workflowDirectory, 'workflows.ts')
+      const marker = '// Invalid constructions.'
+      assert.equal(
+        workflowFixture.split(marker).length,
+        2,
+        'Workflow proof needs one invalid boundary',
+      )
+      const workflowOptions = { ...leaf.options, types: [] }
+      const workflowFiles = [join(root, 'apps/web/src/vite-env.d.ts'), workflowPath]
+      if (!negativeOnly) {
+        await writeFile(workflowPath, workflowFixture.split(marker)[0])
+        requireClean(
+          program(workflowFiles, workflowOptions),
+          'Browser named workflows and operation-specific settled results',
+        )
+      }
+      await writeFile(workflowPath, workflowFixture)
+      const workflowProgram = program(workflowFiles, workflowOptions)
+      assert.ok(
+        workflowProgram
+          .getSourceFiles()
+          .every((file) => !normalize(file.fileName).includes('/@types/node/')),
+        'Workflow consumer proof must not load Node ambient declarations',
+      )
+      const source = workflowProgram.getSourceFile(workflowPath)
+      assert.ok(source)
+      const expected = [
+        ['invalidRawProject', 2322, 'integration'],
+        ['invalidProjectIdBrand', 2322, 'ProjectId'],
+        ['invalidConnectionIdBrand', 2322, 'ConnectionId'],
+        ['invalidAuthorizationIdBrand', 2322, 'AuthorizationOperationId'],
+        ['invalidProjectAsConnection', 2322, 'ConnectionId'],
+        ['invalidProjectScope', 2741, 'integration'],
+        ['invalidOverrideScope', 2739, 'ticketId'],
+        ['invalidMissingSelectorOwner', 2345, 'owner'],
+        ['invalidSelectorOwnerKind', 2322, 'registration'],
+        ['invalidRegistrationOwner', 2322, 'connectionId'],
+        ['invalidProjectOwner', 2322, 'project'],
+        ['invalidBeginVersion', 2353, 'expectedConfigurationVersion'],
+        ['invalidReauthorizeVersion', 2353, 'expectedConfigurationVersion'],
+        ['invalidRetryVersion', 2353, 'expectedConfigurationVersion'],
+        ['invalidCancelVersion', 2353, 'expectedConfigurationVersion'],
+        ['invalidRenameConnectionVersion', 2353, 'expectedConfigurationVersion'],
+        ['invalidRemoveConnectionVersion', 2353, 'expectedConfigurationVersion'],
+        ['invalidRegisterVersion', 2353, 'expectedConfigurationVersion'],
+        ['invalidRenameProjectVersion', 2353, 'expectedConfigurationVersion'],
+        ['invalidRepairVersion', 2353, 'expectedConfigurationVersion'],
+        ['invalidRemoveProjectVersion', 2353, 'expectedConfigurationVersion'],
+        ['invalidGlobalAutomationVersion', 2353, 'expectedConfigurationVersion'],
+        ['invalidProjectAutomationVersion', 2353, 'expectedConfigurationVersion'],
+        ['invalidOverrideVersion', 2353, 'expectedConfigurationVersion'],
+        ['invalidRefreshVersion', 2353, 'expectedConfigurationVersion'],
+        ['invalidLaunchVersion', 2353, 'expectedConfigurationVersion'],
+        ['invalidSelectorVersion', 2353, 'expectedConfigurationVersion'],
+        ['invalidWrongResultFamily', 2739, 'configurationVersion'],
+        ['invalidWrongOutcomeFamily', 2322, 'result'],
+        ['invalidAcknowledgedRejectedOutcome', 2741, 'result'],
+        ['invalidPendingResult', 2353, 'result'],
+        ['invalidPendingError', 2353, 'error'],
+        ['invalidPendingOutcome', 2353, 'outcome'],
+        ['invalidPendingMissingVersion', 2322, 'configurationVersion'],
+        ['invalidUnknownResult', 2353, 'result'],
+        ['invalidUnknownOutcome', 2353, 'outcome'],
+        ['invalidUnknownCanonicalSubject', 2353, 'canonicalSubject'],
+        ['invalidAcknowledgedError', 2353, 'error'],
+        ['invalidFolderPendingVersion', 2322, 'undefined'],
+        ['invalidNotDispatchedVersion', 2322, 'undefined'],
+        ['invalidFolderCommandResult', 2322, 'kind'],
+        ['invalidFolderSelectedWithoutPath', 2322, 'path'],
+        ['invalidFolderCancelledPath', 2353, 'path'],
+        ['invalidRawAttemptId', 2322, 'WorkflowAttemptId'],
+        ['invalidMutableAttempts', 4104, 'readonly'],
+        ['invalidMutableAttempt', 2540, 'dismissed', 'body'],
+        ['invalidExecuteFacade', 2339, 'execute'],
+        ['invalidQueryFacade', 2339, 'query'],
+        ['invalidAggregateFacade', 2339, 'command'],
+        ['invalidWorkflowExecute', 2339, 'execute'],
+        ['invalidWorkflowQuery', 2339, 'query'],
+        ['invalidOperationSubject', 2739, 'integration, projectId'],
+        ['invalidAuthorizationWaitingPayload', 2322, 'verificationUri'],
+        ['invalidAuthorizationGrantedPayload', 2322, 'connection'],
+        ['invalidAuthorizationCancelledError', 2353, 'error'],
+        ['invalidAuthorizationFeedbackId', 2345, 'AuthorizationOperationId'],
+      ]
+      const diagnostics = ts.getPreEmitDiagnostics(workflowProgram)
+      assert.equal(
+        diagnostics.length,
+        expected.length,
+        `Browser workflows: expected exactly ${expected.length} diagnostics\n${format(diagnostics)}`,
+      )
+      for (const [name, code, detail, location] of expected) {
+        const statement = source.statements.find(
+          (statement) =>
+            ts.isVariableStatement(statement) &&
+            statement.declarationList.declarations.some(
+              (declaration) => ts.isIdentifier(declaration.name) && declaration.name.text === name,
+            ),
+        )
+        assert.ok(statement, `Missing workflow invalid construction ${name}`)
+        const declaration = statement.declarationList.declarations.find(
+          (declaration) => ts.isIdentifier(declaration.name) && declaration.name.text === name,
+        )
+        assert.ok(declaration, `Missing workflow invalid variable ${name}`)
+        let diagnosticSpan = declaration
+        if (location === 'body') {
+          assert.ok(
+            statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword),
+            `${name}: mutation probe must be exported`,
+          )
+          assert.ok(
+            declaration.initializer &&
+              ts.isArrowFunction(declaration.initializer) &&
+              ts.isBlock(declaration.initializer.body),
+            `${name}: mutation probe must have an arrow function statement body`,
+          )
+          diagnosticSpan = declaration.initializer.body
+        }
+        const errors = diagnostics.filter(
+          (diagnostic) =>
+            diagnostic.file &&
+            normalize(diagnostic.file.fileName) === normalize(workflowPath) &&
+            diagnostic.start >= diagnosticSpan.getStart() &&
+            diagnostic.start < diagnosticSpan.getEnd(),
+        )
+        assert.equal(
+          errors.length,
+          1,
+          `${name}: expected one intended diagnostic\n${format(errors)}`,
+        )
+        assert.equal(errors[0].code, code, `${name}: wrong diagnostic\n${format(errors)}`)
+        assert.equal(errors[0].category, ts.DiagnosticCategory.Error)
+        assert.ok(
+          ts.flattenDiagnosticMessageText(errors[0].messageText, '\n').includes(detail),
+          `${name}: diagnostic must name ${detail}\n${format(errors)}`,
+        )
+      }
+      console.log(JSON.stringify({ proof: 'workflows', consumer, cases: expected.length }))
+    } finally {
+      await rm(workflowDirectory, { recursive: true, force: true })
+    }
   }
   const directory = await mkdtemp(join(root, '.architecture-fixtures-'))
   try {

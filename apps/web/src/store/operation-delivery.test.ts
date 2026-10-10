@@ -6,10 +6,21 @@ import {
   stateSequenceSchema,
 } from '@roadmap/contracts/identity'
 import type { Command } from '@roadmap/contracts/operations'
-import { applicationStateSchema, connectionSchema, type Project } from '@roadmap/contracts/state'
+import {
+  applicationStateSchema,
+  connectionSchema,
+  type Project,
+  serverLaunchActionSchema,
+} from '@roadmap/contracts/state'
 import { REQUEST_ID_HEADER, requestIdSchema } from '@roadmap/contracts/wire'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { neverReadProject } from '@/views/overview/test-fixtures'
+import { WorkflowFeedback } from '@/views/shared/workflow-feedback'
+import type { RoadmapWorkflows } from '@/workflows/workflows'
+import { nativeOperationFeedback } from '@/workflows/workflows'
 import { createRoadmapStore, type SocketLike } from './roadmap-store'
 
 type SocketEvent = 'open' | 'message' | 'close'
@@ -45,9 +56,25 @@ const command = {
   project: projectRefSchema.parse(canonicalProject.ref),
   operation: 'open-workspace',
 } satisfies Command
+const launchInput = {
+  project: canonicalProject.ref,
+  operation: 'open-workspace',
+} satisfies Parameters<RoadmapWorkflows['launchProject']>[0]
 
 function state(sequence: number, epoch = 'epoch-a', name = 'Accepted read facts') {
-  const project: Project = { ...canonicalProject, name }
+  const project: Project = {
+    ...canonicalProject,
+    name,
+    actions: [
+      serverLaunchActionSchema.parse({
+        id: 'open-workspace',
+        label: 'Open Workspace',
+        kind: 'server-launch',
+        project: canonicalProject.ref,
+        operation: 'open-workspace',
+      }),
+    ],
+  }
   return applicationStateSchema.parse({
     phase: 'ready',
     mode: 'mutable',
@@ -212,29 +239,29 @@ describe('state-free operation delivery through the public store', () => {
     }
   })
 
-  it('command activity publishes immutable cached snapshots without replacing accepted read content', async () => {
+  it('workflow attempts publish immutable cached snapshots without replacing accepted read content', async () => {
     const h = harness()
     const stop = h.store.start()
     h.baseline()
     const idle = h.store.getSnapshot()
     const accepted = idle.state
     try {
-      const execution = h.store.execute(command)
+      const execution = h.store.workflows.launchProject(launchInput)
       const active = h.store.getSnapshot()
       expect(active).not.toBe(idle)
       expect(h.store.getSnapshot()).toBe(active)
       expect(active.state).toBe(accepted)
-      expect(active.command.inFlight).toBe(true)
-      expect(idle.command.inFlight).toBe(false)
-      expect(Reflect.set(active.command, 'inFlight', false)).toBe(false)
+      expect(active.workflows.attempts).toMatchObject([{ kind: 'pending' }])
+      expect(idle.workflows.attempts).toEqual([])
+      expect(Reflect.set(active.workflows.attempts, '0', {})).toBe(false)
       await h.reply(0)
-      await expect(execution).resolves.toEqual(outcome())
+      await expect(execution).resolves.toMatchObject({ kind: 'acknowledged', outcome: outcome() })
       const settled = h.store.getSnapshot()
       expect(settled).not.toBe(active)
       expect(h.store.getSnapshot()).toBe(settled)
       expect(settled.state).toBe(accepted)
-      expect(settled.command.inFlight).toBe(false)
-      expect(active.command.inFlight).toBe(true)
+      expect(settled.workflows.attempts).toMatchObject([{ kind: 'acknowledged' }])
+      expect(active.workflows.attempts).toMatchObject([{ kind: 'pending' }])
       expect(settled.state).toMatchObject({ projects: [{ name: 'Accepted read facts' }] })
     } finally {
       stop()
@@ -246,16 +273,19 @@ describe('state-free operation delivery through the public store', () => {
     const stop = h.store.start()
     h.baseline()
     const accepted = h.store.getSnapshot().state
-    const execution = h.store.execute(command)
+    const execution = h.store.workflows.launchProject(launchInput)
     await h.captured()
     stop()
     stop()
     await h.reply(0, outcome('epoch-b', 900))
-    await expect(execution).resolves.toEqual(outcome('epoch-b', 900))
+    await expect(execution).resolves.toMatchObject({
+      kind: 'acknowledged',
+      outcome: outcome('epoch-b', 900),
+    })
     expect(h.store.getSnapshot()).toMatchObject({
       transport: 'disconnected',
       synchronization: 'retained',
-      command: { inFlight: false, error: null },
+      workflows: { attempts: [{ kind: 'acknowledged' }] },
     })
     expect(h.store.getSnapshot().state).toBe(accepted)
     expect(h.store.getSnapshot().state).toMatchObject({
@@ -273,7 +303,7 @@ describe('state-free operation delivery through the public store', () => {
       const stop = h.store.start()
       h.baseline()
       try {
-        const execution = h.store.execute(command)
+        const execution = h.store.workflows.launchProject(launchInput)
         const rejected = {
           ok: false,
           operation: command.type,
@@ -288,15 +318,13 @@ describe('state-free operation delivery through the public store', () => {
           },
           error: { code: 'conflict', message: 'Workspace is unavailable.' },
         }
-        const assertion =
-          subject === 'matching'
-            ? expect(execution).resolves.toEqual(rejected)
-            : expect(execution).rejects.toBeInstanceOf(Error)
         await h.reply(0, rejected)
-        await assertion
-        expect(h.store.getSnapshot().command.error?.code).toBe(
-          subject === 'matching' ? 'conflict' : 'transport-failed',
-        )
+        const attempt = await execution
+        expect(attempt).toMatchObject({
+          kind: subject === 'matching' ? 'rejected' : 'completion-unknown',
+          error: { code: subject === 'matching' ? 'conflict' : 'transport-failed' },
+        })
+        expect(h.store.getSnapshot().workflows.attempts).toContainEqual(attempt)
         expect(h.store.getSnapshot().state).toEqual(state(4))
       } finally {
         stop()
@@ -312,8 +340,7 @@ describe('state-free operation delivery through the public store', () => {
       h.baseline()
       const accepted = h.store.getSnapshot().state
       try {
-        const execution = h.store.execute(command)
-        const assertion = expect(execution).rejects.toBeInstanceOf(Error)
+        const execution = h.store.workflows.launchProject(launchInput)
         const request = await h.captured()
         const valid = outcome()
         const wrongProject = neverReadProject({
@@ -353,8 +380,13 @@ describe('state-free operation delivery through the public store', () => {
             outcome: returned,
           }),
         )
-        await assertion
-        expect(h.store.getSnapshot().command.error).toMatchObject({ code: 'transport-failed' })
+        const attempt = await execution
+        expect(attempt).toMatchObject({
+          kind: 'completion-unknown',
+          error: { code: 'transport-failed' },
+        })
+        expect(attempt).not.toHaveProperty('destination')
+        expect(h.store.getSnapshot().workflows.attempts).toContainEqual(attempt)
         expect(h.store.getSnapshot().state).toBe(accepted)
         expect(h.requests).toHaveLength(1)
       } finally {
@@ -457,16 +489,23 @@ describe('state-free operation delivery through the public store', () => {
     h.baseline()
     let switched = false
     const unsubscribe = h.store.subscribe(() => {
-      if (!h.store.getSnapshot().command.inFlight || switched) return
+      if (
+        !h.store.getSnapshot().workflows.attempts.some((attempt) => attempt.kind === 'pending') ||
+        switched
+      )
+        return
       switched = true
       stop()
       stop = h.store.start()
       h.baseline(1, 'epoch-b', 1)
     })
     try {
-      const execution = h.store.execute(command)
+      const execution = h.store.workflows.launchProject(launchInput)
       await h.reply(0, outcome('epoch-c'))
-      await expect(execution).resolves.toEqual(outcome('epoch-c'))
+      await expect(execution).resolves.toMatchObject({
+        kind: 'acknowledged',
+        outcome: outcome('epoch-c'),
+      })
       expect(h.sockets).toHaveLength(2)
       expect(h.store.getSnapshot().state).toEqual(state(1, 'epoch-b'))
       h.baseline(2, 'epoch-b', 1)
@@ -482,7 +521,7 @@ describe('state-free operation delivery through the public store', () => {
     const stop = h.store.start()
     h.baseline()
     try {
-      const execution = h.store.execute(command)
+      const execution = h.store.workflows.launchProject(launchInput)
       const request = await h.captured()
       expect(requestIdSchema.safeParse(request.requestId).success).toBe(true)
       request.response.resolve(
@@ -497,7 +536,7 @@ describe('state-free operation delivery through the public store', () => {
           403,
         ),
       )
-      await expect(execution).resolves.toMatchObject({ kind: 'not-admitted', ok: false })
+      await expect(execution).resolves.toMatchObject({ kind: 'not-admitted' })
       expect(h.store.getSnapshot().state).toEqual(state(4))
       expect(h.requests).toHaveLength(1)
     } finally {
@@ -512,16 +551,19 @@ describe('state-free operation delivery through the public store', () => {
       let stop = h.store.start()
       h.baseline()
       try {
-        const execution = h.store.execute(command)
-        const assertion = expect(execution).rejects.toBeInstanceOf(Error)
+        const execution = h.store.workflows.launchProject(launchInput)
         const request = await h.captured()
         if (failure === 'lost') request.response.reject(new Error('Network response lost'))
         else
           request.response.resolve(
             new Response('{', { headers: { 'Content-Type': 'application/json' } }),
           )
-        await assertion
-        expect(h.store.getSnapshot().command.error).toMatchObject({ code: 'transport-failed' })
+        const attempt = await execution
+        expect(attempt).toMatchObject({
+          kind: 'completion-unknown',
+          error: { code: 'transport-failed' },
+        })
+        expect(h.store.getSnapshot().workflows.attempts).toContainEqual(attempt)
         stop()
         stop = h.store.start()
         const newer = state(50, 'epoch-b', 'Later facts do not prove a launch')
@@ -534,11 +576,64 @@ describe('state-free operation delivery through the public store', () => {
         expect(accepted?.phase).toBe('ready')
         if (accepted?.phase !== 'ready') throw new Error('Expected the successor read baseline.')
         expect(accepted.configurationVersion).toBe(20)
-        expect(h.store.getSnapshot().command.error).toMatchObject({ code: 'transport-failed' })
+        expect(h.store.getSnapshot().workflows.attempts).toContainEqual(attempt)
         expect(h.requests).toHaveLength(1)
       } finally {
         stop()
       }
     },
   )
+
+  it('renders each undismissed unknown once and hides notices without changing attempt truth', async () => {
+    const h = harness()
+    const stop = h.store.start()
+    h.baseline()
+    const feedback = () => nativeOperationFeedback(h.store.getSnapshot().workflows, launchInput)
+    const renderFeedback = () =>
+      renderToStaticMarkup(
+        createElement(
+          MemoryRouter,
+          null,
+          createElement(WorkflowFeedback, { feedback: feedback(), workflows: h.store.workflows }),
+        ),
+      )
+    try {
+      const first = h.store.workflows.launchProject(launchInput)
+      const firstRequest = await h.captured()
+      firstRequest.response.reject(new Error('Lost response after dispatch'))
+      const firstAttempt = await first
+      const second = h.store.workflows.launchProject(launchInput)
+      const secondRequest = await h.captured(1)
+      secondRequest.response.resolve(new Response('{'))
+      const secondAttempt = await second
+      expect(firstAttempt.kind).toBe('completion-unknown')
+      expect(secondAttempt.kind).toBe('completion-unknown')
+      expect(feedback().current?.id).toBe(secondAttempt.id)
+      expect(feedback().unknown.map((attempt) => attempt.id)).toEqual([
+        firstAttempt.id,
+        secondAttempt.id,
+      ])
+      expect(renderFeedback().match(/Dismiss notice/g)).toHaveLength(2)
+
+      h.store.workflows.dismiss({ attemptId: secondAttempt.id })
+      expect(renderFeedback().match(/Dismiss notice/g)).toHaveLength(1)
+      expect(feedback().current).toMatchObject({
+        id: secondAttempt.id,
+        kind: 'completion-unknown',
+        dismissed: true,
+      })
+      expect(feedback().unknown).toHaveLength(2)
+
+      const third = h.store.workflows.launchProject(launchInput)
+      await h.reply(2)
+      await expect(third).resolves.toMatchObject({ kind: 'acknowledged' })
+      expect(feedback().current?.kind).toBe('acknowledged')
+      expect(renderFeedback().match(/Dismiss notice/g)).toHaveLength(1)
+      h.baseline(50, 'epoch-a', 0, 'A later read is not a receipt')
+      expect(feedback().unknown).toHaveLength(2)
+      expect(h.requests).toHaveLength(3)
+    } finally {
+      stop()
+    }
+  })
 })

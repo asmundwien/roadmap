@@ -1,5 +1,4 @@
 import type { ConnectionId } from '@roadmap/contracts/identity'
-import type { CommandResult, SafeError } from '@roadmap/contracts/operations'
 import { Alert } from '@roadmap/ui/alert'
 import { Link as ExternalLink } from '@roadmap/ui/link'
 import { Page, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
@@ -10,7 +9,12 @@ import { Link } from '@/navigation'
 import { resolveConnection } from '@/resources/results'
 import { routePaths } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
-import { ErrorText } from '@/views/shared/settings-shared'
+import { WorkflowFeedback } from '@/views/shared/workflow-feedback'
+import {
+  connectionAuthorizationFeedback,
+  type WorkflowAttemptId,
+  workflowFeedback,
+} from '@/workflows/workflows'
 import { DetailsSection } from './details-section'
 import { ManageSection } from './manage-section'
 import pageStyles from './page.module.css'
@@ -19,68 +23,72 @@ const cx = classNames.bind(pageStyles)
 
 type ConnectionPageProps = { connectionId: ConnectionId }
 
-type RemovalFeedback =
-  | { kind: 'pending' }
-  | { kind: 'unconfirmed'; result: Extract<CommandResult, { type: 'remove-connection' }> }
-  | { kind: 'error'; error: SafeError | string }
-
 export function ConnectionPage({ connectionId }: ConnectionPageProps) {
   return <ConnectionDetail key={connectionId} connectionId={connectionId} />
 }
 
 function ConnectionDetail({ connectionId }: ConnectionPageProps) {
-  const { connection, configuration, configurationVersion, execute } = useRoadmap((roadmap) => ({
-    connection: resolveConnection(roadmap, connectionId),
-    configuration: roadmap.configuration,
-    configurationVersion: roadmap.configurationVersion,
-    execute: roadmap.execute,
-  }))
+  const { connection, configuration, workflows, rename, removal, authorizations } = useRoadmap(
+    (roadmap) => ({
+      connection: resolveConnection(roadmap, connectionId),
+      configuration: roadmap.configuration,
+      workflows: roadmap.workflows,
+      rename: workflowFeedback(roadmap.workflowState, 'rename-connection', {
+        kind: 'connection',
+        connectionId,
+      }),
+      removal: workflowFeedback(roadmap.workflowState, 'remove-connection', {
+        kind: 'connection',
+        connectionId,
+      }),
+      authorizations: connectionAuthorizationFeedback(roadmap.workflowState, connectionId),
+    }),
+  )
   const navigate = useNavigate()
-  const [removal, setRemoval] = useState<RemovalFeedback | null>(null)
   const active = useRef(true)
+  const navigationRequest = useRef<symbol | null>(null)
+  const [navigationAttempt, setNavigationAttempt] = useState<WorkflowAttemptId | null>(null)
   useEffect(() => {
     active.current = true
     return () => {
       active.current = false
+      navigationRequest.current = null
     }
   }, [])
   const remove = async () => {
-    setRemoval({ kind: 'pending' })
-    try {
-      const outcome = await execute({
-        type: 'remove-connection',
-        expectedConfigurationVersion: configurationVersion,
-        connectionId,
-      })
-      if (!active.current) return
-      if (!outcome.ok) {
-        setRemoval({ kind: 'error', error: outcome.error })
-      } else if (outcome.result.commit === 'committed') {
-        setRemoval(null)
-        navigate(routePaths.connections, { replace: true })
-      } else {
-        setRemoval({ kind: 'unconfirmed', result: outcome.result })
-      }
-    } catch {
-      if (active.current)
-        setRemoval({
-          kind: 'error',
-          error: `Connection ${connectionId} removal may have completed. Check the relevant configuration before retrying.`,
-        })
-    }
+    const request = Symbol('removal navigation')
+    navigationRequest.current = request
+    const attempt = await workflows.removeConnection({ connectionId })
+    if (!active.current || navigationRequest.current !== request) return
+    setNavigationAttempt(attempt.id)
   }
-  const feedback =
-    removal?.kind === 'pending' ? (
-      <Alert variant="info">
-        {`Waiting for the removal result for Connection ${connectionId}. Current configuration does not confirm this operation's durability.`}
-      </Alert>
-    ) : removal?.kind === 'unconfirmed' ? (
-      <Alert variant="info">
-        {`Connection ${removal.result.connectionId} removal committed at configuration version ${removal.result.configurationVersion}, but durability is unconfirmed. External GitHub authorization and repositories remain unchanged.`}
-      </Alert>
-    ) : removal?.kind === 'error' ? (
-      <ErrorText error={removal.error} />
-    ) : null
+  useEffect(() => {
+    const current = removal.current
+    if (
+      !active.current ||
+      !navigationAttempt ||
+      current?.id !== navigationAttempt ||
+      current.kind !== 'acknowledged' ||
+      !current.destination
+    )
+      return
+    navigate(current.destination, { replace: true })
+  }, [navigationAttempt, removal.current, navigate])
+  const feedback = (
+    <>
+      {connection.kind === 'missing' && (
+        <WorkflowFeedback feedback={rename} workflows={workflows} />
+      )}
+      <WorkflowFeedback feedback={removal} workflows={workflows} />
+      {authorizations.map((authorization) => (
+        <WorkflowFeedback
+          key={authorization.current?.id ?? 'reauthorize'}
+          feedback={authorization}
+          workflows={workflows}
+        />
+      ))}
+    </>
+  )
 
   if (connection.kind === 'missing') {
     return (
@@ -124,12 +132,7 @@ function ConnectionDetail({ connectionId }: ConnectionPageProps) {
         </Alert>
       )}
       <DetailsSection connection={connection} />
-      <ManageSection
-        key={connection.id}
-        connection={connection}
-        removing={removal?.kind === 'pending'}
-        onRemove={remove}
-      />
+      <ManageSection key={connection.id} connection={connection} onRemove={remove} />
     </Page>
   )
 }

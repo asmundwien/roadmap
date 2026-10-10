@@ -31,6 +31,10 @@ const LAUNCH: Command = commandSchema.parse({
   project: fixtureProjectRef({ integration: 'local', id: 'fixture' }),
   operation: 'open-workspace',
 })
+const launchInput = {
+  project: fixtureProjectRef({ integration: 'local', id: 'fixture' }),
+  operation: 'open-workspace',
+} satisfies Parameters<RoadmapStore['workflows']['launchProject']>[0]
 
 function deferred() {
   let resolve: () => void = () => undefined
@@ -458,9 +462,11 @@ describe('HTTP outcomes and current WebSocket authority', () => {
     const c = await backend('C')
     client.route(c)
     client.withhold()
-    const outcome = await client.store.execute(commandSchema.parse(LAUNCH))
-    expect(outcome).toMatchObject({ ok: true, serverEpoch: 'C' })
-    expect(outcome).not.toHaveProperty('state')
+    const attempt = await client.store.workflows.launchProject(launchInput)
+    expect(attempt).toMatchObject({ kind: 'acknowledged', outcome: { ok: true, serverEpoch: 'C' } })
+    if (attempt.kind !== 'acknowledged') throw new Error('Expected native acknowledgement.')
+    expect(attempt.outcome).not.toHaveProperty('state')
+    expect(client.store.getSnapshot().workflows.attempts).toContainEqual(attempt)
     // A new socket is required; its baseline is withheld independently of the completed HTTP call.
     await until(() => client.wires.length === 2)
     await until(() => (client.wires[1]?.messages.length ?? 0) > 0)
@@ -488,19 +494,24 @@ describe('HTTP outcomes and current WebSocket authority', () => {
       await client.ready()
       expectEpoch(client.store, 'A')
       a.effectGate = deferred()
-      const delayed = client.store.execute(LAUNCH)
+      const delayed = client.store.workflows.launchProject(launchInput)
       await a.effectReached.promise
       const b = await backend('B')
       await client.reconnect(b, true)
       if (order === 'baseline-first') client.flush()
       a.effectGate.resolve()
-      const outcome = await delayed
-      expect(outcome).toMatchObject({
-        ok: true,
-        serverEpoch: 'A',
-        result: { type: 'launch-project-operation', status: 'invoked' },
+      const attempt = await delayed
+      expect(attempt).toMatchObject({
+        kind: 'acknowledged',
+        outcome: {
+          ok: true,
+          serverEpoch: 'A',
+          result: { type: 'launch-project-operation', status: 'invoked' },
+        },
       })
-      expect(outcome).not.toHaveProperty('state')
+      if (attempt.kind !== 'acknowledged') throw new Error('Expected native acknowledgement.')
+      expect(attempt.outcome).not.toHaveProperty('state')
+      expect(client.store.getSnapshot().workflows.attempts).toContainEqual(attempt)
       if (order === 'reply-first') {
         expectEpoch(client.store, 'A', 'retained')
         client.flush()
@@ -525,15 +536,19 @@ describe('HTTP outcomes and current WebSocket authority', () => {
     const client = browser(a)
     await client.ready()
     client.makeNextReplyUnreadable()
-    await expect(client.store.execute(LAUNCH)).rejects.toBeInstanceOf(Error)
-    expect(client.store.getSnapshot().command.error?.code).toBe('transport-failed')
+    const attempt = await client.store.workflows.launchProject(launchInput)
+    expect(attempt).toMatchObject({
+      kind: 'completion-unknown',
+      error: { code: 'transport-failed' },
+    })
+    expect(client.store.getSnapshot().workflows.attempts).toContainEqual(attempt)
     await publishName(a, 'A after unreadable completion')
     await until(
       () =>
         readApplicationState(client.store.getSnapshot().state)?.projects[0]?.management
           .displayName === 'A after unreadable completion',
     )
-    expect(client.store.getSnapshot().command.error?.code).toBe('transport-failed')
+    expect(client.store.getSnapshot().workflows.attempts).toContainEqual(attempt)
     expect(a.effects).toBe(1)
     expect(a.commandRequests).toBe(1)
   })
@@ -544,20 +559,21 @@ describe('HTTP outcomes and current WebSocket authority', () => {
     const client = browser(a)
     await client.ready()
     a.loseNextReply = true
-    const lost = client.store.execute(commandSchema.parse(LAUNCH)).then(
-      () => 'received',
-      () => 'lost',
-    )
+    const lost = client.store.workflows.launchProject(launchInput)
     await a.effectReached.promise
-    expect(await lost).toBe('lost')
-    expect(client.store.getSnapshot().command.error?.code).toBe('transport-failed')
+    const attempt = await lost
+    expect(attempt).toMatchObject({
+      kind: 'completion-unknown',
+      error: { code: 'transport-failed' },
+    })
+    expect(client.store.getSnapshot().workflows.attempts).toContainEqual(attempt)
     await publishName(a, 'A after lost reply')
     await until(
       () =>
         readApplicationState(client.store.getSnapshot().state)?.projects[0]?.management
           .displayName === 'A after lost reply',
     )
-    expect(client.store.getSnapshot().command.error?.code).toBe('transport-failed')
+    expect(client.store.getSnapshot().workflows.attempts).toContainEqual(attempt)
     const b = await backend('B')
     await client.reconnect(b)
     expectEpoch(client.store, 'B')
@@ -567,7 +583,7 @@ describe('HTTP outcomes and current WebSocket authority', () => {
         readApplicationState(client.store.getSnapshot().state)?.projects[0]?.management
           .displayName === 'B after lost reply',
     )
-    expect(client.store.getSnapshot().command.error?.code).toBe('transport-failed')
+    expect(client.store.getSnapshot().workflows.attempts).toContainEqual(attempt)
     expect(a.effects).toBe(1)
     expect(a.commandRequests).toBe(1)
     expect(b.effects).toBe(0)
@@ -583,13 +599,10 @@ describe('HTTP outcomes and current WebSocket authority', () => {
       const retained = client.store.getSnapshot().state
       a.configurationGate = deferred()
       const project = fixtureProjectRef({ integration: 'local', id: 'fixture' })
-      const command = client.store.execute(
-        commandSchema.parse(
-          type === 'rename-project'
-            ? { type, project, name: 'Saved after retirement', expectedConfigurationVersion: 1 }
-            : { type, project, expectedConfigurationVersion: 1 },
-        ),
-      )
+      const command =
+        type === 'rename-project'
+          ? client.store.workflows.renameProject({ project, name: 'Saved after retirement' })
+          : client.store.workflows.removeProject({ project })
       void command.catch(() => undefined)
       await a.configurationReached.promise
       const applicationDone = a.application.stop()
@@ -602,13 +615,18 @@ describe('HTTP outcomes and current WebSocket authority', () => {
         await until(() => a.retiredSourceOwners === 1)
         expect(a.persistedConfiguration).toBeNull()
         a.configurationGate.resolve()
-        const outcome = await command
-        expect(outcome).toMatchObject({
-          ok: true,
-          result: { type, project, configurationVersion: 2, commit: 'committed' },
-          serverEpoch: 'A',
+        const attempt = await command
+        expect(attempt).toMatchObject({
+          kind: 'acknowledged',
+          outcome: {
+            ok: true,
+            result: { type, project, configurationVersion: 2, commit: 'committed' },
+            serverEpoch: 'A',
+          },
         })
-        expect(outcome).not.toHaveProperty('state')
+        if (attempt.kind !== 'acknowledged') throw new Error('Expected saved acknowledgement.')
+        expect(attempt.outcome).not.toHaveProperty('state')
+        expect(client.store.getSnapshot().workflows.attempts).toContainEqual(attempt)
         const saved = readApplicationState(a.application.current())
         const previous = readApplicationState(retained)
         if (type === 'rename-project') {
@@ -625,7 +643,6 @@ describe('HTTP outcomes and current WebSocket authority', () => {
         expect(client.store.getSnapshot()).toMatchObject({
           synchronization: 'retained',
           state: retained,
-          command: { error: null },
         })
         expect(readApplicationState(a.application.current()).projects).toEqual(saved.projects)
         expect(readApplicationState(a.application.current()).automation.availability.status).toBe(
@@ -650,7 +667,7 @@ describe('HTTP outcomes and current WebSocket authority', () => {
     const client = browser(a)
     await client.ready()
     a.effectGate = deferred()
-    const command = client.store.execute(commandSchema.parse(LAUNCH))
+    const command = client.store.workflows.launchProject(launchInput)
     void command.catch(() => undefined)
     await a.effectReached.promise
     try {
@@ -668,15 +685,20 @@ describe('HTTP outcomes and current WebSocket authority', () => {
       await new Promise<void>((resolve) => setImmediate(resolve))
       expect(transportClosed).toBe(false)
       a.effectGate.resolve()
-      expect(await command).toMatchObject({
-        ok: true,
-        result: {
-          type: 'launch-project-operation',
-          operation: 'open-workspace',
-          status: 'invoked',
+      const attempt = await command
+      expect(attempt).toMatchObject({
+        kind: 'acknowledged',
+        outcome: {
+          ok: true,
+          result: {
+            type: 'launch-project-operation',
+            operation: 'open-workspace',
+            status: 'invoked',
+          },
+          serverEpoch: 'A',
         },
-        serverEpoch: 'A',
       })
+      expect(client.store.getSnapshot().workflows.attempts).toContainEqual(attempt)
       await Promise.all([transportDone, applicationDone, serverDone])
       expectEpoch(client.store, 'A', 'retained')
       expect(a.transport.clientCount()).toBe(0)

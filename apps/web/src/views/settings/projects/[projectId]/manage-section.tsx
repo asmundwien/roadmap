@@ -1,5 +1,3 @@
-import type { Command, SafeError } from '@roadmap/contracts/operations'
-import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
 import { ControlGroup } from '@roadmap/ui/control-group'
 import { Modal } from '@roadmap/ui/modal'
@@ -9,121 +7,39 @@ import { type FormEvent, useState } from 'react'
 import type { KnownProjectResult } from '@/resources/results'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { SettingsForm } from '@/views/shared/settings-form'
-import { ErrorText, observedLabel, projectIdentity } from '@/views/shared/settings-shared'
+import { WorkflowFeedback } from '@/views/shared/workflow-feedback'
 import { WorkspaceFolderSelector } from '@/views/shared/workspace-folder-selector'
+import { type WorkflowFeedbackResult, workflowFeedback } from '@/workflows/workflows'
 
 type ManageSectionProps = {
   project: KnownProjectResult
-  removing: boolean
+  removalFeedback: WorkflowFeedbackResult
   onRemove: () => Promise<void>
 }
 
-export function ManageSection({ project, removing, onRemove }: ManageSectionProps) {
-  const { configuration, configurationVersion, command, execute, query } = useRoadmap(
-    (roadmap) => ({
-      configuration: roadmap.configuration,
-      configurationVersion: roadmap.configurationVersion,
-      command: roadmap.command,
-      execute: roadmap.execute,
-      query: roadmap.query,
+export function ManageSection({ project, removalFeedback, onRemove }: ManageSectionProps) {
+  const { workflows, refreshFeedback, repairFeedback, folderFeedback } = useRoadmap((roadmap) => ({
+    workflows: roadmap.workflows,
+    refreshFeedback: workflowFeedback(roadmap.workflowState, 'refresh-project', {
+      kind: 'project',
+      project: project.ref,
     }),
-  )
-  const [error, setError] = useState<SafeError | string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
-  const [workspaceError, setWorkspaceError] = useState<string | null>(null)
+    repairFeedback: workflowFeedback(roadmap.workflowState, 'repair-project-workspace', {
+      kind: 'project',
+      project: project.ref,
+    }),
+    folderFeedback: workflowFeedback(
+      roadmap.workflowState,
+      'select-workspace',
+      { kind: 'none' },
+      { kind: 'project', project: project.ref },
+    ),
+  }))
   const [workspacePath, setWorkspacePath] = useState('')
   const [confirming, setConfirming] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const blocked = removing || busy || command.inFlight || !configuration.valid
-
-  const run = async (
-    next: Extract<Command, { type: 'refresh-project' | 'repair-project-workspace' }>,
-  ): Promise<void> => {
-    setBusy(true)
-    setError(null)
-    setNotice(null)
-    setWorkspaceError(null)
-    try {
-      const outcome = await execute(next)
-      if (!outcome.ok) {
-        if (next.type === 'repair-project-workspace' && outcome.error.field?.includes('workspace'))
-          setWorkspaceError(outcome.error.message)
-        else setError(outcome.error)
-        return
-      }
-      const result = outcome.result
-      const identity = projectIdentity({ ref: result.project })
-      switch (result.type) {
-        case 'refresh-project': {
-          const attempt = result.attempt
-          const source =
-            attempt.provenance.integration === 'local'
-              ? attempt.provenance.path
-              : `GitHub repository ${attempt.provenance.repositoryId}, ${attempt.provenance.stage}`
-          switch (attempt.kind) {
-            case 'observed':
-              setNotice(
-                `Source read completed for ${identity} at ${observedLabel(attempt.observedAt)}. Attempted at ${observedLabel(attempt.attemptedAt)} from ${source}. A completed read does not imply that source content changed.`,
-              )
-              break
-            case 'degraded':
-              setNotice(
-                `Refresh for ${identity} was incomplete at ${observedLabel(attempt.attemptedAt)} from ${source}. ${attempt.cause} Last successful source read: ${observedLabel(attempt.observedAt)}. Retained facts are not a new complete source read.`,
-              )
-              break
-            case 'failed':
-              setNotice(
-                `Source read failed for ${identity} at ${observedLabel(attempt.attemptedAt)} from ${source}. ${attempt.cause} No successful source read was established by this attempt.`,
-              )
-              break
-            case 'proven-absent':
-              setNotice(
-                `Source absence established for ${identity} at ${observedLabel(attempt.observedAt)}. Attempted at ${observedLabel(attempt.attemptedAt)} from ${source}. This is not a successful read of source content.`,
-              )
-              break
-            default: {
-              const exhaustive: never = attempt
-              return exhaustive
-            }
-          }
-          return
-        }
-        case 'repair-project-workspace':
-          setNotice(
-            result.commit === 'committed'
-              ? `Workspace repair committed for ${identity} at configuration version ${result.configurationVersion}. Canonical Workspace: ${result.workspacePath}.`
-              : `Workspace repair committed for ${identity} at configuration version ${result.configurationVersion}, but durability is unconfirmed. Canonical Workspace: ${result.workspacePath}. Check configuration before another change.`,
-          )
-          return
-        default: {
-          const exhaustive: never = result
-          return exhaustive
-        }
-      }
-    } catch {
-      setError(
-        next.type === 'refresh-project'
-          ? 'The refresh may have completed, but its result is unknown. Displayed source facts do not confirm this attempt.'
-          : 'The change may have completed. Check the relevant configuration before retrying.',
-      )
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const repair = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const path = workspacePath
-    if (!path) {
-      setWorkspaceError('Choose the moved Workspace.')
-      return
-    }
-    void run({
-      type: 'repair-project-workspace',
-      expectedConfigurationVersion: configurationVersion,
-      project: project.ref,
-      workspace: { path },
-    })
+    void workflows.repairWorkspace({ project: project.ref, path: workspacePath })
   }
 
   return (
@@ -132,22 +48,19 @@ export function ManageSection({ project, removing, onRemove }: ManageSectionProp
         <SectionTitle>Manage project registration</SectionTitle>
       </SectionHeader>
       <SectionBody>
-        {notice && <Alert variant="info">{notice}</Alert>}
-        <ErrorText error={error} />
+        <WorkflowFeedback feedback={refreshFeedback} workflows={workflows} />
+        <WorkflowFeedback feedback={repairFeedback} workflows={workflows} />
+        {!project.capabilities.repairOffered && (
+          <WorkflowFeedback feedback={folderFeedback} workflows={workflows} />
+        )}
         <Surface>
           <SurfaceTitle>Refresh project</SurfaceTitle>
           <p>Check the Project source for current maps and availability.</p>
           <ControlGroup>
             <Button
               type="button"
-              disabled={blocked}
-              onClick={() =>
-                void run({
-                  type: 'refresh-project',
-                  expectedConfigurationVersion: configurationVersion,
-                  project: project.ref,
-                })
-              }
+              disabled={refreshFeedback.blocked || refreshFeedback.pending}
+              onClick={() => void workflows.refreshProject({ project: project.ref })}
             >
               Refresh now
             </Button>
@@ -165,16 +78,16 @@ export function ManageSection({ project, removing, onRemove }: ManageSectionProp
                 label="New Workspace"
                 description="Choose the moved folder that contains the same Project."
                 path={workspacePath}
-                error={workspaceError ?? undefined}
-                disabled={blocked}
-                query={query}
-                onChange={(path) => {
-                  setWorkspacePath(path)
-                  setWorkspaceError(null)
-                }}
+                error={repairFeedback.fields.workspace ?? repairFeedback.fields.path}
+                owner={{ kind: 'project', project: project.ref }}
+                onChange={setWorkspacePath}
               />
               <ControlGroup>
-                <Button variant="primary" type="submit" disabled={blocked}>
+                <Button
+                  variant="primary"
+                  type="submit"
+                  disabled={repairFeedback.blocked || repairFeedback.pending}
+                >
                   Validate and repair
                 </Button>
               </ControlGroup>
@@ -188,7 +101,7 @@ export function ManageSection({ project, removing, onRemove }: ManageSectionProp
             <Button
               variant="danger"
               type="button"
-              disabled={blocked}
+              disabled={removalFeedback.blocked || removalFeedback.pending}
               onClick={() => setConfirming(true)}
             >
               Remove project registration
@@ -202,7 +115,7 @@ export function ManageSection({ project, removing, onRemove }: ManageSectionProp
               variant="danger"
               appearance="solid"
               type="button"
-              disabled={blocked}
+              disabled={removalFeedback.blocked || removalFeedback.pending}
               onClick={() => void onRemove()}
             >
               Remove project

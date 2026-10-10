@@ -274,3 +274,177 @@ test('refuses storage factories outside composition even through an imported ali
     [],
   )
 })
+
+test('refuses raw facade execution and query access in views', async (context) => {
+  const path = 'apps/web/src/views/settings/projects/details-section.tsx'
+  for (const [name, source, line] of [
+    [
+      'selected execute function',
+      "import { useRoadmap } from '@/store/roadmap-provider'\nconst execute = useRoadmap(read => read.execute)\nexecute(command)",
+      2,
+    ],
+    [
+      'selected query function',
+      "import { useRoadmap } from '@/store/roadmap-provider'\nconst query = useRoadmap(read => read.query)\nquery({ type: 'select-workspace' })",
+      2,
+    ],
+    [
+      'facade import alias and selected object',
+      "import { useRoadmap as select } from '@/store/roadmap-provider'\nconst actions = select(read => ({ run: read.execute }))\nactions.run(command)",
+      2,
+    ],
+    [
+      'literal property',
+      "import { useRoadmap } from '@/store/roadmap-provider'\nconst execute = useRoadmap(read => read['execute'])",
+      2,
+    ],
+    [
+      'selector destructuring',
+      "import { useRoadmap } from '@/store/roadmap-provider'\nconst execute = useRoadmap(({ execute: run }) => run)",
+      2,
+    ],
+    [
+      'selected root alias',
+      "import { useRoadmap } from '@/store/roadmap-provider'\nconst read = useRoadmap(read => read)\nconst actions = read\nactions.execute(command)",
+      4,
+    ],
+    [
+      'selected root query destructuring',
+      "import { useRoadmap } from '@/store/roadmap-provider'\nconst read = useRoadmap(read => read)\nconst { query: choose } = read\nchoose({ type: 'select-workspace' })",
+      3,
+    ],
+    [
+      'namespace facade import',
+      "import * as facade from '@/store/roadmap-provider'\nconst execute = facade.useRoadmap(read => read.execute)",
+      2,
+    ],
+    [
+      'relative facade import',
+      "import { useRoadmap } from '../../../store/roadmap-provider'\nconst query = useRoadmap(read => read.query)",
+      2,
+    ],
+    [
+      'typed facade callback',
+      "import type { RoadmapViewState } from '@/store/roadmap-provider'\nfunction select(read: RoadmapViewState) { return read.execute }",
+      2,
+    ],
+  ]) {
+    await context.test(name, () => {
+      assert.deepEqual(inspectSource(path, source), [
+        { rule: 'web-views-through-workflows', path, line },
+      ])
+    })
+  }
+})
+
+test('refuses view-owned versioned Command construction', async (context) => {
+  const path = 'apps/web/src/views/settings/projects/details-section.tsx'
+  for (const [name, source] of [
+    [
+      'Command annotation',
+      "import type { Command } from '@roadmap/contracts/operations'\nconst command: Command = { type: 'rename-project', expectedConfigurationVersion: version, project, name }",
+    ],
+    [
+      'renamed Command annotation',
+      "import type { Command as Request } from '@roadmap/contracts/operations'\nconst command: Request = { type: 'rename-project', expectedConfigurationVersion: version, project, name }",
+    ],
+    [
+      'Command variant satisfies',
+      "import type { Command } from '@roadmap/contracts/operations'\nconst command = { type: 'rename-project', expectedConfigurationVersion: version, project, name } satisfies Extract<Command, { type: 'rename-project' }>",
+    ],
+    [
+      'namespace Command annotation',
+      "import type * as operations from '@roadmap/contracts/operations'\nconst command: operations.Command = { type: 'rename-project', expectedConfigurationVersion: version, project, name }",
+    ],
+    [
+      'Command schema parsing',
+      "import { commandSchema as request } from '@roadmap/contracts/operations'\nconst command = request.parse({ type: 'rename-project', expectedConfigurationVersion: version, project, name })",
+    ],
+    [
+      'relative public Command import',
+      "import type { Command } from '../../../../../../packages/contracts/src/operations.ts'\nconst command: Command = { type: 'rename-project', expectedConfigurationVersion: version, project, name }",
+    ],
+  ]) {
+    await context.test(name, () => {
+      assert.deepEqual(inspectSource(path, source), [
+        { rule: 'web-views-through-workflows', path, line: 2 },
+      ])
+    })
+  }
+})
+
+test('refuses view-owned ConfigurationVersion construction but permits reading accepted versions', () => {
+  const path = 'apps/web/src/views/settings/projects/details-section.tsx'
+  for (const source of [
+    "import { configurationVersionSchema } from '@roadmap/contracts/identity'\nconst version = configurationVersionSchema.parse(1)",
+    "import { configurationVersionSchema as revision } from '@roadmap/contracts/identity'\nconst version = revision.safeParse(input)",
+    "import * as identity from '@roadmap/contracts/identity'\nconst version = identity.configurationVersionSchema.parse(input)",
+  ]) {
+    assert.deepEqual(inspectSource(path, source), [
+      { rule: 'web-views-through-workflows', path, line: 2 },
+    ])
+  }
+  for (const source of [
+    "import { useRoadmap } from '@/store/roadmap-provider'; const version = useRoadmap(read => read.configurationVersion)",
+    "import type { ConfigurationVersion } from '@roadmap/contracts/identity'; declare const acceptedVersion: ConfigurationVersion; export const revision = acceptedVersion",
+    "import { configurationVersionSchema } from '@roadmap/contracts/identity'; function read(configurationVersionSchema) { return configurationVersionSchema.parse(1) }",
+    'const configurationVersionSchema = { parse(value) { return value } }; configurationVersionSchema.parse(1)',
+  ]) {
+    assert.deepEqual(inspectSource(path, source), [], source)
+  }
+})
+
+test('permits lexical workflow names and public operation-derived drafts', () => {
+  const path = 'apps/web/src/views/shared/fixture.tsx'
+  for (const source of [
+    'const api = { execute() { return 1 }, query() { return 2 } }; api.execute(); api.query()',
+    'function run(execute, query) { execute(); query() }',
+    'function useRoadmap(selector) { return selector({ execute() { return 1 } }) }; useRoadmap(read => read.execute)()',
+    "import { useRoadmap } from '@/store/roadmap-provider'; function run(useRoadmap) { return useRoadmap(read => read.execute) }",
+    "import { useRoadmap } from '@/store/roadmap-provider'; useRoadmap(read => { const local = { execute() { return 1 } }; return local.execute() })",
+    "import { useRoadmap } from '@/store/roadmap-provider'; useRoadmap(read => { function run(read) { return read.execute() }; return run(local) })",
+    "import type { Command } from '@roadmap/contracts/operations'; function run() { type Command = { expectedConfigurationVersion: number }; const record: Command = { expectedConfigurationVersion: 1 }; return record }",
+    "import { commandSchema } from '@roadmap/contracts/operations'; function run(commandSchema) { return commandSchema.parse({ expectedConfigurationVersion: 1 }) }",
+    'type Command = { type: string; expectedConfigurationVersion: number }; const record: Command = { type: "note", expectedConfigurationVersion: 1 }',
+    'const metadata = { expectedConfigurationVersion: 1 }; type execute = () => void; type query = () => void',
+    "import type { Command, CommandResultFor } from '@roadmap/contracts/operations'; type Candidate = Extract<Command, { type: 'register-project' }>['candidate']; type Result = CommandResultFor<Extract<Command, { type: 'register-project' }>>; declare const candidate: Candidate; export const draft = { candidate }",
+    "import type { RoadmapViewState } from '@/store/roadmap-provider'; type Execute = RoadmapViewState['execute']; type Query = RoadmapViewState['query']",
+  ]) {
+    assert.deepEqual(inspectSource(path, source), [], source)
+  }
+})
+
+test('permits named workflow consumers and the store transport seam', () => {
+  assert.deepEqual(
+    inspectSource(
+      'apps/web/src/views/shared/workflow-feedback.tsx',
+      "import { useRoadmap } from '@/store/roadmap-provider'; import { workflowFeedback } from '@/workflows/workflows'; import { Alert } from '@roadmap/ui/alert'; import { createElement } from 'react'; const selected = useRoadmap(read => ({ workflows: read.workflows, feedback: workflowFeedback(read.workflowState, 'rename-project', { kind: 'project', project }) })); selected.workflows.renameProject({ project, name }); createElement(Alert, null, selected.feedback.message)",
+    ),
+    [],
+  )
+  const transport = 'transport.execute(command); transport.query({ type: "select-workspace" })'
+  assert.deepEqual(inspectSource('apps/web/src/workflows/workflows.ts', transport), [])
+  assert.deepEqual(inspectSource('apps/web/src/store/roadmap-store.ts', transport), [])
+  assert.deepEqual(
+    inspectSource(
+      'apps/web/src/views/fixture.test.tsx',
+      "import { useRoadmap } from '@/store/roadmap-provider'; const execute = useRoadmap(read => read.execute); execute(command)",
+    ),
+    [],
+  )
+})
+
+test('refuses source transport in the workflow owner without banning its narrow seam', () => {
+  const path = 'apps/web/src/workflows/workflows.ts'
+  for (const source of [
+    "fetch('/api/execute')",
+    "const root = globalThis; root.fetch('/api/execute')",
+    "new WebSocket('ws://localhost')",
+  ]) {
+    assert.ok(
+      inspectSource(path, source).some(({ rule }) => rule === 'web-views-through-store'),
+      source,
+    )
+  }
+  assert.deepEqual(inspectSource(path, 'transport.execute(command); transport.query(query)'), [])
+})

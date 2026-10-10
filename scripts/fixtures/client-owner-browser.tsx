@@ -1,4 +1,4 @@
-import { commandSchema } from '@roadmap/contracts/operations'
+import { projectRefSchema } from '@roadmap/contracts/identity'
 import { StrictMode, useLayoutEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, useNavigate } from 'react-router'
@@ -9,6 +9,11 @@ import {
   useRoadmap,
 } from '../../apps/web/src/store/roadmap-provider'
 import { createRoadmapStore } from '../../apps/web/src/store/roadmap-store'
+import {
+  nativeOperationFeedback,
+  type RoadmapWorkflows,
+  type WorkflowAttempt,
+} from '../../apps/web/src/workflows/workflows'
 import '@roadmap/ui/index.css'
 import '../../apps/web/src/index.module.css'
 
@@ -33,7 +38,13 @@ const derivedSelection = (view: RoadmapViewState) => ({
     name: project.management.displayName ?? null,
   })),
 })
-const outcomes: unknown[] = []
+const outcomes: WorkflowAttempt[] = []
+const fixtureProject = projectRefSchema.parse({ integration: 'local', projectId: 'fixture' })
+const unavailableProject = projectRefSchema.parse({
+  integration: 'local',
+  projectId: 'unavailable',
+})
+let observedWorkflows: RoadmapWorkflows | null = null
 let selectedProjects: RoadmapViewState['projects'] | null = null
 let observedStatus: ReturnType<typeof statusSelection> | null = null
 let navigateTo: ((path: string) => void) | null = null
@@ -49,8 +60,7 @@ let savedNodes: {
   draft: HTMLInputElement
 } | null = null
 let pinnedReadState: ReturnType<typeof store.getSnapshot>['state'] = null
-let pinnedUnknown: unknown = null
-let pinnedCommandError: ReturnType<typeof store.getSnapshot>['command']['error'] = null
+let pinnedUnknown: WorkflowAttempt | null = null
 
 // Both projections retain compatible object keys. The old no-argument hook ignores its argument at runtime,
 // so its regression is a real render/identity assertion rather than an import or destructuring failure.
@@ -106,6 +116,17 @@ function StatusProbe() {
   return <output data-fixture-status>{JSON.stringify(value)}</output>
 }
 
+function WorkflowProbe() {
+  const workflows = useRoadmap((view) => view.workflows)
+  useLayoutEffect(() => {
+    observedWorkflows = workflows
+    return () => {
+      observedWorkflows = null
+    }
+  }, [workflows])
+  return null
+}
+
 function LocalDraft() {
   const [draft, setDraft] = useState('')
   return (
@@ -140,6 +161,7 @@ function MountedApp() {
         <>
           <ProjectsProbe key={churn} />
           <DerivedProbe />
+          <WorkflowProbe />
           <StatusProbe />
         </>
       )}
@@ -206,35 +228,35 @@ function identity() {
   }
 }
 
-async function execute(kind: 'conflict' | 'successor-conflict' | 'host') {
-  const state = store.getSnapshot().state
-  const readable =
-    state?.phase === 'ready' ? state : state && 'retained' in state ? state.retained : null
-  if (readable === null || readable === undefined)
-    throw new Error('Command fixture requires accepted readable state.')
-  const command = commandSchema.parse(
-    kind === 'host'
-      ? {
-          type: 'launch-project-operation',
-          expectedConfigurationVersion: readable.configurationVersion,
-          project: { integration: 'local', projectId: 'fixture' },
-          operation: 'open-workspace',
-        }
-      : {
-          type: 'rename-project',
-          expectedConfigurationVersion:
-            kind === 'successor-conflict' ? readable.configurationVersion : 0,
-          project: { integration: 'local', projectId: 'fixture' },
-          name: 'Rejected rename must never appear',
-        },
-  )
-  try {
-    outcomes.push(await store.execute(command))
-  } catch (error: unknown) {
-    const current = store.getSnapshot()
-    if (!(error instanceof Error) || current.command.error?.code !== 'transport-failed') throw error
-    outcomes.push(Object.freeze({ kind: 'completion-unknown', message: error.message }))
-  }
+function workflows() {
+  if (observedWorkflows === null) throw new Error('Readable workflow facade is not mounted.')
+  return observedWorkflows
+}
+
+async function renameProject() {
+  const attempt = await workflows().renameProject({
+    project: fixtureProject,
+    name: 'Rejected rename must never appear',
+  })
+  outcomes.push(attempt)
+  return attempt
+}
+
+async function launchProject() {
+  const attempt = await workflows().launchProject({
+    project: fixtureProject,
+    operation: 'open-workspace',
+  })
+  outcomes.push(attempt)
+  return attempt
+}
+
+async function refreshUnavailable() {
+  const attempt = await workflows().refreshProject({
+    project: unavailableProject,
+  })
+  outcomes.push(attempt)
+  return attempt
 }
 
 const api = {
@@ -245,6 +267,10 @@ const api = {
     selectedProjects,
     observedStatus,
     outcomes: [...outcomes],
+    launchFeedback: nativeOperationFeedback(store.getSnapshot().workflows, {
+      project: fixtureProject,
+      operation: 'open-workspace',
+    }),
     pathname: location.pathname,
   }),
   navigate(path: string) {
@@ -263,21 +289,38 @@ const api = {
   },
   pinIdentity,
   identity,
-  execute,
+  renameProject,
+  launchProject,
+  refreshUnavailable,
   pinReadState() {
     pinnedReadState = store.getSnapshot().state
   },
   readStateIdentity: () => pinnedReadState === store.getSnapshot().state,
   pinUnknown() {
-    pinnedUnknown = outcomes.at(-1)
-    pinnedCommandError = store.getSnapshot().command.error
+    const attempt = outcomes.at(-1)
+    if (attempt?.kind !== 'completion-unknown') throw new Error('No unknown attempt to pin.')
+    pinnedUnknown = attempt
   },
-  unknownIdentity: () => ({
-    completion: pinnedUnknown === outcomes.at(-1),
-    completionFrozen: Object.isFrozen(pinnedUnknown),
-    commandError: pinnedCommandError === store.getSnapshot().command.error,
-    commandErrorFrozen: Object.isFrozen(store.getSnapshot().command.error),
-  }),
+  unknownIdentity: () => {
+    const retained = store
+      .getSnapshot()
+      .workflows.attempts.find((attempt) => attempt.id === pinnedUnknown?.id)
+    return {
+      completion: pinnedUnknown === retained,
+      completionFrozen: Object.isFrozen(retained),
+      error:
+        pinnedUnknown !== null &&
+        retained !== undefined &&
+        'error' in pinnedUnknown &&
+        'error' in retained &&
+        pinnedUnknown.error === retained.error,
+      errorFrozen: retained !== undefined && 'error' in retained && Object.isFrozen(retained.error),
+    }
+  },
+  dismissUnknown() {
+    if (pinnedUnknown === null) throw new Error('No unknown attempt to dismiss.')
+    workflows().dismiss({ attemptId: pinnedUnknown.id })
+  },
   dispose() {
     mountedRoot?.unmount()
     mountedRoot = null

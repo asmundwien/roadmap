@@ -21,8 +21,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { RoadmapProvider } from '@/store/roadmap-provider'
-import type { RoadmapStore } from '@/store/roadmap-store'
-import { makeRoadmapSnapshot } from '@/views/map/test-fixtures'
+import { makeRoadmapSnapshot, makeRoadmapStore } from '@/views/map/test-fixtures'
 import {
   absentMap,
   currentProject,
@@ -174,7 +173,6 @@ function renderPage(
     evidence: [],
     overrides: [],
   },
-  inFlight = false,
   connections: Connection[] = [connection],
   selectedProject: Project['ref'] = project.ref,
 ): string {
@@ -193,29 +191,8 @@ function renderPage(
     automation,
     capturedAt: 0,
   })
-  const snapshot = Object.freeze({
-    ...(initial
-      ? makeRoadmapSnapshot(state)
-      : ({
-          transport: 'live',
-          synchronization: 'not-ready',
-          lifecycle: null,
-          state: null,
-          command: { inFlight: false, error: null },
-        } satisfies ReturnType<RoadmapStore['getSnapshot']>)),
-    command: Object.freeze({ inFlight, error: null }),
-  })
-  const store: RoadmapStore = {
-    subscribe: () => () => undefined,
-    getSnapshot: () => snapshot,
-    start: () => () => undefined,
-    query: async () => {
-      throw new Error('Unexpected query')
-    },
-    execute: async () => {
-      throw new Error('Unexpected command')
-    },
-  }
+  const snapshot = makeRoadmapSnapshot(initial ? state : null)
+  const store = makeRoadmapStore([], snapshot)
   return renderToStaticMarkup(
     createElement(
       MemoryRouter,
@@ -230,6 +207,24 @@ function renderPage(
 }
 
 describe('ProjectSettingsPage', () => {
+  it('keeps enabling unavailable while a saved preference can still be disabled', () => {
+    const automation: ReadyApplicationState['automation'] = {
+      enabled: false,
+      enabledProjects: [],
+      availability: { status: 'unavailable', cause: 'Harness command missing.' },
+      evidence: [],
+      overrides: [],
+    }
+    const disabledPreference = renderPage([project], true, true, automation)
+    expect(disabledPreference.match(/<input[^>]*role="switch"[^>]*>/)?.[0]).toContain('disabled=""')
+    const enabledPreference = renderPage([project], true, true, {
+      ...automation,
+      enabledProjects: [project.ref],
+    })
+    expect(enabledPreference.match(/<input[^>]*role="switch"[^>]*>/)?.[0]).not.toContain(
+      'disabled=""',
+    )
+  })
   it('preserves the project preference while global Automation is paused', () => {
     const markup = renderPage([project], true, true, {
       enabled: false,
@@ -337,53 +332,42 @@ describe('ProjectSettingsPage', () => {
     expect(toggle).not.toContain('disabled=""')
   })
 
-  it.each([
-    { valid: false, inFlight: false },
-    { valid: true, inFlight: true },
-  ])(
-    'blocks ordinary and recovery controls while changes are blocked: %j',
-    ({ valid, inFlight }) => {
-      const automation: ReadyApplicationState['automation'] = {
-        enabled: true,
-        enabledProjects: [],
-        availability: { status: 'ready' },
-        evidence: [],
-        overrides: [],
-      }
-      const ordinary = renderPage([project], true, valid, automation, inFlight)
-      expect(ordinary.match(/<input[^>]*role="switch"[^>]*>/)?.[0]).toContain('disabled=""')
-      const recovery = renderPage(
-        [project],
-        true,
-        valid,
+  it('blocks ordinary and recovery configuration controls when configuration is invalid', () => {
+    const valid = false
+    const automation: ReadyApplicationState['automation'] = {
+      enabled: true,
+      enabledProjects: [],
+      availability: { status: 'ready' },
+      evidence: [],
+      overrides: [],
+    }
+    const ordinary = renderPage([project], true, valid, automation)
+    expect(ordinary.match(/<input[^>]*role="switch"[^>]*>/)?.[0]).toContain('disabled=""')
+    const recovery = renderPage([project], true, valid, {
+      ...automation,
+      evidence: [
         {
-          ...automation,
-          evidence: [
-            {
-              target: {
-                map: { project: project.ref, mapId: mapIdSchema.parse('map') },
-                ticketId: ticketIdSchema.parse('ticket'),
-              },
-              classification: {
-                status: 'completed',
-                admission: 'automatic',
-                processResult: { status: 'exited', code: 0 },
-                verdict: { value: 'afk', reason: 'Recorded AFK evidence.' },
-              },
-              wayfinder: {
-                status: 'outcome-unknown',
-                admission: 'automatic',
-                reason: 'Server stopped.',
-                acknowledged: false,
-              },
-            },
-          ],
+          target: {
+            map: { project: project.ref, mapId: mapIdSchema.parse('map') },
+            ticketId: ticketIdSchema.parse('ticket'),
+          },
+          classification: {
+            status: 'completed',
+            admission: 'automatic',
+            processResult: { status: 'exited', code: 0 },
+            verdict: { value: 'afk', reason: 'Recorded AFK evidence.' },
+          },
+          wayfinder: {
+            status: 'outcome-unknown',
+            admission: 'automatic',
+            reason: 'Server stopped.',
+            acknowledged: false,
+          },
         },
-        inFlight,
-      )
-      expect(recovery).toMatch(/<button[^>]*disabled=""[^>]*>[^<]*Acknowledge/)
-    },
-  )
+      ],
+    })
+    expect(recovery).toMatch(/<button[^>]*disabled=""[^>]*>[^<]*Acknowledge/)
+  })
 
   it.each([
     { name: 'current target', maps: [affectedMap, siblingMap] },
@@ -495,7 +479,7 @@ describe('ProjectSettingsPage', () => {
         ...connection,
         availability: { status, observedAt: 2_000, cause: 'Connection health check failed.' },
       }
-      const markup = renderPage([project], true, true, undefined, false, [unhealthy])
+      const markup = renderPage([project], true, true, undefined, [unhealthy])
       expect(markup).toContain('Connection health check failed.')
       expect(markup).toContain('Current readable content.')
       expect(markup).toContain('1970-01-01T00:00:01.000Z')
@@ -571,7 +555,6 @@ describe('ProjectSettingsPage', () => {
         true,
         true,
         undefined,
-        false,
         [
           {
             id: connectionIdSchema.parse('github'),

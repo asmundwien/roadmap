@@ -1,5 +1,4 @@
 import type { ConnectionId } from '@roadmap/contracts/identity'
-import type { CommandResult } from '@roadmap/contracts/operations'
 import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
 import { Link as ExternalLink } from '@roadmap/ui/link'
@@ -9,25 +8,20 @@ import { TextInput } from '@roadmap/ui/text-input'
 import { type FormEvent, useState } from 'react'
 import { Link } from '@/navigation'
 import { type ConnectionResult, resolveConnection } from '@/resources/results'
-import { projectSettingsPath, routePaths } from '@/router'
+import { routePaths } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
-import {
-  projectRegistrationDraft,
-  projectRegistrationError,
-} from '@/views/shared/project-registration'
 import { SettingsForm } from '@/views/shared/settings-form'
 import { SettingsFormActions } from '@/views/shared/settings-form-actions'
 import { ErrorText } from '@/views/shared/settings-shared'
+import { WorkflowFeedback } from '@/views/shared/workflow-feedback'
 import { WorkspaceFolderSelector } from '@/views/shared/workspace-folder-selector'
+import { type WorkflowScope, workflowFeedback } from '@/workflows/workflows'
 
 type ProjectImportPageProps = { connectionId: ConnectionId }
 
 export function ProjectImportPage({ connectionId }: ProjectImportPageProps) {
-  const { connection, configurationValid } = useRoadmap((roadmap) => ({
-    connection: resolveConnection(roadmap, connectionId),
-    configurationValid: roadmap.configuration.valid,
-  }))
+  const connection = useRoadmap((roadmap) => resolveConnection(roadmap, connectionId))
 
   if (connection.kind === 'missing') {
     return (
@@ -43,68 +37,41 @@ export function ProjectImportPage({ connectionId }: ProjectImportPageProps) {
     )
   }
 
-  return (
-    <ProjectImportForm
-      key={connection.id}
-      connection={connection}
-      configurationValid={configurationValid}
-    />
-  )
+  return <ProjectImportForm key={connection.id} connection={connection} />
 }
 
 type ProjectImportFormProps = {
   connection: Extract<ConnectionResult, { kind: 'known' }>
-  configurationValid: boolean
 }
 
-function ProjectImportForm({ connection, configurationValid }: ProjectImportFormProps) {
-  const { configurationVersion, command, query, execute } = useRoadmap((roadmap) => ({
-    configurationVersion: roadmap.configurationVersion,
-    command: { inFlight: roadmap.command.inFlight },
-    query: roadmap.query,
-    execute: roadmap.execute,
+function ProjectImportForm({ connection }: ProjectImportFormProps) {
+  const owner: WorkflowScope = {
+    kind: 'registration',
+    integration: connection.registration.identity.integration,
+    connectionId: connection.registration.identity.id,
+  }
+  const { workflows, feedback, configurationValid } = useRoadmap((roadmap) => ({
+    workflows: roadmap.workflows,
+    feedback: workflowFeedback(roadmap.workflowState, 'register-project', owner),
+    configurationValid: roadmap.configuration.valid,
   }))
   const [workspacePath, setWorkspacePath] = useState('')
-  const [errors, setErrors] = useState<Record<string, string>>({})
-  const [generalError, setGeneralError] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState<Extract<CommandResult, { type: 'register-project' }> | null>(
-    null,
-  )
-  const blocked = saving || command.inFlight || !configurationValid
+  const [displayName, setDisplayName] = useState('')
+  const acknowledged =
+    feedback.current?.kind === 'acknowledged' && feedback.current.operation === 'register-project'
+      ? feedback.current.result
+      : null
 
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
+  const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const draft = projectRegistrationDraft(
-      new FormData(event.currentTarget),
-      connection.registration.identity,
-      workspacePath,
-    )
-    setErrors(draft.errors)
-    setGeneralError(null)
-    if (!draft.candidate) return
-
-    setSaving(true)
-    try {
-      const outcome = await execute({
-        type: 'register-project',
-        expectedConfigurationVersion: configurationVersion,
-        candidate: draft.candidate,
-      })
-      if (outcome.ok) {
-        setSaved(outcome.result)
-        return
-      }
-      const { fields, general } = projectRegistrationError(outcome.error)
-      setErrors(fields)
-      setGeneralError(general)
-    } catch {
-      setGeneralError(
-        'Registration completion is unknown. No Project identity or saved version was confirmed. Check the configuration before submitting another registration.',
-      )
-    } finally {
-      setSaving(false)
-    }
+    void workflows.registerProject({
+      candidate: {
+        integration: connection.registration.identity.integration,
+        connectionId: connection.registration.identity.id,
+        workspace: { path: workspacePath },
+        ...(displayName ? { displayName } : {}),
+      },
+    })
   }
 
   return (
@@ -132,79 +99,58 @@ function ProjectImportForm({ connection, configurationValid }: ProjectImportForm
           </SectionTitle>
         </SectionHeader>
         <SectionBody>
-          {saved ? (
-            <Alert variant={saved.commit === 'committed' ? 'info' : 'error'}>
-              <strong>
-                {saved.commit === 'committed'
-                  ? 'Project registered.'
-                  : 'Project registration committed, but durability is unconfirmed.'}
-              </strong>
+          <WorkflowFeedback feedback={feedback} workflows={workflows} />
+          {acknowledged ? (
+            <Alert variant={acknowledged.commit === 'committed' ? 'info' : 'error'}>
               <span>
-                {saved.project.integration}/{saved.project.projectId} through Connection{' '}
-                {saved.connectionId}, configuration version {saved.configurationVersion}.
+                {acknowledged.project.integration}/{acknowledged.project.projectId} through
+                Connection {acknowledged.connectionId}, configuration version{' '}
+                {acknowledged.configurationVersion}.
               </span>
-              <span>Workspace: {saved.workspacePath}</span>
-              {saved.commit === 'committed' && (
-                <Link href={projectSettingsPath(saved.project)}>View project registration</Link>
-              )}
+              <span>Workspace: {acknowledged.workspacePath}</span>
             </Alert>
-          ) : (
-            <SettingsForm onSubmit={(event) => void submit(event)}>
-              {connection.integration === 'github' ? (
-                <>
-                  <WorkspaceFolderSelector
-                    label={connection.registration.folderLabel}
-                    description={connection.registration.description}
-                    path={workspacePath}
-                    error={errors.workspace}
-                    disabled={blocked}
-                    query={query}
-                    onChange={(path) => {
-                      setWorkspacePath(path)
-                      setErrors({})
-                    }}
-                  />
-                  <Alert variant="info">
-                    <span>
-                      GitHub authorization and repository installation are separate grants.
-                    </span>
-                    {connection.registration.newInstallation.kind === 'link' && (
-                      <ExternalLink href={connection.registration.newInstallation.href} external>
-                        Configure repository access
-                      </ExternalLink>
-                    )}
-                  </Alert>
-                </>
-              ) : (
-                <WorkspaceFolderSelector
-                  label={connection.registration.folderLabel}
-                  description={connection.registration.description}
-                  path={workspacePath}
-                  error={errors.folder}
-                  disabled={blocked}
-                  query={query}
-                  onChange={(path) => {
-                    setWorkspacePath(path)
-                    setErrors({})
-                  }}
-                />
-              )}
-              <label htmlFor="project-import-display-name">
-                Display name
-                <TextInput
-                  id="project-import-display-name"
-                  name="displayName"
-                  placeholder="Optional"
-                />
-              </label>
-              <ErrorText error={generalError ?? errors.connection ?? null} />
-              <SettingsFormActions>
-                <Button variant="primary" type="submit" disabled={blocked}>
-                  {saving ? 'Validating…' : 'Validate and save'}
-                </Button>
-              </SettingsFormActions>
-            </SettingsForm>
-          )}
+          ) : null}
+          <SettingsForm onSubmit={submit}>
+            <WorkspaceFolderSelector
+              owner={owner}
+              label={connection.registration.folderLabel}
+              description={connection.registration.description}
+              path={workspacePath}
+              error={feedback.fields.workspace ?? feedback.fields.folder}
+              onChange={setWorkspacePath}
+            />
+            {connection.integration === 'github' && (
+              <Alert variant="info">
+                <span>GitHub authorization and repository installation are separate grants.</span>
+                {connection.registration.newInstallation.kind === 'link' && (
+                  <ExternalLink href={connection.registration.newInstallation.href} external>
+                    Configure repository access
+                  </ExternalLink>
+                )}
+              </Alert>
+            )}
+            <label htmlFor="project-import-display-name">
+              Display name
+              <TextInput
+                id="project-import-display-name"
+                name="displayName"
+                placeholder="Optional"
+                value={displayName}
+                onChange={(event) => setDisplayName(event.currentTarget.value)}
+              />
+            </label>
+            <ErrorText error={feedback.fields.displayName ?? feedback.fields.name ?? null} />
+            <ErrorText error={feedback.fields.connection ?? null} />
+            <SettingsFormActions>
+              <Button
+                variant="primary"
+                type="submit"
+                disabled={feedback.blocked || feedback.pending}
+              >
+                {feedback.pending ? 'Validating…' : 'Validate and save'}
+              </Button>
+            </SettingsFormActions>
+          </SettingsForm>
         </SectionBody>
       </Section>
     </Page>

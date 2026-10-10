@@ -3,13 +3,7 @@ import {
   correlationIdSchema,
   type ServerEpoch,
 } from '@roadmap/contracts/identity'
-import type {
-  Command,
-  CommandOutcomeFor,
-  Query,
-  QueryResult,
-  SafeError,
-} from '@roadmap/contracts/operations'
+import type { Command, CommandOutcomeFor, Query } from '@roadmap/contracts/operations'
 import type { ApplicationState } from '@roadmap/contracts/state'
 import {
   decodeCommandResultEnvelope,
@@ -21,41 +15,29 @@ import {
   requestRejectionStatus,
 } from '@roadmap/contracts/wire'
 
-interface RequestNotAdmitted {
-  kind: 'not-admitted'
-  ok: false
-  rejection: RequestRejection
-  error: SafeError
-}
+import {
+  createRoadmapWorkflows,
+  type RoadmapWorkflows,
+  type WorkflowCompletionUnknown,
+  type WorkflowLifecycle,
+  type WorkflowQueryDelivery,
+  type WorkflowRequestNotAdmitted,
+  type WorkflowSnapshot,
+} from '../workflows/workflows.ts'
 
-type CommandDelivery<C extends Command> = CommandOutcomeFor<C> | RequestNotAdmitted
-interface QueryCompletionUnknown {
-  kind: 'completion-unknown'
-  reason: 'protocol' | 'delivery'
-  ok: false
-  error: SafeError
-}
-type QueryDelivery = QueryResult | RequestNotAdmitted | QueryCompletionUnknown
+type CommandDelivery<C extends Command> = CommandOutcomeFor<C> | WorkflowRequestNotAdmitted
 const RECONNECT_BASE_MS = 1_000
 const RECONNECT_MAX_MS = 30_000
 
 /** Browser transport liveness, deliberately distinct from a domain Connection. */
 export type TransportLiveness = 'connecting' | 'live' | 'disconnected'
 
-export interface CommandActivity {
-  readonly inFlight: boolean
-  readonly error: Readonly<SafeError> | null
-}
-
-export type RoadmapLifecycle =
-  | Readonly<Pick<Extract<ApplicationState, { phase: 'ready' }>, 'phase' | 'mode'>>
-  | Readonly<Pick<Extract<ApplicationState, { phase: 'failed' }>, 'phase' | 'cause'>>
-  | Readonly<Pick<Exclude<ApplicationState, { phase: 'ready' | 'failed' }>, 'phase'>>
+export type RoadmapLifecycle = WorkflowLifecycle
 
 export type RoadmapStoreSnapshot = {
   readonly transport: TransportLiveness
   readonly lifecycle: RoadmapLifecycle | null
-  readonly command: CommandActivity
+  readonly workflows: WorkflowSnapshot
 } & (
   | { readonly synchronization: 'not-ready'; readonly state: null }
   | {
@@ -76,7 +58,8 @@ interface SocketGeneration {
 export interface RoadmapStore {
   subscribe(listener: () => void): () => void
   getSnapshot(): RoadmapStoreSnapshot
-  query(query: Query): Promise<QueryDelivery>
+  readonly workflows: RoadmapWorkflows
+  query(query: Query): Promise<WorkflowQueryDelivery>
   /** Rejects only when HTTP failure makes command completion unknowable. */
   execute<C extends Command>(command: C): Promise<CommandDelivery<C>>
   /** Acquires one observation owner. Each release is idempotent. */
@@ -102,10 +85,13 @@ const EMPTY_SNAPSHOT: RoadmapStoreSnapshot = freezePublished<RoadmapStoreSnapsho
   synchronization: 'not-ready',
   lifecycle: null,
   state: null,
-  command: { inFlight: false, error: null },
+  workflows: {
+    attempts: [],
+    policy: { synchronization: 'not-ready', lifecycle: null, state: null },
+  },
 })
 
-/** Owns accepted socket facts, read retention, and aggregate command activity. */
+/** Owns accepted socket facts, read retention, transport, and browser workflow integration. */
 export function createRoadmapStore(
   serverUrl: string,
   options: RoadmapStoreOptions = {},
@@ -119,7 +105,6 @@ export function createRoadmapStore(
 
   let snapshot: RoadmapStoreSnapshot = EMPTY_SNAPSHOT
   const listeners = new Set<() => void>()
-  let activeCommands = 0
   let generation: SocketGeneration | null = null
   let acceptedPublication: Readonly<
     Pick<ApplicationState, 'serverEpoch' | 'stateSequence'>
@@ -128,8 +113,27 @@ export function createRoadmapStore(
   let attempts = 0
   let owners = 0
 
+  const workflowOwner = createRoadmapWorkflows({
+    read: () => ({
+      synchronization: snapshot.synchronization,
+      lifecycle: snapshot.lifecycle,
+      state: snapshot.state,
+    }),
+    dispatch: (command, onDispatch) => dispatchCommand(command, onDispatch),
+    query: (onDispatch) => dispatchQuery({ type: 'select-workspace' }, onDispatch),
+    publish(workflows) {
+      snapshot = freezePublished({ ...snapshot, workflows })
+      for (const listener of listeners) listener()
+    },
+  })
+
   function publish(next: RoadmapStoreSnapshot): void {
-    snapshot = freezePublished(next)
+    workflowOwner.synchronize({
+      synchronization: next.synchronization,
+      lifecycle: next.lifecycle,
+      state: next.state,
+    })
+    snapshot = freezePublished({ ...next, workflows: workflowOwner.getSnapshot() })
     for (const listener of listeners) listener()
   }
 
@@ -162,10 +166,6 @@ export function createRoadmapStore(
         state: content,
       })
     }
-  }
-
-  function publishCommand(error: SafeError | null): void {
-    publish({ ...snapshot, command: { inFlight: activeCommands > 0, error } })
   }
 
   function clearReconnect(): void {
@@ -280,21 +280,26 @@ export function createRoadmapStore(
     connect()
   }
 
-  async function query(queryValue: Query): Promise<QueryDelivery> {
+  async function dispatchQuery(
+    queryValue: Query,
+    onDispatch?: () => void,
+  ): Promise<WorkflowQueryDelivery> {
     const authority = generation?.authority ?? null
     const correlationId = correlationIdSchema.parse(crypto.randomUUID())
     try {
-      const response = await fetchRequest(new URL('/api/query', httpUrl), {
+      const request = fetchRequest(new URL('/api/query', httpUrl), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', [REQUEST_ID_HEADER]: correlationId },
         redirect: 'error',
         body: JSON.stringify({ type: 'query', correlationId, query: queryValue }),
       })
+      onDispatch?.()
+      const response = await request
       let body: unknown
       try {
         body = await response.json()
       } catch {
-        return transportQueryFailure(
+        return transportFailure(
           'delivery',
           'The query completion is unknown because its response was unreadable.',
         )
@@ -302,61 +307,73 @@ export function createRoadmapStore(
       const rejection = attributableRejection(body, response.status, 'query', correlationId)
       if (rejection !== null) return rejection
       if (response.status !== 200) {
-        return transportQueryFailure(
-          'protocol',
-          'The query did not receive a valid server response.',
-        )
+        return transportFailure('protocol', 'The query did not receive a valid server response.')
       }
       const decoded = decodeQueryResultEnvelope(body, queryValue, correlationId)
       if (!decoded.ok) {
-        return transportQueryFailure('protocol', 'Server returned an invalid query result.')
+        return transportFailure('protocol', 'Server returned an invalid query result.')
       }
       observeOutcomeEpoch(authority, decoded.value.result.serverEpoch)
       return decoded.value.result
     } catch {
-      return transportQueryFailure('delivery', 'The query completion is unknown.')
+      return transportFailure('delivery', 'The query completion is unknown.')
     }
   }
 
-  async function execute<C extends Command>(command: C): Promise<CommandDelivery<C>> {
+  async function dispatchCommand<C extends Command>(
+    command: C,
+    onDispatch?: () => void,
+  ): Promise<CommandDelivery<C> | WorkflowCompletionUnknown> {
     const authority = generation?.authority ?? null
     const correlationId = correlationIdSchema.parse(crypto.randomUUID())
-    activeCommands += 1
-    let completionError: SafeError | null = null
     try {
-      publishCommand(null)
-      const response = await fetchRequest(new URL('/api/command', httpUrl), {
+      const request = fetchRequest(new URL('/api/command', httpUrl), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', [REQUEST_ID_HEADER]: correlationId },
         redirect: 'error',
         body: JSON.stringify({ type: 'command', correlationId, command }),
       })
-      const body: unknown = await response.json()
-      const rejection = attributableRejection(body, response.status, 'command', correlationId)
-      if (rejection !== null) {
-        completionError = rejection.error
-        return rejection
+      onDispatch?.()
+      const response = await request
+      let body: unknown
+      try {
+        body = await response.json()
+      } catch {
+        return transportFailure(
+          'delivery',
+          'The command may have completed, but its response was unreadable and its completion is unknown.',
+        )
       }
+      const rejection = attributableRejection(body, response.status, 'command', correlationId)
+      if (rejection !== null) return rejection
       if (response.status !== 200) {
-        throw new Error('The command did not receive a valid server response.')
+        return transportFailure(
+          'protocol',
+          'The command may have completed, but it did not receive a valid server response. Its completion is unknown.',
+        )
       }
       const decoded = decodeCommandResultEnvelope(body, command, correlationId)
       if (!decoded.ok) {
-        throw new Error('Server returned an invalid command result.')
+        return transportFailure(
+          'protocol',
+          'The command may have completed, but its result was invalid and its completion is unknown.',
+        )
       }
-      completionError = decoded.value.outcome.ok ? null : decoded.value.outcome.error
       observeOutcomeEpoch(authority, decoded.value.outcome.serverEpoch)
       return decoded.value.outcome
     } catch {
-      completionError = {
-        code: 'transport-failed',
-        message: 'The command may have completed, but its completion is unknown.',
-      }
-      throw new Error(completionError.message)
-    } finally {
-      activeCommands -= 1
-      publishCommand(completionError)
+      return transportFailure(
+        'delivery',
+        'The command may have completed, but its completion is unknown.',
+      )
     }
+  }
+
+  async function execute<C extends Command>(command: C): Promise<CommandDelivery<C>> {
+    const delivery = await dispatchCommand(command)
+    if ('kind' in delivery && delivery.kind === 'completion-unknown')
+      throw new Error(delivery.error.message)
+    return delivery
   }
 
   function start(): () => void {
@@ -382,7 +399,8 @@ export function createRoadmapStore(
       return () => listeners.delete(listener)
     },
     getSnapshot: () => snapshot,
-    query,
+    workflows: workflowOwner.workflows,
+    query: dispatchQuery,
     execute,
     start,
   }
@@ -443,10 +461,10 @@ function parseJson(data: unknown): unknown | null {
   }
 }
 
-function transportQueryFailure(
-  reason: QueryCompletionUnknown['reason'],
+function transportFailure(
+  reason: WorkflowCompletionUnknown['reason'],
   message: string,
-): QueryCompletionUnknown {
+): WorkflowCompletionUnknown {
   return {
     kind: 'completion-unknown',
     reason,
@@ -460,7 +478,7 @@ function attributableRejection(
   status: number,
   request: RequestRejection['request'],
   requestId: CorrelationId,
-): RequestNotAdmitted | null {
+): WorkflowRequestNotAdmitted | null {
   const decoded = decodeRequestRejection(body)
   if (
     !decoded.ok ||

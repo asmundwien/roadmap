@@ -1,5 +1,4 @@
 import type { ProjectRef } from '@roadmap/contracts/identity'
-import type { CommandResult, SafeError } from '@roadmap/contracts/operations'
 import { Alert } from '@roadmap/ui/alert'
 import { Page, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
 import classNames from 'classnames/bind'
@@ -7,9 +6,10 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Link } from '@/navigation'
 import { resolveProject } from '@/resources/results'
-import { connectionPath, routePaths } from '@/router'
+import { routePaths } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
-import { ErrorText, projectIdentity } from '@/views/shared/settings-shared'
+import { WorkflowFeedback } from '@/views/shared/workflow-feedback'
+import { type WorkflowAttemptId, workflowFeedback } from '@/workflows/workflows'
 import { AutomationSection } from './automation-section'
 import { DetailsSection } from './details-section'
 import { ManageSection } from './manage-section'
@@ -18,11 +18,6 @@ import pageStyles from './page.module.css'
 const cx = classNames.bind(pageStyles)
 
 type ProjectSettingsPageProps = { projectRef: ProjectRef }
-
-type RemovalFeedback =
-  | { kind: 'pending' }
-  | { kind: 'unconfirmed'; result: Extract<CommandResult, { type: 'remove-project' }> }
-  | { kind: 'error'; error: SafeError | string }
 
 export function ProjectSettingsPage({ projectRef }: ProjectSettingsPageProps) {
   return (
@@ -34,62 +29,80 @@ export function ProjectSettingsPage({ projectRef }: ProjectSettingsPageProps) {
 }
 
 function ProjectSettingsDetail({ projectRef }: ProjectSettingsPageProps) {
-  const { project, configuration, configurationVersion, execute } = useRoadmap((roadmap) => ({
-    project: resolveProject(roadmap, projectRef),
-    configuration: roadmap.configuration,
-    configurationVersion: roadmap.configurationVersion,
-    execute: roadmap.execute,
-  }))
+  const { project, configuration, workflows, removalFeedback, retainedFeedback } = useRoadmap(
+    (roadmap) => ({
+      project: resolveProject(roadmap, projectRef),
+      configuration: roadmap.configuration,
+      workflows: roadmap.workflows,
+      removalFeedback: workflowFeedback(roadmap.workflowState, 'remove-project', {
+        kind: 'project',
+        project: projectRef,
+      }),
+      retainedFeedback: [
+        {
+          operation: 'rename-project',
+          feedback: workflowFeedback(roadmap.workflowState, 'rename-project', {
+            kind: 'project',
+            project: projectRef,
+          }),
+        },
+        {
+          operation: 'repair-project-workspace',
+          feedback: workflowFeedback(roadmap.workflowState, 'repair-project-workspace', {
+            kind: 'project',
+            project: projectRef,
+          }),
+        },
+        {
+          operation: 'refresh-project',
+          feedback: workflowFeedback(roadmap.workflowState, 'refresh-project', {
+            kind: 'project',
+            project: projectRef,
+          }),
+        },
+        {
+          operation: 'select-workspace',
+          feedback: workflowFeedback(
+            roadmap.workflowState,
+            'select-workspace',
+            { kind: 'none' },
+            { kind: 'project', project: projectRef },
+          ),
+        },
+      ],
+    }),
+  )
   const navigate = useNavigate()
-  const [removal, setRemoval] = useState<RemovalFeedback | null>(null)
   const active = useRef(true)
+  const navigationRequest = useRef<symbol | null>(null)
+  const [navigationAttempt, setNavigationAttempt] = useState<WorkflowAttemptId | null>(null)
   useEffect(() => {
     active.current = true
     return () => {
       active.current = false
+      navigationRequest.current = null
     }
   }, [])
   const remove = async () => {
-    if (project.kind === 'missing') return
-    const destination = project.connection
-      ? connectionPath(project.connectionId)
-      : routePaths.connections
-    setRemoval({ kind: 'pending' })
-    try {
-      const outcome = await execute({
-        type: 'remove-project',
-        expectedConfigurationVersion: configurationVersion,
-        project: projectRef,
-      })
-      if (!active.current) return
-      if (!outcome.ok) {
-        setRemoval({ kind: 'error', error: outcome.error })
-      } else if (outcome.result.commit === 'committed') {
-        setRemoval(null)
-        navigate(destination, { replace: true })
-      } else {
-        setRemoval({ kind: 'unconfirmed', result: outcome.result })
-      }
-    } catch {
-      if (active.current)
-        setRemoval({
-          kind: 'error',
-          error: `Registration removal for ${projectIdentity({ ref: projectRef })} may have completed. Check the relevant configuration before retrying.`,
-        })
-    }
+    const request = Symbol('removal navigation')
+    navigationRequest.current = request
+    const attempt = await workflows.removeProject({ project: projectRef })
+    if (!active.current || navigationRequest.current !== request) return
+    setNavigationAttempt(attempt.id)
   }
-  const feedback =
-    removal?.kind === 'pending' ? (
-      <Alert variant="info">
-        {`Waiting for the registration removal result for ${projectIdentity({ ref: projectRef })}. Current configuration does not confirm this operation's durability.`}
-      </Alert>
-    ) : removal?.kind === 'unconfirmed' ? (
-      <Alert variant="info">
-        {`Registration removal committed for ${projectIdentity({ ref: removal.result.project })} at configuration version ${removal.result.configurationVersion}, but durability is unconfirmed. Check configuration before leaving this page or making another change. The source repository, Wayfinder state, and Workspace remain unchanged.`}
-      </Alert>
-    ) : removal?.kind === 'error' ? (
-      <ErrorText error={removal.error} />
-    ) : null
+  useEffect(() => {
+    const current = removalFeedback.current
+    if (
+      !active.current ||
+      !navigationAttempt ||
+      current?.id !== navigationAttempt ||
+      current.kind !== 'acknowledged' ||
+      !current.destination
+    )
+      return
+    navigate(current.destination, { replace: true })
+  }, [navigationAttempt, removalFeedback.current, navigate])
+  const feedback = <WorkflowFeedback feedback={removalFeedback} workflows={workflows} />
 
   if (project.kind === 'missing') {
     return (
@@ -102,6 +115,9 @@ function ProjectSettingsDetail({ projectRef }: ProjectSettingsPageProps) {
         </PageHeader>
         {feedback}
         <Alert>{project.message}</Alert>
+        {retainedFeedback.map((entry) => (
+          <WorkflowFeedback key={entry.operation} feedback={entry.feedback} workflows={workflows} />
+        ))}
         <AutomationSection projectRef={project.ref} />
         <Link href={routePaths.connections}>Back to Connections</Link>
       </Page>
@@ -153,7 +169,7 @@ function ProjectSettingsDetail({ projectRef }: ProjectSettingsPageProps) {
       <ManageSection
         key={`manage:${project.ref.integration}:${project.ref.projectId}`}
         project={project}
-        removing={removal?.kind === 'pending'}
+        removalFeedback={removalFeedback}
         onRemove={remove}
       />
     </Page>

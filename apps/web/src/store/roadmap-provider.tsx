@@ -2,9 +2,9 @@ import type { ApplicationState, ReadyApplicationState } from '@roadmap/contracts
 import { Alert } from '@roadmap/ui/alert'
 import { createContext, type ReactNode, useContext, useEffect, useMemo } from 'react'
 import { useSyncExternalStoreWithSelector } from 'use-sync-external-store/with-selector'
+import type { RoadmapWorkflows, WorkflowSnapshot } from '@/workflows/workflows'
 import { createStoreFromEnv } from './create-store'
 import type {
-  CommandActivity,
   RoadmapLifecycle,
   RoadmapStore,
   RoadmapStoreSnapshot,
@@ -25,9 +25,8 @@ export interface RoadmapViewState {
   readonly supportedIntegrations: ReadyApplicationState['supportedIntegrations']
   readonly authorizationOperations: ReadyApplicationState['authorizationOperations']
   readonly configurationVersion: ReadyApplicationState['configurationVersion']
-  readonly command: CommandActivity
-  readonly query: RoadmapStore['query']
-  readonly execute: RoadmapStore['execute']
+  readonly workflows: RoadmapWorkflows
+  readonly workflowState: WorkflowSnapshot
 }
 
 function readableState(
@@ -132,9 +131,8 @@ function roadmapView(store: RoadmapStore, snapshot: RoadmapStoreSnapshot): Roadm
     supportedIntegrations: state.supportedIntegrations,
     authorizationOperations: state.authorizationOperations,
     configurationVersion: state.configurationVersion,
-    command: snapshot.command,
-    query: store.query,
-    execute: store.execute,
+    workflows: store.workflows,
+    workflowState: snapshot.workflows,
   })
 }
 

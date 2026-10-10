@@ -1,60 +1,13 @@
-import {
-  type Command,
-  type CommandResultFor,
-  commandResultFor,
-  type SafeError,
-} from '@roadmap/contracts/operations'
 import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
-import { useState } from 'react'
 import type { ConnectionResult } from '@/resources/results'
-import { useRoadmap } from '@/store/roadmap-provider'
-import { ErrorText } from '@/views/shared/settings-shared'
 import { AuthorizationGroup, RemoveConnectionGroup } from './management-sections'
 
 type ManageSectionProps = {
   connection: Extract<ConnectionResult, { kind: 'known' }>
-  removing: boolean
-  onRemove: () => Promise<void>
+  onRemove: () => void
 }
 
-export function ManageSection({ connection, removing, onRemove }: ManageSectionProps) {
-  const { authorizationOperations, configuration, configurationVersion, command, execute } =
-    useRoadmap((roadmap) => ({
-      authorizationOperations: roadmap.authorizationOperations,
-      configuration: { valid: roadmap.configuration.valid },
-      configurationVersion: roadmap.configurationVersion,
-      command: { inFlight: roadmap.command.inFlight },
-      execute: roadmap.execute,
-    }))
-  const [error, setError] = useState<SafeError | string | null>(null)
-  const [busy, setBusy] = useState(false)
-  const authorizationResult = connection.currentAuthorization
-  const authorization = authorizationOperations.find(
-    (operation) => operation.id === authorizationResult?.id,
-  )
-  const blocked = removing || busy || command.inFlight || !configuration.valid
-
-  const run = async <C extends Command>(next: C): Promise<CommandResultFor<C> | null> => {
-    setBusy(true)
-    setError(null)
-    try {
-      const outcome = await execute(next)
-      if (!outcome.ok) {
-        setError(outcome.error)
-        return null
-      }
-      if (!commandResultFor(next, outcome.result)) {
-        throw new Error('The result does not match the initiating Connection command.')
-      }
-      return outcome.result
-    } catch {
-      setError('The change may have completed. Check the relevant configuration before retrying.')
-      return null
-    } finally {
-      setBusy(false)
-    }
-  }
-
+export function ManageSection({ connection, onRemove }: ManageSectionProps) {
   if (connection.builtIn) return null
 
   return (
@@ -63,22 +16,8 @@ export function ManageSection({ connection, removing, onRemove }: ManageSectionP
         <SectionTitle>Manage connection</SectionTitle>
       </SectionHeader>
       <SectionBody>
-        <ErrorText error={error} />
-        {connection.integration === 'github' && (
-          <AuthorizationGroup
-            connection={connection}
-            authorization={authorization}
-            presentation={authorizationResult}
-            configurationVersion={configurationVersion}
-            blocked={blocked}
-            run={run}
-          />
-        )}
-        <RemoveConnectionGroup
-          dependentCount={connection.projectCount}
-          blocked={blocked}
-          onRemove={onRemove}
-        />
+        {connection.integration === 'github' && <AuthorizationGroup connection={connection} />}
+        <RemoveConnectionGroup connection={connection} onRemove={onRemove} />
       </SectionBody>
     </Section>
   )

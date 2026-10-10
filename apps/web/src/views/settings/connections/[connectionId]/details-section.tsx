@@ -1,5 +1,3 @@
-import type { SafeError } from '@roadmap/contracts/operations'
-import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
 import { ControlGroup } from '@roadmap/ui/control-group'
 import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
@@ -11,7 +9,9 @@ import { useRoadmap } from '@/store/roadmap-provider'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
 import { SettingsFacts } from '@/views/shared/settings-facts'
 import { SettingsForm } from '@/views/shared/settings-form'
-import { ErrorText, observedLabel } from '@/views/shared/settings-shared'
+import { observedLabel } from '@/views/shared/settings-shared'
+import { WorkflowFeedback } from '@/views/shared/workflow-feedback'
+import { workflowFeedback } from '@/workflows/workflows'
 import styles from './details-section.module.css'
 
 const cx = classNames.bind(styles)
@@ -19,49 +19,17 @@ const cx = classNames.bind(styles)
 type DetailsSectionProps = { connection: Extract<ConnectionResult, { kind: 'known' }> }
 
 export function DetailsSection({ connection }: DetailsSectionProps) {
-  const { configuration, configurationVersion, command, execute } = useRoadmap((roadmap) => ({
-    configuration: { valid: roadmap.configuration.valid },
-    configurationVersion: roadmap.configurationVersion,
-    command: { inFlight: roadmap.command.inFlight },
-    execute: roadmap.execute,
+  const { workflows, feedback } = useRoadmap((roadmap) => ({
+    workflows: roadmap.workflows,
+    feedback: workflowFeedback(roadmap.workflowState, 'rename-connection', {
+      kind: 'connection',
+      connectionId: connection.id,
+    }),
   }))
-  const [error, setError] = useState<SafeError | string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  const blocked = busy || command.inFlight || !configuration.valid
-
-  const rename = async (event: FormEvent<HTMLFormElement>) => {
+  const [name, setName] = useState(connection.name)
+  const rename = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const name = String(new FormData(event.currentTarget).get('name') ?? '').trim()
-    if (!name) {
-      setError('Enter a Connection name.')
-      return
-    }
-    setBusy(true)
-    setError(null)
-    setNotice(null)
-    try {
-      const outcome = await execute({
-        type: 'rename-connection',
-        expectedConfigurationVersion: configurationVersion,
-        connectionId: connection.id,
-        name,
-      })
-      if (!outcome.ok) {
-        setError(outcome.error)
-      } else {
-        const result = outcome.result
-        setNotice(
-          result.commit === 'committed'
-            ? `Connection ${result.connectionId} renamed at configuration version ${result.configurationVersion}.`
-            : `Connection ${result.connectionId} rename committed at configuration version ${result.configurationVersion}, but durability is unconfirmed.`,
-        )
-      }
-    } catch {
-      setError('The change may have completed. Check the relevant configuration before retrying.')
-    } finally {
-      setBusy(false)
-    }
+    void workflows.renameConnection({ connectionId: connection.id, name })
   }
 
   return (
@@ -70,8 +38,7 @@ export function DetailsSection({ connection }: DetailsSectionProps) {
         <SectionTitle>Details</SectionTitle>
       </SectionHeader>
       <SectionBody>
-        {notice && <Alert variant="info">{notice}</Alert>}
-        <ErrorText error={error} />
+        <WorkflowFeedback feedback={feedback} workflows={workflows} />
         <SettingsFacts className={cx('facts')}>
           <dt>Integration</dt>
           <dd>
@@ -85,14 +52,30 @@ export function DetailsSection({ connection }: DetailsSectionProps) {
           <dd>{connection.projectCount}</dd>
         </SettingsFacts>
         {!connection.builtIn && (
-          <SettingsForm onSubmit={rename} key={connection.name}>
+          <SettingsForm onSubmit={rename}>
             <label htmlFor="connection-name">Connection name</label>
             <ControlGroup>
-              <TextInput id="connection-name" name="name" defaultValue={connection.name} />
-              <Button variant="primary" type="submit" disabled={blocked}>
+              <TextInput
+                id="connection-name"
+                name="name"
+                value={name}
+                onChange={(event) => setName(event.currentTarget.value)}
+                aria-invalid={Boolean(feedback.fields.name)}
+                aria-describedby={feedback.fields.name ? 'connection-name-error' : undefined}
+              />
+              <Button
+                variant="primary"
+                type="submit"
+                disabled={feedback.blocked || feedback.pending}
+              >
                 Save name
               </Button>
             </ControlGroup>
+            {feedback.fields.name && (
+              <p id="connection-name-error" role="alert">
+                {feedback.fields.name}
+              </p>
+            )}
           </SettingsForm>
         )}
       </SectionBody>

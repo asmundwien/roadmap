@@ -24,15 +24,14 @@ import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { resolveAuthorization } from '@/resources/results'
 import { RoadmapProvider } from '@/store/roadmap-provider'
-import type { RoadmapStore } from '@/store/roadmap-store'
-import { makeRoadmapSnapshot } from '@/views/map/test-fixtures'
+import { makeRoadmapSnapshot, makeRoadmapStore } from '@/views/map/test-fixtures'
 import {
   currentProject,
   neverReadProject,
   readableMap,
   readableTicket,
 } from '@/views/overview/test-fixtures'
-import { AuthorizationPane } from './connection-panes'
+import { AddConnectionPane, AuthorizationPane } from './connection-panes'
 import { ConnectionSettings } from './page'
 
 const github = {
@@ -47,17 +46,7 @@ const github = {
 function renderConnections(state: ReadyApplicationState): string {
   const validatedState = readyApplicationStateSchema.parse(state)
   const snapshot = makeRoadmapSnapshot(validatedState)
-  const store: RoadmapStore = {
-    subscribe: () => () => undefined,
-    getSnapshot: () => snapshot,
-    start: () => () => undefined,
-    query: async () => {
-      throw new Error('Unexpected query')
-    },
-    execute: async () => {
-      throw new Error('Unexpected command')
-    },
-  }
+  const store = makeRoadmapStore([], snapshot)
   return renderToStaticMarkup(
     createElement(
       MemoryRouter,
@@ -609,12 +598,25 @@ describe('ConnectionSettings', () => {
 
 describe('authorization grant navigation', () => {
   it.each(['current', 'historical'] as const)(
-    'uses the published %s grant identity after a waiting operation outcome',
+    'uses the published %s grant identity after the owner consumes a waiting result',
     (kind) => {
+      const canonicalId = connectionIdSchema.parse('github/canonical')
+      const grantedAccountId = 'account-42'
+      const canonical = connectionSchema.parse({
+        id: canonicalId,
+        integration: 'github',
+        name: 'Canonical GitHub account',
+        builtIn: false,
+        githubIdentity: {
+          id: kind === 'current' ? grantedAccountId : 'newer-account-43',
+          login: 'canonical-account',
+        },
+        availability: { status: 'available' },
+      })
       const authorization = authorizationOperationSchema.parse({
         id: 'grant-operation',
         status: 'granted',
-        connection: { kind, id: 'github/canonical', accountId: 'account-42' },
+        connection: { kind, id: canonicalId, accountId: grantedAccountId },
       })
       const result = commandResultSchema.parse({
         type: 'begin-github-authorization',
@@ -626,33 +628,59 @@ describe('authorization grant navigation', () => {
       })
       if (result.type !== 'begin-github-authorization')
         throw new Error('Expected authorization result')
+      const accepted = readyApplicationStateSchema.parse({
+        ...state([canonical]),
+        authorizationOperations: [authorization],
+      })
+      const store = makeRoadmapStore([], makeRoadmapSnapshot(accepted))
       const markup = renderToStaticMarkup(
         createElement(
           MemoryRouter,
           null,
-          createElement(AuthorizationPane, {
-            authorization,
-            presentation: resolveAuthorization(state([]), authorization),
-            feedback: { result, previous: undefined, consumed: false },
-            configurationVersion: configurationVersionSchema.parse(99),
-            operation: {
-              execute: async () => {
-                throw new Error('Unexpected authorization effect')
-              },
-            },
-            onClose() {},
-            onResult() {},
-            onFinished() {},
-          }),
+          createElement(
+            RoadmapProvider,
+            { store },
+            createElement(AuthorizationPane, {
+              operationId: authorization.id,
+              authorization,
+              presentation: resolveAuthorization(accepted, authorization),
+              feedback: { result, previous: undefined, consumed: true },
+              beginFeedback: null,
+              onClose() {},
+            }),
+          ),
         ),
       )
+      expect(markup).not.toContain('PREVIOUS-CODE')
       if (kind === 'current') {
-        expect(markup).toContain('href="/connections/github%2Fcanonical"')
-        expect(markup).toContain('account-42')
-        expect(markup).not.toContain('configuration version 99')
+        expect(markup).toContain(`href="/connections/${encodeURIComponent(canonical.id)}"`)
+        expect(markup).toContain(grantedAccountId)
       } else {
-        expect(markup).not.toContain('href="/connections/github%2Fcanonical"')
+        expect(markup).not.toContain(`href="/connections/${encodeURIComponent(canonical.id)}"`)
       }
     },
   )
+})
+
+describe('AddConnectionPane owner feedback', () => {
+  it('renders owner name validation without dispatching or removing the draft field', async () => {
+    const store = makeRoadmapStore([], makeRoadmapSnapshot(state([])))
+    const attempt = await store.workflows.beginAuthorization({ name: '   ' })
+    expect(attempt.kind).toBe('not-dispatched')
+    const markup = renderToStaticMarkup(
+      createElement(
+        MemoryRouter,
+        null,
+        createElement(
+          RoadmapProvider,
+          { store },
+          createElement(AddConnectionPane, { onClose() {}, onResult() {} }),
+        ),
+      ),
+    )
+    const nameInput = markup.match(/<input[^>]*name="name"[^>]*>/)?.[0]
+    expect(nameInput).toContain('aria-invalid="true"')
+    expect(markup).toContain('Start authorization</button>')
+    expect(markup).not.toContain('Starting…')
+  })
 })

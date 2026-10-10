@@ -1,71 +1,37 @@
 import type { ProjectRef } from '@roadmap/contracts/identity'
-import type { SafeError } from '@roadmap/contracts/operations'
 import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
 import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
 import { Surface, SurfaceDescription } from '@roadmap/ui/surface'
 import { Toggle } from '@roadmap/ui/toggle'
-import { useState } from 'react'
 import { Link } from '@/navigation'
 import { presentAutomation, resolveProject } from '@/resources/results'
 import { routePaths, ticketPath } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
-import { ErrorText, projectIdentity } from '@/views/shared/settings-shared'
+import { WorkflowFeedback } from '@/views/shared/workflow-feedback'
+import { automationEnablementFeedback } from '@/workflows/workflows'
 
 type AutomationSectionProps = { projectRef: ProjectRef }
 
 export function AutomationSection({ projectRef }: AutomationSectionProps) {
-  const { project, globalAutomation, configuration, configurationVersion, command, execute } =
-    useRoadmap((roadmap) => ({
-      project: resolveProject(roadmap, projectRef),
+  const { project, globalAutomation, workflows, feedback } = useRoadmap((roadmap) => {
+    const project = resolveProject(roadmap, projectRef)
+    return {
+      project,
       globalAutomation: presentAutomation(roadmap),
-      configuration: roadmap.configuration,
-      configurationVersion: roadmap.configurationVersion,
-      command: roadmap.command,
-      execute: roadmap.execute,
-    }))
-  const [error, setError] = useState<SafeError | string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  const blocked = busy || command.inFlight || !configuration.valid
+      workflows: roadmap.workflows,
+      feedback: automationEnablementFeedback(roadmap.workflowState, {
+        project: projectRef,
+        enabled: !project.automation.projectEnabled || project.automation.reviewRequired,
+      }),
+    }
+  })
   const automation = project.automation
   const interruption = automation.reviewRequired
   const preferred = automation.projectEnabled
-  const toggleState = busy ? 'pending' : preferred ? 'on' : 'off'
-
-  const setEnabled = async (enabled: boolean) => {
-    if (blocked || project.kind === 'missing') return
-    setBusy(true)
-    setError(null)
-    setNotice(null)
-    try {
-      const outcome = await execute({
-        type: 'set-project-automation-enabled',
-        expectedConfigurationVersion: configurationVersion,
-        project: projectRef,
-        enabled,
-      })
-      if (!outcome.ok) setError(outcome.error)
-      else {
-        const result = outcome.result
-        const identity = projectIdentity({ ref: result.project })
-        const preference = result.enabled ? 'enabled' : 'disabled'
-        const commit =
-          result.commit === 'committed'
-            ? `Automation preference ${preference} committed for ${identity} at configuration version ${result.configurationVersion}.`
-            : `Automation preference ${preference} committed for ${identity} at configuration version ${result.configurationVersion}, but durability is unconfirmed. Check configuration before another change.`
-        setNotice(
-          interruption && result.enabled
-            ? `${commit} Interruption acknowledgement does not establish the Session outcome. It remains unknown.`
-            : commit,
-        )
-      }
-    } catch {
-      setError('The change may have completed. Check the relevant configuration before retrying.')
-    } finally {
-      setBusy(false)
-    }
-  }
+  const toggleState = feedback.pending ? 'pending' : preferred ? 'on' : 'off'
+  const setEnabled = (enabled: boolean) =>
+    workflows.setProjectAutomationEnabled({ project: projectRef, enabled })
 
   return (
     <Section>
@@ -77,7 +43,7 @@ export function AutomationSection({ projectRef }: AutomationSectionProps) {
           {project.kind === 'known' && (
             <Toggle
               state={interruption ? 'off' : toggleState}
-              disabled={blocked || interruption}
+              disabled={feedback.blocked || feedback.pending || interruption}
               aria-describedby="project-automation-description"
               onChange={(event) => void setEnabled(event.currentTarget.checked)}
             >
@@ -114,8 +80,8 @@ export function AutomationSection({ projectRef }: AutomationSectionProps) {
               {project.kind === 'known' && (
                 <Button
                   type="button"
-                  disabled={blocked}
-                  aria-busy={busy || undefined}
+                  disabled={feedback.blocked || feedback.pending}
+                  aria-busy={feedback.pending || undefined}
                   onClick={() => void setEnabled(true)}
                 >
                   Acknowledge interruption and enable
@@ -160,9 +126,7 @@ export function AutomationSection({ projectRef }: AutomationSectionProps) {
               )}
             </Surface>
           ))}
-          {busy && interruption && <p role="status">Saving automation preference...</p>}
-          {notice && <Alert variant="info">{notice}</Alert>}
-          <ErrorText error={error} />
+          <WorkflowFeedback feedback={feedback} workflows={workflows} />
         </Surface>
       </SectionBody>
     </Section>

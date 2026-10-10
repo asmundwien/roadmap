@@ -1,104 +1,100 @@
+import type { ProjectRef } from '@roadmap/contracts/identity'
+import { projectOperationSchema } from '@roadmap/contracts/operations'
 import type { ProjectAction } from '@roadmap/contracts/state'
-import { Alert } from '@roadmap/ui/alert'
 import { Button, ButtonLink as ExternalButtonLink } from '@roadmap/ui/button'
 import { Icon, icon } from '@roadmap/ui/icon'
 import classNames from 'classnames/bind'
-import { useState } from 'react'
 import { ButtonLink } from '@/navigation'
 import { useRoadmap } from '@/store/roadmap-provider'
+import { WorkflowFeedback } from '@/views/shared/workflow-feedback'
+import { nativeOperationFeedback, type WorkflowFeedbackResult } from '@/workflows/workflows'
 import styles from './project-launch-buttons.module.css'
 
 const cx = classNames.bind(styles)
 
-type ProjectLaunchButtonsProps = { actions: ProjectAction[] }
+type ProjectLaunchButtonsProps = { project: ProjectRef; actions: ProjectAction[] }
 type LaunchAction = Extract<ProjectAction, { kind: 'server-launch' }>
+type ProjectActionView =
+  | Exclude<ProjectAction, LaunchAction>
+  | { kind: 'server-launch'; action: LaunchAction; feedback: WorkflowFeedbackResult }
 
-export function ProjectLaunchButtons({ actions }: ProjectLaunchButtonsProps) {
-  const { configuration, configurationVersion, command, execute } = useRoadmap((roadmap) => ({
-    configuration: { valid: roadmap.configuration.valid },
-    configurationVersion: roadmap.configurationVersion,
-    command: { inFlight: roadmap.command.inFlight },
-    execute: roadmap.execute,
+export function ProjectLaunchButtons({ project, actions }: ProjectLaunchButtonsProps) {
+  const { workflows, actionViews, nativeFeedback } = useRoadmap((roadmap) => ({
+    workflows: roadmap.workflows,
+    actionViews: actions.map(
+      (action): ProjectActionView =>
+        action.kind === 'server-launch'
+          ? {
+              kind: 'server-launch',
+              action,
+              feedback: nativeOperationFeedback(roadmap.workflowState, {
+                project,
+                operation: action.operation,
+              }),
+            }
+          : action,
+    ),
+    nativeFeedback: projectOperationSchema.options.map((operation) => ({
+      operation,
+      feedback: nativeOperationFeedback(roadmap.workflowState, { project, operation }),
+    })),
   }))
-  const [busy, setBusy] = useState(false)
-  const [feedback, setFeedback] = useState<string | null>(null)
-
-  const launch = async (action: LaunchAction) => {
-    setBusy(true)
-    setFeedback(null)
-    try {
-      const outcome = await execute({
-        type: 'launch-project-operation',
-        expectedConfigurationVersion: configurationVersion,
-        project: action.project,
-        operation: action.operation,
-      })
-      if (!outcome.ok) setFeedback(outcome.error.message)
-      else if (outcome.result.status === 'invoked') {
-        setFeedback(
-          `Host invocation completed for ${outcome.result.project.projectId}. This does not confirm a Session result.`,
-        )
-      }
-    } catch {
-      setFeedback(
-        'The native invocation outcome is unknown because its reply was lost. Roadmap will not retry it.',
-      )
-    } finally {
-      setBusy(false)
-    }
-  }
 
   return (
     <>
       <div className={cx('connection-project-actions')}>
-        {actions.map((action) => {
-          switch (action.kind) {
+        {actionViews.map((view) => {
+          switch (view.kind) {
             case 'roadmap':
               return (
-                <ButtonLink key={action.id} href={action.href} size="small">
+                <ButtonLink key={view.id} href={view.href} size="small">
                   <Icon icon={icon.codeBranch} />
-                  {action.label}
+                  {view.label}
                 </ButtonLink>
               )
             case 'external-link':
               return (
                 <ExternalButtonLink
-                  key={action.id}
-                  href={action.href}
+                  key={view.id}
+                  href={view.href}
                   size="small"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
                   <Icon icon={icon.github} />
-                  {action.label}
+                  {view.label}
                 </ExternalButtonLink>
               )
             case 'server-launch':
               return (
                 <Button
-                  key={action.id}
+                  key={view.action.id}
                   size="small"
-                  disabled={busy || command.inFlight || !configuration.valid}
-                  onClick={() => void launch(action)}
+                  disabled={view.feedback.blocked}
+                  aria-busy={view.feedback.pending || undefined}
+                  onClick={() =>
+                    void workflows.launchProject({
+                      project,
+                      operation: view.action.operation,
+                    })
+                  }
                 >
-                  {action.operation === 'open-workspace' && <Icon icon={icon.vscode} />}
-                  {action.operation === 'reveal-source' && <Icon icon={icon.folderOpen} />}
-                  {action.operation === 'open-terminal' && <Icon icon={icon.terminal} />}
-                  {action.label}
+                  {view.action.operation === 'open-workspace' && <Icon icon={icon.vscode} />}
+                  {view.action.operation === 'reveal-source' && <Icon icon={icon.folderOpen} />}
+                  {view.action.operation === 'open-terminal' && <Icon icon={icon.terminal} />}
+                  {view.action.label}
                 </Button>
               )
             default: {
-              const exhaustive: never = action
+              const exhaustive: never = view
               return exhaustive
             }
           }
         })}
       </div>
-      {feedback && (
-        <div role="status">
-          <Alert>{feedback}</Alert>
-        </div>
-      )}
+      {nativeFeedback.map(({ operation, feedback }) => (
+        <WorkflowFeedback key={operation} feedback={feedback} workflows={workflows} />
+      ))}
     </>
   )
 }

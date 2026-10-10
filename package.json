@@ -18,6 +18,7 @@
     "architecture": "node scripts/check-architecture.mjs && node --test scripts/browser-architecture-plugin.test.mjs scripts/source-boundaries.test.mjs scripts/proof-options.test.mjs && node scripts/check-browser-build-fixtures.mjs",
     "test:client-owner-browser": "node scripts/client-owner-browser.mjs",
     "test:resource-results-browser": "node scripts/resource-results-browser.mjs",
+    "test:workflows-browser": "node scripts/workflows-browser.mjs",
     "fix": "biome check --write ."
   },
   "devDependencies": {

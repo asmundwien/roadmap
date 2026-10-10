@@ -1,89 +1,84 @@
-import type { ConfigurationVersion } from '@roadmap/contracts/identity'
-import type { Command, CommandResultFor } from '@roadmap/contracts/operations'
-import type { AuthorizationOperation } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
 import { ControlGroup } from '@roadmap/ui/control-group'
 import { Link } from '@roadmap/ui/link'
 import { Surface, SurfaceTitle } from '@roadmap/ui/surface'
-import { useRef, useState } from 'react'
-import type { AuthorizationResult, ConnectionSummary } from '@/resources/results'
-import {
-  type AuthorizationResultFeedback,
-  authorizationResultPending,
-  consumeAuthorizationFeedback,
-} from '@/views/settings/connections/connection-details'
+import { useState } from 'react'
+import { type ConnectionSummary, resolveConnection } from '@/resources/results'
+import { useRoadmap } from '@/store/roadmap-provider'
 import { AuthorizationControls, DeviceCode } from '@/views/shared/authorization-presentation'
+import {
+  authorizationFeedback,
+  authorizationPhaseStatus,
+  workflowFeedback,
+} from '@/workflows/workflows'
 
-type RunCommand = <C extends Command>(command: C) => Promise<CommandResultFor<C> | null>
-type AuthorizationCommand = Extract<
-  Command,
-  {
-    type:
-      | 'reauthorize-github-connection'
-      | 'retry-github-authorization'
-      | 'cancel-github-authorization'
-  }
->
+type AuthorizationGroupProps = { connection: ConnectionSummary }
 
-type AuthorizationGroupProps = {
-  connection: ConnectionSummary
-  authorization: AuthorizationOperation | undefined
-  presentation: AuthorizationResult | null
-  configurationVersion: ConfigurationVersion
-  blocked: boolean
-  run: RunCommand
-}
-
-export function AuthorizationGroup({
-  connection,
-  authorization,
-  presentation,
-  configurationVersion,
-  blocked,
-  run,
-}: AuthorizationGroupProps) {
-  const [feedback, setFeedback] = useState<AuthorizationResultFeedback | null>(null)
-  const currentAuthorization = useRef(authorization)
-  currentAuthorization.current = authorization
-  const reconciledFeedback = feedback ? consumeAuthorizationFeedback(authorization, feedback) : null
-  if (reconciledFeedback !== feedback) setFeedback(reconciledFeedback)
-  const result = authorizationResultPending(authorization, reconciledFeedback)
-    ? reconciledFeedback?.result
-    : null
-  const perform = async <C extends AuthorizationCommand>(command: C) => {
-    const next = await run(command)
-    if (next) {
-      setFeedback(
-        consumeAuthorizationFeedback(currentAuthorization.current, {
-          result: next,
-          previous: authorization,
-          consumed: currentAuthorization.current !== authorization,
-        }),
+export function AuthorizationGroup({ connection }: AuthorizationGroupProps) {
+  const { workflows, presentation, result, reauthorization, retry, cancellation } = useRoadmap(
+    (roadmap) => {
+      const currentConnection = resolveConnection(roadmap, connection.id)
+      const presentation =
+        currentConnection.kind === 'known' ? currentConnection.currentAuthorization : null
+      const reauthorization = workflowFeedback(
+        roadmap.workflowState,
+        'reauthorize-github-connection',
+        {
+          kind: 'connection',
+          connectionId: connection.id,
+        },
       )
-    }
-  }
+      const attempt = reauthorization.current
+      const returnedOperationId =
+        attempt?.kind === 'acknowledged' && attempt.operation === 'reauthorize-github-connection'
+          ? attempt.result.operationId
+          : undefined
+      const returnedFeedback = returnedOperationId
+        ? authorizationFeedback(roadmap.workflowState, returnedOperationId)
+        : null
+      const feedback =
+        returnedFeedback && !returnedFeedback.consumed
+          ? returnedFeedback
+          : presentation
+            ? authorizationFeedback(roadmap.workflowState, presentation.id)
+            : null
+      const result = feedback && !feedback.consumed ? feedback.result : null
+      const operationId = result?.operationId ?? presentation?.id
+      return {
+        workflows: roadmap.workflows,
+        presentation,
+        result,
+        reauthorization,
+        retry: operationId
+          ? workflowFeedback(roadmap.workflowState, 'retry-github-authorization', {
+              kind: 'authorization',
+              operationId,
+            })
+          : null,
+        cancellation: operationId
+          ? workflowFeedback(roadmap.workflowState, 'cancel-github-authorization', {
+              kind: 'authorization',
+              operationId,
+            })
+          : null,
+      }
+    },
+  )
+  const operationId = result?.operationId ?? presentation?.id
+  const canRetry = result
+    ? result.phase !== 'granted' && result.phase !== 'cancelled'
+    : presentation &&
+      presentation.kind !== 'granted-current' &&
+      presentation.kind !== 'granted-historical' &&
+      !(presentation.kind === 'terminal' && presentation.outcome === 'cancelled')
+  const actionFeedback = canRetry && operationId ? retry : reauthorization
   const reauthenticate = () => {
-    const operationId = result?.operationId ?? authorization?.id
-    const retry = result
-      ? result.phase !== 'granted' && result.phase !== 'cancelled'
-      : presentation &&
-        presentation.kind !== 'granted-current' &&
-        presentation.kind !== 'granted-historical' &&
-        !(presentation.kind === 'terminal' && presentation.outcome === 'cancelled')
-    if (retry && operationId) {
-      void perform({
-        type: 'retry-github-authorization',
-        expectedConfigurationVersion: configurationVersion,
-        operationId,
-      })
-      return
+    if (canRetry && operationId) {
+      void workflows.retryAuthorization({ operationId })
+    } else {
+      void workflows.reauthorizeConnection({ connectionId: connection.id })
     }
-    void perform({
-      type: 'reauthorize-github-connection',
-      expectedConfigurationVersion: configurationVersion,
-      connectionId: connection.id,
-    })
   }
   const waiting = result
     ? result.phase === 'waiting'
@@ -92,25 +87,16 @@ export function AuthorizationGroup({
     : presentation?.kind === 'waiting'
       ? presentation
       : null
-  const waitingOperationId = result?.operationId ?? authorization?.id
-
   return (
     <Surface variant="subtle">
       <SurfaceTitle>GitHub authorization</SurfaceTitle>
-      {result && result.phase !== 'waiting' && (
-        <Alert variant={result.phase === 'granted' ? 'info' : undefined}>
-          {result.phase === 'granted'
-            ? `Connection ${result.connection.connectionId} authorized at configuration version ${result.configurationVersion}.`
-            : result.phase === 'failed' || result.phase === 'denied'
-              ? result.error.message
-              : result.phase === 'expired'
-                ? 'GitHub authorization expired.'
-                : 'GitHub authorization cancelled. Existing credentials and provider authorization remain unchanged.'}
-        </Alert>
-      )}
-      {waiting && waitingOperationId ? (
+      {waiting && operationId ? (
         <>
-          <p>Waiting for GitHub. Authorization progress is live server state.</p>
+          <p>
+            {result
+              ? authorizationPhaseStatus('waiting')
+              : 'Waiting for GitHub. Authorization progress is live server state.'}
+          </p>
           <DeviceCode>
             <small>{waiting.verificationUri}</small>
             <strong>{waiting.userCode}</strong>
@@ -131,14 +117,8 @@ export function AuthorizationGroup({
               </Button>
               <Button
                 type="button"
-                disabled={blocked}
-                onClick={() =>
-                  void perform({
-                    type: 'cancel-github-authorization',
-                    expectedConfigurationVersion: configurationVersion,
-                    operationId: waitingOperationId,
-                  })
-                }
+                disabled={!cancellation || cancellation.blocked || cancellation.pending}
+                onClick={() => void workflows.cancelAuthorization({ operationId })}
               >
                 Cancel authorization
               </Button>
@@ -148,7 +128,6 @@ export function AuthorizationGroup({
       ) : (
         <>
           {!result &&
-            authorization &&
             presentation &&
             presentation.kind === 'terminal' &&
             presentation.outcome !== 'cancelled' && (
@@ -157,17 +136,12 @@ export function AuthorizationGroup({
                 <span>{presentation.cause}</span>
               </Alert>
             )}
-          <Button type="button" disabled={blocked} onClick={reauthenticate}>
-            {(
-              result
-                ? result.phase !== 'granted' && result.phase !== 'cancelled'
-                : presentation &&
-                  presentation.kind !== 'granted-current' &&
-                  presentation.kind !== 'granted-historical' &&
-                  !(presentation.kind === 'terminal' && presentation.outcome === 'cancelled')
-            )
-              ? 'Retry authorization'
-              : 'Reauthenticate'}
+          <Button
+            type="button"
+            disabled={!actionFeedback || actionFeedback.blocked || actionFeedback.pending}
+            onClick={reauthenticate}
+          >
+            {canRetry ? 'Retry authorization' : 'Reauthenticate'}
           </Button>
         </>
       )}
@@ -176,16 +150,22 @@ export function AuthorizationGroup({
 }
 
 type RemoveConnectionGroupProps = {
-  dependentCount: number
-  blocked: boolean
-  onRemove: () => Promise<void>
+  connection: ConnectionSummary
+  onRemove: () => void
 }
 
-export function RemoveConnectionGroup({
-  dependentCount,
-  blocked,
-  onRemove,
-}: RemoveConnectionGroupProps) {
+export function RemoveConnectionGroup({ connection, onRemove }: RemoveConnectionGroupProps) {
+  const { feedback, dependentCount } = useRoadmap((roadmap) => {
+    const currentConnection = resolveConnection(roadmap, connection.id)
+    return {
+      feedback: workflowFeedback(roadmap.workflowState, 'remove-connection', {
+        kind: 'connection',
+        connectionId: connection.id,
+      }),
+      dependentCount: currentConnection.kind === 'known' ? currentConnection.projectCount : 0,
+    }
+  })
+  const blocked = feedback.blocked || feedback.pending
   const [confirming, setConfirming] = useState(false)
 
   return (

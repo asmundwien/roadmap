@@ -18,6 +18,7 @@ import {
   makeApplicationState,
   makeMap,
   makeProject,
+  makeRoadmapSnapshot,
   makeRoadmapStore,
   ticket,
 } from './test-fixtures'
@@ -540,7 +541,12 @@ describe('blocker source links', () => {
           {},
           createElement(
             RoadmapProvider,
-            { store: makeRoadmapStore([makeProject([map])]) },
+            {
+              store: makeRoadmapStore(
+                [],
+                makeRoadmapSnapshot(makeApplicationState([makeProject([map])])),
+              ),
+            },
             createElement(TicketModal, {
               selected: { map: map.ref, ticketId: ticketIdSchema.parse('8') },
               onClose: () => undefined,
@@ -572,7 +578,12 @@ describe('blocker source links', () => {
         {},
         createElement(
           RoadmapProvider,
-          { store: makeRoadmapStore([makeProject([map])]) },
+          {
+            store: makeRoadmapStore(
+              [],
+              makeRoadmapSnapshot(makeApplicationState([makeProject([map])])),
+            ),
+          },
           createElement(TicketModal, {
             selected: { map: map.ref, ticketId: ticketIdSchema.parse('8') },
             onClose: () => undefined,

@@ -301,30 +301,56 @@ async function main() {
       'withheld and malformed initial baseline; actual source-unavailable accepted readiness',
     )
 
-    // This assertion deliberately runs before any lifecycle probe assertion, so the historical broad hook fails on subscription behavior.
+    // The request captures current admission, then a real external revision makes it stale before application dispatch.
+    await control('withhold')
+    await control('hold-next-request')
     await control('hold-next-response')
     const beforeCommand = await snapshot()
     void page.evaluate(() => {
-      void window.clientOwnerFixture.execute('conflict')
+      void window.clientOwnerFixture.renameProject()
     })
+    await until(
+      'held captured workflow request',
+      async () =>
+        (await control('status')).pendingRequests === 1 &&
+        (await snapshot()).snapshot.workflows.attempts.some(
+          (attempt) => attempt.kind === 'pending',
+        ),
+    )
+    await control('equal-projects')
+    await control('release-requests')
     await until(
       'held real correlated command outcome',
       async () =>
         (await control('status')).pendingResponses === 1 &&
-        (await snapshot()).snapshot.command.inFlight,
+        (await snapshot()).snapshot.workflows.attempts.some(
+          (attempt) => attempt.kind === 'pending',
+        ),
     )
     await stableSelection(beforeCommand, 'command-only publication')
     await control('release-responses')
-    await until('settled real command', async () => !(await snapshot()).snapshot.command.inFlight)
+    await until(
+      'settled real workflow',
+      async () =>
+        !(await snapshot()).snapshot.workflows.attempts.some(
+          (attempt) => attempt.kind === 'pending',
+        ),
+    )
     await stableSelection(beforeCommand, 'command-only completion')
     const commandConflict = (await snapshot()).outcomes.at(-1)
-    assert.equal(commandConflict.ok, false)
+    assert.equal(commandConflict.kind, 'rejected')
     assert.equal(commandConflict.operation, 'rename-project')
     assert.deepEqual(commandConflict.subject, {
       kind: 'project',
       project: { integration: 'local', projectId: 'fixture' },
     })
     assert.equal(commandConflict.error.code, 'conflict')
+    assert.equal(commandConflict.outcome.ok, false)
+    assert.equal(
+      commandConflict.configurationVersion,
+      beforeCommand.snapshot.state.configurationVersion,
+    )
+    assert.equal(commandConflict.destination ?? null, null)
     results.push(
       'selected Projects render and identity stability during command-only begin/completion',
     )
@@ -333,6 +359,13 @@ async function main() {
       return
     }
 
+    await control('release-baseline')
+    await until(
+      'external revision becomes accepted',
+      async () =>
+        (await snapshot()).snapshot.state.configurationVersion >
+        beforeCommand.snapshot.state.configurationVersion,
+    )
     const beforeEqual = await snapshot()
     await control('equal-projects')
     await until(
@@ -420,7 +453,7 @@ async function main() {
     // A predecessor host command really completes before transport settlement. The fixture holds its original correlated HTTP bytes.
     await control('hold-next-response')
     void page.evaluate(() => {
-      void window.clientOwnerFixture.execute('host')
+      void window.clientOwnerFixture.launchProject()
     })
     await until(
       'predecessor outcome held',
@@ -460,16 +493,19 @@ async function main() {
     await control('release-responses')
     await until(
       'obsolete predecessor outcome settlement',
-      async () => !(await snapshot()).snapshot.command.inFlight,
+      async () =>
+        !(await snapshot()).snapshot.workflows.attempts.some(
+          (attempt) => attempt.kind === 'pending',
+        ),
     )
     assert.equal(
       (await snapshot()).snapshot.state.serverEpoch,
       successor.snapshot.state.serverEpoch,
     )
     assert.equal((await snapshot()).snapshot.synchronization, 'synchronized')
-    assert.equal((await snapshot()).outcomes.at(-1).ok, true)
+    assert.equal((await snapshot()).outcomes.at(-1).kind, 'acknowledged')
     assert.equal(
-      (await snapshot()).outcomes.at(-1).serverEpoch,
+      (await snapshot()).outcomes.at(-1).outcome.serverEpoch,
       predecessor.snapshot.state.serverEpoch,
     )
     results.push(
@@ -479,7 +515,7 @@ async function main() {
     // The second settlement order releases the predecessor reply while the successor baseline is still withheld.
     await control('hold-next-response')
     void page.evaluate(() => {
-      void window.clientOwnerFixture.execute('host')
+      void window.clientOwnerFixture.launchProject()
     })
     await until(
       'second predecessor outcome held',
@@ -498,10 +534,15 @@ async function main() {
     await control('release-responses')
     await until(
       'predecessor outcome before successor baseline',
-      async () => !(await snapshot()).snapshot.command.inFlight,
+      async () =>
+        !(await snapshot()).snapshot.workflows.attempts.some(
+          (attempt) => attempt.kind === 'pending',
+        ),
     )
     assert.equal((await snapshot()).snapshot.state.serverEpoch, withheldEpoch)
     assert.equal((await snapshot()).snapshot.synchronization, 'retained')
+    assert.equal((await snapshot()).outcomes.at(-1).kind, 'acknowledged')
+    assert.equal((await snapshot()).outcomes.at(-1).outcome.serverEpoch, withheldEpoch)
     await control('release-baseline')
     await until(
       'second valid successor baseline',
@@ -526,17 +567,17 @@ async function main() {
     assert.notEqual(httpSuccessor.state.serverEpoch, current.snapshot.state.serverEpoch)
     assert.equal((await snapshot()).snapshot.synchronization, 'synchronized')
     assert.equal(await page.evaluate(() => window.clientOwnerFixture.readStateIdentity()), true)
-    await page.evaluate(() => window.clientOwnerFixture.execute('successor-conflict'))
+    await page.evaluate(() => window.clientOwnerFixture.renameProject())
     const conflict = await snapshot()
-    assert.equal(conflict.outcomes.at(-1).ok, false)
+    assert.equal(conflict.outcomes.at(-1).kind, 'rejected')
     assert.equal(conflict.outcomes.at(-1).operation, 'rename-project')
     assert.deepEqual(conflict.outcomes.at(-1).subject, {
       kind: 'project',
       project: { integration: 'local', projectId: 'fixture' },
     })
     assert.equal(conflict.outcomes.at(-1).error.code, 'conflict')
-    assert.equal(conflict.outcomes.at(-1).serverEpoch, httpSuccessor.state.serverEpoch)
-    assert.equal(conflict.snapshot.command.error.code, 'conflict')
+    assert.equal(conflict.outcomes.at(-1).outcome.serverEpoch, httpSuccessor.state.serverEpoch)
+    assert.equal(conflict.outcomes.at(-1).destination ?? null, null)
     await until(
       'successor HTTP retires established B socket and opens fresh withheld C socket',
       async () => {
@@ -591,32 +632,83 @@ async function main() {
     assert.equal((await snapshot()).snapshot.synchronization, 'synchronized')
     const beforeLoss = await control('status')
     await control('drop-next-response')
-    await page.evaluate(() => window.clientOwnerFixture.execute('host'))
+    await page.evaluate(() => window.clientOwnerFixture.launchProject())
     assert.equal((await snapshot()).outcomes.at(-1).kind, 'completion-unknown')
     const unknown = await snapshot()
-    assert.equal(unknown.snapshot.command.inFlight, false)
-    assert.equal(unknown.snapshot.command.error.code, 'transport-failed')
+    assert.equal(
+      unknown.snapshot.workflows.attempts.some((attempt) => attempt.kind === 'pending'),
+      false,
+    )
+    assert.equal(unknown.outcomes.at(-1).error.code, 'transport-failed')
     const unknownCompletion = unknown.outcomes.at(-1)
-    const unknownError = unknown.snapshot.command.error
+    const unknownError = unknownCompletion.error
     await page.evaluate(() => window.clientOwnerFixture.pinUnknown())
-    async function assertCurrentUnknown(label) {
+    async function assertCurrentUnknown(label, sameIdentity = true) {
       const view = await snapshot()
-      assert.equal(view.snapshot.command.inFlight, false, label)
-      assert.equal(view.snapshot.command.error.code, 'transport-failed', label)
-      assert.deepEqual(view.snapshot.command.error, unknownError, label)
-      assert.deepEqual(view.outcomes.at(-1), unknownCompletion, label)
-      assert.equal(view.outcomes.length, unknown.outcomes.length, label)
+      const attempt = view.snapshot.workflows.attempts.find(
+        (attempt) => attempt.id === unknownCompletion.id,
+      )
+      assert.ok(attempt, label)
+      assert.equal(attempt.kind, 'completion-unknown', label)
+      assert.equal(attempt.error.code, 'transport-failed', label)
+      assert.deepEqual(attempt.error, unknownError, label)
+      assert.equal(attempt.operation, 'launch-project-operation', label)
+      assert.deepEqual(attempt.subject, unknownCompletion.subject, label)
+      assert.equal(
+        view.launchFeedback.unknown.some((attempt) => attempt.id === unknownCompletion.id),
+        true,
+        label,
+      )
+      assert.equal(attempt.destination ?? null, null, label)
       assert.deepEqual(
         await page.evaluate(() => window.clientOwnerFixture.unknownIdentity()),
-        { completion: true, completionFrozen: true, commandError: true, commandErrorFrozen: true },
+        { completion: sameIdentity, completionFrozen: true, error: true, errorFrozen: true },
         label,
       )
     }
-    await assertCurrentUnknown('unknown completion is immutable with current transport error')
+    await assertCurrentUnknown('unknown completion remains immutable and attached to its attempt')
+    await page.evaluate(() => window.clientOwnerFixture.refreshUnavailable())
+    const independentRefresh = (await snapshot()).outcomes.at(-1)
+    assert.equal(independentRefresh.kind, 'acknowledged')
+    assert.equal(independentRefresh.operation, 'refresh-project')
+    assert.equal(independentRefresh.result.attempt.kind, 'failed')
+    await assertCurrentUnknown('unrelated acknowledged refresh cannot clear native uncertainty')
+    await control('hold-next-request')
+    void page.evaluate(() => {
+      void window.clientOwnerFixture.renameProject()
+    })
+    await until(
+      'unrelated captured rename request',
+      async () => (await control('status')).pendingRequests === 1,
+    )
+    await control('equal-projects')
+    await control('release-requests')
+    await until(
+      'unrelated stale rename rejection',
+      async () =>
+        !(await snapshot()).snapshot.workflows.attempts.some(
+          (attempt) => attempt.kind === 'pending',
+        ),
+    )
+    const unrelatedRejection = (await snapshot()).outcomes.at(-1)
+    assert.equal(unrelatedRejection.kind, 'rejected')
+    assert.equal(unrelatedRejection.error.code, 'conflict')
+    await assertCurrentUnknown('another workflow error cannot clear native uncertainty')
+    await page.evaluate(() => window.clientOwnerFixture.dismissUnknown())
+    const dismissed = (await snapshot()).snapshot.workflows.attempts.find(
+      (attempt) => attempt.id === unknownCompletion.id,
+    )
+    assert.equal(dismissed.dismissed, true)
+    assert.equal((await snapshot()).launchFeedback.message, null)
+    assert.equal((await snapshot()).launchFeedback.error, null)
+    await assertCurrentUnknown(
+      'dismissal hides feedback without settling native uncertainty',
+      false,
+    )
     assert.equal(
       (await control('status')).commandRequests,
-      beforeLoss.commandRequests + 1,
-      'Truncated admitted reply does not cause a fixture/browser command replay',
+      beforeLoss.commandRequests + 3,
+      'Each explicit workflow dispatches once, without replaying the unknown native operation',
     )
     assert.equal(
       (await control('status')).hostInvocations,
@@ -632,7 +724,7 @@ async function main() {
         (await control('status')).socketConnections > connectionsBeforeUnknownReconnect &&
         (await snapshot()).snapshot.synchronization === 'synchronized',
     )
-    await assertCurrentUnknown('current unknown completion and error survive reconnect')
+    await assertCurrentUnknown('unknown attempt survives reconnect', false)
     const beforeUnknownUpdate = await snapshot()
     await control('equal-projects')
     await until(
@@ -641,7 +733,7 @@ async function main() {
         (await snapshot()).snapshot.state.configurationVersion >
         beforeUnknownUpdate.snapshot.state.configurationVersion,
     )
-    await assertCurrentUnknown('current unknown completion and error survive state publication')
+    await assertCurrentUnknown('unknown attempt survives state publication', false)
     assert.equal(
       (await control('status')).commandRequests,
       commandCount,
@@ -652,8 +744,115 @@ async function main() {
       beforeLoss.hostInvocations + 1,
       'Reconnect cannot repeat the unknown host invocation',
     )
+    for (const order of ['predecessor-first', 'successor-first']) {
+      const established = await snapshot()
+      const networkBefore = await control('status')
+      await page.evaluate(() => {
+        window.clientOwnerFixture.pinIdentity('HTTP successor')
+        window.clientOwnerFixture.pinReadState()
+      })
+      await control('hold-next-response')
+      void page.evaluate(() => {
+        void window.clientOwnerFixture.launchProject()
+      })
+      await until(
+        `${order} current-authority predecessor reply held`,
+        async () => (await control('status')).pendingResponses === 1,
+      )
+      const actualSuccessor = await control('http-successor')
+      await control('hold-next-response')
+      void page.evaluate(() => {
+        void window.clientOwnerFixture.renameProject()
+      })
+      await until(
+        `${order} independent successor reply held`,
+        async () =>
+          (await control('status')).pendingResponses === 2 &&
+          (await snapshot()).snapshot.workflows.attempts.filter(
+            (attempt) => attempt.kind === 'pending',
+          ).length === 2,
+      )
+      assert.equal((await snapshot()).snapshot.synchronization, 'synchronized')
+      await control(
+        order === 'predecessor-first' ? 'release-first-response' : 'release-last-response',
+      )
+      await until(
+        `${order} first independent settlement`,
+        async () =>
+          (await snapshot()).snapshot.workflows.attempts.filter(
+            (attempt) => attempt.kind === 'pending',
+          ).length === 1,
+      )
+      if (order === 'predecessor-first') {
+        assert.equal((await snapshot()).snapshot.synchronization, 'synchronized')
+        assert.equal((await control('status')).socketConnections, networkBefore.socketConnections)
+        assert.equal((await snapshot()).outcomes.at(-1).kind, 'acknowledged')
+        assert.equal(
+          (await snapshot()).outcomes.at(-1).outcome.serverEpoch,
+          established.snapshot.state.serverEpoch,
+        )
+      } else {
+        assert.equal((await snapshot()).outcomes.at(-1).kind, 'rejected')
+        assert.equal(
+          (await snapshot()).outcomes.at(-1).outcome.serverEpoch,
+          actualSuccessor.state.serverEpoch,
+        )
+      }
+      await control('release-responses')
+      await until(`${order} settled with one fresh withheld successor socket`, async () => {
+        const view = await snapshot()
+        const network = await control('status')
+        return (
+          !view.snapshot.workflows.attempts.some((attempt) => attempt.kind === 'pending') &&
+          network.socketConnections === networkBefore.socketConnections + 1 &&
+          network.activeSockets === 1 &&
+          network.upstreamSockets === 1 &&
+          view.snapshot.transport === 'live' &&
+          view.snapshot.synchronization === 'retained'
+        )
+      })
+      assert.equal(await page.evaluate(() => window.clientOwnerFixture.readStateIdentity()), true)
+      assert.deepEqual((await snapshot()).snapshot.state, established.snapshot.state)
+      await assertRetained(
+        `${order} established authority retains DOM and draft until real baseline`,
+      )
+      const settled = (await snapshot()).outcomes.slice(-2)
+      const native = settled.find((attempt) => attempt.operation === 'launch-project-operation')
+      const mutation = settled.find((attempt) => attempt.operation === 'rename-project')
+      assert.equal(native.kind, 'acknowledged')
+      assert.equal(native.outcome.serverEpoch, established.snapshot.state.serverEpoch)
+      assert.equal(mutation.kind, 'rejected')
+      assert.equal(mutation.error.code, 'conflict')
+      assert.equal(mutation.outcome.serverEpoch, actualSuccessor.state.serverEpoch)
+      assert.equal(mutation.destination ?? null, null)
+      await assertCurrentUnknown(
+        `${order} independent outcomes cannot settle old native uncertainty`,
+        false,
+      )
+      await control('release-baseline')
+      await until(
+        `${order} real successor baseline`,
+        async () =>
+          (await snapshot()).snapshot.synchronization === 'synchronized' &&
+          (await snapshot()).snapshot.state.serverEpoch === actualSuccessor.state.serverEpoch,
+      )
+      await assertCurrentUnknown(
+        `${order} fresh baseline cannot settle old native uncertainty`,
+        false,
+      )
+      const beforePublication = await snapshot()
+      await control('equal-projects')
+      await until(
+        `${order} continued successor publication`,
+        async () =>
+          (await snapshot()).snapshot.state.configurationVersion >
+          beforePublication.snapshot.state.configurationVersion,
+      )
+      assert.equal((await snapshot()).snapshot.state.serverEpoch, actualSuccessor.state.serverEpoch)
+      assert.equal((await control('status')).commandRequests, networkBefore.commandRequests + 2)
+    }
     results.push(
-      'actual differing-epoch successor HTTP configuration conflict retires B socket without HTTP read adoption; withheld C baseline retains B reference/DOM/URL/draft; real C baseline and updates; immutable native completion uncertainty and current transport-failed error survive reconnect and state without replay',
+      'actual differing-epoch HTTP conflict requests fresh socket without HTTP read adoption; current-authority predecessor/successor settlements in both orders; retained DOM/URL/draft until real baseline and continued successor updates; per-attempt native uncertainty survives unrelated workflow settlement, dismissal, reconnect and state without replay',
     )
 
     for (const route of ['/components', '/unknown-client-owner-path']) {
@@ -707,6 +906,7 @@ async function main() {
           (await control('status')).upstreamSockets === 0,
       )
       assert.equal((await snapshot()).snapshot.transport, 'disconnected')
+      await assertCurrentUnknown('provider disposal retains dismissed attempt uncertainty', false)
       const disposedCount = (await control('status')).socketConnections
       await new Promise((resolve) => setTimeout(resolve, 650))
       assert.equal((await control('status')).socketConnections, disposedCount)
@@ -716,6 +916,10 @@ async function main() {
         async () =>
           (await control('status')).activeSockets === 1 &&
           (await snapshot()).snapshot.synchronization === 'synchronized',
+      )
+      await assertCurrentUnknown(
+        'StrictMode reacquisition retains dismissed attempt uncertainty',
+        false,
       )
     }
     await control('withhold')
@@ -744,6 +948,11 @@ async function main() {
       (await control('status')).selectorInvocations,
       0,
       'Mounts, navigation and reconnect cannot invoke folder selection',
+    )
+    assert.equal(
+      (await control('status')).hostInvocations,
+      5,
+      'Every explicit native attempt invokes its harmless effect once',
     )
     results.push(
       'subscriber churn; concurrent owners; repeated StrictMode setup/cleanup; disposal closes sockets and cancels pending reconnect',

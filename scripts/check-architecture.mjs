@@ -147,6 +147,30 @@ try {
         await readFile(new URL('./fixtures/architecture/resource-results.ts', import.meta.url)),
       )
       cruise(leaf, [relative(root, resources).split('\\').join('/')])
+      const workflows = join(workspace, 'src/workflows/architecture-consumer.ts')
+      await mkdir(dirname(workflows), { recursive: true })
+      await writeFile(
+        workflows,
+        await readFile(new URL('./fixtures/architecture/workflows.ts', import.meta.url)),
+      )
+      cruise(leaf, [relative(root, workflows).split('\\').join('/')])
+      const feedback = join(workspace, 'src/views/shared/workflow-feedback.tsx')
+      await mkdir(dirname(feedback), { recursive: true })
+      await writeFile(
+        feedback,
+        [
+          "import type { OperationSubject } from '@roadmap/contracts/operations'",
+          "import { Alert } from '@roadmap/ui/alert'",
+          "import { createElement } from 'react'",
+          "import { useRoadmap } from '@/store/roadmap-provider'",
+          "import { workflowFeedback, type WorkflowOperation } from '@/workflows/workflows'",
+          'export function WorkflowFeedback({ operation, subject }: { operation: WorkflowOperation; subject: OperationSubject }) {',
+          '  const feedback = useRoadmap(read => workflowFeedback(read.workflowState, operation, subject))',
+          '  return feedback.message === null ? null : createElement(Alert, null, feedback.message)',
+          '}',
+        ].join('\n'),
+      )
+      cruise(leaf, [relative(root, feedback).split('\\').join('/')])
     }
   }
 } finally {

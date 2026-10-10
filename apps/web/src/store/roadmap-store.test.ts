@@ -601,12 +601,12 @@ function flushTimers(): Promise<void> {
 describe('createRoadmapStore', () => {
   it('starts with transport liveness separated from domain state', () => {
     const { store, sockets } = harness()
-    expect(store.getSnapshot()).toEqual({
+    expect(store.getSnapshot()).toMatchObject({
       transport: 'connecting',
       synchronization: 'not-ready',
       lifecycle: null,
       state: null,
-      command: { inFlight: false, error: null },
+      workflows: { attempts: [] },
     })
     expect(sockets).toHaveLength(0)
   })
@@ -841,7 +841,7 @@ describe('createRoadmapStore', () => {
       const accepted = store.getSnapshot()
       expect(store.getSnapshot()).toBe(accepted)
       expect(Reflect.set(accepted, 'transport', 'disconnected')).toBe(false)
-      expect(Reflect.set(accepted.command, 'inFlight', true)).toBe(false)
+      expect(Reflect.set(accepted.workflows.attempts, '0', {})).toBe(false)
       const content = readyStateOf(store)
       if (!content) throw new Error('Expected readable accepted state.')
       const map = content.projects[0]?.maps[0]
@@ -1424,7 +1424,6 @@ describe('createRoadmapStore', () => {
       connectionId: connectionIdSchema.parse('github-1'),
       name: 'Renamed',
     })
-    expect(store.getSnapshot().command.inFlight).toBe(true)
 
     const outcome: CommandOutcome = {
       ok: false,
@@ -1437,7 +1436,6 @@ describe('createRoadmapStore', () => {
     response.resolve(jsonResponse({ type: 'command-result', outcome }))
     await expect(execution).resolves.toEqual(outcome)
     expect(store.getSnapshot().state?.stateSequence).toBe(1)
-    expect(store.getSnapshot().command).toEqual({ inFlight: false, error: outcome.error })
   })
 
   it('lets newer WebSocket state win a cross-wire race', async () => {
@@ -1465,38 +1463,32 @@ describe('createRoadmapStore', () => {
       throw new Error('connection reset')
     }) as typeof fetch)
     store.start()
-    sockets[0]?.emit('message', wire(state(1)))
+    sockets[0]?.emit('message', wire(state(1, 'epoch-a', [project('a/one')])))
 
-    await expect(
-      store.execute({
-        type: 'refresh-project',
-        expectedConfigurationVersion: configurationVersionSchema.parse(1),
-        project: { integration: 'github', projectId: projectIdSchema.parse('a/one') },
-      }),
-    ).rejects.toBeInstanceOf(Error)
+    const attempt = await store.workflows.refreshProject({ project: refreshCommand.project })
+    expect(attempt).toMatchObject({
+      kind: 'completion-unknown',
+      error: { code: 'transport-failed' },
+    })
     expect(store.getSnapshot().state?.stateSequence).toBe(1)
-    expect(store.getSnapshot().command.error).toMatchObject({ code: 'transport-failed' })
+    expect(store.getSnapshot().workflows.attempts).toContainEqual(attempt)
     sockets[0]?.emit('message', wire(state(2)))
     expect(store.getSnapshot().state?.stateSequence).toBe(2)
-    expect(store.getSnapshot().command.error).toMatchObject({ code: 'transport-failed' })
+    expect(store.getSnapshot().workflows.attempts).toContainEqual(attempt)
   })
 
-  it('does not expose thrown transport secrets in command activity', async () => {
-    const { store } = harness(async () => {
+  it('does not expose thrown transport secrets in workflow feedback', async () => {
+    const { store, sockets } = harness(async () => {
       throw new Error('private-token')
     })
-    await expect(
-      store.execute({
-        type: 'launch-project-operation',
-        expectedConfigurationVersion: configurationVersionSchema.parse(1),
-        project: refreshCommand.project,
-        operation: 'open-workspace',
-      }),
-    ).rejects.toBeInstanceOf(Error)
-    expect(store.getSnapshot().command.error?.message).not.toContain('private-token')
-    expect(store.getSnapshot().command.error?.code).toBe('transport-failed')
+    store.start()
+    sockets[0]?.emit('message', wire(state(1, 'epoch-a', [project('a/one')])))
+    const attempt = await store.workflows.refreshProject({ project: refreshCommand.project })
+    expect(attempt).toMatchObject({ kind: 'completion-unknown' })
+    if (attempt.kind !== 'completion-unknown') throw new Error('Expected unknown completion.')
+    expect(attempt.error.message).not.toContain('private-token')
+    expect(attempt.error.code).toBe('transport-failed')
   })
-
   it.each(rejectionPolicies)(
     'distinguishes attributable command rejection from uncertain completion ($reason)',
     async ({ reason, status }) => {
@@ -1534,13 +1526,8 @@ describe('createRoadmapStore', () => {
       expect(delivery).not.toHaveProperty('state')
       expect(delivery).not.toHaveProperty('outcome')
       expect(store.getSnapshot().state).toBe(retainedState)
-      expect(store.getSnapshot().command).toMatchObject({
-        inFlight: false,
-        error: { code: 'admission-failed' },
-      })
       if (!delivery.ok) {
         expect(delivery.error.message.trim()).not.toBe('')
-        expect(store.getSnapshot().command.error).toEqual(delivery.error)
       }
       expect(requestId).toMatch(
         /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
@@ -1581,7 +1568,6 @@ describe('createRoadmapStore', () => {
         expect(delivery.error.message.trim()).not.toBe('')
       }
       expect(store.getSnapshot().state).toBe(retainedState)
-      expect(store.getSnapshot().command).toEqual({ inFlight: false, error: null })
       expect(requestId).toMatch(
         /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
       )
@@ -1611,10 +1597,6 @@ describe('createRoadmapStore', () => {
     ).rejects.toBeInstanceOf(Error)
 
     expect(store.getSnapshot().state).toBe(retainedState)
-    expect(store.getSnapshot().command).toMatchObject({
-      inFlight: false,
-      error: { code: 'transport-failed' },
-    })
     expect(attempts).toBe(1)
   })
 
@@ -1642,7 +1624,6 @@ describe('createRoadmapStore', () => {
     expect(delivery).toMatchObject({ ok: false, error: { code: 'transport-failed' } })
     expect(delivery).not.toHaveProperty('kind', 'not-admitted')
     expect(store.getSnapshot().state).toBe(retainedState)
-    expect(store.getSnapshot().command).toEqual({ inFlight: false, error: null })
     expect(attempts).toBe(1)
   })
 
@@ -1669,10 +1650,6 @@ describe('createRoadmapStore', () => {
       ).rejects.toBeInstanceOf(Error)
 
       expect(store.getSnapshot().state).toBe(retainedState)
-      expect(store.getSnapshot().command).toMatchObject({
-        inFlight: false,
-        error: { code: 'transport-failed' },
-      })
       expect(attempts).toBe(1)
     },
   )
@@ -1696,7 +1673,6 @@ describe('createRoadmapStore', () => {
       expect(result).toMatchObject({ ok: false, error: { code: 'transport-failed' } })
       expect(result).not.toHaveProperty('kind', 'not-admitted')
       expect(store.getSnapshot().state).toBe(retainedState)
-      expect(store.getSnapshot().command).toEqual({ inFlight: false, error: null })
       expect(attempts).toBe(1)
     },
   )
@@ -1723,10 +1699,6 @@ describe('createRoadmapStore', () => {
       ).rejects.toBeInstanceOf(Error)
 
       expect(store.getSnapshot().state).toBe(retainedState)
-      expect(store.getSnapshot().command).toMatchObject({
-        inFlight: false,
-        error: { code: 'transport-failed' },
-      })
       expect(attempts).toBe(1)
     },
   )
@@ -1750,7 +1722,6 @@ describe('createRoadmapStore', () => {
       })
 
       expect(store.getSnapshot().state).toBe(retainedState)
-      expect(store.getSnapshot().command).toEqual({ inFlight: false, error: null })
       expect(attempts).toBe(1)
     },
   )
@@ -1777,7 +1748,6 @@ describe('createRoadmapStore', () => {
       await expect(store.execute(command)).resolves.toEqual(outcome)
 
       expect(store.getSnapshot().state?.stateSequence).toBe(1)
-      expect(store.getSnapshot().command).toEqual({ inFlight: false, error: null })
       expect(attempts).toBe(1)
     })
 
@@ -1805,10 +1775,6 @@ describe('createRoadmapStore', () => {
         await expect(store.execute(command)).rejects.toBeInstanceOf(Error)
 
         expect(store.getSnapshot().state).toBe(retainedState)
-        expect(store.getSnapshot().command).toMatchObject({
-          inFlight: false,
-          error: { code: 'transport-failed' },
-        })
         expect(attempts).toBe(1)
       },
     )

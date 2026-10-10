@@ -996,6 +996,9 @@ async function main() {
     )
 
     const before = await control('status')
+    const beforeAttempts = (await snapshot()).workflows.attempts
+    const beforeEvidence = (await read()).automation.evidence
+    const deniedAttempts = []
     const deniedModal = await evidenceText(p.githubTicket, 'GitHub child prose.')
     const serverControl = (await read()).automation.overrides.find(
       (item) =>
@@ -1012,16 +1015,65 @@ async function main() {
       assert.equal(await button.isDisabled(), true)
       assert.equal(await button.getAttribute('title'), serverControl[stage].reason)
       await button.evaluate((element) => element.click())
-      const outcome = await page.evaluate(
-        ({ target, stage }) => window.resourceResultsFixture.executeOverride(target, stage),
+      const { attempt, previousPublicationUnchanged } = await page.evaluate(
+        async (argument) => {
+          const previous = window.resourceResultsFixture.snapshot().workflows.attempts
+          const recorded = JSON.stringify(previous)
+          const attempt = await window.resourceResultsFixture.startOverride(argument)
+          return { attempt, previousPublicationUnchanged: JSON.stringify(previous) === recorded }
+        },
         { target: serverControl.target, stage },
       )
       assert.equal(
-        outcome.ok,
-        false,
-        'Server rechecks ineligibility through real HTTP, independently of disabled UI',
+        previousPublicationUnchanged,
+        true,
+        'A new attempt cannot mutate an earlier publication',
       )
+      assert.equal(attempt.kind, 'not-dispatched')
+      assert.equal(attempt.operation, 'start-automation-override')
+      assert.deepEqual(attempt.subject, { kind: 'ticket', target: serverControl.target, stage })
+      assert.equal('configurationVersion' in attempt, false)
+      assert.equal('outcome' in attempt, false)
+      assert.equal('result' in attempt, false)
+      assert.equal('destination' in attempt, false)
+      assert.ok(attempt.error.message.includes(serverControl[stage].reason))
+      deniedAttempts.push(attempt)
+      assert.deepEqual((await snapshot()).workflows.attempts, [
+        ...beforeAttempts,
+        ...deniedAttempts,
+      ])
+      assert.equal(
+        (await control('status')).commandRequests,
+        before.commandRequests + deniedAttempts.length - 1,
+        'Disabled clicks and named ineligible workflows send no HTTP request',
+      )
+      await until('central scoped workflow feedback', () =>
+        deniedModal.getByText(attempt.message, { exact: true }).count(),
+      )
+      const denial = await fixture.denyOverride({ stage })
+      assert.equal(denial.httpStatus, 200)
+      assert.equal(denial.outcome.ok, false)
+      assert.equal(denial.outcome.operation, 'start-automation-override')
+      assert.deepEqual(denial.outcome.subject, {
+        kind: 'ticket',
+        target: serverControl.target,
+        stage,
+      })
+      assert.ok(denial.outcome.error.message.length > 0)
+      assert.equal('result' in denial.outcome, false)
+      assert.deepEqual((await snapshot()).workflows.attempts, [
+        ...beforeAttempts,
+        ...deniedAttempts,
+      ])
     }
+    assert.notEqual(deniedAttempts[0].id, deniedAttempts[1].id)
+    assert.deepEqual((await read()).automation.evidence, beforeEvidence)
+    await navigate('/')
+    await navigate(p.githubTicket)
+    await until('retained scoped feedback after Modal remount', () =>
+      page.locator('dialog[open]').getByText(deniedAttempts[1].message, { exact: true }).count(),
+    )
+    assert.deepEqual((await snapshot()).workflows.attempts, [...beforeAttempts, ...deniedAttempts])
     const after = await control('status')
     assert.equal(after.hostInvocations, before.hostInvocations)
     assert.equal(after.selectorInvocations, 0)
@@ -1039,7 +1091,7 @@ async function main() {
     )
     assert.deepEqual(failures, [])
     scenarios.push(
-      'Server-authored ineligible controls preserve exact reasons; disabled clicks and real public HTTP denial produce no host/selector/Automation/durable effects',
+      'Server-authored ineligible controls and named immutable not-dispatched feedback send no HTTP; separate real public transport denial has no host/selector/Automation/durable effects',
     )
     await capture('server-ineligible-controls')
     assert.deepEqual(failures, [])
