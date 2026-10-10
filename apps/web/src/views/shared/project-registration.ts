@@ -5,7 +5,7 @@ type RegistrationInput = Extract<Command, { type: 'register-project' }>['candida
 
 export function projectRegistrationDraft(
   data: FormData,
-  connection: Connection | undefined,
+  connection: Pick<Connection, 'id' | 'integration'> | undefined,
   workspacePath: string,
 ): { candidate: RegistrationInput | null; errors: Record<string, string> } {
   if (!connection) return { candidate: null, errors: { connection: 'Choose a Connection.' } }

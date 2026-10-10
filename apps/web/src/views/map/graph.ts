@@ -7,7 +7,7 @@ import type {
   TicketResourceResult,
 } from '@roadmap/contracts/state'
 import { type Edge, MarkerType, type Node, Position } from '@xyflow/react'
-import { resourceObservation } from '@/views/shared/resource-results'
+import { resourceObservation } from '@/resources/results'
 
 type TicketObservation = Extract<TicketResourceResult, { kind: 'current-readable' }>['observation']
 
@@ -35,7 +35,7 @@ function scopedTicketId(map: MapResource['ref'], ticketId: string): string {
   ])
 }
 
-export function blockerNodeId(blocker: Blocker): string {
+function blockerNodeId(blocker: Blocker): string {
   const { reference } = blocker
   switch (reference.kind) {
     case 'registered':

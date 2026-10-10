@@ -1,5 +1,4 @@
 import type { AuthorizationOperationId } from '@roadmap/contracts/identity'
-import type { AuthorizationOperation } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 import { Icon, icon } from '@roadmap/ui/icon'
 import {
@@ -10,11 +9,8 @@ import {
   SectionTitle,
 } from '@roadmap/ui/section'
 import classNames from 'classnames/bind'
-import {
-  type AuthorizationResultFeedback,
-  authorizationPhaseStatus,
-  authorizationStatus,
-} from './connection-details'
+import type { AuthorizationResult } from '@/resources/results'
+import { type AuthorizationResultFeedback, authorizationPhaseStatus } from './connection-details'
 import connectionStyles from './connection-sections.module.css'
 
 const cx = classNames.bind(connectionStyles)
@@ -24,7 +20,7 @@ type ConnectionSetupSectionProps = {
   configurationValid: boolean
   configurationNotices: string[]
   notice: string | null
-  authorizations: AuthorizationOperation[]
+  authorizations: AuthorizationResult[]
   feedback: AuthorizationResultFeedback[]
   hasConnections: boolean
   onOpenAuthorization: (operationId: AuthorizationOperationId) => void
@@ -80,11 +76,8 @@ export function ConnectionSetupSection({
               onClick={() => onOpenAuthorization(authorization.id)}
             >
               <span>
-                <strong>GitHub authorization · {authorizationStatus(authorization)}</strong>
-                <small>
-                  {('cause' in authorization ? authorization.cause : undefined) ??
-                    'Open the device authorization progress.'}
-                </small>
+                <strong>GitHub authorization · {authorization.label}</strong>
+                <small>{authorization.cause ?? 'Open the device authorization progress.'}</small>
               </span>
               <Icon icon={icon.internalLink} />
             </button>

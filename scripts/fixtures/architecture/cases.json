@@ -319,5 +319,100 @@
     "companions": {
       "packages/contracts/src/cycle.ts": "import type { A } from './fixture.ts'\nexport type B = { a: A }\n"
     }
+  },
+  {
+    "name": "resource-results-react",
+    "leaf": "web",
+    "file": "apps/web/src/resources/fixture.ts",
+    "rule": "web-resource-results-pure",
+    "source": "export { useMemo } from 'react'\n"
+  },
+  {
+    "name": "resource-results-router",
+    "leaf": "web",
+    "file": "apps/web/src/resources/fixture.ts",
+    "rule": "web-resource-results-pure",
+    "source": "export { useLocation } from 'react-router'\n"
+  },
+  {
+    "name": "resource-results-route-policy",
+    "leaf": "web",
+    "file": "apps/web/src/resources/fixture.ts",
+    "rule": "web-resource-results-pure",
+    "source": "export * from '../router.ts'\n",
+    "companions": { "apps/web/src/router.ts": "export const route = '/'\n" }
+  },
+  {
+    "name": "resource-results-provider",
+    "leaf": "web",
+    "file": "apps/web/src/resources/fixture.ts",
+    "rule": "web-resource-results-pure",
+    "source": "export * from '../store/roadmap-provider.tsx'\n",
+    "companions": { "apps/web/src/store/roadmap-provider.tsx": "export const provider = null\n" }
+  },
+  {
+    "name": "resource-results-store",
+    "leaf": "web",
+    "file": "apps/web/src/resources/fixture.ts",
+    "rule": "web-resource-results-pure",
+    "source": "export * from '../store/roadmap-store.ts'\n",
+    "companions": { "apps/web/src/store/roadmap-store.ts": "export const store = null\n" }
+  },
+  {
+    "name": "resource-results-view",
+    "leaf": "web",
+    "file": "apps/web/src/resources/fixture.ts",
+    "rule": "web-resource-results-pure",
+    "source": "export * from '../views/fixture.ts'\n",
+    "companions": { "apps/web/src/views/fixture.ts": "export const view = null\n" }
+  },
+  {
+    "name": "resource-results-private-view",
+    "leaf": "web",
+    "file": "apps/web/src/resources/internal/fixture.ts",
+    "rule": "web-resource-results-pure",
+    "source": "export * from '../../views/fixture.ts'\n",
+    "companions": { "apps/web/src/views/fixture.ts": "export const view = null\n" }
+  },
+  {
+    "name": "resource-results-ui",
+    "leaf": "web",
+    "file": "apps/web/src/resources/fixture.ts",
+    "rule": "web-resource-results-pure",
+    "source": "export { Button } from '@roadmap/ui/button'\n"
+  },
+  {
+    "name": "resource-results-wire",
+    "leaf": "web",
+    "file": "apps/web/src/resources/fixture.ts",
+    "rule": "web-resource-results-pure",
+    "source": "export { decodeStateEnvelope } from '@roadmap/contracts/wire'\n"
+  },
+  {
+    "name": "resource-results-operations",
+    "leaf": "web",
+    "file": "apps/web/src/resources/fixture.ts",
+    "rule": "web-resource-results-pure",
+    "source": "export type { Command } from '@roadmap/contracts/operations'\n"
+  },
+  {
+    "name": "ui-resource-results",
+    "leaf": "ui",
+    "file": "packages/ui/src/fixture.ts",
+    "rule": "ui-not-to-roadmap-domain",
+    "source": "export type { ConsumerRead } from '../../../../apps/web/src/resources/results.ts'\n",
+    "companions": {
+      "apps/web/src/resources/results.ts": "export type ConsumerRead = { readonly projects: readonly unknown[] }\n"
+    }
+  },
+  {
+    "name": "docs-resource-results",
+    "leaf": "docs",
+    "file": "apps/docs/src/fixture.ts",
+    "rule": "docs-only-to-ui",
+    "source": "export type { ConsumerRead } from '../../../../apps/web/src/resources/results.ts'\n",
+    "companions": {
+      "apps/web/src/resources/results.ts": "export type ConsumerRead = { readonly projects: readonly unknown[] }\n"
+    }
   }
 ]

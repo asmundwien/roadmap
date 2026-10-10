@@ -1,5 +1,5 @@
 import type { CommandResult } from '@roadmap/contracts/operations'
-import type { AuthorizationOperation, Connection } from '@roadmap/contracts/state'
+import type { AuthorizationOperation } from '@roadmap/contracts/state'
 import type { RoadmapViewState } from '@/store/roadmap-provider'
 
 export type ConnectionOperation = Pick<RoadmapViewState, 'execute'>
@@ -93,31 +93,4 @@ export function consumeAuthorizationFeedback(
   return feedback.consumed || authorizationResultPending(authorization, feedback)
     ? feedback
     : { ...feedback, consumed: true }
-}
-
-export function connectionAvailability(connection: Connection): string {
-  switch (connection.availability.status) {
-    case 'available':
-      return 'Available'
-    case 'degraded':
-      return 'Observation degraded'
-    case 'authorization-required':
-      return 'Authorization required'
-    case 'unavailable':
-      return 'Unavailable'
-  }
-}
-
-export function authorizationStatus(authorization: AuthorizationOperation): string {
-  switch (authorization.status) {
-    case 'waiting':
-    case 'granted':
-      return authorizationPhaseStatus(authorization.status)
-    case 'terminal':
-      return authorizationPhaseStatus(authorization.outcome)
-    default: {
-      const exhaustive: never = authorization
-      return exhaustive
-    }
-  }
 }

@@ -47,11 +47,11 @@ The binding computes a selection before comparing the snapshot React observes. D
 | Aggregate command activity | `RoadmapStore` | Current shared activity remains until the later per-attempt workflow cutover; it is not read authority or universal feedback for every attempt. |
 | Operation attempts, feedback, notices, and form drafts | Actual view-local or page-level operation owner | Removal feedback survives disappearance of its target. Drafts and presentation stay local unless a concrete workflow lifetime requires retention elsewhere. |
 | Resource selection | URL pathname, search, and fragment | No store or workflow mirror silently substitutes another Project, map, or ticket. |
-| Derived lookup indexes and pure resource results | Pure consumers of the accepted read state and scoped URL identity | Memoization caches calculations, not independently writable facts or a second resource authority. |
+| Derived lookup indexes and pure resource results | `apps/web/src/resources/results.ts`, consuming accepted read facts and scoped URL identity | Pure calculations have no independently writable facts, resource cache, or second authority. |
 
 `start()` acquires observation and returns an idempotent release. Multiple acquisitions share the active observation; releasing one does not dispose another's ownership. Repeating a release cannot decrement ownership twice. Adding/removing subscribers neither acquires nor releases observation. Last-owner cleanup retires authority, reports disconnected, retains actual accepted facts, closes the socket, and clears reconnect timers. React StrictMode setup/cleanup/setup may retire one generation and acquire another, but must not leave duplicate active sockets or reconnect timers. Retired callbacks cannot affect their successor. Navigating through `/components` or an unknown route does not end provider ownership.
 
-The interface to future shared pure resource results is immutable `RoadmapViewState` plus scoped resource identity. Results derive lifecycle, reachability, content, absence, and durable evidence from the sole public collection, without joining removed authorities. Future per-attempt workflow policy can own attempt state and interpret state-free operation evidence; it cannot mutate server read facts, infer a receipt from unrelated publication, mirror URL selection, or automatically replay commands. This decision does not implement that later policy.
+`apps/web/src/resources/results.ts` now owns shared pure resource lookup and presentation over the accepted read fields. It does not interpret lifecycle or transport synchronization; the provider and store own those facts. Future per-attempt workflow policy can own attempt state and interpret state-free operation evidence; it cannot mutate server read facts, infer a receipt from unrelated publication, mirror URL selection, or automatically replay commands. This resource cutover does not implement that later policy.
 
 The clean cutover removes the no-argument broad `useRoadmap` subscription and every affected caller, test/prototype use, and compatibility path. It replaces provider whole-content/command subscriptions with gate/status selection and removes mutable publication exposure and disposal that can invalidate another acquisition. It retains the already-shipped deletion of reader-owned observation and fabricated initial defaults. There is no parallel authoritative cache, duplicated writable Project collection, mirrored URL selection, obsolete owner alias, or automatic interaction replay. State-free HTTP outcomes and the existing session-authority rules remain intact.
 
@@ -164,9 +164,84 @@ Resource adapters use the router's `pathParams` helper to match the original enc
 
 A production web host must return the SPA HTML for application navigation paths so direct loads and refreshes work. API endpoints and asset requests must bypass this fallback. This deployment requirement does not imply that a production host has been verified.
 
-The map area lives in `apps/web/src/views/map`. `page.tsx` resolves the registered Project and the exact URL-selected map and ticket from `state.projects`. Resource phases determine whether actual content exists. Navigation uses the catalog's last trustworthy open/closed identity order and a separate historical or unplaced group. It never promotes a sibling because the selected map failed. `map-container.tsx` owns the React Flow viewport and its pan, zoom, and fit controls. `graph.ts` projects real blocked-by relationships and uses Dagre for layout. `ticket-node.tsx` renders ticket and unresolved or external blocker nodes. Closed tickets remain in the graph, with arrows from blockers to dependent tickets.
+The map area lives in `apps/web/src/views/map`. `App` parses opaque route parameters once and supplies the complete scoped selection. `page.tsx` calls `resolveSelection` through `useRoadmap`; it does not join Project collections or select a replacement locally. The result supplies exact Project/map/ticket lookup, trustworthy default selection, grouped navigation, content, warnings, source destinations, and Automation facts. `map-container.tsx` owns the React Flow viewport and its pan, zoom, and fit controls. The retained pure `graph.ts` projector accepts the selected `MapResource` and uses Dagre for layout. `ticket-node.tsx` renders ticket and unresolved or external blocker nodes with shared tracker/blocker interpretation. Closed tickets remain in the graph, with arrows from blockers to dependent tickets.
 
 `ticket-modal.tsx` opens the URL-selected ticket in the shared native Modal. It retains ticket bodies, metadata, blockers, source links, Automation evidence, and eligible Automation controls. Opening a ticket pushes a pathname that pins its map and selects the ticket. Closing the Modal or returning to map prose replaces that history entry with the pinned map pathname, so Back does not reopen the closed ticket. Back and Forward otherwise restore the URL-selected map and ticket. `map-content.tsx` renders complete raw map Markdown inline below the graph, with a structured fallback when raw content is absent. `prose.tsx` renders Markdown and resolves references within the current Project and map: local ticket links open ticket details, map references return to map prose, and external references use available source links. Unresolvable local references explain why they cannot be opened. Missing tickets, incomplete blockers or map sections, warnings, and unavailable Projects or maps remain explicit rather than disappearing.
+
+### Shared resource results
+
+`apps/web/src/resources/results.ts` is the app-local public interface for pure consumer results. `ConsumerRead` is a readonly `Pick<ReadyApplicationState, 'projects' | 'connections' | 'automation' | 'configuration' | 'supportedIntegrations' | 'authorizationOperations'>`. Consumers call it inside `useRoadmap(selector)` after the provider's readable-content gate. It owns neither acquisition nor a writable result store. Server projection remains the sole authority for source success, completeness, trustworthy absence, provenance, and admission.
+
+`resolveProject` returns a missing scoped identity with a message and durable Automation facts, or a known presentation result with explicit management identity/locator/Workspace facts, Connection summary, availability, observation destination, current source destination, grouped map summaries, journey, aggregate counts, activity, and supplied capabilities. `presentProjects` owns portfolio grouping and attention. Neither exposes a raw Project or Connection wrapper for consumers to reinterpret. Counts preserve source aggregates beyond fetched tickets, unknown counts remain `null`, and known zero remains zero. Recency uses actual source activity or explicit unknown activity. Connection attention reports Connection health, not that all dependent Projects are retained.
+
+`resolveConnection` owns exact Connection lookup, independent health label/cause/time, dependent Project results, related and current accepted authorization, and integration installation/setup/registration context. `presentConnections` supplies list/setup presentation. `resolveAuthorization` interprets accepted live authorization only; returned-operation feedback reconciliation and pure registration draft/error helpers retain their separate owners. Explicit registration identity facts support command construction without restoring a raw presentation model.
+
+Lookup `missing` means the requested identity has no entry in the accepted collection. A known entry's resource availability preserves `never-observed`, `current-readable`, `retained-unavailable`, or `proven-absent`, including actual absence proof and optional historical trace. These are not interchangeable with lookup failure, known-empty membership, readable incomplete content, Connection degradation, or no accepted browser state. `resourceObservation` chooses actual current success, retained success, or historical success where supplied. Availability messages retain safe causes, attempt/source times, completeness and Local/GitHub provenance. Source destinations are explicit `link` with `href`, `file` with `path`, or `absent`. A current management destination and historical observed destination can differ; missing lookup never fabricates a source capability. Repair is offered based on absence of the supplied open-Workspace action, not client-derived admission.
+
+`resolveSelection(read, { project, map, ticket })` returns `pinned`, `default-current`, `default-closed`, `no-trustworthy-default`, or `known-empty`. Explicit map/ticket identities remain pinned even when missing or proven absent. They never fall back to a sibling. With no pin, only server `activeMap: known-current` selects the current map. Server `known-empty` permits the first trustworthy closed map, or known-empty presentation when none exists. Uncertain current ordering supplies no default, though known historical/unplaced maps remain explicit navigation choices. These are conservative agent interaction defaults, not execution eligibility or new source authority.
+
+Map results expose content and the actual `MapResource` for the retained graph and `link-targets.ts` projectors. Ticket results retain the requested scope even when missing and supply content, source, tracker/type labels, independent blocked/claimed facts, decision gist, blockers, and Automation. Markdown link projection still resolves real same-map Local source paths and preserves absolute/GitHub URLs; unsupported relative Local references stay visibly disabled. Raw Markdown, incomplete sections, warnings and unknown blockers remain available instead of becoming complete empty data.
+
+Graph blocker nodes preserve the projector's merged blocker title, exact source destination, state, and graph-supplied scope. Shared presentation adds target tracker and availability separately rather than replacing those merged facts. A registered target in another map can therefore remain external to this graph. Graph nodes and the ticket Modal render evidence-aware type labels and separate blocked/claimed labels, including closed tickets; display placement does not erase either fact.
+
+`presentProjects` interprets Automation once and returns it as `portfolio.automation`, which Overview consumes. Its per-Project results share that interpreted evidence. Standalone `resolveProject` filters evidence by the complete Project identity before interpretation. Tracker glyphs retain `ticketTypeOf` semantics while type labels preserve missing, unknown, or conflicting type evidence.
+
+`presentAutomation` and scoped results own durable evidence lookup independently of target membership. Every interruption carries its exact target and known/missing Project/map/ticket messages, so simultaneous interruptions remain reachable after resources disappear. Classification and Session expose separate labelled admission, Verdict, Process result, report, reason, and acknowledgement facts as their actual stages permit. Queued Sessions say "No launch admission". Acknowledged outcome-unknown remains unknown. Global enabled/availability, Project preference, evidence, and server controls remain independent. Controls preserve server `eligible`, `ineligible`, or `absent` and exact reasons; tracker state, graph display, Connection health, and retained content cannot manufacture eligibility.
+
+Affected consumers include map/ticket/prose/blocker/source journeys, Project settings, Connections detail/list/setup/import/launch presentation, and Overview. The cutover removes the old `views/shared/resource-results.ts` owner, Overview `project-presentation.ts`, settings `project-automation.ts`, and superseded settings status helpers and caller-owned resource/Automation joins. Useful graph/link projectors and draft/error/operation-feedback helpers remain. The already-upstream deletion of `projectWithSource` and overlapping public Project authorities remains historical, not a new deletion claimed by this cutover. Generic UI and standalone docs gain no runtime-domain dependencies.
+
+### Resource browser proof
+
+The permanent runner exercises the mounted public App, provider, router, store, public `RoadmapApplication`, and real HTTP/WebSocket transport:
+
+```sh
+pnpm install
+pnpm exec playwright install chromium
+pnpm test:resource-results-browser
+node scripts/resource-results-browser.mjs --serve-only
+node scripts/resource-results-browser.mjs --screenshots /tmp/roadmap-resource-results-visual
+```
+
+`--serve-only` prints the fixture URL/control endpoint and serves until SIGINT/SIGTERM for interactive visual inspection. `--screenshots` saves scenario PNGs during the complete regression run and cannot be combined with `--serve-only`. `--headed`, `--executable-path`, or `CHROMIUM_EXECUTABLE_PATH` select an interactive or installed Chromium. Vite uses the actual web root and a fixture-only entry. Its development tooling socket has an isolated listener rather than sharing the application's `/ws` transport.
+
+`scripts/fixtures/resource-results-server.ts` owns disposable canonical temporary configuration, real Local Markdown/filesystem reads, and replay-validated persisted Automation history. The real GitHub observer consumes deterministic harmless REST/GraphQL provider responses and injected admission/credentials. Host and Automation launchers are harmless substitutes with invocation counters. The fixture never synthesizes a public snapshot as source authority and does not use production configuration, credentials, native host effects, or real Classification/Wayfinder processes.
+
+The runner's contract covers withheld initial state separately from known-empty and never-observed resources; opaque direct pinned loads/reloads; Markdown/map/blocker/source navigation and Modal Close/Back/Forward; incomplete prose and aggregate progress; actual Local unreadability and same-ID recovery; equivalent GitHub retained Project/map/ticket destinations; exact disappearance without substitution; independent durable stage facts and absent targets; and server denial without native or Automation effects. Assertions, screenshots, and measured output belong to exercised completion evidence, not to this command description. Provider substitutions do not prove live GitHub service behavior, replay fixtures do not prove external Session chronology, and harmless host substitutes do not prove native effect completion or production hosting.
+
+### Exercised resource-cutover evidence
+
+The orchestrator ran the complete four repository gates after integration and corrections. Workers edited without running gates. `pnpm check`, `pnpm typecheck`, `pnpm test`, and `pnpm knip` passed. Source tests passed 1,447 server, 313 web, and 27 UI cases. Architecture proof passed 57 intended-diagnostic import refusals, 47 detector tests, and six build fixtures. Type proof exercised 177 exports, seven decoders, and 122 invalid constructions in each browser/server consumer graph, plus seven resource cases and six client cases. Docs checking covered 41 files with zero errors, warnings, or hints. Biome reported 163 warnings and eight infos; this is not a warning-free result.
+
+The actual `pnpm --filter @roadmap/web build` passed with 713 resolved modules checked before tree shaking and 714 transformed modules.
+
+| Verification | Observed result |
+| --- | --- |
+| Actual emitted JavaScript inspection | `assets/index-D_P_JEYS.js` contains 877,919 bytes and 485 inspected module entries. Inspected code matched the actual `dist` file byte-for-byte. The resource-results module is present; zero forbidden Node/private-server/credential/host implementation dependencies were found. |
+| Actual production component catalog | The production bundle mounted `/components` against the real disposable application WebSocket through fixture endpoint redirection. It rendered 20 SVG marks and the complete type/state catalog text. UI/docs imports remain unchanged, with no new docs runtime dependency. |
+
+The complete resource browser runner passed nine schedule groups covering its 22 manifest rows and produced 16 scenario screenshots. It observed zero page errors, host invocations, folder-selector invocations, Classification launches, and Wayfinder launches, and completed owned cleanup. The separate client-owner runner passed all eight schedule groups. Initial browser-tool screenshot calls timed out; the permanent runner supplied the actual screenshots. Harmless substitutions and screenshots retain the proof limits stated above.
+
+The semantic deletions are the obsolete shared resource-result location, Overview presentation owner, settings Project-Automation owner, superseded settings status helpers, and replaced caller-owned lookup/status/evidence joins. Shared scoped interpretation now supplies map, Settings, Connections, and Overview consumers. Graph/link projectors and real draft/error/operation-feedback owners remain. Earlier `projectWithSource`, overlapping public authority, and Snapshot-store deletions remain upstream history, not new savings.
+
+Counts use the original handwritten application-source boundary and exclusions, include every relocated responsibility, and measure nonblank physical lines and UTF-8 bytes without minification:
+
+| Application production comparison | Files | Nonblank lines | UTF-8 bytes |
+| --- | ---: | ---: | ---: |
+| Original map baseline `7e70e897` | 85 | 13,616 | 489,864 |
+| Resource-cutover task start | 100 | 24,183 | 885,723 |
+| Integrated resource cutover | 97 | 24,952 | 914,184 |
+
+The cutover removes three production files but adds 769 nonblank lines and 28,461 bytes. Pure scoped results, independent durable stage facts, and full consumer interpretation justify the added responsibility. No net production-code reduction or performance improvement is claimed.
+
+| Separate responsibility | Files | Nonblank lines | UTF-8 bytes |
+| --- | ---: | ---: | ---: |
+| Source tests and fixtures | 70 | 47,488 | 1,753,787 |
+| Build/gate owners outside original source roots | 16 | 1,495 | 58,829 |
+| Outside-source proof tests and fixtures | 137 | 6,455 | 245,182 |
+
+Documentation remains a separate category. Its final aggregate belongs to the completion report after documentation edits finish.
+
+
 
 Application component styles use CSS Modules. Components resolve local class names with `classnames/bind`. Reusable styling belongs to shared components, not shared stylesheet imports. React Flow also imports its required vendor stylesheet for graph rendering and viewport controls.
 
@@ -489,6 +564,8 @@ Contracts compile in `packages/contracts/tsconfig.json` against ES2023 with `typ
 Dependency-cruiser's configuration and resolver loaders require default exports. Biome's existing tool-configuration exception names those six configuration paths explicitly; application source still forbids default exports.
 
 Source-boundary inspection also rejects browser transport capabilities outside the store, direct view imports of store internals, private persistence-factory access outside composition, and environment access outside approved owners. It follows ordinary static aliases and object destructuring without confusing lexical shadowing or type-only references with runtime capabilities. Reassignment, runtime-computed names, and arbitrary runtime object flow are outside this static proof. Astro frontmatter and scripts are extracted for docs dependency checks; static catalog prose is not a domain model.
+
+The `web-resource-results-pure` import rule covers production `apps/web/src/resources` modules, including type-only imports and reexports. It refuses view/rendering, store/provider, router/navigation, React, generic UI, operations, and wire dependencies. The sole view-path exception is the existing pure `views/shared/gist.ts` Markdown helper. Results depend on browser-safe identity/state meaning, not transport or command workflows. Positive consumers and intended-diagnostic negative fixtures exercise this boundary through `pnpm architecture`.
 
 Run the installed repository gates from the root:
 

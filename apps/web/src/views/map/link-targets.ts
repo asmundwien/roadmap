@@ -1,6 +1,6 @@
 import type { TicketId } from '@roadmap/contracts/identity'
 import type { MapResource, TicketResource } from '@roadmap/contracts/state'
-import { resourceObservation } from '@/views/shared/resource-results'
+import { resourceObservation } from '@/resources/results'
 
 export type ProseLinkTarget =
   | { kind: 'selection'; selection: { kind: 'map' } | { kind: 'ticket'; id: TicketId } }
@@ -24,7 +24,9 @@ export function resolveProseLink(
   if (!href) return null
   if (href.startsWith('#')) return { kind: 'disabled', reason: LOCAL_LINK_DISABLED }
   if (isAbsoluteHref(href)) return { kind: 'href', href }
-  if (map.ref.project.integration !== 'local' || !sourcePath) return null
+  if (map.ref.project.integration !== 'local') return null
+  if (!sourcePath)
+    return { kind: 'disabled', reason: 'The source path for this local reference is unavailable.' }
 
   const resolvedPath = resolveFileHref(sourcePath, href)
   if (!resolvedPath) return { kind: 'disabled', reason: LOCAL_LINK_DISABLED }
@@ -60,7 +62,10 @@ function resolveFileHref(sourcePath: string, href: string): string | null {
 }
 
 function toFileUrl(path: string): string {
-  return `file://${encodeURI(path)}`
+  return `file://${path
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/')}`
 }
 
 function samePath(a: string, b: string): boolean {

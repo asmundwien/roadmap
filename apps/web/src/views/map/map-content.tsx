@@ -1,21 +1,21 @@
 import type { TicketId } from '@roadmap/contracts/identity'
-import type { MapBody, MapResource } from '@roadmap/contracts/state'
+import type { MapBody } from '@roadmap/contracts/state'
 import classNames from 'classnames/bind'
-import { resourceObservation } from '@/views/shared/resource-results'
+import type { MapResult } from '@/resources/results'
 import styles from './map-content.module.css'
 import { Prose } from './prose'
 
 const cx = classNames.bind(styles)
 
 export type MapContentProps = {
-  map: MapResource
+  map: Extract<MapResult, { kind: 'known' }>
   onOpenTicket: (id: TicketId) => void
   onOpenMap: () => void
 }
 
 export function MapContent({ map, onOpenTicket, onOpenMap }: MapContentProps) {
-  const content = resourceObservation(map.resource)?.value
-  if (content === undefined) return null
+  const content = map.content
+  if (content === null) return null
   const markdown =
     content.body.raw.trim() !== '' ? content.body.raw : structuredMarkdown(content.body)
 
@@ -24,8 +24,8 @@ export function MapContent({ map, onOpenTicket, onOpenMap }: MapContentProps) {
       <h2>Map content</h2>
       {markdown.trim() !== '' ? (
         <Prose
-          map={map}
-          sourcePath={content.source.kind === 'file' ? content.source.path : undefined}
+          map={map.resource}
+          sourcePath={map.source.kind === 'file' ? map.source.path : undefined}
           markdown={markdown}
           onOpenTicket={onOpenTicket}
           onOpenMap={onOpenMap}

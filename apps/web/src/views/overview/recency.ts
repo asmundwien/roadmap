@@ -1,9 +1,4 @@
-/**
- * The card's date tails. An open map's tail says how recently it moved — relative wording up to a
- * month, because past that recency is no longer the story and the tail falls back to the
- * calendar. A closed map's tail is always calendar: when the journey ended, not how long ago.
- * English on purpose — the whole UI is.
- */
+/** Formats known source activity relative to the current local calendar date. */
 export function formatRecency(ms: number, now: number): string {
   const days = calendarDaysBetween(ms, now)
   if (days <= 0) return 'today'
@@ -12,12 +7,12 @@ export function formatRecency(ms: number, now: number): string {
   return formatMonth(ms)
 }
 
-/** A month-and-year stamp — the resolution history is read at. */
+/** Formats known source activity as a month and year. */
 export function formatMonth(ms: number): string {
   return new Date(ms).toLocaleDateString('en', { month: 'short', year: 'numeric' })
 }
 
-/** Whole local calendar days, so 23:59 → 00:01 reads as yesterday, not today. */
+/** Counts local calendar days, so activity across midnight reads as yesterday. */
 function calendarDaysBetween(from: number, to: number): number {
   const a = new Date(from)
   const b = new Date(to)

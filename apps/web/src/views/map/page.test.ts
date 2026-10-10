@@ -12,12 +12,13 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { App } from '@/App'
+import { resourceObservation } from '@/resources/results'
 import { mapPath, projectPath, ticketPath } from '@/router'
 import { RoadmapProvider } from '@/store/roadmap-provider'
 import type { RoadmapStore } from '@/store/roadmap-store'
-import { resourceObservation } from '@/views/shared/resource-results'
 import { mapGraph } from './graph'
 import {
+  blocker,
   makeApplicationState,
   makeMap,
   makeRoadmapSnapshot,
@@ -323,13 +324,40 @@ describe('App pinned map resource interpretation', () => {
     expect(markup).toContain('1970-01-01T00:00:04.000Z')
     expect(markup).not.toContain('Old retained prose.')
   })
+
+  it('renders closed ticket block and claim facts with unknown type evidence in its URL-owned Modal', () => {
+    const map = makeMap([
+      ticket('closed', 'closed', [blocker('outside')], undefined, 0, 'untyped', {
+        isBlocked: true,
+        isClaimed: true,
+        typeEvidence: { kind: 'unknown', labels: ['custom'] },
+      }),
+    ])
+    const markup = renderProject(
+      project([map]),
+      ticketPath({
+        map: map.ref,
+        ticketId: ticketIdSchema.parse('closed'),
+      }),
+    )
+
+    expect(markup).toContain('Decided')
+    expect(markup).toMatch(/>Blocked<\/span>/)
+    expect(markup).toMatch(/>Claimed<\/span>/)
+    expect(markup).toContain('Unknown type: custom')
+    expect(markup).toContain('https://example.test/me/repo/closed')
+  })
 })
 
 describe('pinned resource content limits', () => {
   it('keeps incomplete readable raw Markdown and reports unknown counts without treating it as unreadable', () => {
     const map = makeMap(
       [],
-      { raw: 'Readable incomplete raw content.', missingSections: ['Destination'] },
+      {
+        raw: 'Readable incomplete raw content.',
+        destination: '',
+        missingSections: ['Destination'],
+      },
       undefined,
       { progress: null },
     )
@@ -348,7 +376,7 @@ describe('pinned resource content limits', () => {
     expect(markup).toContain('Readable incomplete raw content.')
     expect(markup).toContain('Content is incomplete')
     expect(markup).toContain('Closed ticket count unknown')
-    expect(markup).toContain('Map sections are missing')
+    expect(markup).toContain('Destination')
     expect(markup).not.toContain('Currently unavailable')
   })
 
@@ -388,6 +416,42 @@ describe('pinned resource content limits', () => {
 })
 
 describe('URL-selected ticket Automation evidence', () => {
+  it('shows no launch admission for a queued Session independently of completed Classification', () => {
+    const map = makeMap([ticket('8', 'frontier')])
+    const registered = project([map])
+    const target = ticketRefSchema.parse({ map: map.ref, ticketId: '8' })
+    const state = makeApplicationState([registered])
+    state.automation.evidence = [
+      {
+        target,
+        classification: {
+          status: 'completed',
+          admission: 'automatic',
+          processResult: { status: 'exited', code: 0 },
+          verdict: { value: 'afk', reason: 'Classification completed before Session admission.' },
+        },
+        wayfinder: { status: 'queued' },
+      },
+    ]
+    const snapshot = makeRoadmapSnapshot(state)
+    const store: RoadmapStore = {
+      ...makeRoadmapStore([registered]),
+      getSnapshot: () => snapshot,
+    }
+
+    const markup = renderProject(registered, ticketPath(target), store)
+    const session = markup.match(/<h4>Wayfinder Session<\/h4>([\s\S]*?)<\/section>/)?.[1]
+
+    expect(session).toContain('<dt>State</dt><dd><strong>Queued</strong>')
+    expect(session).toContain('<dt>Admission</dt><dd><strong>No launch admission</strong>')
+    expect(session).not.toContain('<strong>Automatic</strong>')
+    expect(session).not.toContain('<strong>Override</strong>')
+    expect(session).not.toContain('<dt>Process result</dt>')
+    expect(session).not.toContain('<dt>Session report</dt>')
+    expect(markup).toContain('<dt>Verdict</dt><dd><strong>AFK</strong>')
+    expect(markup).toContain('<dt>Process result</dt><dd><strong>Exited 0</strong>')
+  })
+
   it('keeps durable stage history without source content and honors server override denial', () => {
     const map = makeMap([])
     const registered = project([map])
@@ -476,8 +540,48 @@ describe('URL-selected ticket Automation evidence', () => {
     expect(markup).toContain('Recorded Automation evidence')
     expect(markup).toContain('Actual durable AFK verdict.')
     expect(markup).toContain('Actual durable unknown outcome.')
+    const session = markup.match(/<h4>Wayfinder Session<\/h4>([\s\S]*?)<\/section>/)?.[1]
+    expect(session).toContain('<dt>State</dt><dd><strong>Outcome unknown</strong>')
+    expect(session).toContain('<dt>Acknowledgement</dt><dd><strong>Acknowledged</strong>')
+    expect(session).toContain('<dt>Admission</dt><dd><strong>Override</strong>')
+    expect(session).not.toContain('<strong>Finished</strong>')
+    expect(session).not.toContain('<dt>Process result</dt>')
+    expect(session).not.toContain('<dt>Session report</dt>')
     expect(markup).toContain('No other ticket has been selected')
     expect(markup).not.toContain('Map content')
+  })
+
+  it('keeps every missing scoped selection visible without claiming proven resource absence', () => {
+    const otherMap = makeMap(
+      [
+        ticket('shared-ticket', 'frontier', [], undefined, 0, 'task', {
+          body: 'Unrelated same-ID ticket prose.',
+        }),
+      ],
+      { raw: 'Unrelated same-ID map prose.' },
+      {
+        project: { integration: 'github', projectId: 'project-home' },
+        mapId: 'shared-map',
+      },
+    )
+    const registered = project([otherMap])
+    const target = ticketRefSchema.parse({
+      map: {
+        project: { integration: 'local', projectId: 'missing-project' },
+        mapId: 'shared-map',
+      },
+      ticketId: 'shared-ticket',
+    })
+    const markup = renderProject(registered, ticketPath(target))
+
+    expect(markup).toContain('missing-project')
+    expect(markup).toContain('shared-map')
+    expect(markup).toContain('shared-ticket')
+    expect(markup).not.toContain('Unrelated same-ID map prose.')
+    expect(markup).not.toContain('Unrelated same-ID ticket prose.')
+    expect(markup).not.toContain('Proven absent')
+    expect(markup).not.toContain('Map source</a>')
+    expect(markup).not.toContain('Project source</a>')
   })
 })
 

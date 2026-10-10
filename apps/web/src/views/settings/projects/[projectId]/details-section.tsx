@@ -1,5 +1,4 @@
 import type { SafeError } from '@roadmap/contracts/operations'
-import type { Connection, Project } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
 import { ControlGroup } from '@roadmap/ui/control-group'
@@ -8,26 +7,19 @@ import { Surface, SurfaceTitle } from '@roadmap/ui/surface'
 import { TextInput } from '@roadmap/ui/text-input'
 import { type FormEvent, useState } from 'react'
 import { Link } from '@/navigation'
+import type { KnownProjectResult } from '@/resources/results'
 import { connectionPath } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
 import { SettingsFacts } from '@/views/shared/settings-facts'
 import { SettingsForm } from '@/views/shared/settings-form'
-import {
-  ErrorText,
-  mapState,
-  observedLabel,
-  projectIdentity,
-  projectObservedAt,
-  projectSourceLabel,
-} from '@/views/shared/settings-shared'
+import { ErrorText, observedLabel, projectIdentity } from '@/views/shared/settings-shared'
 
 type DetailsSectionProps = {
-  project: Project
-  connection: Connection | undefined
+  project: KnownProjectResult
 }
 
-export function DetailsSection({ project, connection }: DetailsSectionProps) {
+export function DetailsSection({ project }: DetailsSectionProps) {
   const { configuration, configurationVersion, command, execute } = useRoadmap((roadmap) => ({
     configuration: roadmap.configuration,
     configurationVersion: roadmap.configurationVersion,
@@ -88,26 +80,32 @@ export function DetailsSection({ project, connection }: DetailsSectionProps) {
           </dd>
           <dt>Connection</dt>
           <dd>
-            {connection ? (
-              <Link href={connectionPath(connection.id)}>{connection.name}</Link>
+            {project.connection ? (
+              <Link href={connectionPath(project.connection.id)}>{project.connection.name}</Link>
             ) : (
               project.connectionId
             )}
           </dd>
           <dt>Locator</dt>
-          <dd>{projectSourceLabel(project)}</dd>
+          <dd>{project.locator}</dd>
           <dt>Workspace</dt>
-          <dd>
-            {project.integration === 'local'
-              ? project.source.path
-              : project.management.workspacePath}
-          </dd>
+          <dd>{project.workspacePath}</dd>
           <dt>Route identity</dt>
           <dd>{projectIdentity(project)}</dd>
           <dt>Last successful source read</dt>
-          <dd>{observedLabel(projectObservedAt(project))}</dd>
+          <dd>{observedLabel(project.availability.observedAt)}</dd>
+          <dt>Last successful source destination</dt>
+          <dd>
+            {project.observedSource.kind === 'link' ? (
+              <a href={project.observedSource.href}>{project.observedSource.href}</a>
+            ) : project.observedSource.kind === 'file' ? (
+              project.observedSource.path
+            ) : (
+              'No source destination available.'
+            )}
+          </dd>
           <dt>Map state</dt>
-          <dd>{mapState(project)}</dd>
+          <dd>{project.mapState}</dd>
         </SettingsFacts>
 
         <Surface>

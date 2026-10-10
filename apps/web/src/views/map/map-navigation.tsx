@@ -1,46 +1,39 @@
-import type { MapResource, Project } from '@roadmap/contracts/state'
 import { Surface, SurfaceTitle } from '@roadmap/ui/surface'
 import classNames from 'classnames/bind'
 import { Link } from '@/navigation'
+import type { KnownProjectResult, MapResult, MapSummary } from '@/resources/results'
 import { mapPath, projectPath } from '@/router'
-import { orderedMaps, resourceObservation } from '@/views/shared/resource-results'
 import styles from './page.module.css'
 
 const cx = classNames.bind(styles)
 
 type MapNavigationProps = {
-  project: Project
-  selectedMap: MapResource | undefined
+  project: KnownProjectResult
+  selectedMap: MapResult | null
 }
 
 export function MapNavigation({ project, selectedMap }: MapNavigationProps) {
-  const maps = orderedMaps(project)
-  const activeMapId =
-    project.activeMap.kind === 'known-current' ? project.activeMap.ref.mapId : undefined
   return (
     <Surface>
       <SurfaceTitle>Maps</SurfaceTitle>
       <nav aria-label="Project maps">
-        <Link href={projectPath(project.ref)}>Active map or latest closed history</Link>
+        <Link href={projectPath(project.navigation.project)}>
+          Active map or latest closed history
+        </Link>
         <MapGroup
-          heading={
-            project.activeMap.kind === 'uncertain' ? 'Last trustworthy open order' : 'Open maps'
-          }
-          maps={maps.open}
+          heading={project.orderWarning ? 'Last trustworthy open order' : 'Open maps'}
+          maps={project.navigation.open}
           selectedMap={selectedMap}
-          activeMapId={activeMapId}
         />
         <MapGroup
           heading="Closed history"
-          maps={maps.closed}
+          maps={project.navigation.closed}
           selectedMap={selectedMap}
-          activeMapId={activeMapId}
         />
         <MapGroup
           heading="Historical or unplaced maps"
-          maps={maps.unplaced}
+          maps={project.navigation.unplaced}
           selectedMap={selectedMap}
-          activeMapId={activeMapId}
         />
       </nav>
     </Surface>
@@ -49,12 +42,11 @@ export function MapNavigation({ project, selectedMap }: MapNavigationProps) {
 
 type MapGroupProps = {
   heading: string
-  maps: MapResource[]
-  selectedMap: MapResource | undefined
-  activeMapId: string | undefined
+  maps: MapSummary[]
+  selectedMap: MapResult | null
 }
 
-function MapGroup({ heading, maps, selectedMap, activeMapId }: MapGroupProps) {
+function MapGroup({ heading, maps, selectedMap }: MapGroupProps) {
   return (
     <section className={cx('map-group')}>
       <h3>
@@ -64,33 +56,21 @@ function MapGroup({ heading, maps, selectedMap, activeMapId }: MapGroupProps) {
         <p>No maps in this group.</p>
       ) : (
         <ul>
-          {maps.map((map) => {
-            const content = resourceObservation(map.resource)?.value
-            return (
-              <li key={map.ref.mapId}>
-                <Link
-                  href={mapPath(map.ref)}
-                  aria-current={selectedMap?.ref.mapId === map.ref.mapId ? 'page' : undefined}
-                >
-                  <span>{content?.title ?? content?.displayId ?? map.ref.mapId}</span>
-                  <small>
-                    {content?.displayId ?? map.ref.mapId} · {mapStatus(map, activeMapId)}
-                  </small>
-                </Link>
-              </li>
-            )
-          })}
+          {maps.map((map) => (
+            <li key={map.key}>
+              <Link
+                href={mapPath(map.ref)}
+                aria-current={selectedMap?.ref.mapId === map.ref.mapId ? 'page' : undefined}
+              >
+                <span>{map.title}</span>
+                <small>
+                  {map.displayId} · {map.statusLabel}
+                </small>
+              </Link>
+            </li>
+          ))}
         </ul>
       )}
     </section>
   )
-}
-
-function mapStatus(map: MapResource, activeMapId: string | undefined): string {
-  if (map.resource.kind === 'proven-absent') return 'Historical, proven absent'
-  if (map.resource.kind === 'never-observed') return 'Never read'
-  if (map.resource.kind === 'retained-unavailable') return 'Unavailable, retained content'
-  if (map.ref.mapId === activeMapId) return 'Active'
-  const status = map.resource.observation.value.status
-  return status === 'open' ? 'Open' : status === 'closed' ? 'Closed' : 'Status unknown'
 }

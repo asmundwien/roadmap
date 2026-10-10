@@ -11,6 +11,7 @@ import {
 } from '@roadmap/contracts/identity'
 import { commandResultSchema } from '@roadmap/contracts/operations'
 import {
+  type AutomationEvidence,
   authorizationOperationSchema,
   type Connection,
   connectionSchema,
@@ -21,10 +22,16 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
+import { resolveAuthorization } from '@/resources/results'
 import { RoadmapProvider } from '@/store/roadmap-provider'
 import type { RoadmapStore } from '@/store/roadmap-store'
 import { makeRoadmapSnapshot } from '@/views/map/test-fixtures'
-import { neverReadProject } from '@/views/overview/test-fixtures'
+import {
+  currentProject,
+  neverReadProject,
+  readableMap,
+  readableTicket,
+} from '@/views/overview/test-fixtures'
 import { AuthorizationPane } from './connection-panes'
 import { ConnectionSettings } from './page'
 
@@ -81,6 +88,27 @@ function state(connections: Connection[]): ReadyApplicationState {
       overrides: [],
     },
     capturedAt: 0,
+  }
+}
+
+function interruption(
+  target: AutomationEvidence['target'],
+  acknowledged = false,
+): AutomationEvidence {
+  return {
+    target,
+    classification: {
+      status: 'completed',
+      admission: 'automatic',
+      processResult: { status: 'exited', code: 0 },
+      verdict: { value: 'afk', reason: 'Recorded AFK evidence.' },
+    },
+    wayfinder: {
+      status: 'outcome-unknown',
+      admission: 'automatic',
+      reason: 'Server stopped.',
+      acknowledged,
+    },
   }
 }
 
@@ -254,6 +282,192 @@ describe('ConnectionSettings', () => {
     },
   )
 
+  it.each(['missing ticket', 'missing map', 'missing Project'] as const)(
+    'keeps exact durable review targets accessible with a %s',
+    (missing) => {
+      const initial = state([
+        {
+          id: connectionIdSchema.parse('local'),
+          integration: 'local',
+          name: 'Local files',
+          builtIn: true,
+          availability: { status: 'available' },
+        },
+      ])
+      const ref: ProjectRef = {
+        integration: 'local',
+        projectId: projectIdSchema.parse('my workspace'),
+      }
+      const targetBaseMap = readableMap(ref, 'target/%2F#map', 'open', 2_000)
+      if (targetBaseMap.resource.kind !== 'current-readable')
+        throw new Error('Expected readable target Map fixture')
+      const targetMap = {
+        ...targetBaseMap,
+        resource: {
+          ...targetBaseMap.resource,
+          observation: {
+            ...targetBaseMap.resource.observation,
+            value: {
+              ...targetBaseMap.resource.observation.value,
+              progress: { total: 0, completed: 0 },
+            },
+          },
+        },
+        tickets: [],
+        frontier: [],
+      }
+      const target = {
+        map: targetMap.ref,
+        ticketId: ticketIdSchema.parse('ticket/%2F#id'),
+      }
+      const siblingMap = readableMap(ref, 'sibling')
+      const siblingTicket = readableTicket(siblingMap, target.ticketId)
+      const markup = renderConnections({
+        ...initial,
+        projects:
+          missing === 'missing Project'
+            ? []
+            : [
+                currentProject(ref.projectId, [
+                  ...(missing === 'missing ticket' ? [targetMap] : []),
+                  {
+                    ...siblingMap,
+                    tickets: [siblingTicket],
+                    frontier: [siblingTicket.ref],
+                    ticketsMembership:
+                      siblingMap.ticketsMembership.kind === 'current-complete'
+                        ? {
+                            kind: 'current-complete',
+                            observation: {
+                              ...siblingMap.ticketsMembership.observation,
+                              value: { members: [siblingTicket.ref] },
+                            },
+                          }
+                        : siblingMap.ticketsMembership,
+                  },
+                ]),
+              ],
+        automation: {
+          ...initial.automation,
+          enabled: true,
+          evidence: [
+            interruption(target),
+            interruption({ map: targetMap.ref, ticketId: ticketIdSchema.parse('second') }),
+            interruption({
+              map: { project: ref, mapId: mapIdSchema.parse('another') },
+              ticketId: target.ticketId,
+            }),
+          ],
+        },
+      })
+      expect(markup).toContain(
+        'href="/projects/local/my%20workspace/maps/target%2F%252F%23map/tickets/ticket%2F%252F%23id"',
+      )
+      expect(markup).toContain(
+        'href="/projects/local/my%20workspace/maps/target%2F%252F%23map/tickets/second"',
+      )
+      expect(markup).toContain(
+        'href="/projects/local/my%20workspace/maps/another/tickets/ticket%2F%252F%23id"',
+      )
+      expect(markup).not.toContain(
+        'href="/projects/local/my%20workspace/maps/sibling/tickets/ticket%2F%252F%23id"',
+      )
+      expect(markup).toMatch(/outcome[^<]*unknown/i)
+    },
+  )
+
+  it('keeps acknowledged unknown evidence accessible without demanding review', () => {
+    const initial = state([])
+    const markup = renderConnections({
+      ...initial,
+      automation: {
+        ...initial.automation,
+        evidence: [
+          interruption(
+            {
+              map: {
+                project: {
+                  integration: 'github',
+                  projectId: projectIdSchema.parse('gone repository'),
+                },
+                mapId: mapIdSchema.parse('map'),
+              },
+              ticketId: ticketIdSchema.parse('ticket'),
+            },
+            true,
+          ),
+        ],
+      },
+    })
+    expect(markup).toContain('href="/projects/github/gone%20repository/maps/map/tickets/ticket"')
+    expect(markup).toMatch(/outcome[^<]*unknown/i)
+    expect(markup).toMatch(/acknowledged/i)
+    expect(markup).not.toContain('Automation needs review')
+  })
+
+  it.each(['degraded', 'unavailable'] as const)(
+    'does not turn a readable Project into retained content when Connection health is %s',
+    (status) => {
+      const initial = state([
+        {
+          id: connectionIdSchema.parse('local'),
+          integration: 'local',
+          name: 'Local files',
+          builtIn: true,
+          availability: { status, observedAt: 2_000, cause: 'Connection check failed.' },
+        },
+      ])
+      const markup = renderConnections({
+        ...initial,
+        projects: [currentProject('healthy Project')],
+      })
+      expect(markup).toContain('Connection check failed.')
+      expect(markup).toContain(status === 'degraded' ? 'Observation degraded' : 'Unavailable')
+      expect(markup).toContain('Current readable content.')
+      expect(markup).toContain('1970-01-01T00:00:01.000Z')
+      expect(markup).not.toContain('Showing the last successful content.')
+    },
+  )
+
+  it('does not invent source actions or host controls when a GitHub Project has no supplied actions', () => {
+    const initial = state([
+      {
+        id: connectionIdSchema.parse('github'),
+        integration: 'github',
+        name: 'GitHub',
+        builtIn: false,
+        githubIdentity: { id: 'account-1', login: 'test-account' },
+        availability: { status: 'available' },
+      },
+    ])
+    const registered = neverReadProject(
+      { integration: 'github', projectId: projectIdSchema.parse('opaque repository') },
+      'No supplied actions',
+    )
+    if (registered.integration !== 'github') throw new Error('Expected GitHub Project fixture')
+    const withoutActions = {
+      ...registered,
+      source: {
+        ...registered.source,
+        url: 'https://source.example.test/repositories/canonical-id',
+      },
+      actions: [],
+    }
+    const markup = renderConnections({
+      ...initial,
+      projects: [withoutActions],
+    })
+    expect(markup).toContain('test/opaque repository')
+    expect(markup).toContain('href="/projects/github/opaque%20repository/settings"')
+    expect(markup).not.toContain('href="https://source.example.test/repositories/canonical-id"')
+    expect(markup).not.toContain('href="https://example.test/test/opaque repository"')
+    expect(markup).not.toContain('href="https://github.com/test/opaque')
+    expect(markup).not.toContain('Open on GitHub')
+    expect(markup).not.toContain('Open in VS Code')
+    expect(markup).not.toContain('View source folder')
+    expect(markup).not.toContain('Open Terminal')
+  })
+
   it('offers project import for each connection, including built-in local connections', () => {
     const markup = renderConnections(
       state([
@@ -418,6 +632,7 @@ describe('authorization grant navigation', () => {
           null,
           createElement(AuthorizationPane, {
             authorization,
+            presentation: resolveAuthorization(state([]), authorization),
             feedback: { result, previous: undefined, consumed: false },
             configurationVersion: configurationVersionSchema.parse(99),
             operation: {

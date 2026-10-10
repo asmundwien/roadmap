@@ -1,23 +1,18 @@
 import { Page } from '@roadmap/ui/page'
+import { presentProjects } from '@/resources/results'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { OverviewHeader, ProjectOverviewSections } from './project-list'
-import { presentProjects } from './project-presentation'
 
 export function OverviewPage() {
-  const { projects, connections, configuration, capturedAt } = useRoadmap(
-    ({ projects, connections, configuration, capturedAt }) => ({
-      projects,
-      connections,
-      configuration,
-      capturedAt,
-    }),
-  )
-  const portfolio = presentProjects({ projects, connections, configuration })
+  const { portfolio, capturedAt } = useRoadmap((read) => ({
+    portfolio: presentProjects(read),
+    capturedAt: read.capturedAt,
+  }))
 
   return (
     <Page>
       <OverviewHeader capturedAt={capturedAt} portfolio={portfolio} />
-      <ProjectOverviewSections portfolio={portfolio} />
+      <ProjectOverviewSections portfolio={portfolio} automation={portfolio.automation} />
     </Page>
   )
 }

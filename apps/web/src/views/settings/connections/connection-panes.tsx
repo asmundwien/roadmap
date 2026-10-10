@@ -10,6 +10,7 @@ import { TextInput } from '@roadmap/ui/text-input'
 import classNames from 'classnames/bind'
 import { type FormEvent, useRef, useState } from 'react'
 import { Link as InternalLink } from '@/navigation'
+import type { AuthorizationResult } from '@/resources/results'
 import { connectionPath } from '@/router'
 import { AuthorizationControls, DeviceCode } from '@/views/shared/authorization-presentation'
 import { SettingsForm } from '@/views/shared/settings-form'
@@ -20,7 +21,6 @@ import {
   type AuthorizationResultFeedback,
   authorizationPhaseStatus,
   authorizationResultPending,
-  authorizationStatus,
   type ConnectionOperation,
 } from './connection-details'
 import styles from './connection-panes.module.css'
@@ -106,6 +106,7 @@ export function AddConnectionPane({
 }
 type AuthorizationPaneProps = {
   authorization: AuthorizationOperation | undefined
+  presentation: AuthorizationResult | null
   feedback: AuthorizationResultFeedback | null
   operation: ConnectionOperation
   configurationVersion: ConfigurationVersion
@@ -116,6 +117,7 @@ type AuthorizationPaneProps = {
 
 export function AuthorizationPane({
   authorization,
+  presentation,
   feedback,
   operation,
   configurationVersion,
@@ -134,21 +136,23 @@ export function AuthorizationPane({
   const phase =
     pending && result
       ? result.phase
-      : authorization?.status === 'terminal'
-        ? authorization.outcome
-        : authorization?.status
+      : presentation?.kind === 'terminal'
+        ? presentation.outcome
+        : presentation?.kind === 'granted-current' || presentation?.kind === 'granted-historical'
+          ? 'granted'
+          : presentation?.kind
   const waiting =
     pending && result?.phase === 'waiting'
       ? result
-      : authorization?.status === 'waiting' && phase === 'waiting'
-        ? authorization
+      : presentation?.kind === 'waiting' && phase === 'waiting'
+        ? presentation
         : null
   const operationId = pending ? result?.operationId : authorization?.id
   const phaseError =
     pending && result && (result.phase === 'failed' || result.phase === 'denied')
       ? result.error
-      : !pending && authorization?.status === 'terminal' && 'cause' in authorization
-        ? authorization.cause
+      : !pending && presentation?.kind === 'terminal'
+        ? presentation.cause
         : null
 
   const execute = async (
@@ -189,9 +193,7 @@ export function AuthorizationPane({
           GitHub authorization progress is live server state. Closing this pane does not cancel it.
         </p>
       </header>
-      {pending && authorization && (
-        <p>{`Live authorization read: ${authorizationStatus(authorization)}.`}</p>
-      )}
+      {pending && authorization && <p>{`Live authorization read: ${presentation?.label}.`}</p>}
 
       {pending && (
         <Alert variant="info">
@@ -250,19 +252,19 @@ export function AuthorizationPane({
                 View granted Connection
               </InternalLink>
             </span>
-          ) : authorization?.status === 'granted' && authorization.connection.kind === 'current' ? (
+          ) : presentation?.kind === 'granted-current' ? (
             <span>
-              {`Connection ${authorization.connection.id}, account ${authorization.connection.accountId}. `}
+              {`Connection ${presentation.navigation.connection}, account ${presentation.accountId}. `}
               {result?.phase === 'granted' &&
                 `Grant committed at configuration version ${result.configurationVersion}. `}
-              <InternalLink href={connectionPath(authorization.connection.id)}>
+              <InternalLink href={connectionPath(presentation.navigation.connection)}>
                 View granted Connection
               </InternalLink>
             </span>
           ) : null}
           <span>
-            {authorization?.status === 'granted' && authorization.connection.kind === 'historical'
-              ? 'The granted Connection account is no longer configured.'
+            {presentation?.kind === 'granted-historical'
+              ? presentation.message
               : 'This grant does not establish Project source availability.'}
           </span>
         </Alert>

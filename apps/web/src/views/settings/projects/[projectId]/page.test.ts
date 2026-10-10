@@ -9,6 +9,7 @@ import {
   ticketIdSchema,
 } from '@roadmap/contracts/identity'
 import {
+  type AutomationEvidence,
   type Connection,
   type MapResource,
   type Project,
@@ -25,6 +26,7 @@ import { makeRoadmapSnapshot } from '@/views/map/test-fixtures'
 import {
   absentMap,
   currentProject,
+  neverReadProject,
   readableMap,
   readableTicket,
 } from '@/views/overview/test-fixtures'
@@ -121,6 +123,46 @@ const retainedMap: MapResource = {
   },
 }
 
+const siblingBaseMap = readableMap(project.ref, 'sibling map')
+const siblingTicket = readableTicket(siblingBaseMap, 'ticket')
+const siblingMap: MapResource = {
+  ...siblingBaseMap,
+  tickets: [siblingTicket],
+  frontier: [siblingTicket.ref],
+  ticketsMembership:
+    siblingBaseMap.ticketsMembership.kind === 'current-complete'
+      ? {
+          kind: 'current-complete',
+          observation: {
+            ...siblingBaseMap.ticketsMembership.observation,
+            value: { members: [siblingTicket.ref] },
+          },
+        }
+      : siblingBaseMap.ticketsMembership,
+}
+
+function interruptedSession(
+  target: AutomationEvidence['target'],
+  acknowledged = false,
+  reason = 'Server stopped.',
+): AutomationEvidence {
+  return {
+    target,
+    classification: {
+      status: 'completed',
+      admission: 'automatic',
+      processResult: { status: 'exited', code: 0 },
+      verdict: { value: 'afk', reason: 'Recorded AFK evidence.' },
+    },
+    wayfinder: {
+      status: 'outcome-unknown',
+      admission: 'automatic',
+      reason,
+      acknowledged,
+    },
+  }
+}
+
 function renderPage(
   projects: Project[],
   initial = true,
@@ -133,6 +175,8 @@ function renderPage(
     overrides: [],
   },
   inFlight = false,
+  connections: Connection[] = [connection],
+  selectedProject: Project['ref'] = project.ref,
 ): string {
   const state = readyApplicationStateSchema.parse({
     phase: 'ready',
@@ -141,7 +185,7 @@ function renderPage(
     stateSequence: stateSequenceSchema.parse(1),
     configurationVersion: configurationVersionSchema.parse(1),
     supportedIntegrations: [],
-    connections: [connection],
+    connections,
 
     projects,
     authorizationOperations: [],
@@ -179,7 +223,7 @@ function renderPage(
       createElement(
         RoadmapProvider,
         { store },
-        createElement(ProjectSettingsPage, { projectRef: project.ref }),
+        createElement(ProjectSettingsPage, { projectRef: selectedProject }),
       ),
     ),
   )
@@ -342,49 +386,218 @@ describe('ProjectSettingsPage', () => {
   )
 
   it.each([
-    { maps: [affectedMap], linked: true },
-    { maps: [absentMap(affectedMap)], linked: true },
-    { maps: [absentTicketMap], linked: true },
-    { maps: [retainedMap], linked: true },
-    { maps: [baseMap], linked: false },
-    { maps: [], linked: false },
-  ])(
-    'links durable interruption evidence to keyed current or historical resources: %j',
-    ({ maps, linked }) => {
-      const markup = renderPage(
-        [{ ...currentProject(project.ref.projectId, maps), name: project.name }],
-        true,
-        true,
-        {
-          enabled: true,
-          enabledProjects: [],
-          availability: { status: 'ready' },
-          evidence: [
-            {
-              target: {
-                map: { project: project.ref, mapId: mapIdSchema.parse('map') },
-                ticketId: ticketIdSchema.parse('ticket'),
-              },
-              classification: {
-                status: 'completed',
-                admission: 'automatic',
-                processResult: { status: 'exited', code: 0 },
-                verdict: { value: 'afk', reason: 'Recorded AFK evidence.' },
-              },
-              wayfinder: {
-                status: 'outcome-unknown',
-                admission: 'automatic',
-                reason: 'Server stopped.',
-                acknowledged: false,
-              },
+    { name: 'current target', maps: [affectedMap, siblingMap] },
+    { name: 'historical map', maps: [absentMap(affectedMap), siblingMap] },
+    { name: 'historical ticket', maps: [absentTicketMap, siblingMap] },
+    { name: 'retained map', maps: [retainedMap, siblingMap] },
+    { name: 'missing ticket entry', maps: [baseMap, siblingMap] },
+    { name: 'missing map entry', maps: [siblingMap] },
+    { name: 'no map entries', maps: [] },
+  ])('keeps the exact durable interruption journey with $name', ({ maps }) => {
+    const markup = renderPage(
+      [{ ...currentProject(project.ref.projectId, maps), name: project.name }],
+      true,
+      true,
+      {
+        enabled: true,
+        enabledProjects: [],
+        availability: { status: 'ready' },
+        evidence: [interruptedSession(affectedTicket.ref)],
+        overrides: [],
+      },
+    )
+    expect(markup).toContain('href="/projects/local/my%20workspace/maps/map/tickets/ticket"')
+    expect(markup).not.toContain(
+      'href="/projects/local/my%20workspace/maps/sibling%20map/tickets/ticket"',
+    )
+    expect(markup).toMatch(/outcome[^<]*unknown/i)
+  })
+
+  it('keeps durable interruption navigation when the Project is no longer registered', () => {
+    const markup = renderPage([], true, true, {
+      enabled: true,
+      enabledProjects: [],
+      availability: { status: 'ready' },
+      evidence: [interruptedSession(affectedTicket.ref)],
+      overrides: [],
+    })
+    expect(markup).toContain('Project not found')
+    expect(markup).toContain('href="/projects/local/my%20workspace/maps/map/tickets/ticket"')
+    expect(markup).toMatch(/outcome[^<]*unknown/i)
+    expect(markup).not.toContain('Save name</button>')
+    expect(markup).not.toContain('Remove project registration</button>')
+  })
+
+  it('keeps every independent unacknowledged interruption scoped to this Project', () => {
+    const markup = renderPage(
+      [{ ...currentProject(project.ref.projectId, [siblingMap]), name: project.name }],
+      true,
+      true,
+      {
+        enabled: true,
+        enabledProjects: [],
+        availability: { status: 'ready' },
+        evidence: [
+          interruptedSession(affectedTicket.ref),
+          interruptedSession({
+            map: affectedMap.ref,
+            ticketId: ticketIdSchema.parse('second/%2F#ticket'),
+          }),
+          interruptedSession({
+            map: { project: project.ref, mapId: mapIdSchema.parse('other/%2F#map') },
+            ticketId: affectedTicket.ref.ticketId,
+          }),
+          interruptedSession({
+            map: {
+              project: { integration: 'github', projectId: project.ref.projectId },
+              mapId: affectedMap.ref.mapId,
             },
-          ],
-          overrides: [],
+            ticketId: affectedTicket.ref.ticketId,
+          }),
+        ],
+        overrides: [],
+      },
+    )
+    expect(markup).toContain('href="/projects/local/my%20workspace/maps/map/tickets/ticket"')
+    expect(markup).toContain(
+      'href="/projects/local/my%20workspace/maps/map/tickets/second%2F%252F%23ticket"',
+    )
+    expect(markup).toContain(
+      'href="/projects/local/my%20workspace/maps/other%2F%252F%23map/tickets/ticket"',
+    )
+    expect(markup).not.toContain('href="/projects/github/my%20workspace/maps/map/tickets/ticket"')
+    expect(markup).not.toContain(
+      'href="/projects/local/my%20workspace/maps/sibling%20map/tickets/ticket"',
+    )
+  })
+
+  it('keeps acknowledged evidence accessible without turning an unknown outcome into success', () => {
+    const markup = renderPage([project], true, true, {
+      enabled: true,
+      enabledProjects: [project.ref],
+      availability: { status: 'ready' },
+      evidence: [interruptedSession(affectedTicket.ref, true)],
+      overrides: [],
+    })
+    expect(markup).toContain('href="/projects/local/my%20workspace/maps/map/tickets/ticket"')
+    expect(markup).toMatch(/outcome[^<]*unknown/i)
+    expect(markup).toMatch(/acknowledged/i)
+    expect(markup).not.toMatch(/<button[^>]*>[^<]*Acknowledge/)
+    const toggle = markup.match(/<input[^>]*role="switch"[^>]*>/)?.[0]
+    expect(toggle).toContain('aria-checked="true"')
+    expect(toggle).not.toContain('disabled=""')
+  })
+
+  it.each(['degraded', 'unavailable'] as const)(
+    'keeps Project source observation independent of %s Connection health',
+    (status) => {
+      const unhealthy: Connection = {
+        ...connection,
+        availability: { status, observedAt: 2_000, cause: 'Connection health check failed.' },
+      }
+      const markup = renderPage([project], true, true, undefined, false, [unhealthy])
+      expect(markup).toContain('Connection health check failed.')
+      expect(markup).toContain('Current readable content.')
+      expect(markup).toContain('1970-01-01T00:00:01.000Z')
+      expect(markup).not.toContain('Showing the last successful content.')
+    },
+  )
+
+  it('does not turn retained source evidence current when the Connection is healthy', () => {
+    if (project.resource.kind !== 'current-readable')
+      throw new Error('Expected readable Project fixture')
+    const retained: Project = {
+      ...project,
+      resource: {
+        kind: 'retained-unavailable',
+        lastSuccessful: project.resource.observation,
+        unavailable: {
+          kind: 'no-current-evidence',
+          scope: { kind: 'project', project: project.ref },
+          cause: 'No current source observation is available.',
         },
+      },
+      activeMap: {
+        kind: 'uncertain',
+        reason: 'project-unavailable',
+        cause: 'Project source is currently unavailable.',
+      },
+    }
+    const markup = renderPage([retained])
+    expect(markup).toContain('Showing the last successful content.')
+    expect(markup).toContain('1970-01-01T00:00:01.000Z')
+    expect(markup).not.toContain('Current readable content.')
+    expect(markup).not.toContain('No current Wayfinder maps.')
+  })
+
+  it.each(['never-observed', 'current-readable'] as const)(
+    'preserves %s GitHub source evidence without inventing source actions or host controls',
+    (kind) => {
+      const registered = neverReadProject(
+        { integration: 'github', projectId: projectIdSchema.parse('opaque repository') },
+        'No supplied actions',
       )
-      expect(markup.includes('href="/projects/local/my%20workspace/maps/map/tickets/ticket"')).toBe(
-        linked,
+      if (registered.integration !== 'github') throw new Error('Expected GitHub Project fixture')
+      const source = {
+        ...registered.source,
+        url: 'https://source.example.test/repositories/canonical-id',
+      }
+      const withoutActions: Project = {
+        ...registered,
+        source,
+        actions: [],
+        resource:
+          kind === 'never-observed'
+            ? registered.resource
+            : {
+                kind: 'current-readable',
+                observation: {
+                  scope: { kind: 'project', project: registered.ref },
+                  attemptedAt: 1_000,
+                  observedAt: 1_000,
+                  provenance: {
+                    integration: 'github',
+                    connectionId: registered.connectionId,
+                    repositoryId: source.repositoryId,
+                    stage: 'repository',
+                  },
+                  completeness: { kind: 'complete' },
+                  value: { name: registered.name, source, warnings: [] },
+                },
+              },
+      }
+      const markup = renderPage(
+        [withoutActions],
+        true,
+        true,
+        undefined,
+        false,
+        [
+          {
+            id: connectionIdSchema.parse('github'),
+            integration: 'github',
+            name: 'GitHub',
+            builtIn: false,
+            githubIdentity: { id: 'account-1', login: 'test-account' },
+            availability: { status: 'available' },
+          },
+        ],
+        withoutActions.ref,
       )
+      expect(markup).toContain('test/opaque repository')
+      if (kind === 'never-observed') {
+        expect(markup).toContain('This resource has never been read.')
+        expect(markup).not.toContain('href="https://source.example.test/repositories/canonical-id"')
+      } else {
+        expect(markup).toContain('Current readable content.')
+        expect(markup).toContain('href="https://source.example.test/repositories/canonical-id"')
+      }
+      expect(markup).not.toContain('href="https://example.test/test/opaque repository"')
+      expect(markup).not.toContain('href="https://github.com/test/opaque')
+      expect(markup).not.toContain('Open on GitHub')
+      expect(markup).not.toContain('Open in VS Code')
+      expect(markup).not.toContain('View source folder')
+      expect(markup).not.toContain('Open Terminal')
     },
   )
 

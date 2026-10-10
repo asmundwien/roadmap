@@ -61,6 +61,19 @@ The web production build checks resolved modules before tree shaking for Node, s
 
 Vitest runs in Node. DOM tests need jsdom and Testing Library.
 
+The shared-resource browser regression uses disposable source/configuration files, the actual public application and HTTP/WebSocket transport, and harmless GitHub/host/Automation substitutes:
+
+```sh
+pnpm install
+pnpm exec playwright install chromium
+pnpm test:resource-results-browser
+node scripts/resource-results-browser.mjs --serve-only
+node scripts/resource-results-browser.mjs --screenshots /tmp/roadmap-resource-results-visual
+```
+
+`--serve-only` prints the fixture URL and control endpoint for interactive inspection. `--screenshots` captures scenario PNGs during the complete run and cannot be combined with `--serve-only`. `--executable-path` or `CHROMIUM_EXECUTABLE_PATH` selects an installed Chromium. See the resource browser proof section in [docs/architecture.md](docs/architecture.md) for scenario contracts and proof limits. These commands do not claim an observed test result or native effect completion.
+
+
 ## Navigation
 
 Canonical application paths are:

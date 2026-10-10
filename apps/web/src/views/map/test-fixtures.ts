@@ -1,6 +1,7 @@
 import {
   configurationVersionSchema,
   connectionIdSchema,
+  githubProjectRefSchema,
   mapRefSchema,
   type ProjectRef,
   projectRefSchema,
@@ -333,5 +334,72 @@ export function makeRoadmapStore(projects: Project[] = []): RoadmapStore {
     execute: async () => {
       throw new Error('Unexpected command')
     },
+  }
+}
+export function makeProject(maps: MapResource[]): Project {
+  const key = githubProjectRefSchema.parse(maps[0]?.ref.project ?? HOME_PROJECT)
+  return {
+    integration: 'github',
+    ref: key,
+    connectionId: connectionIdSchema.parse('connection-home'),
+    source: {
+      integration: 'github',
+      repositoryId: key.projectId,
+      nameWithOwner: 'me/repo',
+      url: 'https://example.test/me/repo',
+    },
+    management: { workspacePath: '/workspace' },
+    name: 'Configured project',
+    actions: [],
+    managementWarnings: [],
+    resource: {
+      kind: 'current-readable',
+      observation: {
+        scope: { kind: 'project', project: key },
+        attemptedAt: 0,
+        observedAt: 0,
+        provenance: {
+          integration: 'github',
+          connectionId: connectionIdSchema.parse('connection-home'),
+          repositoryId: key.projectId,
+          stage: 'repository',
+        },
+        completeness: { kind: 'complete' },
+        value: {
+          name: 'Source project',
+          source: {
+            integration: 'github',
+            repositoryId: key.projectId,
+            nameWithOwner: 'me/repo',
+            url: 'https://example.test/me/repo',
+          },
+          warnings: [],
+        },
+      },
+    },
+    mapsMembership: {
+      kind: 'current-complete',
+      observation: {
+        scope: { kind: 'maps-membership', project: key },
+        attemptedAt: 0,
+        observedAt: 0,
+        provenance: {
+          integration: 'github',
+          connectionId: connectionIdSchema.parse('connection-home'),
+          repositoryId: key.projectId,
+          stage: 'map-list',
+        },
+        completeness: { kind: 'complete' },
+        value: {
+          members: maps
+            .filter((map) => map.resource.kind !== 'proven-absent')
+            .map((map) => map.ref),
+        },
+      },
+    },
+    maps,
+    displayOrder: { open: maps.map((map) => map.ref), closed: [] },
+    activeMap:
+      maps[0] === undefined ? { kind: 'known-empty' } : { kind: 'known-current', ref: maps[0].ref },
   }
 }

@@ -178,6 +178,21 @@ export const forbidden = [
     'Views read through useRoadmap, never the transport/store implementation.',
   ),
   refuse(
+    'web-resource-results-pure',
+    { path: `${web}resources/`, pathNot: tests },
+    {
+      path: [
+        `${web}(?:views/|store/|router[.]ts$|navigation[.]tsx$|App[.]tsx$|main[.]tsx$)`,
+        `${contracts}(?:operations|wire)[.]ts$`,
+        ui,
+        '(?:^|/)node_modules/(?:react|react-dom|react-router)(?:/|$)',
+        '(?:^|/)node_modules/[.]pnpm/[^/]+/node_modules/(?:react|react-dom|react-router)(?:/|$)',
+      ],
+      pathNot: `${web}views/shared/gist[.]ts$`,
+    },
+    'Pure app-local resource results interpret accepted read facts without rendering, route, transport or operation dependencies.',
+  ),
+  refuse(
     'ui-not-to-roadmap-domain',
     { path: ui },
     { path: [`${prefix}apps/(?:server|web|docs)/`, `${prefix}packages/contracts/`] },

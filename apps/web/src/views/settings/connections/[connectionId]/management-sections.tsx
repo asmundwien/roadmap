@@ -1,16 +1,16 @@
 import type { ConfigurationVersion } from '@roadmap/contracts/identity'
 import type { Command, CommandResultFor } from '@roadmap/contracts/operations'
-import type { AuthorizationOperation, Connection, Project } from '@roadmap/contracts/state'
+import type { AuthorizationOperation } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
 import { ControlGroup } from '@roadmap/ui/control-group'
 import { Link } from '@roadmap/ui/link'
 import { Surface, SurfaceTitle } from '@roadmap/ui/surface'
 import { useRef, useState } from 'react'
+import type { AuthorizationResult, ConnectionSummary } from '@/resources/results'
 import {
   type AuthorizationResultFeedback,
   authorizationResultPending,
-  authorizationStatus,
   consumeAuthorizationFeedback,
 } from '@/views/settings/connections/connection-details'
 import { AuthorizationControls, DeviceCode } from '@/views/shared/authorization-presentation'
@@ -27,8 +27,9 @@ type AuthorizationCommand = Extract<
 >
 
 type AuthorizationGroupProps = {
-  connection: Connection
+  connection: ConnectionSummary
   authorization: AuthorizationOperation | undefined
+  presentation: AuthorizationResult | null
   configurationVersion: ConfigurationVersion
   blocked: boolean
   run: RunCommand
@@ -37,6 +38,7 @@ type AuthorizationGroupProps = {
 export function AuthorizationGroup({
   connection,
   authorization,
+  presentation,
   configurationVersion,
   blocked,
   run,
@@ -65,9 +67,10 @@ export function AuthorizationGroup({
     const operationId = result?.operationId ?? authorization?.id
     const retry = result
       ? result.phase !== 'granted' && result.phase !== 'cancelled'
-      : authorization &&
-        authorization.status !== 'granted' &&
-        !(authorization.status === 'terminal' && authorization.outcome === 'cancelled')
+      : presentation &&
+        presentation.kind !== 'granted-current' &&
+        presentation.kind !== 'granted-historical' &&
+        !(presentation.kind === 'terminal' && presentation.outcome === 'cancelled')
     if (retry && operationId) {
       void perform({
         type: 'retry-github-authorization',
@@ -86,8 +89,8 @@ export function AuthorizationGroup({
     ? result.phase === 'waiting'
       ? result
       : null
-    : authorization?.status === 'waiting'
-      ? authorization
+    : presentation?.kind === 'waiting'
+      ? presentation
       : null
   const waitingOperationId = result?.operationId ?? authorization?.id
 
@@ -146,20 +149,22 @@ export function AuthorizationGroup({
         <>
           {!result &&
             authorization &&
-            authorization.status !== 'granted' &&
-            !(authorization.status === 'terminal' && authorization.outcome === 'cancelled') && (
+            presentation &&
+            presentation.kind === 'terminal' &&
+            presentation.outcome !== 'cancelled' && (
               <Alert>
-                <strong>{authorizationStatus(authorization)}</strong>
-                <span>{'cause' in authorization ? authorization.cause : undefined}</span>
+                <strong>{presentation.label}</strong>
+                <span>{presentation.cause}</span>
               </Alert>
             )}
           <Button type="button" disabled={blocked} onClick={reauthenticate}>
             {(
               result
                 ? result.phase !== 'granted' && result.phase !== 'cancelled'
-                : authorization &&
-                  authorization.status !== 'granted' &&
-                  !(authorization.status === 'terminal' && authorization.outcome === 'cancelled')
+                : presentation &&
+                  presentation.kind !== 'granted-current' &&
+                  presentation.kind !== 'granted-historical' &&
+                  !(presentation.kind === 'terminal' && presentation.outcome === 'cancelled')
             )
               ? 'Retry authorization'
               : 'Reauthenticate'}
@@ -171,13 +176,13 @@ export function AuthorizationGroup({
 }
 
 type RemoveConnectionGroupProps = {
-  dependents: Project[]
+  dependentCount: number
   blocked: boolean
   onRemove: () => Promise<void>
 }
 
 export function RemoveConnectionGroup({
-  dependents,
+  dependentCount,
   blocked,
   onRemove,
 }: RemoveConnectionGroupProps) {
@@ -186,7 +191,7 @@ export function RemoveConnectionGroup({
   return (
     <Surface variant="danger">
       <SurfaceTitle>Remove connection</SurfaceTitle>
-      {dependents.length > 0 ? (
+      {dependentCount > 0 ? (
         <>
           <p>
             Remove every dependent Project registration first. Reassignment and cascade removal are

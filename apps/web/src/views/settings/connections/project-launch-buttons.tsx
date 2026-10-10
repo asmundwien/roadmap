@@ -1,4 +1,4 @@
-import type { Project } from '@roadmap/contracts/state'
+import type { ProjectAction } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 import { Button, ButtonLink as ExternalButtonLink } from '@roadmap/ui/button'
 import { Icon, icon } from '@roadmap/ui/icon'
@@ -10,10 +10,10 @@ import styles from './project-launch-buttons.module.css'
 
 const cx = classNames.bind(styles)
 
-type ProjectLaunchButtonsProps = { project: Project }
-type LaunchAction = Extract<Project['actions'][number], { kind: 'server-launch' }>
+type ProjectLaunchButtonsProps = { actions: ProjectAction[] }
+type LaunchAction = Extract<ProjectAction, { kind: 'server-launch' }>
 
-export function ProjectLaunchButtons({ project }: ProjectLaunchButtonsProps) {
+export function ProjectLaunchButtons({ actions }: ProjectLaunchButtonsProps) {
   const { configuration, configurationVersion, command, execute } = useRoadmap((roadmap) => ({
     configuration: { valid: roadmap.configuration.valid },
     configurationVersion: roadmap.configurationVersion,
@@ -51,7 +51,7 @@ export function ProjectLaunchButtons({ project }: ProjectLaunchButtonsProps) {
   return (
     <>
       <div className={cx('connection-project-actions')}>
-        {project.actions.map((action) => {
+        {actions.map((action) => {
           switch (action.kind) {
             case 'roadmap':
               return (

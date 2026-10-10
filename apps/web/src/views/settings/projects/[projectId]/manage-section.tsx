@@ -1,5 +1,4 @@
 import type { Command, SafeError } from '@roadmap/contracts/operations'
-import type { Project } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
 import { ControlGroup } from '@roadmap/ui/control-group'
@@ -7,13 +6,14 @@ import { Modal } from '@roadmap/ui/modal'
 import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
 import { Surface, SurfaceTitle } from '@roadmap/ui/surface'
 import { type FormEvent, useState } from 'react'
+import type { KnownProjectResult } from '@/resources/results'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { SettingsForm } from '@/views/shared/settings-form'
 import { ErrorText, observedLabel, projectIdentity } from '@/views/shared/settings-shared'
 import { WorkspaceFolderSelector } from '@/views/shared/workspace-folder-selector'
 
 type ManageSectionProps = {
-  project: Project
+  project: KnownProjectResult
   removing: boolean
   onRemove: () => Promise<void>
 }
@@ -153,9 +153,7 @@ export function ManageSection({ project, removing, onRemove }: ManageSectionProp
             </Button>
           </ControlGroup>
         </Surface>
-        {!project.actions.some(
-          (action) => action.kind === 'server-launch' && action.operation === 'open-workspace',
-        ) && (
+        {project.capabilities.repairOffered && (
           <Surface>
             <SurfaceTitle>Moved Workspace</SurfaceTitle>
             <p>

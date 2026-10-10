@@ -1,6 +1,5 @@
 import type { ConnectionId } from '@roadmap/contracts/identity'
 import type { CommandResult } from '@roadmap/contracts/operations'
-import type { Connection } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
 import { Link as ExternalLink } from '@roadmap/ui/link'
@@ -9,6 +8,7 @@ import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/s
 import { TextInput } from '@roadmap/ui/text-input'
 import { type FormEvent, useState } from 'react'
 import { Link } from '@/navigation'
+import { type ConnectionResult, resolveConnection } from '@/resources/results'
 import { projectSettingsPath, routePaths } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { IntegrationBadge } from '@/views/shared/integration-badge'
@@ -24,15 +24,12 @@ import { WorkspaceFolderSelector } from '@/views/shared/workspace-folder-selecto
 type ProjectImportPageProps = { connectionId: ConnectionId }
 
 export function ProjectImportPage({ connectionId }: ProjectImportPageProps) {
-  const { connection, githubInstallationUrl, configurationValid } = useRoadmap((roadmap) => ({
-    connection: roadmap.connections.find((candidate) => candidate.id === connectionId),
-    githubInstallationUrl: roadmap.supportedIntegrations.find(
-      (integration) => integration.integration === 'github',
-    )?.newInstallationUrl,
+  const { connection, configurationValid } = useRoadmap((roadmap) => ({
+    connection: resolveConnection(roadmap, connectionId),
     configurationValid: roadmap.configuration.valid,
   }))
 
-  if (!connection) {
+  if (connection.kind === 'missing') {
     return (
       <Page>
         <PageHeader>
@@ -50,23 +47,17 @@ export function ProjectImportPage({ connectionId }: ProjectImportPageProps) {
     <ProjectImportForm
       key={connection.id}
       connection={connection}
-      githubInstallationUrl={githubInstallationUrl}
       configurationValid={configurationValid}
     />
   )
 }
 
 type ProjectImportFormProps = {
-  connection: Connection
-  githubInstallationUrl: string | undefined
+  connection: Extract<ConnectionResult, { kind: 'known' }>
   configurationValid: boolean
 }
 
-function ProjectImportForm({
-  connection,
-  githubInstallationUrl,
-  configurationValid,
-}: ProjectImportFormProps) {
+function ProjectImportForm({ connection, configurationValid }: ProjectImportFormProps) {
   const { configurationVersion, command, query, execute } = useRoadmap((roadmap) => ({
     configurationVersion: roadmap.configurationVersion,
     command: { inFlight: roadmap.command.inFlight },
@@ -86,7 +77,7 @@ function ProjectImportForm({
     event.preventDefault()
     const draft = projectRegistrationDraft(
       new FormData(event.currentTarget),
-      connection,
+      connection.registration.identity,
       workspacePath,
     )
     setErrors(draft.errors)
@@ -128,10 +119,10 @@ function ProjectImportForm({
           <span>In-app changes stay blocked until roadmap.config.json is valid.</span>
         </Alert>
       )}
-      {connection.availability.status !== 'available' && (
+      {connection.health.status !== 'available' && (
         <Alert>
-          <strong>{connection.name} is not available.</strong>
-          <span>{connection.availability.cause}</span>
+          <strong>{connection.health.label}</strong>
+          <span>{connection.health.cause}</span>
         </Alert>
       )}
       <Section>
@@ -162,8 +153,8 @@ function ProjectImportForm({
               {connection.integration === 'github' ? (
                 <>
                   <WorkspaceFolderSelector
-                    label="Workspace"
-                    description="Roadmap derives and verifies the repository from this Git worktree's origin remote."
+                    label={connection.registration.folderLabel}
+                    description={connection.registration.description}
                     path={workspacePath}
                     error={errors.workspace}
                     disabled={blocked}
@@ -177,8 +168,8 @@ function ProjectImportForm({
                     <span>
                       GitHub authorization and repository installation are separate grants.
                     </span>
-                    {githubInstallationUrl && (
-                      <ExternalLink href={githubInstallationUrl} external>
+                    {connection.registration.newInstallation.kind === 'link' && (
+                      <ExternalLink href={connection.registration.newInstallation.href} external>
                         Configure repository access
                       </ExternalLink>
                     )}
@@ -186,8 +177,8 @@ function ProjectImportForm({
                 </>
               ) : (
                 <WorkspaceFolderSelector
-                  label="Project folder and Workspace"
-                  description="Local uses this one readable folder as both locator and Workspace."
+                  label={connection.registration.folderLabel}
+                  description={connection.registration.description}
                   path={workspacePath}
                   error={errors.folder}
                   disabled={blocked}

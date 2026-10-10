@@ -1,18 +1,5 @@
 import type { TicketId, TicketRef } from '@roadmap/contracts/identity'
-import type {
-  AutomationEvidence,
-  AutomationOverrideControl,
-  AutomationOverrideStage,
-  AutomationProcessResult,
-  Blocker,
-  ClassificationAttempt,
-  MapResource,
-  SessionReportEvidence,
-  TicketResource,
-  TicketResourceResult,
-  WayfinderSession,
-} from '@roadmap/contracts/state'
-import { ticketTypeOf } from '@roadmap/contracts/state'
+import type { AutomationOverrideStage, MapResource } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 import { Badge } from '@roadmap/ui/badge'
 import { Button } from '@roadmap/ui/button'
@@ -21,84 +8,62 @@ import { Modal } from '@roadmap/ui/modal'
 import { Surface, SurfaceTitle } from '@roadmap/ui/surface'
 import classNames from 'classnames/bind'
 import { useState } from 'react'
+import { Link as NavigationLink } from '@/navigation'
+import {
+  type AutomationControlResult,
+  type BlockerResult,
+  resolveSelection,
+  type TicketResult,
+} from '@/resources/results'
+import { ticketPath } from '@/router'
 import { type RoadmapViewState, useRoadmap } from '@/store/roadmap-provider'
-import { resourceMessage, resourceObservation } from '@/views/shared/resource-results'
 import { TicketMark } from '@/views/shared/ticket-mark'
-import { TICKET_STATE_META } from '@/views/shared/ticket-presentation'
-import { blockerNodeId } from './graph'
 import { Prose } from './prose'
 import styles from './ticket-modal.module.css'
 
 const cx = classNames.bind(styles)
 
-type TicketValue = Extract<
-  TicketResourceResult,
-  { kind: 'current-readable' }
->['observation']['value']
-
-function automationEvidenceFor(
-  ticket: TicketResource['ref'],
-  evidence: readonly AutomationEvidence[],
-): AutomationEvidence | undefined {
-  return evidence.find(
-    (candidate) =>
-      candidate.target.map.project.integration === ticket.map.project.integration &&
-      candidate.target.map.project.projectId === ticket.map.project.projectId &&
-      candidate.target.map.mapId === ticket.map.mapId &&
-      candidate.target.ticketId === ticket.ticketId,
-  )
-}
-
 export type TicketModalProps = {
-  map: MapResource | null
   selected: TicketRef | null
   onClose: () => void
   onOpenTicket: (id: TicketId) => void
   onOpenMap: () => void
 }
 
-export function TicketModal({ map, selected, onClose, onOpenTicket, onOpenMap }: TicketModalProps) {
-  const roadmap = useRoadmap<AutomationViewState>(
-    ({ automation, configurationVersion, command, execute }) => ({
-      automation,
-      configurationVersion,
-      command,
-      execute,
-    }),
-  )
-  const ticket = map?.tickets.find((item) => item.ref.ticketId === selected?.ticketId)
-  const content = ticket === undefined ? null : resourceObservation(ticket.resource)?.value
-
+export function TicketModal({ selected, onClose, onOpenTicket, onOpenMap }: TicketModalProps) {
+  const view = useRoadmap((read) => ({
+    result:
+      selected === null
+        ? null
+        : resolveSelection(read, {
+            project: selected.map.project,
+            map: selected.map,
+            ticket: selected,
+          }),
+    configurationVersion: read.configurationVersion,
+    command: read.command,
+    execute: read.execute,
+  }))
+  const ticket = view.result?.ticket
+  const map = view.result?.map
   return (
     <Modal
       open={selected !== null}
       onClose={onClose}
-      title={content?.title ?? content?.displayId ?? selected?.ticketId ?? 'Ticket'}
+      title={ticket?.title ?? 'Ticket'}
       className={cx('modal')}
     >
-      {ticket === undefined || map === null ? (
-        selected !== null && (
-          <>
-            <Alert variant="info">
-              Ticket {selected.ticketId} has no known resource in this map. No other ticket has been
-              selected.
-            </Alert>
-            <TicketAutomation roadmap={roadmap} ticket={selected} tracker={undefined} />
-          </>
-        )
-      ) : (
+      {ticket && (
         <>
-          <Alert variant="info">Ticket source. {resourceMessage(ticket.resource)}</Alert>
+          <Alert variant="info">
+            {ticket.kind === 'known' ? 'Ticket source. ' : ''}
+            {ticket.message}
+          </Alert>
           <TicketContent
-            key={JSON.stringify([
-              map.ref.project.integration,
-              map.ref.project.projectId,
-              map.ref.mapId,
-              ticket.ref.ticketId,
-            ])}
-            map={map}
-            ticketResource={ticket}
-            roadmap={roadmap}
+            key={ticket.key}
+            ticket={ticket}
+            map={map?.kind === 'known' ? map.resource : null}
+            roadmap={view}
             onOpenTicket={onOpenTicket}
             onOpenMap={onOpenMap}
           />
@@ -108,247 +73,187 @@ export function TicketModal({ map, selected, onClose, onOpenTicket, onOpenMap }:
   )
 }
 
-type AutomationViewState = Pick<
-  RoadmapViewState,
-  'automation' | 'configurationVersion' | 'command' | 'execute'
->
-
+type AutomationViewState = Pick<RoadmapViewState, 'configurationVersion' | 'command' | 'execute'>
 type TicketContentProps = {
-  map: MapResource
-  ticketResource: TicketResource
+  ticket: TicketResult
+  map: MapResource | null
   roadmap: AutomationViewState
   onOpenTicket: (id: TicketId) => void
   onOpenMap: () => void
 }
 
-function TicketContent({
-  map,
-  ticketResource,
-  roadmap,
-  onOpenTicket,
-  onOpenMap,
-}: TicketContentProps) {
-  const ticket = resourceObservation(ticketResource.resource)?.value
-  if (ticket === undefined) {
-    return <TicketAutomation roadmap={roadmap} ticket={ticketResource.ref} tracker={undefined} />
-  }
-  const type = ticketTypeOf(ticket.typeEvidence)
-  const stateMeta = TICKET_STATE_META[ticket.state]
-  const decision = resourceObservation(map.resource)?.value.body.decisions.find(
-    (item) => item.title === ticket.title,
-  )
-  const proseProps = {
-    map,
-    sourcePath: ticket.source.kind === 'file' ? ticket.source.path : undefined,
-    onOpenTicket,
-    onOpenMap,
-  }
-
+function TicketContent({ ticket, map, roadmap, onOpenTicket, onOpenMap }: TicketContentProps) {
+  const content = ticket.content
+  const tracker = ticket.tracker
+  const proseProps =
+    map === null
+      ? null
+      : {
+          map,
+          sourcePath: ticket.source.kind === 'file' ? ticket.source.path : undefined,
+          onOpenTicket,
+          onOpenMap,
+        }
   return (
     <div className={cx('content')}>
-      <div className={cx('identity')}>
-        <span>{ticket.displayId ?? ticketResource.ref.ticketId}</span>
-        <Badge>{type}</Badge>
-        <Badge variant={stateMeta.variant}>
-          <TicketMark state={ticket.state} type={type} size="small" />
-          {trackerStateLabel(ticket)}
-        </Badge>
-      </div>
-      {ticket.source.kind === 'issue' ? (
-        <Link href={ticket.source.url} external>
-          View item in source
-        </Link>
-      ) : (
-        <p className={cx('supporting')}>{ticket.source.path}</p>
-      )}
-      {(ticket.assignees.length > 0 || ticket.closedAt !== undefined) && (
-        <dl className={cx('metadata')}>
-          {ticket.assignees.length > 0 && (
-            <div>
-              <dt>Assignees</dt>
-              <dd>
-                {ticket.assignees.map((assignee, index) => (
-                  <span key={assignee.url ?? assignee.name}>
-                    {index > 0 && ', '}
-                    {assignee.url ? (
-                      <Link href={assignee.url} external>
-                        {assignee.name}
-                      </Link>
-                    ) : (
-                      assignee.name
-                    )}
-                  </span>
+      {content && tracker && (
+        <>
+          <div className={cx('identity')}>
+            <span>{ticket.displayId}</span>
+            <Badge variant={tracker.typeAccent}>{tracker.typeLabel}</Badge>
+            <Badge variant={tracker.variant}>
+              <TicketMark state={tracker.state} type={tracker.type} size="small" />
+              {tracker.label}
+            </Badge>
+            {tracker.blockedLabel && <Badge variant="danger">{tracker.blockedLabel}</Badge>}
+            {tracker.claimedLabel && <Badge variant="info">{tracker.claimedLabel}</Badge>}
+          </div>
+          {ticket.source.kind === 'link' && (
+            <Link href={ticket.source.href} external>
+              View item in source
+            </Link>
+          )}
+          {ticket.source.kind === 'file' && (
+            <p className={cx('supporting')}>{ticket.source.path}</p>
+          )}
+          {(content.assignees.length > 0 || content.closedAt !== undefined) && (
+            <dl className={cx('metadata')}>
+              {content.assignees.length > 0 && (
+                <div>
+                  <dt>Assignees</dt>
+                  <dd>
+                    {content.assignees.map((assignee, index) => (
+                      <span key={assignee.url ?? assignee.name}>
+                        {index > 0 && ', '}
+                        {assignee.url ? (
+                          <Link href={assignee.url} external>
+                            {assignee.name}
+                          </Link>
+                        ) : (
+                          assignee.name
+                        )}
+                      </span>
+                    ))}
+                  </dd>
+                </div>
+              )}
+              {content.closedAt !== undefined && (
+                <div>
+                  <dt>Closed</dt>
+                  <dd>
+                    {new Date(content.closedAt).toLocaleDateString(undefined, {
+                      year: 'numeric',
+                      month: 'short',
+                      day: 'numeric',
+                    })}
+                  </dd>
+                </div>
+              )}
+            </dl>
+          )}
+          {proseProps && content.body.trim() !== '' && (
+            <Prose {...proseProps} markdown={content.body} />
+          )}
+          {proseProps && ticket.decisionGist !== null && (
+            <Surface variant="subtle">
+              <SurfaceTitle>The decision</SurfaceTitle>
+              <Prose {...proseProps} markdown={ticket.decisionGist} />
+            </Surface>
+          )}
+          {ticket.blockers.length > 0 && (
+            <Surface variant="subtle">
+              <SurfaceTitle>Blocked by</SurfaceTitle>
+              <ul className={cx('blockers')}>
+                {ticket.blockers.map((blocker) => (
+                  <li key={blocker.key}>
+                    <BlockerItem blocker={blocker} onOpenTicket={onOpenTicket} />
+                  </li>
                 ))}
-              </dd>
-            </div>
+              </ul>
+            </Surface>
           )}
-          {ticket.closedAt !== undefined && (
-            <div>
-              <dt>Closed</dt>
-              <dd>
-                {new Date(ticket.closedAt).toLocaleDateString(undefined, {
-                  year: 'numeric',
-                  month: 'short',
-                  day: 'numeric',
-                })}
-              </dd>
-            </div>
+          {!content.blockersComplete && (
+            <Alert variant="info">Some blockers could not be resolved.</Alert>
           )}
-        </dl>
+          {content.warnings.map((warning) => (
+            <Alert key={warning} variant="info">
+              {warning}
+            </Alert>
+          ))}
+        </>
       )}
-      {ticket.body.trim() !== '' && <Prose {...proseProps} markdown={ticket.body} />}
-      {decision !== undefined && (
-        <Surface variant="subtle">
-          <SurfaceTitle>The decision</SurfaceTitle>
-          <Prose {...proseProps} markdown={decision.gist} />
-        </Surface>
-      )}
-      {ticket.blockedBy.length > 0 && (
-        <Surface variant="subtle">
-          <SurfaceTitle>Blocked by</SurfaceTitle>
-          <ul className={cx('blockers')}>
-            {ticket.blockedBy.map((blocker) => (
-              <li key={blockerNodeId(blocker)}>
-                <BlockerItem map={map} blocker={blocker} onOpenTicket={onOpenTicket} />
-              </li>
-            ))}
-          </ul>
-        </Surface>
-      )}
-      {!ticket.blockersComplete && (
-        <Alert variant="info">Some blockers could not be resolved.</Alert>
-      )}
-      {map.ticketsMembership.kind !== 'current-complete' && (
-        <Alert variant="info">
-          Current ticket membership is not complete. Known traces do not prove current presence.
-        </Alert>
-      )}
-      {ticket.warnings.map((warning) => (
-        <Alert key={warning} variant="info">
-          {warning}
-        </Alert>
-      ))}
-      <TicketAutomation roadmap={roadmap} ticket={ticketResource.ref} tracker={ticket} />
+      {ticket.membershipMessage && <Alert variant="info">{ticket.membershipMessage}</Alert>}
+      <AutomationSection roadmap={roadmap} ticket={ticket} />
     </div>
   )
 }
 
-type BlockerItemProps = {
-  map: MapResource
-  blocker: Blocker
-  onOpenTicket: (id: TicketId) => void
-}
+type BlockerItemProps = { blocker: BlockerResult; onOpenTicket: (id: TicketId) => void }
 
-function BlockerItem({ map, blocker, onOpenTicket }: BlockerItemProps) {
-  const { reference } = blocker
-  const local =
-    reference.kind === 'registered' &&
-    reference.ticket.map.project.integration === map.ref.project.integration &&
-    reference.ticket.map.project.projectId === map.ref.project.projectId &&
-    reference.ticket.map.mapId === map.ref.mapId
-      ? map.tickets.find((ticket) => ticket.ref.ticketId === reference.ticket.ticketId)
-      : undefined
-  const scope =
-    reference.kind === 'registered'
-      ? `${reference.ticket.map.project.integration}:${reference.ticket.map.project.projectId}`
-      : reference.kind === 'external'
-        ? `${reference.integration}:${reference.nameWithOwner}`
-        : reference.locator
-  const identity =
-    blocker.displayId ??
-    (blocker.reference.kind === 'registered'
-      ? blocker.reference.ticket.ticketId
-      : blocker.reference.ticketId)
-  const localContent = local === undefined ? null : resourceObservation(local.resource)?.value
-  const title = blocker.title ?? identity
-
-  if (local !== undefined) {
-    return (
-      <div className={cx('blocker')}>
-        <Button size="small" onClick={() => onOpenTicket(local.ref.ticketId)}>
-          {localContent?.title ?? localContent?.displayId ?? local.ref.ticketId}
-        </Button>
-        {localContent && (
-          <Badge variant={TICKET_STATE_META[localContent.state].variant}>
-            <TicketMark
-              state={localContent.state}
-              type={ticketTypeOf(localContent.typeEvidence)}
-              size="small"
-            />
-            {trackerStateLabel(localContent)}
-          </Badge>
-        )}
-        {local.resource.kind !== 'current-readable' && (
-          <span className={cx('supporting')}>{resourceMessage(local.resource)}</span>
-        )}
-      </div>
-    )
-  }
+function BlockerItem({ blocker, onOpenTicket }: BlockerItemProps) {
   return (
     <div className={cx('blocker')}>
-      {blocker.url ? (
-        <Link href={blocker.url} external>
-          {title}
+      {blocker.target ? (
+        blocker.local ? (
+          <Button
+            size="small"
+            onClick={() => {
+              if (blocker.target) onOpenTicket(blocker.target.ticketId)
+            }}
+          >
+            {blocker.title}
+          </Button>
+        ) : (
+          <NavigationLink href={ticketPath(blocker.target)}>{blocker.title}</NavigationLink>
+        )
+      ) : blocker.source.kind === 'link' ? (
+        <Link href={blocker.source.href} external>
+          {blocker.title}
         </Link>
       ) : (
-        <span>{title}</span>
+        <span>{blocker.title}</span>
+      )}
+      {blocker.tracker && (
+        <>
+          <Badge variant={blocker.tracker.variant}>
+            <TicketMark state={blocker.tracker.state} type={blocker.tracker.type} size="small" />
+            {blocker.tracker.label}
+          </Badge>
+          <Badge variant={blocker.tracker.typeAccent}>{blocker.tracker.typeLabel}</Badge>
+          {blocker.tracker.blockedLabel && (
+            <Badge variant="danger">{blocker.tracker.blockedLabel}</Badge>
+          )}
+          {blocker.tracker.claimedLabel && (
+            <Badge variant="info">{blocker.tracker.claimedLabel}</Badge>
+          )}
+        </>
       )}
       <span className={cx('supporting')}>
-        {scope} · {identity} · {blocker.state}
-        {blocker.url ? ' · source' : ' · No source link is available.'}
-        {blocker.state === 'unknown' && ' Blocker state is unknown.'}
+        {blocker.scope} · {blocker.displayId} · {blocker.stateLabel}
       </span>
+      {blocker.source.kind === 'absent' && (
+        <span className={cx('supporting')}>No source link is available.</span>
+      )}
+      {blocker.source.kind === 'file' && (
+        <span className={cx('supporting')}>{blocker.source.path}</span>
+      )}
+      {blocker.message && <span className={cx('supporting')}>{blocker.message}</span>}
+      {blocker.target && !blocker.local && blocker.source.kind === 'link' && (
+        <Link href={blocker.source.href} external>
+          {blocker.title}
+        </Link>
+      )}
     </div>
   )
 }
 
-type TicketAutomationProps = {
-  roadmap: AutomationViewState
-  ticket: TicketResource['ref']
-  tracker: TicketValue | undefined
-}
+type AutomationSectionProps = { roadmap: AutomationViewState; ticket: TicketResult }
 
-function TicketAutomation({ roadmap, ticket, tracker }: TicketAutomationProps) {
-  const control = roadmap.automation.overrides.find(
-    (item) =>
-      item.target.map.project.integration === ticket.map.project.integration &&
-      item.target.map.project.projectId === ticket.map.project.projectId &&
-      item.target.map.mapId === ticket.map.mapId &&
-      item.target.ticketId === ticket.ticketId,
-  )
-  const evidence = automationEvidenceFor(ticket, roadmap.automation.evidence)
-  return (
-    <AutomationSection
-      roadmap={roadmap}
-      control={control}
-      evidence={evidence}
-      ticket={ticket}
-      tracker={tracker}
-    />
-  )
-}
-
-type AutomationSectionProps = {
-  roadmap: AutomationViewState
-  control: AutomationOverrideControl | undefined
-  evidence: AutomationEvidence | undefined
-  ticket: TicketResource['ref']
-  tracker: TicketValue | undefined
-}
-
-function AutomationSection({
-  roadmap,
-  control,
-  evidence,
-  ticket,
-  tracker,
-}: AutomationSectionProps) {
+function AutomationSection({ roadmap, ticket: result }: AutomationSectionProps) {
+  const ticket = result.ref
+  const automation = result.automation
+  const evidence = automation.evidence
   const [feedback, setFeedback] = useState<{ kind: 'notice' | 'error'; text: string } | null>(null)
-  const fallbackReason =
-    roadmap.automation.availability.status === 'unavailable'
-      ? roadmap.automation.availability.cause
-      : 'Automation overrides are unavailable for this ticket.'
-
   const run = async (stage: AutomationOverrideStage) => {
     setFeedback(null)
     try {
@@ -378,16 +283,32 @@ function AutomationSection({
   return (
     <Surface>
       <SurfaceTitle>Automation</SurfaceTitle>
-      {evidence !== undefined && (
+      {evidence && (
         <section className={cx('evidence')} aria-label="Recorded Automation evidence">
           <dl>
             <EvidenceFact
               term="Tracker state"
-              value={tracker === undefined ? 'No source content known' : trackerStateLabel(tracker)}
+              value={result.tracker?.label ?? 'No source content known'}
             />
           </dl>
-          <ClassificationEvidence attempt={evidence.classification} />
-          {evidence.wayfinder !== undefined && <WayfinderEvidence session={evidence.wayfinder} />}
+          <section>
+            <h4>Classification</h4>
+            <dl>
+              {evidence.classification.facts.map((fact) => (
+                <EvidenceFact key={fact.term} {...fact} />
+              ))}
+            </dl>
+          </section>
+          {evidence.session && (
+            <section>
+              <h4>Wayfinder Session</h4>
+              <dl>
+                {evidence.session.facts.map((fact) => (
+                  <EvidenceFact key={fact.term} {...fact} />
+                ))}
+              </dl>
+            </section>
+          )}
         </section>
       )}
       <p className={cx('supporting')}>
@@ -395,19 +316,13 @@ function AutomationSection({
       </p>
       <div className={cx('override-actions')}>
         <OverrideButton
-          label="Run Classification"
-          available={control?.classification}
-          fallbackReason={fallbackReason}
+          control={automation.controls.classification}
           commandInFlight={roadmap.command.inFlight}
-          eligibleHint="Classify this ticket once."
           onClick={() => void run('classification')}
         />
         <OverrideButton
-          label="Start Wayfinder Session"
-          available={control?.wayfinder}
-          fallbackReason={fallbackReason}
+          control={automation.controls.wayfinder}
           commandInFlight={roadmap.command.inFlight}
-          eligibleHint="Start the AFK-approved ticket once."
           onClick={() => void run('wayfinder')}
         />
       </div>
@@ -421,116 +336,6 @@ function AutomationSection({
         ))}
     </Surface>
   )
-}
-
-type ClassificationEvidenceProps = { attempt: ClassificationAttempt }
-
-function ClassificationEvidence({ attempt }: ClassificationEvidenceProps) {
-  return (
-    <section>
-      <h4>Classification</h4>
-      <dl>
-        <EvidenceFact term="State" value={classificationStateLabel(attempt)} />
-        <EvidenceFact
-          term="Admission"
-          value={attempt.admission === 'automatic' ? 'Automatic' : 'Override'}
-        />
-        {(attempt.status === 'completed' || attempt.status === 'failed') && (
-          <ProcessEvidence result={attempt.processResult} />
-        )}
-        {attempt.status === 'completed' && (
-          <EvidenceFact
-            term="Verdict"
-            value={attempt.verdict.value.toUpperCase()}
-            detail={attempt.verdict.reason}
-          />
-        )}
-        {(attempt.status === 'failed' ||
-          attempt.status === 'launch-failed' ||
-          attempt.status === 'outcome-unknown') && (
-          <EvidenceFact term="Reason" value={attempt.reason} />
-        )}
-      </dl>
-    </section>
-  )
-}
-
-type WayfinderEvidenceProps = { session: WayfinderSession }
-
-function WayfinderEvidence({ session }: WayfinderEvidenceProps) {
-  return (
-    <section>
-      <h4>Wayfinder Session</h4>
-      <dl>
-        <EvidenceFact term="State" value={wayfinderStateLabel(session)} />
-        <EvidenceFact
-          term="Admission"
-          value={
-            session.status === 'queued'
-              ? 'Pending'
-              : session.admission === 'automatic'
-                ? 'Automatic'
-                : 'Override'
-          }
-        />
-        {session.status === 'finished' && (
-          <>
-            <ProcessEvidence result={session.processResult} />
-            <ReportEvidence report={session.report} />
-          </>
-        )}
-        {(session.status === 'launch-failed' || session.status === 'outcome-unknown') && (
-          <EvidenceFact term="Reason" value={session.reason} />
-        )}
-        {session.status === 'outcome-unknown' && (
-          <EvidenceFact
-            term="Acknowledgement"
-            value={session.acknowledged ? 'Acknowledged' : 'Required'}
-          />
-        )}
-      </dl>
-    </section>
-  )
-}
-
-type ProcessEvidenceProps = { result: AutomationProcessResult }
-
-function ProcessEvidence({ result }: ProcessEvidenceProps) {
-  switch (result.status) {
-    case 'exited':
-      return <EvidenceFact term="Process result" value={`Exited ${result.code}`} />
-    case 'signaled':
-      return <EvidenceFact term="Process result" value={`Ended by ${result.signal}`} />
-    case 'unavailable':
-      return <EvidenceFact term="Process result" value="Unavailable" detail={result.reason} />
-    default: {
-      const _exhaustive: never = result
-      return _exhaustive
-    }
-  }
-}
-
-type ReportEvidenceProps = { report: SessionReportEvidence }
-
-function ReportEvidence({ report }: ReportEvidenceProps) {
-  switch (report.status) {
-    case 'received':
-      return (
-        <EvidenceFact
-          term="Session report"
-          value={sentenceCase(report.report.outcome)}
-          detail={report.report.reason}
-        />
-      )
-    case 'missing':
-      return <EvidenceFact term="Session report" value="Missing" detail={report.reason} />
-    case 'invalid':
-      return <EvidenceFact term="Session report" value="Invalid" detail={report.reason} />
-    default: {
-      const _exhaustive: never = report
-      return _exhaustive
-    }
-  }
 }
 
 type EvidenceFactProps = { term: string; value: string; detail?: string }
@@ -548,90 +353,28 @@ function EvidenceFact({ term, value, detail }: EvidenceFactProps) {
 }
 
 type OverrideButtonProps = {
-  label: string
-  available: AutomationOverrideControl['classification'] | undefined
-  fallbackReason: string
+  control: AutomationControlResult
   commandInFlight: boolean
-  eligibleHint: string
   onClick: () => void
 }
 
-function OverrideButton({
-  label,
-  available,
-  fallbackReason,
-  commandInFlight,
-  eligibleHint,
-  onClick,
-}: OverrideButtonProps) {
+function OverrideButton({ control, commandInFlight, onClick }: OverrideButtonProps) {
   const reason = commandInFlight
     ? 'Another operation is in progress.'
-    : available?.status === 'ineligible'
-      ? available.reason
-      : available === undefined
-        ? fallbackReason
-        : eligibleHint
+    : control.status === 'eligible'
+      ? control.hint
+      : control.reason
   return (
     <div className={cx('override-action')}>
       <Button
         size="small"
-        disabled={commandInFlight || available?.status !== 'eligible'}
+        disabled={commandInFlight || control.status !== 'eligible'}
         title={reason}
         onClick={onClick}
       >
-        {label}
+        {control.label}
       </Button>
       <span className={cx('supporting')}>{reason}</span>
     </div>
   )
-}
-
-function classificationStateLabel(attempt: ClassificationAttempt): string {
-  switch (attempt.status) {
-    case 'running':
-      return 'Running'
-    case 'completed':
-      return 'Completed'
-    case 'failed':
-      return 'Failed'
-    case 'launch-failed':
-      return 'Launch failed'
-    case 'outcome-unknown':
-      return 'Outcome unknown'
-    default: {
-      const _exhaustive: never = attempt
-      return _exhaustive
-    }
-  }
-}
-
-function wayfinderStateLabel(session: WayfinderSession): string {
-  switch (session.status) {
-    case 'queued':
-      return 'Queued'
-    case 'launching':
-      return 'Launching'
-    case 'running':
-      return 'Running'
-    case 'finished':
-      return 'Finished'
-    case 'launch-failed':
-      return 'Launch failed'
-    case 'outcome-unknown':
-      return 'Outcome unknown'
-    default: {
-      const _exhaustive: never = session
-      return _exhaustive
-    }
-  }
-}
-
-function trackerStateLabel(ticket: TicketValue): string {
-  if (ticket.state === 'closed') return sentenceCase(TICKET_STATE_META.closed.word)
-  if (ticket.isBlocked && ticket.isClaimed) return 'Blocked + claimed'
-  return sentenceCase(TICKET_STATE_META[ticket.state].word)
-}
-
-function sentenceCase(value: string): string {
-  return `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`
 }

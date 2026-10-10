@@ -140,6 +140,14 @@ try {
       await readFile(new URL(`./fixtures/types/${consumer}/public.ts`, import.meta.url)),
     )
     cruise(leaf, [relative(root, positive).split('\\').join('/')], true)
+    if (consumer === 'browser') {
+      const resources = join(workspace, 'src/resource-results.test.ts')
+      await writeFile(
+        resources,
+        await readFile(new URL('./fixtures/architecture/resource-results.ts', import.meta.url)),
+      )
+      cruise(leaf, [relative(root, resources).split('\\').join('/')])
+    }
   }
 } finally {
   await rm(directory, { recursive: true, force: true })

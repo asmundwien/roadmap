@@ -1,7 +1,7 @@
 import { mapIdSchema, projectIdSchema } from '@roadmap/contracts/identity'
 import type { MapResource } from '@roadmap/contracts/state'
 import { describe, expect, it } from 'vitest'
-import { resourceObservation } from '@/views/shared/resource-results'
+import { resourceObservation } from '@/resources/results'
 import { resolveProseLink } from './link-targets'
 import { makeMap as resourceMap, ticket } from './test-fixtures'
 
@@ -63,6 +63,31 @@ describe('resolveProseLink', () => {
         '../map.md',
       ),
     ).toEqual({
+      kind: 'selection',
+      selection: { kind: 'map' },
+    })
+  })
+
+  it('preserves literal percent escapes in the source directory for relative selections', () => {
+    const directory = '/workspace/.wayfinder/resource%2F:α space'
+    const map = resourceMap(
+      [
+        ticket('2', 'frontier', [], undefined, 0, 'task', {
+          source: { kind: 'file', path: `${directory}/tickets/ticket.md` },
+        }),
+      ],
+      {},
+      {
+        project: { integration: 'local', projectId: projectIdSchema.parse('opaque-project') },
+        mapId: mapIdSchema.parse('.wayfinder/resource%2F:α space/map.md'),
+      },
+      { source: { kind: 'file', path: `${directory}/map.md` } },
+    )
+    expect(resolveProseLink(map, `${directory}/map.md`, 'tickets/ticket.md')).toEqual({
+      kind: 'selection',
+      selection: { kind: 'ticket', id: '2' },
+    })
+    expect(resolveProseLink(map, `${directory}/tickets/ticket.md`, '../map.md')).toEqual({
       kind: 'selection',
       selection: { kind: 'map' },
     })

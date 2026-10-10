@@ -52,11 +52,7 @@ function ProjectRoute({ pattern, settings = false }: ProjectRouteProps) {
   return settings ? (
     <ProjectSettingsPage projectRef={selected.project} />
   ) : (
-    <MapPage
-      projectRef={selected.project}
-      mapId={selected.map?.mapId ?? null}
-      ticketId={selected.ticket?.ticketId ?? null}
-    />
+    <MapPage selection={selected} />
   )
 }
 

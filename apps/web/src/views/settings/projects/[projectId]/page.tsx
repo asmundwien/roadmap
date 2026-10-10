@@ -6,10 +6,10 @@ import classNames from 'classnames/bind'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Link } from '@/navigation'
+import { resolveProject } from '@/resources/results'
 import { connectionPath, routePaths } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
-import { resourceMessage, resourceObservation } from '@/views/shared/resource-results'
-import { ErrorText, projectIdentity, sameProject } from '@/views/shared/settings-shared'
+import { ErrorText, projectIdentity } from '@/views/shared/settings-shared'
 import { AutomationSection } from './automation-section'
 import { DetailsSection } from './details-section'
 import { ManageSection } from './manage-section'
@@ -34,20 +34,12 @@ export function ProjectSettingsPage({ projectRef }: ProjectSettingsPageProps) {
 }
 
 function ProjectSettingsDetail({ projectRef }: ProjectSettingsPageProps) {
-  const { project, connection, configuration, configurationVersion, execute } = useRoadmap(
-    (roadmap) => {
-      const project = roadmap.projects.find((candidate) => sameProject(candidate.ref, projectRef))
-      return {
-        project,
-        connection: project
-          ? roadmap.connections.find((candidate) => candidate.id === project.connectionId)
-          : undefined,
-        configuration: roadmap.configuration,
-        configurationVersion: roadmap.configurationVersion,
-        execute: roadmap.execute,
-      }
-    },
-  )
+  const { project, configuration, configurationVersion, execute } = useRoadmap((roadmap) => ({
+    project: resolveProject(roadmap, projectRef),
+    configuration: roadmap.configuration,
+    configurationVersion: roadmap.configurationVersion,
+    execute: roadmap.execute,
+  }))
   const navigate = useNavigate()
   const [removal, setRemoval] = useState<RemovalFeedback | null>(null)
   const active = useRef(true)
@@ -58,8 +50,10 @@ function ProjectSettingsDetail({ projectRef }: ProjectSettingsPageProps) {
     }
   }, [])
   const remove = async () => {
-    if (!project) return
-    const destination = connection ? connectionPath(project.connectionId) : routePaths.connections
+    if (project.kind === 'missing') return
+    const destination = project.connection
+      ? connectionPath(project.connectionId)
+      : routePaths.connections
     setRemoval({ kind: 'pending' })
     try {
       const outcome = await execute({
@@ -97,7 +91,7 @@ function ProjectSettingsDetail({ projectRef }: ProjectSettingsPageProps) {
       <ErrorText error={removal.error} />
     ) : null
 
-  if (!project) {
+  if (project.kind === 'missing') {
     return (
       <Page>
         <PageHeader>
@@ -107,6 +101,8 @@ function ProjectSettingsDetail({ projectRef }: ProjectSettingsPageProps) {
           </div>
         </PageHeader>
         {feedback}
+        <Alert>{project.message}</Alert>
+        <AutomationSection projectRef={project.ref} />
         <Link href={routePaths.connections}>Back to Connections</Link>
       </Page>
     )
@@ -127,46 +123,32 @@ function ProjectSettingsDetail({ projectRef }: ProjectSettingsPageProps) {
           <span>In-app changes stay blocked until roadmap.config.json is valid.</span>
         </Alert>
       )}
-      <Alert variant={project.resource.kind === 'current-readable' ? 'info' : undefined}>
+      <Alert variant={project.availability.variant === 'info' ? 'info' : undefined}>
         <strong>Project source evidence.</strong>
-        <span>{resourceMessage(project.resource)}</span>
+        <span>{project.availability.message}</span>
       </Alert>
-      {connection && connection.availability.status !== 'available' && (
+      {project.connection && project.connection.health.status !== 'available' && (
         <Alert>
-          <strong>{connection.name} is not available.</strong>
-          <span>{connection.availability.cause}</span>
+          <strong>{project.connection.name} is not available.</strong>
+          <span>{project.connection.health.cause}</span>
         </Alert>
       )}
-      {[
-        ...(resourceObservation(project.resource)?.value.warnings ?? []),
-        ...project.managementWarnings,
-      ].map((warning) => (
+      {project.warnings.map((warning) => (
         <Alert key={warning}>{warning}</Alert>
       ))}
-      {project.activeMap.kind === 'uncertain' ? (
-        <Alert>
-          <strong>Active map is uncertain.</strong>
-          <span>{project.activeMap.cause}</span>
+      {project.membershipMessage && (
+        <Alert variant="info">
+          {project.membershipTitle && <strong>{project.membershipTitle}</strong>}
+          <span>{project.membershipMessage}</span>
         </Alert>
-      ) : (
-        project.mapsMembership.kind === 'current-complete' &&
-        project.mapsMembership.observation.value.members.length === 0 && (
-          <Alert variant="info">
-            <strong>No current Wayfinder maps.</strong>
-            <span>
-              Complete current membership contains no maps. Historical resources remain inspectable.
-            </span>
-          </Alert>
-        )
       )}
       <DetailsSection
         key={`details:${project.ref.integration}:${project.ref.projectId}`}
         project={project}
-        connection={connection}
       />
       <AutomationSection
         key={`automation:${project.ref.integration}:${project.ref.projectId}`}
-        project={project}
+        projectRef={project.ref}
       />
       <ManageSection
         key={`manage:${project.ref.integration}:${project.ref.projectId}`}

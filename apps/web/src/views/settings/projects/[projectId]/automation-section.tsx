@@ -1,5 +1,5 @@
+import type { ProjectRef } from '@roadmap/contracts/identity'
 import type { SafeError } from '@roadmap/contracts/operations'
-import type { Project } from '@roadmap/contracts/state'
 import { Alert } from '@roadmap/ui/alert'
 import { Button } from '@roadmap/ui/button'
 import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/section'
@@ -7,44 +7,34 @@ import { Surface, SurfaceDescription } from '@roadmap/ui/surface'
 import { Toggle } from '@roadmap/ui/toggle'
 import { useState } from 'react'
 import { Link } from '@/navigation'
+import { presentAutomation, resolveProject } from '@/resources/results'
 import { routePaths, ticketPath } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
-import { unacknowledgedInterruption } from '@/views/settings/project-automation'
-import { resourceMessage } from '@/views/shared/resource-results'
-import { ErrorText, projectIdentity, sameProject } from '@/views/shared/settings-shared'
+import { ErrorText, projectIdentity } from '@/views/shared/settings-shared'
 
-type AutomationSectionProps = { project: Project }
+type AutomationSectionProps = { projectRef: ProjectRef }
 
-export function AutomationSection({ project }: AutomationSectionProps) {
-  const { automation, configuration, configurationVersion, command, execute } = useRoadmap(
-    (roadmap) => ({
-      automation: roadmap.automation,
+export function AutomationSection({ projectRef }: AutomationSectionProps) {
+  const { project, globalAutomation, configuration, configurationVersion, command, execute } =
+    useRoadmap((roadmap) => ({
+      project: resolveProject(roadmap, projectRef),
+      globalAutomation: presentAutomation(roadmap),
       configuration: roadmap.configuration,
       configurationVersion: roadmap.configurationVersion,
       command: roadmap.command,
       execute: roadmap.execute,
-    }),
-  )
+    }))
   const [error, setError] = useState<SafeError | string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const blocked = busy || command.inFlight || !configuration.valid
-  const interruption = unacknowledgedInterruption(project.ref, automation.evidence)
-  const preferred = automation.enabledProjects.some((key) => sameProject(key, project.ref))
+  const automation = project.automation
+  const interruption = automation.reviewRequired
+  const preferred = automation.projectEnabled
   const toggleState = busy ? 'pending' : preferred ? 'on' : 'off'
-  const affectedMap = interruption
-    ? project.maps.find(
-        (map) =>
-          map.ref.mapId === interruption.target.map.mapId &&
-          sameProject(map.ref.project, project.ref),
-      )
-    : undefined
-  const affectedTicket = affectedMap?.tickets.find(
-    (ticket) => ticket.ref.ticketId === interruption?.target.ticketId,
-  )
 
   const setEnabled = async (enabled: boolean) => {
-    if (blocked) return
+    if (blocked || project.kind === 'missing') return
     setBusy(true)
     setError(null)
     setNotice(null)
@@ -52,7 +42,7 @@ export function AutomationSection({ project }: AutomationSectionProps) {
       const outcome = await execute({
         type: 'set-project-automation-enabled',
         expectedConfigurationVersion: configurationVersion,
-        project: project.ref,
+        project: projectRef,
         enabled,
       })
       if (!outcome.ok) setError(outcome.error)
@@ -84,53 +74,92 @@ export function AutomationSection({ project }: AutomationSectionProps) {
       </SectionHeader>
       <SectionBody>
         <Surface>
-          <Toggle
-            state={interruption ? 'off' : toggleState}
-            disabled={blocked || interruption !== undefined}
-            aria-describedby="project-automation-description"
-            onChange={(event) => void setEnabled(event.currentTarget.checked)}
-          >
-            Enable automation for this project
-          </Toggle>
+          {project.kind === 'known' && (
+            <Toggle
+              state={interruption ? 'off' : toggleState}
+              disabled={blocked || interruption}
+              aria-describedby="project-automation-description"
+              onChange={(event) => void setEnabled(event.currentTarget.checked)}
+            >
+              Enable automation for this project
+            </Toggle>
+          )}
           <SurfaceDescription id="project-automation-description">
             Allow automation to hand eligible frontier tasks to Wayfinder.
           </SurfaceDescription>
-          {preferred && !automation.enabled && (
+          {preferred && !globalAutomation.enabled && (
             <p>
               Automation is paused globally.{' '}
               <Link href={routePaths.connections}>Manage global automation</Link>
             </p>
           )}
-          {automation.availability.status === 'unavailable' && (
+          {globalAutomation.availabilityCause && (
             <Alert>
               <strong>Automation unavailable.</strong>
-              <span>{automation.availability.cause}</span>
+              <span>{globalAutomation.availabilityCause}</span>
             </Alert>
           )}
-          {interruption && (
-            <Alert>
+          {automation.interruptions.map((entry) => (
+            <Alert key={JSON.stringify(entry.target)}>
               <strong>Session interrupted. Its outcome is unknown.</strong>
+              <span>{entry.reason}</span>
               <span>
                 Review any changes before enabling automation. Acknowledgement does not mean the
                 Session succeeded. Queued work may resume when automation is enabled.
               </span>
-              {affectedMap && affectedTicket && (
-                <>
-                  <Link href={ticketPath(affectedTicket.ref)}>Review affected ticket</Link>
-                  <span>{resourceMessage(affectedMap.resource)}</span>
-                  <span>{resourceMessage(affectedTicket.resource)}</span>
-                </>
+              <Link href={ticketPath(entry.navigation.ticket)}>Review affected ticket</Link>
+              <span>{entry.project.message}</span>
+              <span>{entry.map.message}</span>
+              <span>{entry.ticket.message}</span>
+              {project.kind === 'known' && (
+                <Button
+                  type="button"
+                  disabled={blocked}
+                  aria-busy={busy || undefined}
+                  onClick={() => void setEnabled(true)}
+                >
+                  Acknowledge interruption and enable
+                </Button>
               )}
-              <Button
-                type="button"
-                disabled={blocked}
-                aria-busy={busy || undefined}
-                onClick={() => void setEnabled(true)}
-              >
-                Acknowledge interruption and enable
-              </Button>
             </Alert>
-          )}
+          ))}
+          {automation.historicalEvidence.map((entry) => (
+            <Alert key={JSON.stringify(entry.target)} variant="info">
+              <Link href={ticketPath(entry.navigation.ticket)}>Review affected ticket</Link>
+              <span>{entry.project.message}</span>
+              <span>{entry.map.message}</span>
+              <span>{entry.ticket.message}</span>
+            </Alert>
+          ))}
+          {automation.evidence.map((entry) => (
+            <Surface
+              key={JSON.stringify(entry.target)}
+              role="region"
+              aria-label="Automation evidence"
+            >
+              <Link href={ticketPath(entry.target)}>Inspect Automation evidence</Link>
+              <section aria-label="Classification">
+                <h4>Classification</h4>
+                {entry.classification.facts.map((fact) => (
+                  <p key={fact.term}>
+                    {fact.term}: {fact.value}
+                    {fact.detail && ` ${fact.detail}`}
+                  </p>
+                ))}
+              </section>
+              {entry.session && (
+                <section aria-label="Wayfinder Session">
+                  <h4>Wayfinder Session</h4>
+                  {entry.session.facts.map((fact) => (
+                    <p key={fact.term}>
+                      {fact.term}: {fact.value}
+                      {fact.detail && ` ${fact.detail}`}
+                    </p>
+                  ))}
+                </section>
+              )}
+            </Surface>
+          ))}
           {busy && interruption && <p role="status">Saving automation preference...</p>}
           {notice && <Alert variant="info">{notice}</Alert>}
           <ErrorText error={error} />

@@ -4,17 +4,25 @@ import {
   ticketIdSchema,
   ticketRefSchema,
 } from '@roadmap/contracts/identity'
-import type { Blocker } from '@roadmap/contracts/state'
+import type { Blocker, TicketResourceResult } from '@roadmap/contracts/state'
 import { ReactFlow } from '@xyflow/react'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
+import { resolveSelection, resourceObservation } from '@/resources/results'
 import { RoadmapProvider } from '@/store/roadmap-provider'
-import { resourceObservation } from '@/views/shared/resource-results'
 import { type MapNode, mapGraph } from './graph'
-import { blocker, makeMap, makeRoadmapStore, ticket } from './test-fixtures'
+import {
+  blocker,
+  makeApplicationState,
+  makeMap,
+  makeProject,
+  makeRoadmapStore,
+  ticket,
+} from './test-fixtures'
 import { TicketModal } from './ticket-modal'
-import { TicketNode } from './ticket-node'
+import { TicketNode, TicketPresentationContext } from './ticket-node'
 
 function dependencyPairs(graph: ReturnType<typeof mapGraph>) {
   return graph.edges.map((edge) => {
@@ -409,6 +417,39 @@ describe('mapGraph', () => {
         url: 'https://example.test/other/repo/external',
       },
     })
+    if (!external) throw new Error('Expected merged blocker node')
+    const project = makeProject([map])
+    project.activeMap = {
+      kind: 'uncertain',
+      reason: 'map-incomplete',
+      cause: 'A map required for ordering is incomplete.',
+    }
+    const selection = resolveSelection(makeApplicationState([project]), {
+      project: map.ref.project,
+      map: map.ref,
+      ticket: null,
+    })
+    if (selection.map?.kind !== 'known') throw new Error('Expected known map presentation')
+    const markup = renderToStaticMarkup(
+      createElement(
+        MemoryRouter,
+        {},
+        createElement(
+          TicketPresentationContext.Provider,
+          { value: selection.map },
+          createElement(ReactFlow<MapNode>, {
+            nodes: [external],
+            edges: [],
+            nodeTypes: { ticket: TicketNode },
+            width: 800,
+            height: 400,
+          }),
+        ),
+      ),
+    )
+    expect(markup).toContain('Ticket external')
+    expect(markup).toContain('href="https://example.test/other/repo/external"')
+    expect(markup).toContain('State unknown')
   })
 
   it('does not change the live map snapshot while projecting and laying out dependencies', () => {
@@ -495,17 +536,20 @@ describe('blocker source links', () => {
 
       const markup = renderToStaticMarkup(
         createElement(
-          RoadmapProvider,
-          { store: makeRoadmapStore() },
-          createElement(TicketModal, {
-            map,
-            selected: { map: map.ref, ticketId: ticketIdSchema.parse('8') },
-            onClose: () => undefined,
-            onOpenTicket: () => {
-              throw new Error('Unexpected internal navigation')
-            },
-            onOpenMap: () => undefined,
-          }),
+          MemoryRouter,
+          {},
+          createElement(
+            RoadmapProvider,
+            { store: makeRoadmapStore([makeProject([map])]) },
+            createElement(TicketModal, {
+              selected: { map: map.ref, ticketId: ticketIdSchema.parse('8') },
+              onClose: () => undefined,
+              onOpenTicket: () => {
+                throw new Error('Unexpected internal navigation')
+              },
+              onOpenMap: () => undefined,
+            }),
+          ),
         ),
       )
 
@@ -513,7 +557,6 @@ describe('blocker source links', () => {
         /<a[^>]*href="https:\/\/outside\.test\/issues\/7"[^>]*target="_blank"[^>]*>Source-only blocker/,
       )
       expect(markup).not.toContain('Internal seven')
-      expect(markup).toContain('closed')
     },
   )
 
@@ -525,15 +568,18 @@ describe('blocker source links', () => {
 
     const markup = renderToStaticMarkup(
       createElement(
-        RoadmapProvider,
-        { store: makeRoadmapStore() },
-        createElement(TicketModal, {
-          map,
-          selected: { map: map.ref, ticketId: ticketIdSchema.parse('8') },
-          onClose: () => undefined,
-          onOpenTicket: () => undefined,
-          onOpenMap: () => undefined,
-        }),
+        MemoryRouter,
+        {},
+        createElement(
+          RoadmapProvider,
+          { store: makeRoadmapStore([makeProject([map])]) },
+          createElement(TicketModal, {
+            selected: { map: map.ref, ticketId: ticketIdSchema.parse('8') },
+            onClose: () => undefined,
+            onOpenTicket: () => undefined,
+            onOpenMap: () => undefined,
+          }),
+        ),
       ),
     )
 
@@ -567,6 +613,20 @@ describe('blocker source links', () => {
       state: 'unknown',
       label: 'State unknown',
     },
+    {
+      reference: {
+        kind: 'registered',
+        ticket: ticketRefSchema.parse({
+          map: {
+            project: { integration: 'github', projectId: projectIdSchema.parse('project-home') },
+            mapId: mapIdSchema.parse('other-map'),
+          },
+          ticketId: '7',
+        }),
+      },
+      state: 'unknown',
+      label: 'State unknown',
+    },
   ])(
     'renders the $state $reference.kind blocker node with its source URL',
     ({ reference, state, label }) => {
@@ -581,25 +641,75 @@ describe('blocker source links', () => {
       if (!node) throw new Error('Expected a source blocker node')
 
       const markup = renderToStaticMarkup(
-        createElement(ReactFlow<MapNode>, {
-          nodes: [node],
-          edges: [],
-          nodeTypes: { ticket: TicketNode },
-          width: 800,
-          height: 400,
-          nodesDraggable: false,
-          nodesConnectable: false,
-          elementsSelectable: false,
-        }),
+        createElement(
+          MemoryRouter,
+          {},
+          createElement(ReactFlow<MapNode>, {
+            nodes: [node],
+            edges: [],
+            nodeTypes: { ticket: TicketNode },
+            width: 800,
+            height: 400,
+            nodesDraggable: false,
+            nodesConnectable: false,
+            elementsSelectable: false,
+          }),
+        ),
       )
 
       expect(markup).toMatch(
         /<a[^>]*href="https:\/\/example\.test\/me\/repo\/7"[^>]*target="_blank"[^>]*>Open source/,
       )
       expect(markup).toContain(label)
-      expect(markup).not.toContain('Open ticket')
+      if (reference.kind === 'registered') {
+        expect(markup).toContain('Registered outside map')
+        expect(markup).not.toContain('Missing from map')
+        expect(markup).toContain('Open ticket')
+      } else {
+        expect(markup).not.toContain('Open ticket')
+      }
     },
   )
+})
+
+describe('ticket node evidence', () => {
+  it.each<{
+    evidence: Extract<
+      TicketResourceResult,
+      { kind: 'current-readable' }
+    >['observation']['value']['typeEvidence']
+    label: string
+  }>([
+    { evidence: { kind: 'missing', labels: [] }, label: 'Type missing' },
+    { evidence: { kind: 'unknown', labels: ['custom'] }, label: 'Unknown type: custom' },
+    {
+      evidence: { kind: 'conflicting', labels: ['research', 'task'] },
+      label: 'Conflicting types: research, task',
+    },
+  ])('keeps closed block and claim facts visible with $label', ({ evidence, label }) => {
+    const map = makeMap([
+      ticket('closed', 'closed', [blocker('outside')], undefined, 0, 'untyped', {
+        isBlocked: true,
+        isClaimed: true,
+        typeEvidence: evidence,
+      }),
+    ])
+    const node = mapGraph(map).nodes.find((item) => item.data.kind === 'ticket')
+    if (!node) throw new Error('Expected ticket node')
+    const markup = renderToStaticMarkup(
+      createElement(ReactFlow<MapNode>, {
+        nodes: [node],
+        edges: [],
+        nodeTypes: { ticket: TicketNode },
+        width: 800,
+        height: 400,
+      }),
+    )
+    expect(markup).toContain('Decided')
+    expect(markup).toMatch(/>Blocked<\/span>/)
+    expect(markup).toMatch(/>Claimed<\/span>/)
+    expect(markup).toContain(label)
+  })
 })
 
 describe('map resource graph identities', () => {

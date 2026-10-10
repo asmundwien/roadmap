@@ -4,13 +4,16 @@ import { Section, SectionBody, SectionHeader, SectionTitle } from '@roadmap/ui/s
 import { Surface, SurfaceDescription } from '@roadmap/ui/surface'
 import { Toggle } from '@roadmap/ui/toggle'
 import { useState } from 'react'
+import { Link } from '@/navigation'
+import { presentAutomation } from '@/resources/results'
+import { ticketPath } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { ErrorText } from '@/views/shared/settings-shared'
 
 export function AutomationSection() {
   const { automation, configuration, configurationVersion, command, execute } = useRoadmap(
     (roadmap) => ({
-      automation: roadmap.automation,
+      automation: presentAutomation(roadmap),
       configuration: { valid: roadmap.configuration.valid },
       configurationVersion: roadmap.configurationVersion,
       command: { inFlight: roadmap.command.inFlight },
@@ -68,10 +71,72 @@ export function AutomationSection() {
           <SurfaceDescription>Applies to all Projects with Automation enabled.</SurfaceDescription>
           {automation.availability.status === 'unavailable' && (
             <Alert>
-              <strong>Automation unavailable.</strong>
-              <span>{automation.availability.cause}</span>
+              <strong>{automation.availabilityLabel}.</strong>
+              <span>{automation.availabilityCause}</span>
             </Alert>
           )}
+          {automation.interruptions.map((interruption) => (
+            <Alert key={ticketPath(interruption.target)}>
+              <section aria-label="Automation evidence">
+                <span>{interruption.reason}</span>
+                <p>{interruption.project.message}</p>
+                <p>{interruption.map.message}</p>
+                <p>{interruption.ticket.message}</p>
+                <section aria-label="Classification">
+                  <h4>Classification</h4>
+                  {interruption.evidence.classification.facts.map((fact) => (
+                    <p key={fact.term}>
+                      {fact.term}: {fact.value}
+                      {fact.detail ? ` · ${fact.detail}` : ''}
+                    </p>
+                  ))}
+                </section>
+                {interruption.evidence.session && (
+                  <section aria-label="Wayfinder Session">
+                    <h4>Wayfinder Session</h4>
+                    {interruption.evidence.session.facts.map((fact) => (
+                      <p key={fact.term}>
+                        {fact.term}: {fact.value}
+                        {fact.detail ? ` · ${fact.detail}` : ''}
+                      </p>
+                    ))}
+                  </section>
+                )}
+                <Link href={ticketPath(interruption.target)}>Review interrupted Session</Link>
+              </section>
+            </Alert>
+          ))}
+          {automation.historicalEvidence.map((interruption) => (
+            <Alert key={ticketPath(interruption.target)} variant="info">
+              <section aria-label="Automation evidence">
+                <span>{interruption.reason}</span>
+                <p>{interruption.project.message}</p>
+                <p>{interruption.map.message}</p>
+                <p>{interruption.ticket.message}</p>
+                <section aria-label="Classification">
+                  <h4>Classification</h4>
+                  {interruption.evidence.classification.facts.map((fact) => (
+                    <p key={fact.term}>
+                      {fact.term}: {fact.value}
+                      {fact.detail ? ` · ${fact.detail}` : ''}
+                    </p>
+                  ))}
+                </section>
+                {interruption.evidence.session && (
+                  <section aria-label="Wayfinder Session">
+                    <h4>Wayfinder Session</h4>
+                    {interruption.evidence.session.facts.map((fact) => (
+                      <p key={fact.term}>
+                        {fact.term}: {fact.value}
+                        {fact.detail ? ` · ${fact.detail}` : ''}
+                      </p>
+                    ))}
+                  </section>
+                )}
+                <Link href={ticketPath(interruption.target)}>Inspect recorded Session</Link>
+              </section>
+            </Alert>
+          ))}
           <ErrorText error={error} />
           {feedback !== null && (
             <div role="status">

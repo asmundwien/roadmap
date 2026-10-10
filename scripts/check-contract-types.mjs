@@ -192,6 +192,77 @@ for (const [consumer, tsconfig, owner] of [
     } finally {
       await rm(clientDirectory, { recursive: true, force: true })
     }
+    const resourceFixture = await readFile(
+      new URL('./fixtures/types/browser/resource-results.ts', import.meta.url),
+      'utf8',
+    )
+    const resourceDirectory = await mkdtemp(join(root, 'apps/web/.architecture-resource-results-'))
+    try {
+      const resourcePath = join(resourceDirectory, 'resource-results.ts')
+      const marker = '// Invalid constructions.'
+      assert.equal(
+        resourceFixture.split(marker).length,
+        2,
+        'Resource proof needs one invalid boundary',
+      )
+      if (!negativeOnly) {
+        await writeFile(resourcePath, resourceFixture.split(marker)[0])
+        requireClean(
+          program([...leaf.fileNames, resourcePath], leaf.options),
+          'Browser app-local resource result consumers',
+        )
+      }
+      await writeFile(resourcePath, resourceFixture)
+      const resourceProgram = program([...leaf.fileNames, resourcePath], leaf.options)
+      const source = resourceProgram.getSourceFile(resourcePath)
+      assert.ok(source)
+      const expected = [
+        ['invalidUnscopedSelection', 2322, 'mapId'],
+        ['invalidMapKindSelection', 2739, 'mapId'],
+        ['invalidTicketKindSelection', 2739, 'ticketId'],
+        ['invalidKnownProjectPayload', 2322, 'missing'],
+        ['invalidQueuedAdmission', 2322, 'admission'],
+        ['invalidLinkDestination', 2322, 'href'],
+        ['invalidFileDestination', 2322, 'path'],
+      ]
+      const diagnostics = ts.getPreEmitDiagnostics(resourceProgram)
+      assert.equal(
+        diagnostics.length,
+        expected.length,
+        `Browser resource results: expected exactly ${expected.length} diagnostics\n${format(diagnostics)}`,
+      )
+      for (const [name, code, detail] of expected) {
+        const declaration = source.statements.find(
+          (statement) =>
+            ts.isVariableStatement(statement) &&
+            statement.declarationList.declarations.some(
+              (declaration) => ts.isIdentifier(declaration.name) && declaration.name.text === name,
+            ),
+        )
+        assert.ok(declaration, `Missing resource result invalid construction ${name}`)
+        const errors = diagnostics.filter(
+          (diagnostic) =>
+            diagnostic.file &&
+            normalize(diagnostic.file.fileName) === normalize(resourcePath) &&
+            diagnostic.start >= declaration.getStart() &&
+            diagnostic.start < declaration.getEnd(),
+        )
+        assert.equal(
+          errors.length,
+          1,
+          `${name}: expected one intended diagnostic\n${format(errors)}`,
+        )
+        assert.equal(errors[0].code, code, `${name}: wrong diagnostic\n${format(errors)}`)
+        assert.equal(errors[0].category, ts.DiagnosticCategory.Error)
+        assert.ok(
+          ts.flattenDiagnosticMessageText(errors[0].messageText, '\n').includes(detail),
+          `${name}: diagnostic must name ${detail}\n${format(errors)}`,
+        )
+      }
+      console.log(JSON.stringify({ proof: 'resource-results', consumer, cases: expected.length }))
+    } finally {
+      await rm(resourceDirectory, { recursive: true, force: true })
+    }
   }
   const directory = await mkdtemp(join(root, '.architecture-fixtures-'))
   try {

@@ -1,10 +1,10 @@
 import type { AuthorizationOperationId } from '@roadmap/contracts/identity'
-import type { SupportedIntegration } from '@roadmap/contracts/state'
 import { Button } from '@roadmap/ui/button'
 import { Icon, icon } from '@roadmap/ui/icon'
 import { Page, PageEyebrow, PageHeader, PageTitle } from '@roadmap/ui/page'
 import classNames from 'classnames/bind'
 import { useRef, useState } from 'react'
+import { presentConnections, resolveAuthorization } from '@/resources/results'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { AutomationSection } from './automation-section'
 import {
@@ -26,19 +26,19 @@ type ConnectionPane =
 
 export function ConnectionSettings() {
   const {
-    connections,
-    projects,
-    supportedIntegrations,
+    portfolio,
     authorizationOperations,
+    authorizationPresentations,
     configuration,
     configurationVersion,
     command,
     execute,
   } = useRoadmap((roadmap) => ({
-    connections: roadmap.connections,
-    projects: roadmap.projects,
-    supportedIntegrations: roadmap.supportedIntegrations,
+    portfolio: presentConnections(roadmap),
     authorizationOperations: roadmap.authorizationOperations,
+    authorizationPresentations: roadmap.authorizationOperations.map((authorization) =>
+      resolveAuthorization(roadmap, authorization),
+    ),
     configuration: {
       valid: roadmap.configuration.valid,
       notices: roadmap.configuration.notices,
@@ -80,18 +80,9 @@ export function ConnectionSettings() {
       feedback,
     ),
   )
-  const github = supportedIntegrations.find(
-    (integration): integration is Extract<SupportedIntegration, { integration: 'github' }> =>
-      integration.integration === 'github',
-  )
+  const { connections, githubSetup: github, looseAuthorizations: looseOperations } = portfolio
   const blocked = command.inFlight || !configuration.valid
   const operation: ConnectionOperation = { execute }
-  const looseOperations = authorizationOperations.filter(
-    (authorization) =>
-      authorization.status !== 'granted' &&
-      authorization.connectionId === undefined &&
-      !(authorization.status === 'terminal' && authorization.outcome === 'cancelled'),
-  )
 
   return (
     <Page>
@@ -130,11 +121,7 @@ export function ConnectionSettings() {
         />
       )}
       {connections.map((connection) => (
-        <ConnectionStride
-          key={connection.id}
-          connection={connection}
-          dependents={projects.filter((project) => project.connectionId === connection.id)}
-        />
+        <ConnectionStride key={connection.id} connection={connection} />
       ))}
 
       {pane?.kind === 'add' && github && (
@@ -157,6 +144,10 @@ export function ConnectionSettings() {
             <AuthorizationPane
               key={pane.operationId}
               authorization={authorization}
+              presentation={
+                authorizationPresentations.find((candidate) => candidate.id === pane.operationId) ??
+                null
+              }
               feedback={
                 reconciledFeedback.find((item) => item.result.operationId === pane.operationId) ??
                 null

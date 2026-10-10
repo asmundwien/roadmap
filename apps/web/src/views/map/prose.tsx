@@ -28,17 +28,7 @@ export function Prose({ map, sourcePath, markdown, onOpenTicket, onOpenMap }: Pr
       h5: 'h6',
       h6: 'h6',
       a: ({ node: _node, href, className, children, ...props }) => {
-        const resolved = resolveProseLink(map, sourcePath, href)
-        const target: ProseLinkTarget | null =
-          resolved === null &&
-          map.ref.project.integration === 'local' &&
-          href &&
-          !/^(?:[a-zA-Z][a-zA-Z\d+.-]*:|\/\/)/.test(href)
-            ? {
-                kind: 'disabled',
-                reason: 'The source path for this local reference is unavailable.',
-              }
-            : resolved
+        const target = resolveProseLink(map, sourcePath, href)
         if (target?.kind === 'selection') {
           return (
             <SelectionLink

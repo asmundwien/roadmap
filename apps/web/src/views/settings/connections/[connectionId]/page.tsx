@@ -7,10 +7,10 @@ import classNames from 'classnames/bind'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Link } from '@/navigation'
+import { resolveConnection } from '@/resources/results'
 import { routePaths } from '@/router'
 import { useRoadmap } from '@/store/roadmap-provider'
 import { ErrorText } from '@/views/shared/settings-shared'
-import { AvailabilityLabel } from './availability-label'
 import { DetailsSection } from './details-section'
 import { ManageSection } from './manage-section'
 import pageStyles from './page.module.css'
@@ -29,17 +29,12 @@ export function ConnectionPage({ connectionId }: ConnectionPageProps) {
 }
 
 function ConnectionDetail({ connectionId }: ConnectionPageProps) {
-  const { connection, github, configuration, configurationVersion, execute } = useRoadmap(
-    (roadmap) => ({
-      connection: roadmap.connections.find((candidate) => candidate.id === connectionId),
-      github: roadmap.supportedIntegrations.find(
-        (integration) => integration.integration === 'github',
-      ),
-      configuration: roadmap.configuration,
-      configurationVersion: roadmap.configurationVersion,
-      execute: roadmap.execute,
-    }),
-  )
+  const { connection, configuration, configurationVersion, execute } = useRoadmap((roadmap) => ({
+    connection: resolveConnection(roadmap, connectionId),
+    configuration: roadmap.configuration,
+    configurationVersion: roadmap.configurationVersion,
+    execute: roadmap.execute,
+  }))
   const navigate = useNavigate()
   const [removal, setRemoval] = useState<RemovalFeedback | null>(null)
   const active = useRef(true)
@@ -87,7 +82,7 @@ function ConnectionDetail({ connectionId }: ConnectionPageProps) {
       <ErrorText error={removal.error} />
     ) : null
 
-  if (!connection) {
+  if (connection.kind === 'missing') {
     return (
       <Page>
         <PageHeader>
@@ -109,8 +104,8 @@ function ConnectionDetail({ connectionId }: ConnectionPageProps) {
           <PageEyebrow>Settings / Connections</PageEyebrow>
           <PageTitle>{connection.name}</PageTitle>
         </div>
-        {github && (
-          <ExternalLink href={github.installationsUrl} external>
+        {connection.registration.installations.kind === 'link' && (
+          <ExternalLink href={connection.registration.installations.href} external>
             Repository access
           </ExternalLink>
         )}
@@ -122,7 +117,12 @@ function ConnectionDetail({ connectionId }: ConnectionPageProps) {
           <span>In-app changes stay blocked until roadmap.config.json is valid.</span>
         </Alert>
       )}
-      <AvailabilityLabel connection={connection} />
+      {connection.health.status !== 'available' && (
+        <Alert>
+          <strong>{connection.health.label}</strong>
+          <span>{connection.health.cause}</span>
+        </Alert>
+      )}
       <DetailsSection connection={connection} />
       <ManageSection
         key={connection.id}
