@@ -83,7 +83,7 @@ export type WorkflowSettledAttempt<O extends WorkflowOperation = WorkflowOperati
 type PendingUnion<O extends WorkflowOperation = WorkflowOperation> = O extends WorkflowOperation
   ? AttemptBase<O> & CapturedVersion<O> & { readonly kind: 'pending' }
   : never
-export type WorkflowAttempt<O extends WorkflowOperation = WorkflowOperation> = Extract<
+type WorkflowAttempt<O extends WorkflowOperation = WorkflowOperation> = Extract<
   SettledUnion | PendingUnion,
   { operation: O }
 >

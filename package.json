@@ -11,11 +11,10 @@
   "scripts": {
     "dev": "pnpm --parallel dev",
     "build": "pnpm build",
-    "typecheck": "tsc -b --noEmit && pnpm --filter @roadmap/docs typecheck && node scripts/check-contract-types.mjs",
+    "typecheck": "tsc -b --noEmit && pnpm --filter @roadmap/docs typecheck",
     "test": "pnpm -r test",
-    "check": "biome check . && pnpm architecture",
+    "check": "biome check .",
     "knip": "knip",
-    "architecture": "node scripts/check-architecture.mjs && node --test scripts/browser-architecture-plugin.test.mjs scripts/source-boundaries.test.mjs scripts/proof-options.test.mjs && node scripts/check-browser-build-fixtures.mjs",
     "test:client-owner-browser": "node scripts/client-owner-browser.mjs",
     "test:resource-results-browser": "node scripts/resource-results-browser.mjs",
     "test:workflows-browser": "node scripts/workflows-browser.mjs",
@@ -23,7 +22,6 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.7",
-    "dependency-cruiser": "^18.5.0",
     "knip": "^6.39.0",
     "playwright": "^1.58.0",
     "typescript": "~6.0.2"

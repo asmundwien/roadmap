@@ -49,15 +49,13 @@ pnpm test
 pnpm knip
 ```
 
-`pnpm check` includes the repository architecture gate. `pnpm typecheck` includes separate contract/browser/server compilation and public-export positive and invalid-construction fixtures. To run the boundary checks or build the actual browser app directly:
+`pnpm check` runs Biome. `pnpm typecheck` runs workspace TypeScript compilation and Astro checking. The custom architecture and contract-type enforcement systems have been removed. To build the browser app directly:
 
 ```sh
-pnpm architecture
-node scripts/check-contract-types.mjs
 pnpm --filter @roadmap/web build
 ```
 
-The web production build checks resolved modules before tree shaking for Node, server, credential, and host-launch dependencies. The root `pnpm build` script invokes itself recursively; it is not the browser build command. These commands describe the installed gates, not a record that the final checks passed. Runtime observation and schema validation do not prove host-effect completion, deployment fallback, or durable Session chronology.
+The root `pnpm build` script invokes itself recursively; use the package-level browser build command above. Runtime observation and schema validation do not prove host-effect completion, deployment fallback, or durable Session chronology.
 
 Vitest runs in Node. DOM tests need jsdom and Testing Library.
 

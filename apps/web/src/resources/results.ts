@@ -43,7 +43,7 @@ export type ConsumerRead = Readonly<
     | 'authorizationOperations'
   >
 >
-export type SourceDestination =
+type SourceDestination =
   | { kind: 'link'; href: string }
   | { kind: 'file'; path: string }
   | { kind: 'absent' }
@@ -67,7 +67,7 @@ type ClassificationResult = {
   | { status: 'failed'; processResult: AutomationProcessResult; reason: string }
   | { status: 'launch-failed' | 'outcome-unknown'; reason: string }
 )
-export type SessionResult =
+type SessionResult =
   | {
       status: 'queued'
       admission: Extract<AdmissionResult, { kind: 'none' }>
