@@ -10,6 +10,8 @@ Roadmap is a local-first application for one user. It reads source maps and tick
 - `apps/web` renders application state and sends queries and commands.
 - `apps/docs` owns the standalone catalog for public `@roadmap/ui` components and tokens.
 
+`packages/github` is a private declaration-only workspace package. Its `@roadmap/github` root export supplies provider types and a planned SDK interface, not a runtime implementation. The server still owns its implemented GitHub integration. The package's migration plan defines demand-driven map detail acquisition; it does not change current source behavior.
+
 WebSocket carries full state replacements. HTTP carries `query` and `execute` requests.
 
 ## Web application

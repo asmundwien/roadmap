@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "pnpm --parallel dev",
     "build": "pnpm build",
-    "typecheck": "tsc -b --noEmit && pnpm --filter @roadmap/docs typecheck",
+    "typecheck": "tsc -b --noEmit && pnpm --filter @roadmap/github typecheck && pnpm --filter @roadmap/docs typecheck",
     "test": "pnpm -r test",
     "check": "biome check .",
     "knip": "knip",

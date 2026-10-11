@@ -1,6 +1,9 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "workspaces": {
+    "packages/github": {
+      "entry": ["interface.typecheck.ts"]
+    },
     "apps/server": {
       "ignoreBinaries": ["terminal-notifier"]
     }
