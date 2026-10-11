@@ -20,18 +20,9 @@ WebSocket carries full state replacements. HTTP carries `query` and `execute` re
 
 Views read through the required `useRoadmap(selector)` facade and never fetch directly. The selector receives `RoadmapViewState`, including actual read fields, real `capturedAt`, lifecycle, effective synchronization, stable named `workflows`, and immutable `workflowState`. Raw query/execute methods remain a transport test interface on `RoadmapStore`, not view capabilities. There is no no-argument overload or broad-hook compatibility wrapper.
 
-### Client owner and subscription decision
+### Client subscriptions
 
-The [Who owns client state and observation, and does a library earn its place?](https://github.com/asmundwien/roadmap/issues/114) cutover deepens the external store and uses the maintained `use-sync-external-store/with-selector` React binding. The decision consumes the immutable [Data-layer client-state guarantees](https://github.com/asmundwien/roadmap/blob/b347a37b2308ab31ab0be8ec93db4426508ad0bd/docs/research/data-layer-client-state-guarantees.md) from [What do React selection, Redux Toolkit, TanStack Query and SSR actually guarantee here?](https://github.com/asmundwien/roadmap/issues/106), whose primary sources were accessed on 2026-10-08. That research establishes mechanisms, not the application owner or a speedup.
-
-| Candidate | Responsibility it can own | Decision and remaining application obligations |
-| --- | --- | --- |
-| Deepened external store with maintained selector binding | One immutable accepted read root, transport authority/lifetime, and selected subscriptions at the existing public seam. The binding owns concurrent selection memoization and reuse under supplied equality. | Chosen. Authority and lifecycle branching stay local to the store; views do not repeat them. Application code still owns semantic equality, decoding, session provenance, and acquisition/release. |
-| Redux Toolkit with React Redux | Toolkit can own an immutable root and reducer transitions; React Redux supplies pure selectors and custom equality. | Not adopted. There is no repeated reducer/action branching here that this pair removes. Returning a separately decoded full replacement is valid, but Immer does not deep-deduplicate it. Socket generations, observation lifetime, lifecycle retention, and outcome authority still require application policy. Redux remains a viable alternative if cohesive reducer-owned transitions become a concrete need. |
-| TanStack Query, including a single streaming cache entry | Query owns keyed repeatable fetch resources, structural sharing of JSON-compatible data, and observer selection. Streaming setup and cleanup can be application-owned. | Not adopted. There is no independent fetch resource to own alongside the coherent full-state stream. Splitting that stream introduces cross-key coherence rules; mirroring it creates a second authority. A single entry would still need the same epoch/lifetime policy. Mount/focus/reconnect refetch and query retry defaults do not fit the native folder-selection interaction. Mutations do not retry by default, but that default does not establish command completion. |
-| Direct React state/Context or base `useSyncExternalStore` | Context can distribute a stable owner; base external-store subscriptions compare cached snapshots with `Object.is`. | Context carries the store instance, not mutable application state. Context state updates notify all consumers. Selecting after a base broad subscription is not selected notification, and allocating derived snapshots on each read violates snapshot caching. Bespoke concurrent selector memoization would duplicate the maintained binding's responsibility. |
-
-The choice is about ownership, transition locality, public-interface testing, and enforceable dependencies. Avoided imports, migration size, and production line count do not decide it. The handwritten transport/authority owner remains necessary under every candidate. Semantic comparison adds work for selected values; no payload, selector-cost, rendering, or scaling bottleneck has been measured, and no performance gain is claimed.
+The external store uses `use-sync-external-store/with-selector` for React subscriptions. The binding owns selection memoization and reuse under supplied equality. Application code owns semantic equality, decoding, session provenance, and observation acquisition and release. Context distributes the stable store instance, not mutable application state.
 
 `RoadmapStore.getSnapshot` and `subscribe` remain the transport test seam. Publications are cached immutable snapshots: repeated reads without publication return the same object, and neither callers nor later transitions mutate an earlier publication. Command-only publications preserve the accepted `ApplicationState` identity. Complete validated replacements remain atomic; selection does not split the authoritative root into writable slices.
 
@@ -53,62 +44,14 @@ The binding computes a selection before comparing the snapshot React observes. D
 
 `apps/web/src/resources/results.ts` owns shared pure resource lookup and presentation over the accepted read fields. It does not interpret lifecycle or transport synchronization; the provider and store own those facts. The shared workflow owner interprets state-free operation evidence without mutating server read facts, inferring a receipt from unrelated publication, mirroring URL selection, or automatically replaying commands.
 
-The clean cutover removes the no-argument broad `useRoadmap` subscription and every affected caller, test/prototype use, and compatibility path. It replaces provider whole-content/command subscriptions with gate/status selection and removes mutable publication exposure and disposal that can invalidate another acquisition. It retains the already-shipped deletion of reader-owned observation and fabricated initial defaults. There is no parallel authoritative cache, duplicated writable Project collection, mirrored URL selection, obsolete owner alias, or automatic interaction replay. State-free HTTP outcomes and the existing session-authority rules remain intact.
 
 SSR has no established product requirement and is out of scope. The client-only SPA uses no query cache or hydration authority. A future SSR decision would require separately agreed hosting, request-isolated state serialization, and matching server/client hydration snapshots. Folder selection remains explicit user interaction, never a cache entry subject to automatic mount, focus, reconnect, retry, or replay.
 
-The proof obligation crosses both the store interface and the actual mounted provider/App/router/public-application/HTTP/WebSocket seam. It includes subscription churn, repeated ownership, StrictMode and disposal, equal selected results during command-only and full-replacement publications, truthful initial/lifecycle/source states, pinned graph/Modal/prose DOM identity and local draft retention, successor content, and successor configuration-conflict feedback without rollback. The permanent portable browser fixture uses temporary configuration and Local Markdown with harmless host substitutes; selected-consumer probes belong only in its fixture entry. The common proof matrix in [What public read model is sufficient and has one authority for each fact?](https://github.com/asmundwien/roadmap/issues/112) still applies, including supported browser-safe leaves, positive/negative import and type checks, actual production graph/output inspection, and independent UI/docs. Current scoped evidence follows; historical verification records below remain historical.
-
-The permanent runner is `scripts/client-owner-browser.mjs`, invoked from the repository root with Playwright:
-
-```sh
-pnpm install
-pnpm exec playwright install chromium
-pnpm test:client-owner-browser
-```
-
-The root script runs `node scripts/client-owner-browser.mjs`. Vite uses the actual `apps/web` root with fixture-only entry/dependency resolution, not a substitute application root. The server canonicalizes its temporary root with `realpath`, so filesystem identity checks also work on platforms whose temporary directory is a symlink. `--serve-only` emits the fixture URL and control endpoint for an interactive browser visual proof. `--executable-path` or `CHROMIUM_EXECUTABLE_PATH` can select an already installed browser without a machine-specific fixture path. The fixture owns temporary configuration/source storage and harmless host substitutes, not production configuration, credentials, native effects, or Automation launches.
-
-### Exercised client-owner evidence
-
-The complete permanent browser runner passed all eight schedule groups on Node 26.8.1 and Chromium 156 from the current Playwright installation. It observed three harmless host invocations and zero folder-selector invocations. The schedules cover mounted selected-result stability, initial waiting and malformed/withheld state, unavailable sources, subscriber churn and StrictMode, retained pinned graph/prose/open Modal and local draft identity, successor content and conflict feedback without rollback, reader-free routes, and disposal. The default runner completed cleanup. Separately, direct `node scripts/client-owner-browser.mjs --serve-only` exited with code 0 on SIGINT and left its owned port without a listener. This does not claim package-manager-wrapper signal-exit guarantees.
-
-Disposable visual proof also inspected actual waiting, graph, open Modal, retained display, and successor content with the local draft preserved. When the browser helper's screenshot call timed out, a raw page screenshot supplied the visual evidence. Fixture setup failures were corrected without weakening the actual assertions; the full permanent run, not those failed setups or screenshots alone, supplies the regression result.
-
-| Verification | Observed result |
-| --- | --- |
-| Source tests | Passed 1,447 server, 264 web, and 27 UI tests. |
-| Typecheck and public consumer proofs | Passed both browser/server consumers with 177 exports, seven decoders, 122 invalid constructions, and six new client cases. |
-| Architecture gate | Passed five production graphs, two positive consumer graphs, 45 intended-diagnostic refusals, 47 detector/options tests, and six actual-config build fixtures. |
-| Unused-code gate | `pnpm knip` passed. |
-| Actual web production build | Passed with 716 resolved modules before tree shaking and 717 transformed modules. The 865,768-byte JavaScript chunk retains the large-chunk warning. |
-| Actual emitted JavaScript | Matched the final chunk and inspected 488 module entries. No forbidden Node/private-server/credential/host implementation code appeared; the maintained selector package is included. |
-| Changed-file language-service diagnostics | No errors; Biome warnings remain. Reference-service requests repeatedly timed out despite reload, so no completed reference-service result is claimed. |
-
-The semantic deletions are the broad no-argument hook and its compatibility paths, provider whole-content/command subscriptions, and mutable publication exposure. Idempotent shared acquisition remains intact; final cleanup now reports disconnected rather than connecting. The earlier removal of reader-owned observation and fabricated initial defaults remains intact. The cutover adds no second authoritative cache, URL mirror, or automatic replay. Generic UI and standalone docs remain independent. Selected-result identity is an observed correctness contract, not a render-speed claim.
-
-Counts include all new or relocated handwritten application source within the original server/web/contracts boundary. They exclude declarations, tests/specs, explicit test fixtures, styles, generated output, and dependencies. Nonblank physical lines and UTF-8 bytes use the existing comparison method without changed exclusions or minification.
-
-| Application production comparison | Files | Nonblank lines | UTF-8 bytes |
-| --- | ---: | ---: | ---: |
-| Original map baseline `7e70e897` | 85 | 13,616 | 489,864 |
-| Before client-owner cutover `e465d347` | 100 | 23,936 | 876,921 |
-| Current client-owner implementation | 100 | 24,183 | 885,723 |
-
-Application production increased by 247 lines and 8,802 bytes, with no file-count change. Immutable publication, lifecycle/high-water separation, shared observation ownership, and semantic selection justify the added responsibility; no net production-code reduction is claimed.
-
-| Separate evidence/build responsibility | Before files / lines / bytes | Current files / lines / bytes |
-| --- | --- | --- |
-| Source tests and fixtures | 69 / 45,544 / 1,681,194 | 69 / 45,951 / 1,697,059 |
-| Build/gate owners outside original source roots | 16 / 1,333 / 51,759 | 16 / 1,401 / 54,753 |
-| Outside-source proof tests and fixtures | 134 / 4,569 / 140,243 | 138 / 6,127 / 200,344 |
-
-The outside-source proof increase includes the permanent runner and three fixtures. Documentation is a separate resolution-report category; this section does not pin a final aggregate while evidence documents are still changing. Protected real configuration and Automation files changed externally during this task, so completion makes no byte-unchanged claim about them. The fixture did not use those files or re-enable Automation. This evidence resolves only the scoped client-owner implementation, not later workflow or final-integration tickets.
 
 
 ### Shared workflow policy
 
-The [What command policy simplifies concurrency, feedback and canonical results?](https://github.com/asmundwien/roadmap/issues/116) cutover puts command construction, dispatch-time policy, attempt transitions, canonical destinations, and authorization reconciliation in `apps/web/src/workflows/workflows.ts`. The store supplies current accepted facts and delivery through its existing transport interface. The owner has no socket, fetch, React, view, persistence, or host implementation dependency.
+`apps/web/src/workflows/workflows.ts` owns command construction, dispatch-time policy, attempt transitions, canonical destinations, and authorization reconciliation. The store supplies current accepted facts and delivery through its transport interface. The owner has no socket, fetch, React, view, persistence, or host implementation dependency.
 
 | Pending scope | Contending workflows | Independent work |
 | --- | --- | --- |
@@ -130,46 +73,13 @@ Authorization command result phases and accepted authorization state are distinc
 
 Registration and Workspace repair use the committed result's canonical Project and Workspace, not a submitted-path lookup. Only a valid correlated result for the initiating operation and subject can provide a confirmed destination. Rejected, lost, unreadable, or mismatched responses cannot navigate as committed success. Folder selection returns selected/cancelled interaction truth; cancellation and failure preserve local drafts. Native actions send only a scoped Project and finite operation, never executable or trusted path authority. Durable Automation admission, Verdict, Process result, Session report, and acknowledged-unknown evidence remain independent.
 
-The clean cutover deletes aggregate `CommandActivity`/`activeCommands` and single-error overwrite, eleven local executors, eight repeated settings gates, view-owned Command/version construction and catch-based uncertainty policy. The shared owner replaces `connection-details.ts` authorization reconciliation and `project-registration.ts` field translation, then deletes both helpers. It retains the earlier deletion of submitted-Workspace identity guessing. Drafts and URL navigation stay with their existing owners; no compatibility facade or second read cache remains.
 
-Dependency gates enforce `web-workflows-pure`, `web-views-through-workflows`, and resource-results independence from workflow policy. Source inspection refuses view-owned versioned Commands, raw facade execute/query selection, and browser transport outside the store, including static aliases. Runtime-computed object flow remains outside that static proof. Generic UI and standalone docs have no workflow dependency.
+Workflows are independent of rendering, provider/store implementation, transport construction, and server internals. Views use workflow policy and shared resource results.
 
-### Workflow browser proof
-
-```sh
-pnpm test:workflows-browser
-pnpm test:workflows-browser --screenshots /tmp/roadmap-workflow-proof
-node scripts/workflows-browser.mjs --serve-only
-```
-
-The permanent runner uses the actual mounted App/provider/router/store, public `RoadmapApplication`, HTTP, and native WebSocket. Its disposable fixture owns temporary configuration, Local Git/source files, Automation history, and harmless provider/vault/host/process substitutes. The complete run passed all 19 manifest rows, including cleanup, and saved 18 scenario screenshots. `--essential-only` exercises only the first concurrency regression. Direct-node serve-only SIGINT and SIGTERM both exited 0 after reported cleanup; package-manager-wrapper signal behavior is not promised.
-
-The full schedules exercise both settlement orders, shared-revision contention, independent scopes, current open-pane policy, stale rejection, retained drafts, canonical Local/GitHub registration and moved-Workspace repair, all unusable response classes, unknown lifetime, older feedback, state-free epoch authority, refresh variants, authorization phases, finite native launches, and durable Automation evidence. Native/relay generation instrumentation proves the request-start baseline and physical close cause, rather than treating live/retained flags as a fresh-generation barrier. Earlier harness failures used wrong terminal-status predicates and a nonzero Classification success exit; those fixtures were corrected against the existing producer contract without changing server policy.
-
-The original mounted concurrency regression failed when Alpha's pending rename disabled independent Beta refresh. Initial workflow tests failed before the owner existed. Refused authorization retry/cancel regressions failed before correction; pending denied/waiting reconciliation also has a retained regression. The pending-cycle fix preceded its regression, so no failing-before result is claimed for that case. Real configuration and Automation documents were not used by the fixture. Their initial checksums were not recorded in this continuation, so there is no before/after byte-identity claim.
-
-### Workflow cutover verification and comparison
-
-`pnpm check`, `pnpm typecheck`, `pnpm test`, and `pnpm knip` passed. The complete suites passed 1,447 server tests, 365 web tests, and 27 UI tests. Astro checked 41 files without errors, warnings, or hints. Both public compiler consumers checked 177 exports, seven decoders, and 122 invalid constructions; the browser also checked 56 workflow cases. The architecture gate passed 85 intended-diagnostic import refusals, 69 detector/options tests, six actual-config build fixtures, and resolved production/positive-consumer graphs. Biome reported 186 warnings and eight informational diagnostics, with no suppressions added to obtain the pass.
-
-The actual web build inspected 713 resolved modules before tree shaking and transformed 714. Emitted-output inspection matched the 895,672-byte `index-D7PuDztm.js` chunk byte-for-byte, checked 485 module entries, included the workflow owner, and found no forbidden Node, private-server, credential, or host implementation. The existing large-chunk warning remains. Changed-file language-service diagnostics reported warnings but no errors. The complete client-owner and resource-results browser runners also passed after caller migration.
-
-The complete workflow browser run observed 15 harmless host invocations, 17 selectors, one Classification process substitute, and one Wayfinder process substitute. Successful Classification used exit 0 and a decoded AFK Verdict; Wayfinder exited 9 with an independently received completed report. Seeded acknowledged-unknown history remained unchanged and visible. Cleanup removed the fixture root. This is not evidence of a production native launch, real credential use, managed process completion, or a performance improvement.
-
-Counts use the original source boundary and nonblank-line/UTF-8-byte method. All added or relocated handwritten server/web/contracts production owners remain included; source declarations, styles, generated output, tests, and explicit fixtures remain excluded from production. Build/gate owners outside those roots and proof fixtures have separate complete manifests. Documentation counts use the actual tracked Git snapshots of `README.md`, `CONTEXT.md`, and this file rather than prior narrative totals.
-
-| Application responsibility | Original map baseline `7e70e897` | Before workflow cutover `655423d6` | Completed workflow cutover |
-| --- | --- | --- | --- |
-| Production files / lines / bytes | 85 / 13,616 / 489,864 | 97 / 24,952 / 914,184 | 97 / 25,917 / 954,432 |
-| Source tests and fixtures | 41 / 8,396 / 303,730 | 70 / 47,488 / 1,753,787 | 72 / 49,453 / 1,828,818 |
-| Build/gate owners outside source roots | 1 / 17 / 568 | 14 / 1,279 / 51,251 | 14 / 1,715 / 71,315 |
-| Outside-source proof tests and fixtures | 0 / 0 / 0 | 145 / 8,462 / 294,226 | 150 / 13,335 / 492,334 |
-
-Production increases by 965 lines and 40,248 bytes in this cutover, with no file-count increase. Against the original map baseline, production increases by 12 files, 12,301 lines, and 464,568 bytes. Named conflict/attempt policy, typed result correlation, surviving uncertainty, current authorization-phase reconciliation, and enforceable caller separation justify the added responsibility. The two deleted helpers become the cohesive workflow owner and domain feedback renderer, not uncounted relocations. No net code reduction or formatting/test deletion saving is claimed. `CONTEXT.md` is unchanged because its existing admission and completion-unknown terms still describe the behavior; no new domain glossary term is required.
 
 ### Browser authority and synchronization
 
-The contract for [What establishes the authoritative server session across HTTP and WebSocket?](https://github.com/asmundwien/roadmap/issues/107) separates state authority from operation delivery. Each new socket has a distinct generation. Only the first validated state from the current generation establishes its authoritative server session. Socket open alone proves no application synchronization. Epoch identifiers are opaque identities, not clocks; sequence numbers are comparable only within the same established epoch.
+State authority is separate from operation delivery. Each new socket has a distinct generation. Only the first validated state from the current generation establishes its authoritative server session. Socket open alone proves no application synchronization. Epoch identifiers are opaque identities, not clocks; sequence numbers are comparable only within the same epoch. A retired socket callback cannot publish, replace a baseline, or regain synchronization.
 
 `RoadmapStore.getSnapshot` retains transport, accepted read facts, and immutable workflow attempts. Its readonly `state` is a real readable `ApplicationState` or `null`, independently of the latest accepted lifecycle and authority high-water sequence. Effective synchronization is a discriminated union:
 
@@ -249,58 +159,7 @@ Graph blocker nodes preserve the projector's merged blocker title, exact source 
 
 `presentAutomation` and scoped results own durable evidence lookup independently of target membership. Every interruption carries its exact target and known/missing Project/map/ticket messages, so simultaneous interruptions remain reachable after resources disappear. Classification and Session expose separate labelled admission, Verdict, Process result, report, reason, and acknowledgement facts as their actual stages permit. Queued Sessions say "No launch admission". Acknowledged outcome-unknown remains unknown. Global enabled/availability, Project preference, evidence, and server controls remain independent. Controls preserve server `eligible`, `ineligible`, or `absent` and exact reasons; tracker state, graph display, Connection health, and retained content cannot manufacture eligibility.
 
-Affected consumers include map/ticket/prose/blocker/source journeys, Project settings, Connections detail/list/setup/import/launch presentation, and Overview. The cutover removes the old `views/shared/resource-results.ts` owner, Overview `project-presentation.ts`, settings `project-automation.ts`, and superseded settings status helpers and caller-owned resource/Automation joins. Useful graph/link projectors and draft/error/operation-feedback helpers remain. The already-upstream deletion of `projectWithSource` and overlapping public Project authorities remains historical, not a new deletion claimed by this cutover. Generic UI and standalone docs gain no runtime-domain dependencies.
-
-### Resource browser proof
-
-The permanent runner exercises the mounted public App, provider, router, store, public `RoadmapApplication`, and real HTTP/WebSocket transport:
-
-```sh
-pnpm install
-pnpm exec playwright install chromium
-pnpm test:resource-results-browser
-node scripts/resource-results-browser.mjs --serve-only
-node scripts/resource-results-browser.mjs --screenshots /tmp/roadmap-resource-results-visual
-```
-
-`--serve-only` prints the fixture URL/control endpoint and serves until SIGINT/SIGTERM for interactive visual inspection. `--screenshots` saves scenario PNGs during the complete regression run and cannot be combined with `--serve-only`. `--headed`, `--executable-path`, or `CHROMIUM_EXECUTABLE_PATH` select an interactive or installed Chromium. Vite uses the actual web root and a fixture-only entry. Its development tooling socket has an isolated listener rather than sharing the application's `/ws` transport.
-
-`scripts/fixtures/resource-results-server.ts` owns disposable canonical temporary configuration, real Local Markdown/filesystem reads, and replay-validated persisted Automation history. The real GitHub observer consumes deterministic harmless REST/GraphQL provider responses and injected admission/credentials. Host and Automation launchers are harmless substitutes with invocation counters. The fixture never synthesizes a public snapshot as source authority and does not use production configuration, credentials, native host effects, or real Classification/Wayfinder processes.
-
-The runner's contract covers withheld initial state separately from known-empty and never-observed resources; opaque direct pinned loads/reloads; Markdown/map/blocker/source navigation and Modal Close/Back/Forward; incomplete prose and aggregate progress; actual Local unreadability and same-ID recovery; equivalent GitHub retained Project/map/ticket destinations; exact disappearance without substitution; independent durable stage facts and absent targets; and server denial without native or Automation effects. Assertions, screenshots, and measured output belong to exercised completion evidence, not to this command description. Provider substitutions do not prove live GitHub service behavior, replay fixtures do not prove external Session chronology, and harmless host substitutes do not prove native effect completion or production hosting.
-
-### Exercised resource-cutover evidence
-
-The orchestrator ran the complete four repository gates after integration and corrections. Workers edited without running gates. `pnpm check`, `pnpm typecheck`, `pnpm test`, and `pnpm knip` passed. Source tests passed 1,447 server, 313 web, and 27 UI cases. Architecture proof passed 57 intended-diagnostic import refusals, 47 detector tests, and six build fixtures. Type proof exercised 177 exports, seven decoders, and 122 invalid constructions in each browser/server consumer graph, plus seven resource cases and six client cases. Docs checking covered 41 files with zero errors, warnings, or hints. Biome reported 163 warnings and eight infos; this is not a warning-free result.
-
-The actual `pnpm --filter @roadmap/web build` passed with 713 resolved modules checked before tree shaking and 714 transformed modules.
-
-| Verification | Observed result |
-| --- | --- |
-| Actual emitted JavaScript inspection | `assets/index-D_P_JEYS.js` contains 877,919 bytes and 485 inspected module entries. Inspected code matched the actual `dist` file byte-for-byte. The resource-results module is present; zero forbidden Node/private-server/credential/host implementation dependencies were found. |
-| Actual production component catalog | The production bundle mounted `/components` against the real disposable application WebSocket through fixture endpoint redirection. It rendered 20 SVG marks and the complete type/state catalog text. UI/docs imports remain unchanged, with no new docs runtime dependency. |
-
-The complete resource browser runner passed nine schedule groups covering its 22 manifest rows and produced 16 scenario screenshots. It observed zero page errors, host invocations, folder-selector invocations, Classification launches, and Wayfinder launches, and completed owned cleanup. The separate client-owner runner passed all eight schedule groups. Initial browser-tool screenshot calls timed out; the permanent runner supplied the actual screenshots. Harmless substitutions and screenshots retain the proof limits stated above.
-
-The semantic deletions are the obsolete shared resource-result location, Overview presentation owner, settings Project-Automation owner, superseded settings status helpers, and replaced caller-owned lookup/status/evidence joins. Shared scoped interpretation now supplies map, Settings, Connections, and Overview consumers. Graph/link projectors and real draft/error/operation-feedback owners remain. Earlier `projectWithSource`, overlapping public authority, and Snapshot-store deletions remain upstream history, not new savings.
-
-Counts use the original handwritten application-source boundary and exclusions, include every relocated responsibility, and measure nonblank physical lines and UTF-8 bytes without minification:
-
-| Application production comparison | Files | Nonblank lines | UTF-8 bytes |
-| --- | ---: | ---: | ---: |
-| Original map baseline `7e70e897` | 85 | 13,616 | 489,864 |
-| Resource-cutover task start | 100 | 24,183 | 885,723 |
-| Integrated resource cutover | 97 | 24,952 | 914,184 |
-
-The cutover removes three production files but adds 769 nonblank lines and 28,461 bytes. Pure scoped results, independent durable stage facts, and full consumer interpretation justify the added responsibility. No net production-code reduction or performance improvement is claimed.
-
-| Separate responsibility | Files | Nonblank lines | UTF-8 bytes |
-| --- | ---: | ---: | ---: |
-| Source tests and fixtures | 70 | 47,488 | 1,753,787 |
-| Build/gate owners outside original source roots | 16 | 1,495 | 58,829 |
-| Outside-source proof tests and fixtures | 137 | 6,455 | 245,182 |
-
-Documentation remains a separate category. Its final aggregate belongs to the completion report after documentation edits finish.
+Shared resource results supply map/ticket/prose/blocker/source journeys, Project settings, Connections detail/list/setup/import/launch presentation, and Overview. Graph/link projectors and draft/error/operation-feedback helpers own their separate presentation responsibilities. Generic UI and standalone docs have no runtime-domain dependencies.
 
 
 
@@ -464,9 +323,6 @@ Initial activation is quiet. A changed source establishes a new baseline only fo
 
 The implemented source-lifetime modules include `projects/registry.ts`, `configuration/document.ts`, `observation/source.ts`, `observation/coordinator.ts`, the Local and GitHub observers, `resources/catalog.ts`, the Automation modules, pure `application/projection.ts`, and the application composition root. Registry intent and refinements do not use public snapshot comparison as admission authority. The catalog alone owns resource retention, membership, and ordering. Automation reads that catalog's current evidence and keeps its independent policy, authorization, Workspace, command, and durable-history obligations.
 
-The obsolete whole-Adapter Slice/store composition and projection/admission resource reconstruction are removed. The lifecycle cutover also removes the application's independent started/stopping flags and main's latest-Adapter diagnostic/refresh authority. One lifecycle union now determines phase authority; committed application diagnostics replace pending-owner reads. Owned task drains replace timer-clearing-only cleanup and pre-await-only acquisition guards. Main's unconditional successful exit is removed. These are removed authorities and behavior, not rename counters or a claim of net production-line savings.
-
-The public-read cutover installs the single Project projection, inferred schemas, four-leaf exports, and permanent repository dependency gates described below. The operation contract adds correlated canonical subjects and effect-specific, state-free outcomes. Generic UI, documentation application, and URL ownership remain unchanged. Installed gates are not evidence that a final verification run passed.
 
 ### Automation
 
@@ -573,7 +429,6 @@ The private `HostOperation` union contains only `select-workspace`, `open-worksp
 
 Public actions are usable variants: roadmap links and external links require `href`; server launches require a canonical Project and one of `open-workspace`, `open-terminal`, or `reveal-source`. UI icon mapping does not interpret arbitrary action IDs or duplicate server admission policy.
 
-The cutover removes generic `configuration-updated` and `authorization-started` acknowledgements, absent-path cancellation, arbitrary `launch-action` IDs, the negative host exclusion list, broad host state/configuration/credential inputs, duplicated launch string interpretation, submitted-path and result-name identity guesses, and state-bearing HTTP outcomes. The dedicated four public leaves remain the only schema authority; no compatibility aliases or alternate decoder owner preserve the removed meanings.
 
 ### Operation evidence and completion uncertainty
 
@@ -612,7 +467,7 @@ One public Project contains its Connection association, Integration-specific sou
 
 Local registered blocker IDs stay within their originating map, including missing and retained targets. GitHub issue IDs use repository-wide lookup, with ambiguous matches remaining unresolved. Current Project source destinations and source actions reuse observed GitHub names and URLs only when the canonical repository ID matches the configured binding. Retired bindings keep their metadata in historical resource observations, not the replacement Project's destination.
 
-The cutover removes public registrations, registered-Project/raw-Snapshot Project overlap, `roadmap.projects`, the `roadmap` publication wrapper, and consumer joins used to recover source paths and URLs. It removes root and `/codecs` exports and their unchecked generic assertion decoders, separately maintained public declarations, compatibility aliases, and obsolete projection branches. Map `frontier` contains scoped `TicketRef` values, not duplicate Ticket objects. Consumers resolve them against that map's canonical tickets. Private source, Automation, and persisted owners no longer use public DTOs as their domain authority; the deleted Snapshot store is not recreated.
+Map `frontier` contains scoped `TicketRef` values. Consumers resolve them against that map's canonical tickets. Private source, Automation, and persisted owners use private models rather than public DTOs as their domain authority. The four supported package leaves are the public schema interface.
 
 Strict own-data decoding starts at `unknown`, rejects undeclared fields and inherited discriminators, and applies resource and whole-state refinement. It checks unique canonical identities and memberships, parent scopes, actual Connection association, Integration/source agreement, current binding provenance, open/closed placement, display ordering, frontier consistency, and ticket-type evidence. Missing type evidence requires `labels: []`; nonempty unrecognized or conflicting labels use their corresponding variants. Incomplete ticket collections may retain larger source aggregate counts. Claimed and blocked remain independent facts even when display placement chooses blocked. Unknown blockers remain unknown.
 
@@ -622,7 +477,6 @@ A completed AFK Classification requires a queued or later Wayfinder Session. Eve
 
 Contracts compile in `packages/contracts/tsconfig.json` against ES2023 with `types: []`, without DOM or Node ambient types. Web source compiles separately in `apps/web/tsconfig.app.json` against ES2023/DOM and `vite/client`, without Node ambient types. The private server uses `apps/server/tsconfig.json` with ES2024, Node ambient types, and NodeNext resolution. Vite configuration has its own Node project.
 
-The dependency-cruiser rules and runners, custom source-boundary AST checks, browser-build architecture plugin and fixtures, and separate contract-type proof runner and fixtures have been removed. Module boundaries below remain design conventions, not custom executable gates. Historical cutover evidence records checks that existed at those revisions.
 
 Run the installed repository gates from the root:
 
@@ -634,56 +488,12 @@ pnpm knip
 pnpm --filter @roadmap/web build
 ```
 
-`pnpm check` runs Biome. Application tests and mounted-browser runners remain separate checks.
+`pnpm check` runs Biome. `pnpm test` runs the workspace application test suites.
 
 `pnpm typecheck` runs project compilation and Astro checking. Runtime schemas and their application tests still validate decoded shapes and scoped relationships.
 
 Use `pnpm --filter @roadmap/web build` for the production browser build. The root `build` script recursively invokes itself and is not production-browser evidence.
 
-Issue resolutions record exercised gates, consumer journeys, graph/output evidence, and responsibility counts. Passing schema and dependency checks do not establish successful IO, durable chronology, or effect completion.
-
-### Historical public-read cutover evidence
-
-The completed public-read cutover passed `pnpm check`, `pnpm typecheck`, `pnpm test`, and `pnpm knip`. These historical results do not establish verification of the later operation cutover. The application suites passed 1,256 server, 219 web, and 27 UI tests. The dependency gate checked five production graphs and two positive consumer graphs, 45 intended-diagnostic import refusals, 47 detector/options tests, and six actual-config build fixtures. Both compiler consumers exercised all 158 public exports, seven decoders, and 77 invalid constructions. Astro checked 41 files without errors, warnings, or hints.
-
-The actual web package production build inspected 714 resolved modules before tree shaking. Separate emitted-output inspection checked 486 modules in the JavaScript chunk, matched its bytes to the actual `dist` file, and found no Node, private server, credential, or host implementation dependency. Local and GitHub application/HTTP/WebSocket/store smoke runs, source-URI probes, and actual browser journeys covered initial unreadiness, retained graph/prose/source links, pinned selection, recovery, readable incomplete content, known empty, never-observed resources, and durable absent-target evidence. Additional actual Local and GitHub public/wire runs covered duplicate map-scoped blocker IDs and unavailable repository replacement. Fixtures used temporary data and harmless adapters, with zero host or Automation process effects. These are consumer and boundary proofs, not claims about external Session completion.
-
-The counting boundary matches the map's source baseline: handwritten TypeScript/JavaScript under server, web, and contracts source, excluding declarations, tests/specs, explicit test fixtures, styles, generated output, and dependencies. Nonblank physical lines and UTF-8 bytes use the original Git snapshot and complete current manifests. Every relocated production owner remains counted.
-
-| Application production revision | Files | Nonblank lines | UTF-8 bytes |
-| --- | ---: | ---: | ---: |
-| Map baseline `7e70e897` | 85 | 13,616 | 489,864 |
-| Before this cutover `dd3fac09` | 95 | 21,777 | 792,772 |
-| Completed public-read cutover | 99 | 22,477 | 820,944 |
-
-Build/gate implementation and Vite configuration outside those original source roots add 16 counted files, 1,333 nonblank lines, and 51,759 bytes. The combined current application/build responsibility is 115 files, 23,810 lines, and 872,703 bytes. Source tests and declared fixtures are separate: 66 files, 41,051 lines, and 1,519,392 bytes. Outside-source proof tests and fixture data are also separate: 89 files, 2,885 lines, and 85,991 bytes. Documentation is not production code.
-
-Application production increased by four files, 700 lines, and 28,172 bytes in this cutover. The additional validation, correlated variants, scoped identity, private authorization/host/process translation, and permanent enforcement/proof implementations justify that increase. The removed competing models, unchecked codecs, repeated frontier objects, consumer joins, and compatibility exports are the semantic deletion inventory above. Formatting, moved files, and test changes are not claimed as code savings. Biome passed with 131 warnings and five informational diagnostics; Vite reported its over-500-kB chunk warning. No performance improvement or warning-free result is claimed.
-
-### Operation cutover evidence
-
-The operation cutover passed `pnpm check`, `pnpm typecheck`, `pnpm test`, and `pnpm knip`. The complete suites passed 1,447 server, 241 web, and 27 UI tests. Both compiler consumer graphs exercised all 177 public exports, seven decoders, and 122 invalid constructions. Astro checked 41 files without errors, warnings, or hints. The dependency gate verified five production graphs, two positive consumer graphs, 45 intended-diagnostic import refusals, 47 detector/options tests, and six actual-config build fixtures.
-
-Disposable public application, HTTP, WebSocket, and actual store runs passed 65 operation scenarios and 10 authority schedules. They covered canonical Local/GitHub registration and repair, finite harmless host effects, selector variants, active-owner and partial refresh truth, phase-correct authorization, real precommit failure and postrename uncertainty, exact durable Automation admission, outgoing private-field refusal, both delayed predecessor settlement orders, current differing-epoch rebaselining, and obsolete/prebaseline requests. Lost post-effect replies remained unknown through successor state, with no application replay or inferred native completion. A separate missing-Workspace runtime proved new manual failure attempts at times 2000 and 3000 after startup failure at 1000, through HTTP and authoritative WebSocket/store state.
-
-Actual browser journeys exercised normalized Local/GitHub imports, canonical repair, harmless launches, observed/identical/degraded/unavailable/auth-failed refresh feedback, selector cancellation and independent validation error, stopped-selector lifecycle rejection, waiting/granted/failed/denied/expired/cancelled authorization, delayed publication and response feedback, pane close/reopen, canonical grant navigation, confirmed and unconfirmed mutation feedback, and removal results that survive resource disappearance. Fixtures used temporary configuration and Automation storage, safe provider/vault substitutes, and recorded host invocations. No production native launch or credential use formed part of this proof.
-
-The semantic deletion inventory is the operation table's clean cutover: generic configuration and authorization acknowledgements, state-bearing HTTP, arbitrary action-ID launch interpretation, broad host state/configuration inputs, the negative host exclusion contract, submitted-path/result-name identity guesses, and obsolete exported helpers. Page-level removal and permanently consumed authorization feedback replace stale or disappearing result ownership. No retry, reconnect replay, receipt system, or new launch-durability promise replaces these removed paths.
-
-| Operation source responsibility | Files | Nonblank lines | UTF-8 bytes |
-| --- | ---: | ---: | ---: |
-| Map baseline production `7e70e897` | 85 | 13,616 | 489,864 |
-| Before operation cutover production `cf9606f6` | 99 | 22,477 | 820,944 |
-| Completed operation production | 100 | 23,936 | 876,921 |
-| Map baseline source tests and fixtures | 41 | 8,396 | 303,730 |
-| Before operation source tests and fixtures | 66 | 41,051 | 1,519,392 |
-| Completed operation source tests and fixtures | 69 | 45,544 | 1,681,194 |
-
-The earlier documentation totals did not name a consistent subset and are withdrawn. The original tracked `README.md`, `CONTEXT.md`, and `docs/architecture.md` subset contains 286 nonblank lines and 24,464 UTF-8 bytes. Final comparison measures all tracked documentation separately and identifies its committed snapshot.
-
-The source counting boundary and Git-snapshot method are unchanged. Operation production increased by one file, 1,459 nonblank lines, and 55,977 bytes. Strict correlated variants, canonical commit translation, finite host interpretation, scoped refresh truth, and surviving feedback owners account for the added responsibility. Build/gate owners outside those source roots remain 16 files, 1,333 lines, and 51,759 bytes. Outside-source proof tests and fixture data are separate at 134 files, 4,569 lines, and 140,243 bytes. Those historical documentation comparisons used a three-file subset, not all repository documentation. Disposable runtime scripts are not shipped source and were removed after proof. Formatting and test changes are not code savings. Biome passed with 141 warnings and five informational diagnostics. The actual web production build inspected 714 resolved modules before tree shaking and reported its over-500-kB chunk warning. No performance improvement or warning-free result is claimed.
-
-This continuation completed the interrupted work without changing `roadmap.automation.json`. Its original unknown Session outcome remains unknown. Tracker resolution records this continuation's implementation and verification, not a fabricated terminal result for the stopped Session.
 
 ## Configuration and credentials
 
@@ -693,15 +503,15 @@ The root `.env.local` holds the public GitHub App identifiers. Device-flow crede
 
 Completeness belongs to each own-scope observation and each membership result. Public resources preserve raw `MapBody` content, missing sections, warnings, actual provenance and source time, and ticket `blockersComplete`. Unknown aggregate progress is `null`. An incomplete readable document stays current-readable; a failed read retains only real prior success; complete trustworthy membership can prove absence. None permits discarding known trace or treating retained display as current admission evidence.
 
-## Standing cutover proof contract
+## Verification
 
-Each cutover starts with an explicit behavior or ownership claim and a regression that fails for the wrong behavior at the responsible module's interface. Before acceptance, migrate every producer, caller, decoder, consumer, export, test and affected document. Delete obsolete authorities, duplicate models/schemas, forwarding aliases and abandoned callsites. Then compose the public application, real HTTP/WebSocket transport, public decoding and mounted production provider/App/router. Exercise applicable positive and negative compiler/import controls, actual production graph/output evidence and repository gates. A narrow unit pass, essential-only browser run, static markup or direct-store substitute cannot establish whole-cutover completion.
+Changes require a regression at the responsible module's interface, migration of affected callers and contracts, and an exercise of the changed runtime behavior. Run the standard repository checks listed above.
 
 Tests protect promised meaning, security and causal ordering. They must not freeze copied schema representation, handwritten method-list order, minimum publication counts, arbitrary ticket winners or ordering between separate HTTP and WebSocket channels. Preserve complete named workflow exercise, immutable prior publications, accepted read/current policy identity, explicit request/effect counts, per-Project Session nonoverlap, exactly consumed opportunity identities and durable start/running/terminal order within each opportunity. WebSocket publication and correlated HTTP reply each retain their own meaning without a global cross-wire order.
 
 ### Invariant matrix
 
-Paths in server rows are under `apps/server/src/`; application suites are under `application/`. The matrix names permanent proof owners, not timeless passing results. The resolution records the actual exercised revision and full manifests.
+Paths in server rows are under `apps/server/src/`; application suites are under `application/`. The matrix maps runtime invariants to their test owners.
 
 | Responsibility | Required invariant and proof owner |
 | --- | --- |
@@ -716,8 +526,7 @@ Paths in server rows are under `apps/server/src/`; application suites are under 
 | Injected stdout authority | Classification and Session contract owners infer authoritative types and emitted JSON Schema from their strict schemas; actual engine/interpreter callers use those types. No handwritten parallel result interface, AJV generic or type assertion certifies agreement. Independent AJV interpreter controls establish injected accept/refuse behavior, and harmless actual process stdin establishes Classification contract delivery. Session delivery is separate. Schema-copy equality alone proves neither delivery nor behavioral equivalence. |
 | Terminal lifecycle | `lifecycle.test.ts`, `source-lifecycle.test.ts`, actual Local observer late-acquisition, `automation-lifecycle.test.ts`, GitHub authorization overlaps, `transport-lifecycle.test.ts` and transport close suites join late load/candidates, watchers, recovery/append, admitted selectors/host work, credential tasks, owned classifier and response flush/listener/socket closure. Stop-before-start is terminal; repeated calls share settled success/failure. Queued callback is not admission; no late publication/reacquisition occurs. Invalid configuration can be read-only ready, not mutable ready. External launched Sessions remain deliberately unmanaged and unknown after retirement. |
 | Decoder shapes and relations | `blocker-contract.test.ts`, `public-source-contract.test.ts`, `operation-contract.test.ts` plus actual scoped Local/replay suites reject wrong Connection/Integration/source, nested cross-parent refs, duplicate canonical identities/membership, inconsistent placement/order/frontier and missing/contradictory ticket evidence. Accept equal leaf IDs under different parents, missing labels `[]`, legitimate unknown/conflicting variants, aggregate counts beyond fetched children and unknown blockers. Refine authorization/action/resource/lifecycle/stage payloads, independent evidence, safe current/historical destinations and exact operation families. Own-data checks do not evaluate accessors or disclose secret values. |
-| Actual mounted consumption | `scripts/client-owner-browser.mjs`, `scripts/resource-results-browser.mjs`, `scripts/workflows-browser.mjs` and paired fixture entries mount production provider/App/BrowserRouter against real application/transport/decoders. Preserve withheld-startup readiness, selected subscriptions, provider/StrictMode lifetime, graph/Modal/draft DOM identity and exact URL pins through disconnect, withheld successor and conflict; then observe new content. Exercise direct encoded load/reload, Markdown/blocker/source links, graph clicks, close replacement and Back/Forward. Shared results agree across map/Settings/Overview/Connections; durable absent-target evidence remains navigable without invented source capability. |
-| Actual workflow consumption | Web `workflows/workflows.ts` routes immutable typed attempts from production views; `store/roadmap-store.ts` decodes exact initiating replies; App/router/map `resolveSelection` use URL-owned scope. Full workflow manifest exercises current captured revision/readiness and open Automation availability/enablement, canonical Local/GitHub registration and Workspace repair through Settings/HTTP/application, folder cancellation/draft lifetime, phase-correct authorization and refusal preservation, finite native actions, refresh, shared nonqueue revision contention and independent scopes. Held unknown versus independent acknowledgement/application rejection must settle in both orders with exact attempt/subject feedback, no extra requests/effects/replay. |
+| Workflow policy | Web `workflows/workflows.test.ts`, `store/operation-delivery.test.ts`, and application operation/transport tests protect command policy, scoped attempts, authorization phases, canonical destinations, and uncertain delivery. |
 
 ### Allowed dependency directions
 
@@ -725,37 +534,5 @@ The public package exports exactly `identity`, `state`, `operations` and `wire`.
 
 Web provider/store consumes public wire; pure resource results consume identity/state, not React/router/store/views/UI/wire/operations/workflows. Pure workflows consume supported public policy vocabulary, not provider/store/views/React/UI/wire or server internals. Views consume provider/workflows and pure results, not transport construction or facade execution/version capture. Private policy uses private models and supported ports, not public DTOs, composition or concrete adapters. Source adapters do not import other providers. Projection consumes public state; operations consumes public operations; the application facade has no wire dependency; transport consumes application/public wire rather than private owners. Server does not import web/UI/docs. Generic UI is domain-independent; docs consumes UI, not Roadmap runtime state. Production does not import test fixtures. Avoid dependency cycles, including type-only cycles.
 
-These dependency directions remain design conventions. Standard compiler checks, runtime schema validation, and application tests remain; custom AST, dependency-graph, browser-build, and contract-type proof checks do not.
-
-### Semantic subtraction and honest measurement
-
-The cutover removes overlapping public registration/registered/raw Snapshot Project authorities, handwritten public interfaces plus Boolean codecs, old full-Slice store/Adapter composition, observation replacement on neutral edits and freshness from unrelated publications. It replaces implicit lifecycle/admission flags, optional authorization/action payload bags, state-bearing HTTP read authority, broad reader-owned hooks/defaults, repeated view resource selectors, local executors/settings gates/version capture, aggregate busy/error overwrite and view-owned authorization/canonical guessing with their explicit current owners. Private registry, catalog, provenance, persistence and Automation models remain where their meanings differ; renaming a file is not subtraction.
-
-The final stdout subtraction removes handwritten parallel Classification/Session result models and generic certification while retaining inferred schemas, actual interpreter delivery and engine consumers. Incidental copied schema/method arrays, publication minima, ticket winner/global log order and HTTP/WebSocket ordering are removed without dropping capabilities or causal/security assertions.
-
-Production growth is acceptable when explicit observation/read identity, trustworthy absence, retained trace, coherent activation, durable writes, terminal shutdown, relational schemas, finite host authority and immutable scoped attempt ownership answer named obligations. State the actual increase; claim neither net reduction nor performance improvement without measurement. The fixed baseline is commit `7e70e8975b59aa1b435d444cd9c7ba06c886f8a4`, 85 handwritten production files, 13,616 nonblank lines and 489,864 UTF-8 bytes. Count committed tracked UTF-8 blobs, nonblank physical CRLF/LF/CR lines using ECMAScript `trim()`, exact bytes including blank lines/final newline, and every added/relocated owner of the original application responsibilities outside original roots. Keep original exclusions unchanged. Tests/fixtures, executable build/gate owners, configuration, full documentation and independent UI/docs source/tests have distinct complete manifests. Explicit proof fixtures under a directory named `build` remain handwritten proof. Generated comparison JSON is evidence, not production or a substitute for handwritten owners. Publish final source and documentation commit provenance and full manifest in the resolution after the last committed documentation snapshot; architecture prose must not report a self-referential final docs count.
-
-### Evidence limits and preserved capability
-
-Public application, transport, decoders, Local temporary IO and mounted production consumers remain real. Harmless provider/vault/Workspace-inspection/host/launcher ports isolate credentials and external effects; they do not certify live GitHub availability, actual credential receipt or native completion. Local restart proof reads changed map content, not ticket restart. Harmless Node process proof is not production Classification/Wayfinder work. Controlled clocks/barriers/callbacks prove their named schedules; retired callback controls do not mean a browser receives frames from closed sockets. Before-header transparent native retry is historical evidence only; current after-header truncated-body physical arrivals/correlations support only the measured schedule, not universal retries or exactly-once effects.
-
-Owned mkdtemp/realpath roots, aliases, temporary config/replay documents and cleanup avoid mutable user directories, production credentials/config/history and real Automation. Browser fixtures disable env/public loading. Actual app output evidence separately discloses sanitized environment, config/entry/plugins and any envDir/outDir overrides. Current fixtures require native TypeScript stripping/registerHooks, installed dependencies/Chromium and macOS/POSIX Git/symlink facilities with isolated Git configuration; runtime/browser versions come from observations. External source tabs are intercepted harmless pages. Pathname/history proof does not establish arbitrary search/hash behavior or deployed SPA fallback. Subscription reference/render stability is not a speed benchmark. Polling windows do not certify unlimited future delivery. Report warnings and unavailable diagnostics honestly.
-
-Acceptance preserves scoped Local/GitHub resources, map/ticket URL navigation, raw incomplete Markdown/historical trace, Settings/Overview/Connections, registration/repair/authorization/refresh, finite native actions and durable independent Automation outcomes. Retained readable facts never grant new admission. Close a cutover only when complete source migration, documentation, actual applicable matrix and final integrated evidence agree.
-
-### Exercised final correction evidence
-
-The [What evidence proves each cutover works and the completed layer is simpler?](https://github.com/asmundwien/roadmap/issues/117) resolution records the final source snapshot, separate committed documentation snapshot, complete manifests and baseline deltas. Its generated documentation evidence asset records the complete tracked-documentation comparison after the committed snapshot. The historical three-file README/CONTEXT/architecture subset is not the full documentation manifest. This architecture section does not claim a self-referential final documentation total.
-
-Classification and Session stdout each have one private Zod strict-object schema authority. Their result types and emitted JSON Schema are inferred from those schemas; actual engine and interpreter consumers use the inferred types. Handwritten parallel result models and AJV generic certification were removed, and intermediate schema exports are private. Two boundary test files passed all 50 cases before and after the refactor, including acceptance of 1,000 emoji and refusal of 1,001. Two targeted actual-process and transport files passed 216 cases. Independent AJV interpretation exercised valid, missing and corrupt injected Classification schemas through actual harmless process stdin, and the valid Session contract separately. Invalid classifier schedules exited with code 2 and produced no Session. This is contract delivery evidence, not real production Classification or Wayfinder work.
-
-The historical strengthened compiler exercise observed 30 additional positive computed controls in each public browser/server consumer and no Node declarations in the browser graph. Its export, construction, and import-refusal inventories and runners have since been removed with the custom enforcement systems.
-
-All three complete mounted runners passed after schema integration. Client ownership passed eight groups. Resource results passed nine groups covering 22 manifest rows with 16 screenshots and zero host, selector, Classification or Wayfinder effects. The corrected workflow runner passed all 19 manifest rows with 18 screenshots on Node 26.8.1 and Chromium 156.0.8078.4 on darwin arm64. It recorded 19 harmless host invocations, 19 selectors, one Classification substitute and one Wayfinder substitute. The full run includes current availability and enablement in an already-open Automation pane, canonical GitHub Workspace repair through mounted Settings and real HTTP/application admission, and held unknown native attempts versus independent acknowledgement and application rejection in both settlement orders. These are mounted production consumer journeys, not direct-store replacements. One explicitly labelled prebaseline authority schedule uses the public raw store seam.
-
-The workflow relay observed 116 physical HTTP arrivals, 116 application fetch starts and 116 unique correlations. Maximum physical multiplicity was one, with no repeated correlations. Six after-header truncated-response correlations produced six physical arrivals and zero observed reattempts. The native subset contained five correlations, five physical arrivals and five application fetch starts, with zero observed reattempts over the 350 ms overlap observation window. These physical counts apply only to the measured headers-flushed truncated-body schedules and reported runtime/browser. They do not establish a before-header retry limit, universal delivery behavior or exactly-once effects.
-
-The actual web package production build observed 713 parsed graph modules, 714 transformed modules and 485 emitted module entries. The main JavaScript chunk contained 895,672 UTF-8 bytes with SHA-256 `91a3e2802a711bfb8ee07733b1d9fbb84dc8e8eb3c447678477cde454d6861c7`. Captured chunk, written output and actual package-dist output matched; inspection found zero forbidden dependency classes. Sanitized actual-config output with environment loading disabled matched package output. These are actual application output observations, separate from the six synthetic build fixtures. The large-chunk warning remains. Browser fixtures disable environment and public-directory loading; the package build's configured environment loading is separately disclosed in the resolution. No byte-unchanged claim is made about unmeasured production configuration, credentials or history.
-
-After all source corrections and intermediate-export cleanup, the integrated `pnpm check`, `pnpm typecheck`, `pnpm test` and `pnpm knip` run passed. Source tests passed 1,495 server, 365 web and 27 UI cases. Compiler proof covered 177 exports, seven decoders, 122 invalid constructions and 30 additional positive controls in each public consumer, plus six client, seven resource and 56 workflow cases. Architecture proof covered 85 intended import refusals, 69 detector tests and six actual-config build fixtures. The 50 boundary tests also passed separately after export cleanup. These results describe the corrected source run, not a later documentation or generated-asset snapshot. Independent docs checking covered 41 files and the docs build produced 19 pages; those check/build observations are not documentation manifest counts. The completion resolution records snapshot provenance and the final documentation evidence. No warning-free, completed reference-service or performance result is claimed.
+These dependency directions are design conventions. Standard compiler checks, runtime schema validation, and application tests verify their respective contracts.
 
